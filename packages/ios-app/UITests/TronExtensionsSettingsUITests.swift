@@ -14,10 +14,14 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         app.launch()
         let link = app.buttons["settings-link-Extensions"]
         XCTAssertTrue(link.waitForExistence(timeout: 15), app.debugDescription)
-        for _ in 0..<8 where !link.isHittable { app.swipeUp() }
+        for _ in 0..<8 where !link.isHittable { app.swipeUp(velocity: .slow) }
+        // Let the list settle so the tap opens the row instead of stopping a scroll.
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
         link.tap()
-        XCTAssertTrue(app.staticTexts["Installed"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["npm:pi-web-access"].waitForExistence(timeout: 10), app.debugDescription)
+        let heading = app.navigationBars.staticTexts["Extensions"].firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 10), app.debugDescription)
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
         return app
     }
 

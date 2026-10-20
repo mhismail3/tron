@@ -670,7 +670,13 @@ enum HostedExtensionsReview {
     static var inventory: JSONValue {
         .object(["packages": .array((configured + [bundled]).map { source in
             .object(["source": .string(source), "scope": .string("user"), "filtered": .bool(false)])
-        }), "resources": .object([:])])
+        }), "resources": .object([
+            "extensions": .array(configured.enumerated().map { index, source in
+                .object(["path": .string("/fixture/packages/\(index)/index.ts"), "enabled": .bool(true),
+                         "metadata": .object(["source": .string(source), "scope": .string("user"), "origin": .string("package")])])
+            }),
+            "skills": .array([]), "prompts": .array([]), "themes": .array([]),
+        ])])
     }
 
     struct SourceKey { let id, label, help, display, importance, control: String; let subgroup: String?; let order: Int; let value: JSONValue }
