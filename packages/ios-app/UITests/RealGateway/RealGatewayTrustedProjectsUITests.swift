@@ -7,7 +7,9 @@ import XCTest
 /// and Add Project records the chosen folder through `settings.change` as Not
 /// trusted: it joins the list untoggled and the Gateway's trust store holds
 /// `false` for it. A per-model key's all-models instance is titled "All
-/// models", never by its fixed `role=chat` qualifier.
+/// models", never by its fixed `role=chat` qualifier. #1569: a folder nested
+/// under a listed project is added as its own entry (the store resolves the
+/// nearest saved decision), and its row then trusts it alone.
 extension RealGatewayPairAndChatUITests {
     @MainActor
     func testTrustedProjectsListsAndAddsProjectsUntrusted() throws {
@@ -16,10 +18,18 @@ extension RealGatewayPairAndChatUITests {
         let root = URL(fileURLWithPath: fixture.workspace).deletingLastPathComponent()
         let added = root.appendingPathComponent("added-project")
         let seeded = root.appendingPathComponent("trusted-project")
-        for folder in [added, seeded] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        let parent = root.appendingPathComponent("blocked-parent")
+        let nested = parent.appendingPathComponent("nested-project")
+        for folder in [added, seeded, nested] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         // A saved decision the Gateway reads from its own trust store.
         let trustStore = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).appendingPathComponent("trust.json")
-        try JSONSerialization.data(withJSONObject: [seeded.resolvingSymlinksInPath().path: true]).write(to: trustStore)
+        let parentPath = parent.resolvingSymlinksInPath().path
+        try JSONSerialization.data(withJSONObject: [seeded.resolvingSymlinksInPath().path: true, parentPath: false])
+            .write(to: trustStore)
+        func stored(_ name: String) -> Bool? {
+            let document = (try? JSONSerialization.jsonObject(with: Data(contentsOf: trustStore))) as? [String: Any]
+            return document?.first { ($0.key as NSString).lastPathComponent == name }?.value as? Bool
+        }
 
         let app = launchApp(additionalArguments: ["-appearanceMode", "light"])
         defer { app.terminate() }
@@ -74,11 +84,69 @@ extension RealGatewayPairAndChatUITests {
         let row = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "added-project")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 30), "the added project is not listed: \(app.debugDescription)")
         XCTAssertEqual(row.value as? String, "0", "an added project must start untrusted")
-        XCTAssertTrue(waitUntil(timeout: 15) {
-            let stored = (try? JSONSerialization.jsonObject(with: Data(contentsOf: trustStore))) as? [String: Any]
-            return stored?.first { ($0.key as NSString).lastPathComponent == "added-project" }?.value as? Bool == false
-        }, "the Gateway trust store must record the added project as not trusted")
+        XCTAssertTrue(waitUntil(timeout: 15) { stored("added-project") == false },
+                      "the Gateway trust store must record the added project as not trusted")
         XCTAssertEqual(seededRow.value as? String, "1", "adding must not change another project's decision")
         keepScreenshot(app, name: "after-trusted-projects-default-policy")
+
+        // A folder inside a listed (blocked) project is its own project.
+        revealBelowNavigationBar(app, add)
+        add.tap()
+        let parentFolder = app.buttons.matching(NSPredicate(format: "label == %@", "blocked-parent")).firstMatch
+        XCTAssertTrue(parentFolder.waitForExistence(timeout: 60), app.debugDescription)
+        parentFolder.tap()
+        let nestedFolder = app.buttons.matching(NSPredicate(format: "label == %@", "nested-project")).firstMatch
+        XCTAssertTrue(nestedFolder.waitForExistence(timeout: 60), app.debugDescription)
+        nestedFolder.tap()
+        XCTAssertTrue(waitForEnabled(useCurrent, timeout: 60), app.debugDescription)
+        useCurrent.tap()
+        let nestedRow = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "nested-project")).firstMatch
+        XCTAssertTrue(nestedRow.waitForExistence(timeout: 30), "a folder inside a listed project was not added: \(app.debugDescription)")
+        XCTAssertTrue(waitUntil(timeout: 15) { stored("nested-project") == false },
+                      "the Gateway trust store must record the nested project as not trusted")
+        XCTAssertEqual(stored("blocked-parent"), false, "adding a nested project must not change its parent's decision")
+        keepScreenshot(app, name: "after-trusted-projects-nested-added")
+    }
+
+    /// #1570: New Session › Project Settings shows a blocked project's trust and
+    /// its row opens the project's trust editor, whose Trust Project records
+    /// `true` for that project in the Gateway's trust store.
+    @MainActor
+    func testProjectSettingsTrustRowTrustsABlockedProject() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let workspace = URL(fileURLWithPath: fixture.workspace).resolvingSymlinksInPath().path
+        let trustStore = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).appendingPathComponent("trust.json")
+        try JSONSerialization.data(withJSONObject: [workspace: false]).write(to: trustStore)
+        func stored() -> Bool? {
+            ((try? JSONSerialization.jsonObject(with: Data(contentsOf: trustStore))) as? [String: Any])?[workspace] as? Bool
+        }
+
+        let app = launchApp(additionalArguments: ["-appearanceMode", "light"])
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(waitForEnabled(menu, timeout: 90), app.debugDescription)
+        menu.tap()
+        let newSession = app.buttons["New Session"]
+        XCTAssertTrue(newSession.waitForExistence(timeout: 30), app.debugDescription)
+        newSession.tap()
+        let projectSettings = app.buttons["project-settings-link"]
+        XCTAssertTrue(projectSettings.waitForExistence(timeout: 60), app.debugDescription)
+        projectSettings.tap()
+
+        let trustRow = app.buttons["project-settings-trust"]
+        XCTAssertTrue(trustRow.waitForExistence(timeout: 30), "Project Settings offers no way to change trust: \(app.debugDescription)")
+        XCTAssertTrue(app.staticTexts["Resources blocked"].waitForExistence(timeout: 30), app.debugDescription)
+        keepScreenshot(app, name: "project-settings-blocked")
+        trustRow.tap()
+        let trust = app.buttons["Trust Project"]
+        XCTAssertTrue(trust.waitForExistence(timeout: 30), app.debugDescription)
+        trust.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { stored() == true }, "the Gateway trust store must record the project as trusted")
+        dismissTopSheet(app)
+        XCTAssertTrue(app.staticTexts["Trusted"].waitForExistence(timeout: 30), "Project Settings must show the new decision: \(app.debugDescription)")
+        keepScreenshot(app, name: "project-settings-trusted")
     }
 }
