@@ -640,8 +640,24 @@
       }
     },
     {
-      "step": "prune retires an idle file blob; disposal joins its removal and keeps the directory a held lease reads from",
+      "step": "a file blob whose directory became a file is retired as missing",
       "result": {
+        "first": "Blob is not available; refresh the session snapshot",
+        "again": "Blob is not available; refresh the session snapshot"
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
+        "gateway/blobs/blob-0000000c-0000-4000-8000-000000000000": "<17 bytes>"
+      }
+    },
+    {
+      "step": "prune retires an idle file blob; its content cannot register while the removal runs; disposal joins it",
+      "result": {
+        "retiring": {
+          "message": "Blob storage is retiring matching content",
+          "code": "busy",
+          "retryable": true
+        },
         "refused": "Blob is not available; refresh the session snapshot",
         "directory": true
       },

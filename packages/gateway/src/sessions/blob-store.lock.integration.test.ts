@@ -1,8 +1,9 @@
-import { mkdir, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it, onTestFinished } from "vitest";
 import { countRandomUUID } from "../../test-support/fixed-recording.js";
 import { storePathLock } from "../../test-support/store-path-lock.js";
+import type { GatewayError } from "../errors.js";
 import { BlobStore, type BlobByteRange } from "./blob-store.js";
 
 /**
@@ -184,15 +185,21 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   await log.step("releasing the lease keeps the revived blob", async () => { await held.release(); return read(file, { start: 0, end: 7 }); }, "result");
   log.advance(31 * 60_000);
   await log.step("prune with a custom age keeps a blob idle for less", () => { store.prune(60 * 60_000); return read(file, { start: 0, end: 7 }); }, "result");
+  await log.step("a file blob whose directory became a file is retired as missing", () => replaced("detached.txt", async () => {
+    await rename(directory, `${directory}-moved`);
+    await writeFile(directory, "");
+  }).finally(async () => { await rm(directory, { force: true }); await rename(`${directory}-moved`, directory); }));
   const lingering = store.registerData(Buffer.from("lingering"), "text/plain");
   const lease = await store.acquire(lingering);
   log.advance(31 * 60_000);
   const present = () => stat(directory).then(() => true, () => false);
-  await log.step("prune retires an idle file blob; disposal joins its removal and keeps the directory a held lease reads from", async () => {
+  await log.step("prune retires an idle file blob; its content cannot register while the removal runs; disposal joins it", async () => {
     store.prune();
+    const retiring = await Promise.resolve().then(() => store.registerData(Buffer.from("exported text"), "text/plain"))
+      .catch((error: GatewayError) => ({ message: error.message, code: error.code, retryable: error.retryable }));
     const refused = await read(file).catch((error: Error) => error.message);
     await store.dispose();
-    return { refused, directory: await present() };
+    return { retiring, refused, directory: await present() };
   }, "result");
   await log.step("dispose again is the same disposal", () => store.dispose(), "result");
   await log.step("a disposed store refuses data", () => store.registerData(Buffer.from("late"), "text/plain"), "refused");
