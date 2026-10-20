@@ -1,4 +1,4 @@
-import type { ContextEditEntry, FileEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { ContextEditEntry, FileEntry, SessionEntry } from "../kernel/pi/coding-agent.js";
 import { redactCredentials } from "../util/credential-redaction.js";
 import {
   SESSION_SEARCH_MAX_ENTRY_BYTES,

@@ -25,6 +25,9 @@
     "session-catalog.ts",
     "session-export.ts"
   ],
+  "dependsOn": [
+    "gateway/pi"
+  ],
   "exceptions": [
     {
       "path": "blob-store.ts",

@@ -10,6 +10,9 @@
     "session-search.module.json",
     "session-search.store.lock.integration.test.ts"
   ],
+  "dependsOn": [
+    "gateway/pi"
+  ],
   "exceptions": [
     {
       "path": "session-search-service.ts",

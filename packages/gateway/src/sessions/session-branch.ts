@@ -1,4 +1,4 @@
-import type { FileEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { FileEntry, SessionEntry } from "../kernel/pi/coding-agent.js";
 
 interface ParsedSessionBranch {
   sessionId: string;

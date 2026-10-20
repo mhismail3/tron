@@ -14,6 +14,9 @@
     "locks/session-attention-paths.golden.json",
     "session-presentation-presence.ts"
   ],
+  "dependsOn": [
+    "gateway/pi"
+  ],
   "exceptions": [
     {
       "path": "extension-run-projection.ts",

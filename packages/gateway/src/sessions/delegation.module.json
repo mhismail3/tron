@@ -23,6 +23,9 @@
     "subagent-catalog.ts",
     "subagent-parity.integration.test.ts"
   ],
+  "dependsOn": [
+    "gateway/pi"
+  ],
   "exceptions": [
     {
       "path": "child-session-admission.integration.test.ts",

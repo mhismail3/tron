@@ -3,7 +3,7 @@ import { lstat, open, opendir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CatalogLineLimitError, readCatalogLines } from "./catalog-jsonl.js";
 import { GatewayError } from "../errors.js";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "../kernel/pi/coding-agent.js";
 import type { SessionCreationOrigin } from "../protocol/types.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "./invocation-receipts.js";
 import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";

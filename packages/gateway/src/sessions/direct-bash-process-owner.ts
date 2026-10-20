@@ -5,7 +5,7 @@ import {
   getShellConfig,
   type BashOperations,
   type SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 import { TOOL_INTERRUPT_SIGNAL_GRACE_MS, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
 
 const POST_EXIT_OUTPUT_GRACE_MS = 100;

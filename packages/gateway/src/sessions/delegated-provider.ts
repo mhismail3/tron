@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Extension, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Extension, ToolDefinition } from "../kernel/pi/coding-agent.js";
 import type { ExtensionToolOrigin } from "../protocol/types.js";
 import { isManagedSubagentExtension, MANAGED_SUBAGENTS_VERSION } from "./managed-subagents.js";
 import { attributedToolOwner } from "../extensions/owner-attribution.js";

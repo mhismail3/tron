@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { getCurrentTools } from "@earendil-works/pi-ai";
-import type { SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
+import { getCurrentTools } from "../kernel/pi/ai.js";
+import type { SessionEntry, SessionManager } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { FixedSetting } from "../admin/settings-resolver.js";
 import { hasChatSettingsApplier, schemaKey } from "../admin/settings-schema.js";

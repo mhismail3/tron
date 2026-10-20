@@ -1,4 +1,4 @@
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { SessionEntry } from "../kernel/pi/coding-agent.js";
 import type { ContextDeliveryMetadata, ExtensionToolOrigin } from "../protocol/types.js";
 
 import { invocationProjection, invocationReceipts } from "./invocation-receipts.js";

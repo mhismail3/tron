@@ -1,4 +1,4 @@
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession } from "../kernel/pi/coding-agent.js";
 
 /** How long a tool call may keep running after its turn is cancelled before its result is abandoned. */
 const TOOL_CANCELLATION_GRACE_MS = 2_000;

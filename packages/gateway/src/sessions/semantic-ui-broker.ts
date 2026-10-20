@@ -4,7 +4,7 @@ import {
   type ExtensionUIContext,
   type ThemeColor,
   type WorkingIndicatorOptions,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type {
   ExtensionFormAnswer,

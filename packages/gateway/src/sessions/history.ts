@@ -1,4 +1,4 @@
-import type { SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { SessionEntry, SessionManager } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { JsonValue, SessionTreeNode } from "../protocol/types.js";
 import type { PiMessageContentBlock } from "./projection.js";

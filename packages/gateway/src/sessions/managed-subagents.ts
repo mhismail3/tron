@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
-import { DefaultPackageManager, SettingsManager, type Extension, type ExtensionFactory, type InlineExtension, type DefaultResourceLoader, type PackageSource, type ResolvedPaths, type SourceInfo } from "@earendil-works/pi-coding-agent";
+import { DefaultPackageManager, SettingsManager, type Extension, type ExtensionFactory, type InlineExtension, type DefaultResourceLoader, type PackageSource, type ResolvedPaths, type SourceInfo } from "../kernel/pi/coding-agent.js";
 import type { GatewayLogger } from "../transport/logger.js";
 import { GatewayError } from "../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";

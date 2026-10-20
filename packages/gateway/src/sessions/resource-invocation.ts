@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { stripFrontmatter } from "@earendil-works/pi-coding-agent";
+import { stripFrontmatter } from "../kernel/pi/coding-agent.js";
 import type { ResourceInvocation } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 

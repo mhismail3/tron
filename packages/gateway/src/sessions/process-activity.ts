@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { redactCredentials } from "../util/credential-redaction.js";
 import { basename } from "node:path";
-import type { SessionManager } from "@earendil-works/pi-coding-agent";
+import type { SessionManager } from "../kernel/pi/coding-agent.js";
 
 type ReadonlySessionManager = Pick<SessionManager, "getBranch" | "getSessionId" | "getLeafId">;
 import type {

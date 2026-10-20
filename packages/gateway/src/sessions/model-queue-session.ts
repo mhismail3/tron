@@ -1,6 +1,6 @@
 import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { createModelQueueExtension, type ModelQueueSource } from "../providers/model-queue-extension.js";
 
 /** The child half, as its own module: every managed subagent child loads it. */

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { parseFrontmatter } from "../kernel/pi/coding-agent.js";
 
 /**
  * The optional display `title` a SKILL.md frontmatter declares. Pi's skill

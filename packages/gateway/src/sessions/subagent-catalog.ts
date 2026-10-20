@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { type SettingsManager } from "@earendil-works/pi-coding-agent";
+import { type SettingsManager } from "../kernel/pi/coding-agent.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import type { ResourceDistribution } from "../protocol/types.js";
 

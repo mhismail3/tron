@@ -1,4 +1,4 @@
-import type { FileEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { FileEntry, SessionEntry } from "../kernel/pi/coding-agent.js";
 import type { TranscriptForkBoundary } from "../protocol/types.js";
 
 const MAX_FORK_BOUNDARY_ENTRIES = 100_000;

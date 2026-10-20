@@ -52,7 +52,8 @@
     "tron-modules.integration.test.ts"
   ],
   "dependsOn": [
-    "gateway/host"
+    "gateway/host",
+    "gateway/pi"
   ],
   "exceptions": [
     {
