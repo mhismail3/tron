@@ -1,5 +1,6 @@
 import { accessSync, constants, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { piCodingAgentDirectory } from "../kernel/pi/packages.js";
 
 const MAX_PATH_BYTES = 64 * 1024;
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
@@ -117,7 +118,7 @@ function configureValidatedNodeCommandEnvironment(
   const expectedTarget = `../node-${architecture}`;
   const piNodeModulesRoot = join(payloadRoot, "app", "node_modules");
   const piCliPath = join(piNodeModulesRoot, ".bin", "pi");
-  const piPackageRoot = join(piNodeModulesRoot, "@earendil-works", "pi-coding-agent");
+  const piPackageRoot = piCodingAgentDirectory(piNodeModulesRoot);
   const piAliasPath = join(aliasDirectory, "pi");
   const expectedPiTarget = "../../app/node_modules/.bin/pi";
 

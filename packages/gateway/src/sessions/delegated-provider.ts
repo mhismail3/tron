@@ -1,9 +1,9 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { mkdir } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Extension, ToolDefinition } from "../kernel/pi/coding-agent.js";
+import { piHostPackageRoot } from "../kernel/pi/packages.js";
 import type { ExtensionToolOrigin } from "../protocol/types.js";
 import { isManagedSubagentExtension, MANAGED_SUBAGENTS_VERSION } from "./managed-subagents.js";
 import { attributedToolOwner } from "../extensions/owner-attribution.js";
@@ -46,7 +46,7 @@ export const DELEGATED_PROVIDER_ROOT_ENV = "PI_SUBAGENTS_TEMP_ROOT";
 
 // The pinned SDK exports dist/index.js. Resolve from this running payload once,
 // not from the reserved provider install (which deliberately has no SDK copy).
-const PI_HOST_PACKAGE_ROOT = realpathSync(dirname(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")))));
+const PI_HOST_PACKAGE_ROOT = piHostPackageRoot();
 
 export function delegatedArtifactRoot(tronHome: string): string {
   return join(resolve(tronHome), "internal", "subagents");

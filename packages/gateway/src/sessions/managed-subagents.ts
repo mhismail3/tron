@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
 import { DefaultPackageManager, SettingsManager, type Extension, type ExtensionFactory, type InlineExtension, type DefaultResourceLoader, type PackageSource, type ResolvedPaths, type SourceInfo } from "../kernel/pi/coding-agent.js";
+import { piExtensionAliases } from "../kernel/pi/packages.js";
 import type { GatewayLogger } from "../transport/logger.js";
 import { GatewayError } from "../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
@@ -353,15 +354,7 @@ export class ManagedSubagents {
     const { createJiti } = await import(pathToFileURL(require.resolve("jiti")).href) as {
       createJiti: (base: string, options: { moduleCache: boolean; alias: Record<string, string> }) => { import: (path: string, options: { default?: true }) => Promise<unknown> };
     };
-    const hostRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-    const aliases: Record<string, string> = {};
-    for (const name of ["@earendil-works/pi-coding-agent", "@earendil-works/pi-agent-core", "@earendil-works/pi-tui",
-      "@earendil-works/pi-ai/compat", "@earendil-works/pi-ai/oauth", "@earendil-works/pi-ai/providers/all"]) {
-      aliases[name] = fileURLToPath(import.meta.resolve(name));
-    }
-    aliases["@earendil-works/pi-ai"] = aliases["@earendil-works/pi-ai/compat"]!;
-    for (const name of ["typebox", "typebox/compile", "typebox/value"]) aliases[name] = hostRequire.resolve(name);
-    return await createJiti(import.meta.url, { moduleCache: false, alias: aliases }).import(path, defaultExport ? { default: true } : {});
+    return await createJiti(import.meta.url, { moduleCache: false, alias: piExtensionAliases() }).import(path, defaultExport ? { default: true } : {});
   }
 
   admit(extensions: readonly Extension[]): void {

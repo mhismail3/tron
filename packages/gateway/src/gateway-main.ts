@@ -1,10 +1,10 @@
 import { MacTerminalHost, MacTerminalKeys } from "./security/mac-terminal.js";
 import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { existsSync, renameSync, writeFileSync, rmSync } from "node:fs";
 import { ModelRuntime, SettingsManager } from "./kernel/pi/coding-agent.js";
+import { piCliBundle } from "./kernel/pi/packages.js";
 import { loadConfig } from "./config.js";
 import { GatewayError } from "./errors.js";
 import { DeviceStore } from "./security/device-store.js";
@@ -853,7 +853,7 @@ const service = new GatewayService({
   home: sessions.homeOwner(),
   mcpAdmin: new McpAdminService(
     config.agentDir,
-    join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),
+    piCliBundle(),
     new MacKeychainMcpCredentialOwner(),
     (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
   ),
