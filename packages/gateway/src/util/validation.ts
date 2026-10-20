@@ -32,6 +32,12 @@ export function boolean(value: unknown, label: string): boolean {
   return value;
 }
 
+export function rejectUnknownFields(params: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  if (Object.keys(params).some((key) => !allowed.includes(key))) {
+    throw new GatewayError("invalid_request", `${label} contains unknown fields`);
+  }
+}
+
 export function integer(value: unknown, label: string, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) {
     throw new GatewayError("invalid_request", `${label} must be an integer from ${min} through ${max}`);

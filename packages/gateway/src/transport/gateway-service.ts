@@ -21,7 +21,7 @@ import type { ObservedStore } from "../admin/settings-outside.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
 import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
 import { QUALIFIER_NAMES, maxTier, type Qualifiers } from "../admin/settings-types.js";
-import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
+import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { RuntimeSlot } from "../sessions/runtime-slot.js";
@@ -264,12 +264,6 @@ function approvalProjection(request: ApprovalRequest) {
       };
     }),
   };
-}
-
-function rejectUnknownFields(params: Record<string, unknown>, allowed: readonly string[], label: string): void {
-  if (Object.keys(params).some((key) => !allowed.includes(key))) {
-    throw new GatewayError("invalid_request", `${label} contains unknown fields`);
-  }
 }
 
 function parseSessionSourceControl(value: unknown): SessionSourceControlRequest | undefined {
