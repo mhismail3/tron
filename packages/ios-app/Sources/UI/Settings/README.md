@@ -31,7 +31,8 @@ services, paired Macs and devices, notifications and logs.
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
   Notifications and Changes sit in the toolbar. Dashboard Settings exposes only global scope.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
-  chosen folder as Not trusted through `settings.change`.
+  chosen folder as Not trusted through `settings.change`, a folder inside a listed project too
+  (the nearest saved decision governs).
 - **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `number`, `text`,
   `secret`, `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
   order. An unimplemented control renders its `display` read-only, an unknown badge is neutral, an
@@ -50,7 +51,8 @@ services, paired Macs and devices, notifications and logs.
   resolves a `home` target and edits `profile`, ordinary chats edit `chat`. Each has one read-only
   Configuration destination; Manage Session keeps the live Models and Available Tools editors, so
   Session Settings never duplicates them. Project Settings (`ProjectSettingsContent`) lists actual
-  repository overrides read-only and requires **Use This Server** for another Mac.
+  repository overrides read-only, its trust row opens `TrustSettingsView` for that project, and
+  it requires **Use This Server** for another Mac.
 - **Changes.** `SettingsChangesView` pages `settings.history`, intersects filters with the
   surface's scope, pins approvals above history, and keeps last-look per Mac and scope. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model

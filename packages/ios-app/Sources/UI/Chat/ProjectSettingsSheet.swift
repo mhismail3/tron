@@ -110,8 +110,15 @@ struct ProjectSettingsContent: View {
                     // The rows are fixed once the overrides arrive (the sheet's pulse
                     // hides them until then); trust and Git fill values in place.
                     TronSettingsGroup("Project", detail: cwd, accent: .tronEmerald) {
-                        TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: trust?.stateTitle ?? "Trust",
-                                        subtitle: trust?.stateDetail ?? " ", subtitleColor: .tronTextSecondary)
+                        // The row opens the project's one trust editor; its own look is unchanged.
+                        TronProgressiveSheetLink(accessibilityLabel: "Project Trust", identity: "project.settings.trust.\(profileID).\(cwd)",
+                                                 destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
+                            TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: trust?.stateTitle ?? "Trust",
+                                            subtitle: trust?.stateDetail ?? " ", subtitleColor: .tronTextSecondary)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityValue(trust?.stateTitle ?? "")
+                        .accessibilityIdentifier("project-settings-trust")
                         TronSettingsDivider()
                         TronSettingsRow(icon: "arrow.triangle.branch", title: "Workspace",
                                         subtitle: git.map { !$0.isRepository ? "Not a Git repository"

@@ -22,7 +22,8 @@ struct TrustedProjectsSettingsView: View {
     private var target: JSONValue { SettingsTarget.global.gatewayTarget }
     private var accent: Color { theme?.accent ?? .tronCyan }
 
-    /// The projects already listed: a folder inside one is already governed by its row.
+    /// The projects already listed. A folder inside one is its own project: the
+    /// trust store resolves the nearest saved decision, so it gets its own row.
     private var listedProjects: [String] {
         model.settingsSnapshot(for: target)?.resolution.keys
             .filter { $0.key == Self.key }.compactMap { $0.qualifiers?["project"] } ?? []
@@ -58,7 +59,7 @@ struct TrustedProjectsSettingsView: View {
     }
 
     private func add(_ path: String) {
-        guard !adding, !listedProjects.contains(where: { path == $0 || path.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") }) else { return }
+        guard !adding, !listedProjects.contains(path) else { return }
         adding = true
         let change = JSONValue.object([
             "key": .string(Self.key), "layer": .string("mac"), "op": .string("set"),
