@@ -1,6 +1,6 @@
 import { open } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { FileEntry } from "@earendil-works/pi-coding-agent";
+import type { FileEntry } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { ExtensionRunLifecycleState } from "../protocol/types.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../sessions/context-delivery-receipts.js";

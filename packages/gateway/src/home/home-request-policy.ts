@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { Agent, AgentMessage, PrepareRequest, StreamFn } from "@earendil-works/pi-agent-core";
-import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
+import type { Agent, AgentMessage, PrepareRequest, StreamFn } from "../kernel/pi/agent-core.js";
+import { getCurrentSystemMessage } from "../kernel/pi/ai.js";
 import {
   estimateTokens,
   type AgentSession,
   type ModelRuntime,
   type SessionProjection,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 import { markAnthropicBlocks } from "../episodic/cache-layout.js";
 import { HOME_TASK_RESULT_MESSAGE } from "../sessions/invocation-receipts.js";
 import type { HomeContextSection } from "../protocol/types.js";

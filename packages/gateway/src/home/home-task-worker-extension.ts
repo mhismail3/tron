@@ -1,4 +1,4 @@
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 
 /** Reviewed provider contract at fork commit 4a2a59e692b7ed0b9606fb3d00e4de39989ccb0b
  * (tron.9: custom-message runs stay out of the watchdog's user scope, a backport of

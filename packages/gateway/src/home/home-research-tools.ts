@@ -1,7 +1,7 @@
 import { open, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
-import { Type, type TSchema } from "@earendil-works/pi-ai";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type, type TSchema } from "../kernel/pi/ai.js";
+import type { ToolDefinition } from "../kernel/pi/coding-agent.js";
 import { EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS } from "../episodic/episodic-contract.js";
 import { capText } from "../episodic/episodic-tree.js";
 import type { KnowledgeService, KnowledgeToolParameters } from "../knowledge/knowledge-service.js";

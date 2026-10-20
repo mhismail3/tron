@@ -1,4 +1,4 @@
-import { estimateTokens } from "@earendil-works/pi-coding-agent";
+import { estimateTokens } from "../kernel/pi/coding-agent.js";
 import { createHash } from "node:crypto";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../sessions/context-delivery-receipts.js";
 import { parseHomeTaskReport } from "./home-task-report.js";

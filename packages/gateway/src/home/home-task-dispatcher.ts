@@ -1,8 +1,8 @@
 import { isUsageLimitError, type QueueModelState } from "../providers/model-queue-extension.js";
 import { createHash, randomUUID } from "node:crypto";
-import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
-import { clampThinkingLevel } from "@earendil-works/pi-ai";
-import type { FileEntry } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, ImageContent } from "../kernel/pi/ai.js";
+import { clampThinkingLevel } from "../kernel/pi/ai.js";
+import type { FileEntry } from "../kernel/pi/coding-agent.js";
 import type { GatewayWorkHandle } from "../sessions/gateway-work-registry.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../sessions/runtime-slot.js";

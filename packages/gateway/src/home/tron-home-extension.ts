@@ -1,5 +1,5 @@
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { StringEnum, Type } from "@earendil-works/pi-ai";
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
+import { StringEnum, Type } from "../kernel/pi/ai.js";
 import { GatewayError } from "../errors.js";
 import type { HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
 import type { HomeMemoryToolAccess } from "./home-memory.js";

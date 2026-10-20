@@ -1,5 +1,5 @@
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { getSupportedThinkingLevels, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
+import { getSupportedThinkingLevels, type ModelThinkingLevel } from "../kernel/pi/ai.js";
 import { GatewayError } from "../errors.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 

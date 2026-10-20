@@ -1,5 +1,5 @@
-import { Type } from "@earendil-works/pi-ai";
-import type { FileEntry, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type } from "../kernel/pi/ai.js";
+import type { FileEntry, ToolDefinition } from "../kernel/pi/coding-agent.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { HOME_TASK_CHECKIN_PARAMETERS, parseHomeTaskCheckinRequest, type HomeTaskCheckin, type HomeTaskCheckinRequest } from "./home-task-checkin.js";
 

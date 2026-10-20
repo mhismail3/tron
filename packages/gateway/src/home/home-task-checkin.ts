@@ -1,4 +1,4 @@
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "../kernel/pi/ai.js";
 
 /** Small durable progress snapshots, not another transcript or a result. */
 export const HOME_TASK_CHECKIN_LIMIT = 12;

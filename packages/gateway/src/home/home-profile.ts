@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { Type, type TSchema } from "@earendil-works/pi-ai";
-import type { ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type, type TSchema } from "../kernel/pi/ai.js";
+import type { ExtensionToolContext, ToolDefinition } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { KnowledgeListResponse, KnowledgeProvenance, KnowledgeRecord, KnowledgeRelation, NoteContent } from "../knowledge/knowledge-contract.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";

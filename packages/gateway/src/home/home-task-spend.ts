@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { FileEntry } from "@earendil-works/pi-coding-agent";
+import type { FileEntry } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { HomeTaskRecord } from "./home-task-store.js";
 
