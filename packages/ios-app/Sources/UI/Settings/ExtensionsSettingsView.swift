@@ -49,6 +49,13 @@ struct ExtensionsSettingsView: View {
     }
     @PresentationState private var activeMutations: [PackageMutationOperation: OwnedMutation] = [:]
 
+    private static let packagesKey = "sources.packages"
+    private static let npmCommandKey = "sources.npmCommand"
+    private var settingsTarget: JSONValue {
+        projectCWD.map { SettingsTarget.project(cwd: $0).gatewayTarget } ?? SettingsTarget.global.gatewayTarget
+    }
+    private var settingsWriteLayer: String { projectCWD == nil ? "mac" : "project" }
+
     private var loadID: PackageLoadID {
         PackageLoadID(target: target, profileRevision: model.profileRevision,
                       invalidationGeneration: model.packageInvalidationGeneration,
@@ -107,15 +114,21 @@ struct ExtensionsSettingsView: View {
                 }
 
                 // Keep installation beside the installed list, without a
-                // second heading competing with the package inventory.
-                Button { showingInstall = true } label: {
-                    TronSettingsRow(
-                        icon: "arrow.down.circle.fill",
-                        title: "Install Package",
-                        accent: .tronEmerald
-                    )
+                // second heading competing with the package inventory. The npm
+                // command is how Install Package runs, so it shares that card.
+                VStack(spacing: 0) {
+                    Button { showingInstall = true } label: {
+                        TronSettingsRow(
+                            icon: "arrow.down.circle.fill",
+                            title: "Install Package",
+                            accent: .tronEmerald
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    TronSettingsDivider()
+                    SettingsRendererView(target: settingsTarget, writeLayer: settingsWriteLayer, projectCWD: projectCWD,
+                                         presentation: .keys([Self.npmCommandKey]), detailedKeys: true)
                 }
-                .buttonStyle(.plain)
                 .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.06)
                 .tronSettingsCaption("Agent packages and extensions run with your Mac user authority. Review their source before installing.")
 
@@ -123,11 +136,12 @@ struct ExtensionsSettingsView: View {
                     modulesSection
                 }
 
-                // The schema's package settings for this scope (the npm command, and the
-                // packages list this sheet installs into), with where each comes from.
-                SettingsRendererView(target: projectCWD.map { SettingsTarget.project(cwd: $0).gatewayTarget } ?? SettingsTarget.global.gatewayTarget,
-                                     writeLayer: projectCWD == nil ? "mac" : "project", projectCWD: projectCWD,
-                                     presentation: .section("sources"), embedded: true)
+                // The schema's remaining Sources keys (search paths), with where each
+                // comes from. Installed above is the one package list: the `packages`
+                // setting omits the bundled provider the inventory includes.
+                SettingsRendererView(target: settingsTarget, writeLayer: settingsWriteLayer, projectCWD: projectCWD,
+                                     presentation: .section("sources"), embedded: true,
+                                     selection: .editable([settingsWriteLayer], excluding: [Self.packagesKey, Self.npmCommandKey]))
 
                 if let inventory {
                     localThemesGroup(inventory)
@@ -459,7 +473,10 @@ struct ExtensionsSettingsView: View {
                 ].compactMap { $0 }.joined(separator: " · "),
                 accent: .tronBlue
             ) {
-                if isMutating(package) {
+                if package.isBundled {
+                    // Tron ships and updates it; the Gateway refuses Update and Remove.
+                    EmptyView()
+                } else if isMutating(package) {
                     TronPulseLoadingIndicator(size: 18)
                 } else {
                     Menu {

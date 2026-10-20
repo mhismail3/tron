@@ -172,8 +172,12 @@ package struct PackageSummary: Codable, Hashable, Identifiable, Sendable {
     /// Optional: absent when the package declares none or the Gateway predates it.
     package var nodeRequirement: PackageNodeRequirement? = nil
     package var id: String { "\(scope.rawValue):\(source)" }
+    /// The Gateway appends the provider Tron ships (`tron:` sources, such as
+    /// the managed subagents) to the configured packages; it is not in the
+    /// `packages` setting and has no Update or Remove.
+    package var isBundled: Bool { source.hasPrefix("tron:") }
     /// The scope word the installed row and its detail sheet both show.
-    package var scopeLabel: String { scope == .project ? "Project" : "Global" }
+    package var scopeLabel: String { isBundled ? "Bundled with Tron" : scope == .project ? "Project" : "Global" }
 }
 
 /// A declared Node range the Gateway's runtime does not meet, or cannot read, is
