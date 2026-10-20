@@ -1,7 +1,7 @@
 import XCTest
 
 /// The Home dashboard's one Tron-branded button (#1461): a quick tap opens Home,
-/// a 0.3 s hold opens the dashboard menu with one haptic and never also opens Home.
+/// a 0.2 s hold opens the dashboard menu with one haptic and never also opens Home.
 final class TronDashboardHomeButtonUITests: XCTestCase {
     @MainActor
     private func launch(_ extra: [String] = []) -> XCUIApplication {
@@ -27,8 +27,8 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             let feedback = app.staticTexts["fixture.menu-feedback"]
             XCTAssertEqual(feedback.label, "menu-feedback:0")
 
-            // Just over the 0.3 s menu hold and under UIKit's ~0.5 s context-menu hold.
-            button.press(forDuration: 0.4)
+            // Just over the 0.2 s menu hold and under UIKit's ~0.5 s context-menu hold.
+            button.press(forDuration: 0.3)
             let settings = app.buttons["Settings"]
             XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertTrue(app.buttons["New Session"].exists, app.debugDescription)
@@ -44,7 +44,7 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             keep("1461-home-button-\(appearance)-menu-dismissed")
 
             // A natural hold, past UIKit's own context-menu hold, still opens the
-            // menu through the 0.3 s hold and its haptic (#1480).
+            // menu through the 0.2 s hold and its haptic (#1480).
             button.press(forDuration: 1.2)
             XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertTrue(waitFor(feedback, "label == 'menu-feedback:2'"), "A long hold plays the haptic: \(feedback.label)")

@@ -60,7 +60,7 @@ struct DashboardHomeControl {
 struct DashboardModeMenuButton: UIViewRepresentable {
     /// UIKit's own context-menu hold (about 0.5 s) is not adjustable, so the
     /// Home button's hold is its own recognizer at this duration.
-    static let menuHoldDuration: TimeInterval = 0.3
+    static let menuHoldDuration: TimeInterval = 0.2
 
     let mode: DashboardMode
     let onSelect: @MainActor (DashboardMode) -> Void
@@ -135,7 +135,7 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             let offersHome = parent.home != nil
             // With Home, `holdMenu` is the menu's only presenter. A menu on the
             // touch button adds UIKit's own context-menu hold, which defers the
-            // 0.3 s hold until it fails and, past ~0.5 s, opens the menu itself
+            // 0.2 s hold until it fails and, past ~0.5 s, opens the menu itself
             // without the haptic. Assign only on change (see above).
             if offersHome == (button.menu != nil) {
                 button.menu = offersHome ? nil : makeMenu()
