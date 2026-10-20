@@ -50,8 +50,8 @@ compiler resolved them.
 - **Units left by earlier builds** for files no longer tracked are ignored.
 - **Coverage gaps are ratcheted, not hidden.** Owned `.swift` files the
   stamped build does not index count as `unindexed <module>` entries in the
-  same shrink-only baseline. Today that is 17 files: `ProfilingTests` (12) and
-  `E2ETests` (1), whose targets the UI Validation build does not compile, and
+  same shrink-only baseline. Today that is 18 files: `ProfilingTests` (12) and
+  `E2ETests` (2), whose targets the UI Validation build does not compile, and
   the `MacTerminalSSH` package (4, including `Package.swift`), which is
   compiled as a module without index records. Their references are **not**
   checked.
@@ -83,8 +83,8 @@ The first baselines record the as-is graphs. No manifest declares `dependsOn`
 yet; scopers declare real dependencies and the baselines shrink with each slice.
 - Gateway (#1457): 35 upward, 206 undeclared and 30 two-way module pairs from
   1,094 file edges.
-- iOS (#1459): 7 upward, 69 undeclared and 13 two-way module pairs from 2,846
-  file edges, plus the 17 unindexed files.
+- iOS (#1459, #1483): 7 upward, 69 undeclared and 13 two-way module pairs from
+  2,870 file edges, plus the 18 unindexed files.
 
 ## Verify
 
