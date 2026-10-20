@@ -1,241 +1,40 @@
 # Tron Mac development
 
+The Mac runbook: build, test, reinstall and release. Architecture: [Mac README](../README.md);
+payload rules: [gateway-payload](../scripts/README.md). Every Stable transition (app
+replacement, Gateway update, promotion, rollback, restart) is the user's or maintainer's;
+agents prepare and validate artifacts and report the exact action.
+
 ## Stage the gateway
 
-A fresh clone has neither Gateway dependencies/build output nor generated Mac
-payloads. Install the repository-pinned project generator once with
-`scripts/install-ci-tools.sh xcodegen`; `scripts/tron mac generate` verifies that
-exact tool before generating the disposable project. The Mac Xcode target then
-automatically runs `ensure-gateway-bundle.sh` before compiling when the payload
-is missing. This stages the Gateway's locked production dependencies, embedded
-Node runtimes, and checksum-pinned universal XcodeGen toolchain inside the app;
-the resulting destination Mac needs no global Pi, Node, or XcodeGen installation.
-
-For an explicit preflight or to refresh an existing payload:
+Install the pinned generator once (`scripts/install-ci-tools.sh xcodegen`). The Xcode target
+runs `ensure-gateway-bundle.sh` before compiling when the payload is missing, so the built app
+needs no global Pi, Node or XcodeGen.
 
 ```bash
 packages/mac-app/scripts/ensure-gateway-bundle.sh
-# Force a fresh local staging pass while product push is unconfigured:
-packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push
-```
-
-Staging resolves the exact Node version in the repository's `.node-version`
-before installing anything, then derives `npm` from that Node's sibling `bin`
-directory. The launcher and npm shell checks install the official archive into
-`.ci-tools` using the pinned archive checksum and the vendor's `SHASUMS256.txt`,
-then verify the complete npm tree against `config/ci-toolchain.env`; the cache is
-reused only while both checksums remain valid. Those checks default to
-`${TRON_CI_TOOLS_DIR:-.ci-tools}` instead of the developer's Node on `PATH`;
-`TRON_NODE_ROOT` remains an explicit fixture/toolchain override. Candidate
-admission proves the complete pair: a wrong-version Node
-or a pinned-version payload alias without sibling npm is skipped before the
-exact `$NVM_DIR/versions/node/v<version>/bin/node` directory and Homebrew
-candidates are considered. `TRON_NODE_BIN` may explicitly name an absolute
-executable, but it must provide both the pinned Node and sibling npm; there is
-no ambient npm override. Failure happens before build or payload mutation. These
-variables affect staging only. Node payload tests copy fixture npm from the checksum-verified
-`${TRON_CI_TOOLS_DIR:-.ci-tools}/node-v<version>-<architecture>` archive cache, or from an
-explicit `TRON_NODE_ROOT`; they require the repository-pinned Node version regardless of which
-Node executable launches the test. Hosted Mac tests use the npm runtime embedded in their built
-test app. No test depends on a machine-specific temporary archive path. Release
-preparation also downloads and verifies the repository-pinned XcodeGen archive,
-executable, and preset tree, then
-fingerprints them under `Gateway/runtime/xcodegen`. Bundle writers serialize
-before touching the shared dependency tree, assemble and verify generated
-resources under a private source-local staging root, and publish the payload,
-launcher, and icon through bounded backup renames. Failure or interruption
-restores the prior generated projection, removes invocation-owned staging and
-backup roots, and releases its build lock; `ensure-gateway-bundle.sh` never erases
-that projection before a replacement is ready. Download and compiler scratch
-roots share the staging owner's lifetime. Disposal closes each directory
-enumeration before descending, opens immutable directories only for removal,
-and unlinks symlinks without following their targets. The completed app uses only those
-embedded runtimes for supervised work and does not consult Homebrew, NVM, or the
-destination checkout's `.ci-tools` cache.
-
-The Mac app build compiles the universal C Node-API8 capture client and places it
-beside the helper at `Contents/Library/Native/tron-native-capture.node`, with its
-production input manifest. `native-gateway-client/build.py` checks the four
-Node C header SHA-256 pins for the `.node-version` release (`scripts/tron-node pin` writes them) and freezes its production inputs. The normal
-nested signing phase signs the client before the outer app seals it. No library
-validation entitlement is disabled. Gateway source-only updates never touch this
-Mac-owned native client; native changes require a manual Mac app update. An absent
-or incompatible client makes only capture unavailable, not the whole Gateway. See
-[direct capture client ownership](computer-control.md#direct-gateway-capture-client) for
-local-only cleanup versus remote Stop, test artifacts and qualification gates.
-
-`config/PushService.xcconfig` is the one maintainer-owned public Push service
-origin consumed by both iOS and this bundled Gateway. Development may stage an
-unconfigured **dev-channel** payload with `--allow-unconfigured-push`; push then
-remains unavailable. Every payload carries a regular, fingerprinted
-`app/PushService.xcconfig`. Stable staging, selection, source update, rollback,
-launcher admission, and packaging require exactly one non-empty public HTTPS
-origin and reject missing, empty, malformed, or symlinked projections. A Stable
-source update preserves its validated runtime base's product configuration; it
-never reads an environment override or substitutes the source checkout's
-configuration. The selected payload remains the preferred base. When a newer
-payload contract invalidates it, source repair may use only the fully validated
-configured artifact, the signed launcher's exported bundled root, or the prepared
-Gateway bundle inside the admitted source checkout, in that order. The updater
-revalidates the copied snapshot against the admitted manifest before changing it;
-it never scans historical versions for a convenient fallback. This lets a prepared
-local Release build break a toolchain bootstrap deadlock while malformed or stale
-payloads still fail closed. `scripts/tron mac verify` additionally compares the selected stable origin with the installed signed app, so an old external selection cannot masquerade as the current product configuration; repairing that mismatch requires selecting/installing a payload from the current signed product before another source-only update. Direct official staging and Mac Release builds fail closed while
-the origin is empty. This is release configuration, never end-user setup, and
-contains no credential. Notification grants and pending delivery state remain
-under the Tron home outside immutable payload directories and survive updates.
-
-The script:
-
-1. runs locked Gateway install and TypeScript build. Before trusting an existing
-   source install or compiling, `scripts/gateway-install-inputs.mjs` checks the
-   applicable records in npm's hidden lock against `package-lock.json` and walks
-   the installed package directories, checking locked package names/versions,
-   completeness and absence of unlocked packages. It accounts for optional
-   packages not applicable to the host platform; it does not require byte-equal
-   root/hidden lockfiles or claim to hash every installed package byte;
-2. creates an independent `npm ci --omit=dev` production tree, validates that
-   documented production mode against the same lock owner, and includes the
-   owned node-pty postinstall helper;
-3. downloads the exact `.node-version` arm64 and x64 Node archives;
-4. checks their SHA-256 pins from `config/ci-toolchain.env`;
-5. compiles `tron-gateway-launcher.c` as a universal macOS executable;
-6. creates exact relative `runtime/bin-{arm64,x64}` command aliases for the
-   corresponding checked Node binaries and the bundled backing SDK CLI;
-7. stages the launcher into the single Stable Login Item skeleton;
-8. the launcher exports `TRON_GATEWAY_SEARCH_EMBEDDING_HELPER` as the signed
-   helper in app `Contents/Resources`; the Gateway still admits it through its
-   signature check, independently of the selected source payload version;
-9. writes `app/build-inputs.json` with the digest of explicit Gateway compiler,
-   copied-helper, configuration, and toolchain inputs used for the build, then
-   hashes every regular file and safe internal symlink under `app/**` (including
-   that receipt and the complete production `node_modules` tree) and `runtime/**`
-   with the launcher's bounded in-process hasher. It writes that fingerprint into
-   the bundled `manifest.json` and stamps a runtime epoch. The shell hash helper
-   remains the readable cross-implementation test fixture. Use
-   `scripts/gateway-payload-deploy.mjs` for immutable payload operations;
-   `scripts/tron dev` is the sole Debug supervisor on port 9848.
-
-The bundled manifest is the fallback identity authority. External payloads use
-an atomically replaced `gateway/payloads/<channel>/current.json` pointer to a
-complete `versions/<version>` directory. The Stable LaunchAgent selects the
-`stable` channel; scripts/tron-dev launches the installed signed launcher with
-the `dev` selection. The helper validates
-both manifests and all required paths before selecting an external payload,
-otherwise it uses the validated bundled payload. Promotion additionally checks
-the complete fingerprint before publishing.
-
-Before accepting an existing generated payload, `ensure-gateway-bundle.sh`
-invokes `bundle-gateway.sh --verify-only`. Verification is read-only: it first
-checks ordinary payload integrity (including the receipt file), then compares
-the staged `sourceRevision`, package manifest/lockfile, and build-input digest
-with their current source counterparts. Dirty Gateway edits may be staged, but
-reverting them at the same revision invalidates the receipt; unrelated untracked
-files do not invalidate this build-input fast path. A mismatch rebuilds the
-payload. Debug's separate source-dirtiness record and clean-checkout handoff gate
-remain unchanged; build freshness is established by the receipt, while lifecycle
-handoff provenance retains its broader checkout rule. Debug staging also checks
-the full development install before compilation. Verification checks bounded manifest identity against `.node-version`, compiles a fresh trusted
-launcher verifier for the complete fingerprint, validates runtime hashes,
-architectures, required paths, safe symlinks, immutable publication modes,
-exact source/package manifest identity, and byte equality with a freshly
-compiled unsigned universal helper. Only after that validator proves the staged
-runtime does `--verify-only` run the matching architecture's bundled Node to
-check the source-input receipt; it does not require source Node/npm, install
-packages, or download runtimes. Verification also requires every runtime command alias to be an exact symlink
-with exact relative target text resolving to its signed architecture runtime or
-bundled SDK CLI. Missing, substituted, dangling, absolute, wrong-target, or
-escaping aliases fail closed. A failed check triggers one explicit rebuild and a second verification;
-malformed or tampered output is never silently accepted. `runtimeEpoch` is a freshness nonce bound by the immutable payload tree and its
-subsequent Xcode code signature; it is not an externally reproducible source
-input or a standalone secret. This milestone binds all other deterministic
-identity fields to source/build inputs
-without redesigning the production fingerprint algorithm. The isolated fixture
-command below copies a payload to
-a temporary directory and exercises valid, tampered, forged-helper, runtime,
-writable-tree, symlink-escape, valid-identity-tamper, and malformed-manifest cases.
-
-The Mac payload build, verifier, hasher, Xcode signing walk, and install verifier
-select macOS filesystem tools by absolute path (`/usr/bin/find`, `/usr/bin/stat`,
-`/usr/bin/readlink`, `/usr/bin/sort`, and **`/bin/realpath`**). GNU tools may lead
-the caller's `PATH`; do not sanitize it or change the separate pinned Node/npm
-resolver. Permission queries use single-bit `-perm -200/-020/-002` predicates,
-reject any write bit, and refuse a failed scan rather than treating it as an
-empty result. Fingerprinting, fresh-helper identity, runtime hashes, symlink
-containment, immutable modes, and code-signature checks remain mandatory.
-
-The Xcode post-build signing phase signs the embedded Node runtimes with
-`TronNode.entitlements`. Node executes V8 JIT code, so the
-`com.apple.security.cs.allow-jit` entitlement is required when the runtime is
-sealed by the hardened runtime. Native Gateway modules and Login Items remain
-signed without that extra entitlement.
-
-Useful iteration options:
-
-```bash
-# Reuse gateway node_modules, compile current Gateway inputs, and refresh runtime payloads
-packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push --skip-install
-
-# Reuse the published payload's Node and npm runtimes too; they are copied into
-# the private staging root and must still match their exact binary/tree hashes
-# and versions. Symlinks are refused. This skips runtime downloads, not the
-# independent production npm install (scripts/tron-dev uses it after publication).
-packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push --skip-install --skip-download
-
-# Remove generated payloads only
+packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push [--skip-install [--skip-download]]
+packages/mac-app/scripts/bundle-gateway.sh --verify-only   # read-only
 packages/mac-app/scripts/bundle-gateway.sh --clean
-
-# Read-only publication/source-input verification (does not build, install, or redownload)
-packages/mac-app/scripts/bundle-gateway.sh --verify-only
-
-# Check the canonical full Gateway install without installing or rebuilding
 node scripts/gateway-install-inputs.mjs check packages/gateway full
-
-# Pure helper check against a staged payload (does not build or install)
-packages/mac-app/scripts/hash-gateway-payload.sh Sources/Resources/Gateway
-
-# Isolated publication-policy fixtures (requires current unsigned staged inputs)
-packages/mac-app/scripts/test-gateway-payload-verifier.sh
-# Hardware-free stale-input/strict-rejection journey; needs no staged payload
-python3 packages/mac-app/scripts/test-gateway-payload-precondition.py
-
-# Launcher boundary fixture (also covers channel path-component rejection)
-packages/mac-app/scripts/test-tron-gateway-launcher.sh
-# The launcher's argv against the app's admission checks is the hosted
-# TronMacIntegrationTests/GatewayLauncherArgvTests suite; run it after any argv change.
-
-# Bundled npm removal with sanitized PATH and isolated HOME/cache
-packages/mac-app/scripts/test-tron-gateway-npm.sh
-
-# Manifest fingerprint rewrite (preserves launcher-sensitive JSON strings)
-packages/mac-app/scripts/test-update-payload-fingerprint.sh
-
-# Two real builds in this checkout, the second with --skip-download; Node/npm
-# pin violations and symlinks refused without changing published bytes or modes,
-# with no private staging/backup roots or build lock remaining after each refusal.
-# Builds matching and dirty-source payloads, proves reverted provider-helper
-# receipts are rejected, then exercises runtime tamper refusal. Retains the log at
-# packages/mac-app/test-results/bundle-gateway-rebuild.log.
-packages/mac-app/scripts/test-bundle-gateway-rebuild.sh
-# Same real journey: first build with normal tools, then actual GNU find/stat
-# shadow macOS commands for republishing, verification and every refusal case.
-# Requires GNU gfind/gstat on PATH (e.g. Homebrew findutils/coreutils).
-packages/mac-app/scripts/test-bundle-gateway-rebuild.sh --gnu-shadow
-# Focused disposal regression: immutable nested tree, bounded descriptors,
-# external symlink target preserved; no download or build.
-packages/mac-app/scripts/test-bundle-gateway-rebuild.sh --cleanup-only
 ```
 
-The publication-policy matrix first validates its copied baseline with the strict
-verifier. Failure exits **2** with a `generated-input precondition` diagnostic and
-the original cause (for example a stale Node runtime checksum); no adversarial
-cases ran. Explicitly stage current unsigned inputs before retrying. Staging can
-install/download dependencies even with `--skip-install`, so it is a separate,
-authorized operation, never an automatic test repair. Do not rewrite pins or use
-a signed installed app as an unsigned fixture. Direct strict verification still
-rejects invalid payloads with exit **78**. The hardware-free precondition journey
-retains `test-results/gateway-payload-precondition/report.json` and proves both
-exit contracts, unchanged generated bytes/modes, and temporary-fixture cleanup.
+`config/PushService.xcconfig` is the maintainer-owned public push origin shared with iOS;
+`--allow-unconfigured-push` stages a dev payload without push. A Stable source update keeps
+its validated base's configuration; when a newer contract invalidates the selection, repair
+may use only the configured artifact, the launcher's bundled root or the checkout's prepared
+bundle, in that order. Notification state lives outside payload versions.
+
+The build also compiles the universal Node-API capture client into
+`Contents/Library/Native/tron-native-capture.node` (`native-gateway-client/build.py` checks
+the Node header pins that `scripts/tron-node pin` writes; see
+[capture client](computer-control.md#direct-gateway-capture-client)), embeds the native host
+(`PRODUCT_NAME=TronNativeHost`; the copy/sign phase is the only embedder), and copies
+`TronSearchEmbeddingHelper` into `Contents/Resources`. The Gateway admits that helper only as
+the exact signed artifact (`MYGKXH6TY4`, hardened runtime, real path) after a synthetic
+qualification (512 dimensions, paraphrase similarity, a negative control, stable revision);
+`TRON_SEARCH_EMBEDDING_HELPER` is honored only with `NODE_ENV=development`. Otherwise search
+stays lexical. Qualify with synthetic JSONL frames, never private transcripts.
 
 ## Generate and build
 
@@ -247,228 +46,71 @@ cd packages/mac-app
   -derivedDataPath build/DerivedData
 ```
 
-Mac builds, including Replace's detached source build, use
-`scripts/tron-xcodebuild`: at most four CPU-sized build jobs and inherited nice
-+10, printed at launch. Builds start immediately; no host-wide queue or landing
-lock is involved. Test execution stays at its existing priority. See
-[iOS parallel-worker resource ownership](../../ios-app/docs/development.md#parallel-worker-resource-ownership)
-for the shared policy and process-boundary regression. This changes build
-preparation only, not authorization to replace an app or restart Stable.
+`scripts/tron-xcodebuild` runs at most four CPU-sized jobs at nice +10, with no host-wide
+queue ([iOS resource ownership](../../ios-app/docs/development.md#parallel-worker-resource-ownership)).
+The build fails closed when staging cannot complete. The post-build phase signs nested Login
+Items and the Node runtimes with `TronNode.entitlements` (V8 needs `allow-jit`; native
+modules stay minimally entitled) before resealing the app. `TRON_CI_XCODE_VERSION` is the CI
+reference, not an upper bound: a later Xcode is usable when generation, Release build,
+payload validation and installed verification all pass.
 
-The build fails closed if staging cannot complete (for example, if the
-machine lacks the development Node/npm toolchain or network access). A
-completed app contains the Gateway entrypoint, production `node_modules`, both
-arm64/x64 Node runtimes, the pinned npm (`TRON_NODE_NPM_VERSION`) CLI trees extracted from those same
-official archives, and fingerprinted architecture-specific `node`, `npm`, and `pi`
-command aliases. Stable adds only its selected immutable alias to `PATH` before extension
-discovery, so it never consults a user's nvm/Homebrew installation or a global Pi
-command. The Pi command is npm's `app/node_modules/.bin/pi` projection, and the
-runtime aliases must target their exact payload entries; private package-internal CLI paths are not
-a payload contract. Debug preserves an already-resolving developer
-Node and uses the payload alias only as fallback. Release validation must also
-execute the signed embedded runtime, not only check that the binary is present;
-a hardened Node runtime without its JIT entitlement exits before the Gateway
-can bind its port.
+## Efficient focused tests
 
-### Session search embedding helper
-
-The `TronSearchEmbeddingHelper` target is copied to
-`Contents/Resources/TronSearchEmbeddingHelper` and signed by the app's final
-composition phase. The Gateway admits semantic readiness only after running its
-bounded synthetic qualification (512 dimensions, paraphrase similarity, and a
-negative control). Bundled runtime launches derive this path beside the Gateway
-payload. The Gateway admits only the regular, non-symlink helper whose exact
-`TronSearchEmbeddingHelper` code identity, `MYGKXH6TY4` team, hardened runtime
-signature, and real path match the packaged artifact. A source-built helper may
-set `TRON_SEARCH_EMBEDDING_HELPER` only when `NODE_ENV=development`; production
-ignores that override. Missing, unsigned, tampered, unsupported-language, or
-semantically unqualified helpers leave search lexical-only and are never treated
-as ready. Helper responses include the NaturalLanguage sentence embedding
-revision, and Gateway qualification requires that revision, language, and
-512-dimensional vector metadata to remain stable for every vector and query.
-
-The same build embeds the signed Aqua `Tron Native Host` at
-`Contents/Library/Native/Tron Native Host.app`. Its target explicitly keeps
-`PRODUCT_NAME=TronNativeHost`; the shared Release configuration's `Tron` product
-name belongs only to the outer application. The build dependency disables
-Xcode's automatic embedding/linking: the existing copy/sign phase is the sole
-owner of the helper's `Contents/Library/Native` placement. Do not leave another
-copy under `Contents/Resources`; composition validation rejects duplicate helper
-bundle identities. Packaging must retain its fixed
-`com.tron.mac.native-host` identity and deep strict signature. Its bundled Aqua
-LaunchAgent/Mach service is registered only by explicit setup and removed by
-explicit uninstall; ordinary readiness probes never register it or ask for TCC.
-The helper queries TCC from its own process and both peers pin XPC messages to the
-signed bundled build. `package-dmg.sh` checks the nested host signature and both
-architectures. Packaging and the installed-app verifier also use
-`scripts/validate-native-host.py` to require the exact Aqua Mach-service plist,
-parent association, program path, accessory metadata and matching signing-team
-metadata; signature checks remain separate. Validate final service attribution and background approval with
-the signed installed composition; a temporary qualification app is not that proof.
-
-The `.bin/pi` projection is an executable contract transition. Existing signed
-launchers retain the old private CLI path until the user performs the documented
-manual Mac Release reinstall; source-only payload promotion through that launcher
-must fail closed rather than silently accepting the old target. The reinstall
-replaces the launcher and payload together, after which `scripts/tron mac verify`
-confirms the signed projection.
-
-### Gateway payload promotion
-
-Pi SDK rollback verification is performed before payload promotion with
-`cd packages/gateway && npm run test:pi-sdk-rollback`; its JSONL/settings/auth
-fixtures are disposable and isolated from `~/.tron`. The simulator-only iOS
-E2E can be run directly with `scripts/ios-gateway-e2e-test all` when the
-committed Pi package graph or its boundary changes, with cleanup
-always guaranteed. The `.bin/pi` projection is a one-time signed launcher
-transition; an installed old launcher is not a valid source-only promotion
-path, so the user must perform the documented manual Release reinstall.
-
-The installed Release wrapper owns only the Stable LaunchAgent. Debug lifecycle
-belongs only to `scripts/tron dev`; the Release menu is a read-only authenticated
-observer. Gateway transitions are user-initiated: repository agents may prepare and
-validate a complete payload but must not run the following mutating operations. A user
-or maintainer can stage and then explicitly promote that payload:
+CI compiles the app and tests unsigned (`CODE_SIGNING_ALLOWED=NO`) and runs nothing; hosted
+`TronMacIntegrationTests` need the team's signing certificate, so run them locally. Build once,
+then select suites:
 
 ```bash
-scripts/gateway-payload-deploy.mjs stage --channel stable --source <payload>
-scripts/gateway-payload-deploy.mjs promote --channel stable --version <version>
-scripts/gateway-payload-deploy.mjs rollback --channel stable --command-id <unique-command-id>
+../../scripts/tron-xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
+  -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData
+xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
+  -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData \
+  -only-testing:TronMacIntegrationTests/SingleInstanceLockTests \
+  -resultBundlePath build/Focused.xcresult
 ```
 
-Promotion is serialized per channel, verifies the complete payload fingerprint,
-uses authenticated drain-aware `gateway.restart`, and waits without a deadline for the
-exact old PID/start to disappear. It then allows 60 seconds for launchd to produce a
-listener and starts a separate 180-second startup window at the first listener. During
-warmup, `/health` identity is accepted only while the same listener PID/start pair
-remains, and its status must be `ok`. Promotion still requires authenticated
-`system.info` from that exact listener before committing. Listener absence cannot
-authorize a normal kickstart because a live startup process may not have bound yet.
-On failure it restores and revalidates the prior selection. Recovery waits for an
-exact candidate already warming rather than treating it as unknown; a foreign
-listener is never touched, and the bounded startup window covers crash-looping
-candidates before restoration. Recovery never calls the failed Gateway. The iOS update button invokes
-only the LaunchAgent-owned helper; verified artifact promotion is wired, and source
-builds read only the validated `gateway/update-config.json` projection. Source mode uses
-the repository's local TypeScript compiler with a private temporary output directory,
-never `packages/gateway/dist`, and stages only verified output. A helper launch
-acknowledgement does not claim eventual build or promotion success; failures are exposed
-through bounded update progress. The Mac menu Restart seam uses the authenticated drain command rather than
-`launchctl kickstart`; kickstart is deployment recovery only. If authenticated
-runtime identity differs from the validated Stable selection, the menu presents
-“Update incomplete” with both running and selected identities and offers one
-“Rerun Gateway Update” action. That action sends `gateway.update` (`mode: auto`)
-through the authenticated Gateway client, reusing Gateway-owned configuration,
-command receipts, and deployment state; it never invokes the helper or a second
-update lifecycle directly. An uncertain request is reconciled with
-`command.status` and is not automatically repeated. Quitting during an active
-restart drain now requires confirmation because it interrupts accepted work.
+Run test execution with scratch `HOME`/`TMPDIR`, but never carry them into the signed build or
+substitute ad-hoc signing. The suite holds only real-boundary tests: spawned processes and
+pipes (`SubprocessTests`, `CodeSignatureProbeTests`, `CuaProcessOwnerTests`,
+`MenuBarTerminationTests`, `SingleInstanceLockTests`), a loopback WebSocket
+(`MenuBarLogReaderTransportTests`), the built launcher and payload trees
+(`GatewayLauncherArgvTests`), the native host in a demand-launched Mach service
+(`NativeHostRetirementTests`), real files (`WizardProgressFilesystemTests`,
+`TronLogFilesystemTests`), and `MacQuitGatewayTests`, which runs the Quit coordinator against
+the signed bundled Gateway in a disposable launchd job with the shipped `KeepAlive` and
+`ExitTimeOut` (clean exit, a held model request past 20 s, caller cancellation, stall recovery
+without relaunch, missing or stale receipts, retry, restart-75). Then run
+`packages/mac-app/scripts/test-signed-pi-payload-smoke.sh` on the built app.
 
-The Stable plist now requires Boolean `KeepAlive=true`. Delivering that plist requires
-following **Reinstall a local Release build** below and refreshing registration with
-Pause/Resume; payload promotion alone does not replace the registered plist.
+Script checks (pinned Node, `scripts/tron-node exec`): `node --test --test-concurrency=2
+scripts/gateway-payload-deploy.test.mjs`, `node --test scripts/gateway-install-inputs.test.mjs`
+(real `npm ci` repair, #1010), the payload scripts in [gateway-payload](../scripts/README.md#verify),
+`python3 scripts/test-verify-mac-install.py` (fixture app and real TLS listeners, report in
+`test-results/mac-verify/report.json`) and `python3 scripts/test-tron-mac-replace.py`.
+Pi SDK rollback: `cd packages/gateway && npm run test:pi-sdk-rollback`.
 
 ## Permission identity and stale listings
 
-For normal Stable use, keep `Tron.app` (`com.tron.mac`) at `/Applications/Tron.app`
-and its sole bundled `Tron Native Host.app` (`com.tron.mac.native-host`) under
-`Contents/Library/Native`. FDA belongs to the wrapper. Depending on the service,
-macOS can attribute the native helper's request to the responsible wrapper:
-Screen Recording may appear as Tron, while Accessibility appears as Tron Native
-Host. Native computer use needs Accessibility and Screen Recording; it does not
-request Input Monitoring for an unused observer. Never infer identity from the
-display name alone or merge Debug and Stable bundle identifiers to hide rows.
-macOS can also present a separate direct-capture consent dialog on first capture.
-The ordinary grant booleans do not prove that dialog was completed. The user must
-handle it; foreground automation must first inspect the full desktop, not only a
-window screenshot that can omit the blocking system prompt.
-
-After granting Screen Recording, macOS may restart only the wrapper while the
-native helper remains alive. If Settings shows the current Tron entry enabled but
-Tron's own row remains ungranted, use **Permissions… → Restart Helper**, which
-joins native retirement before unregister/register, then re-check. A pending or
-failed drain is not permission to quit/kill the helper. Do not restart the Gateway or reset working grants as a workaround.
-A still-failing fresh helper requires diagnosis, not repeated permission toggles.
-
-Users who no longer use development/qualification builds can remove these old
-permission-list entries through System Settings's minus control:
-
-- `Tron-Dev` / `com.tron.agent` (retired application identity)
-- `TronMac` / `com.tron.mac.dev` (development wrapper)
-- `TronComputerUseQualification` / `com.tron.qualification.computer-use`
-- `TronNativeObserverQualification` / `com.tron.qualification.native-observer`
-- `TronNativeCaptureQualification` / `com.tron.qualification.native-capture`
-
-This revokes only those old/test grants; it is not deletion of sessions or apps.
-Keep unrelated apps and the current Stable identities. Do not use a global TCC
-reset or edit TCC databases. Removing an old app's grant does not require deleting
-`~/.tron`, `~/.pi`, worktrees or qualification evidence. Historical expanded app
-bundles may also remain in Launch Services; archive/unregister only exact stale
-artifacts after verifying they are not running or needed for development. Never
-remove a nested helper from the installed signed app by hand. Release packaging
-must contain exactly one native helper; the validator rejects automatic duplicate
-embedding under Resources.
+Keep `Tron.app` (`com.tron.mac`) at `/Applications/Tron.app` with its one native host. FDA
+belongs to the wrapper; Screen Recording may show as Tron and Accessibility as Tron Native Host;
+computer use needs both and never Input Monitoring. A first capture may raise a separate
+direct-capture dialog that the grant booleans do not reveal: the user handles it, and
+automation inspects the whole desktop first. If Settings shows Tron enabled but its row stays
+ungranted, use **Permissions… → Restart Helper**; never restart the Gateway, reset grants or
+kill a draining helper. Retired identities may be removed with System Settings' minus control:
+`com.tron.agent`, `com.tron.mac.dev`, `com.tron.qualification.computer-use`,
+`com.tron.qualification.native-observer`, `com.tron.qualification.native-capture`. Never reset
+TCC globally or edit its databases.
 
 ## Reinstall a local Release build
 
-This is a manual developer installation, not a production deployment command.
-The user or maintainer performs replacement and launch, and every Gateway
-transition. Repository agents may prepare and validate the `.app` artifact and
-report its path, but must not initiate those operations. Restarting the Gateway is not
-an app reinstall: it only restarts the currently registered Gateway image. It is also the bootstrap path for an intentional lockstep Gateway protocol bump:
-the new signed launcher rejects a previously selected payload whose manifest
-protocol differs and falls back to the matching bundled Gateway. The final Mac
-app binds its own protocol metadata to that bundled payload before signing.
-After `scripts/tron mac verify` passes, the physical iOS helper independently
-requires the same signed protocol before installation. The Gateway package manager
-uses the npm CLI shipped from the same pinned Node archive as the bundled runtime;
-the launcher exports that architecture-specific command directory so package
-install/remove/update operations do not depend on launchd's PATH. Git-backed package
-operations remain intentionally dependent on the host `git` executable because Pi owns
-that checkout lifecycle; verify `/usr/bin/git` (or another explicitly configured Git)
-before using Git packages. This is a
-Mac payload change: a source-only Gateway rebuild cannot add the missing npm
-runtime to an already-installed app. Build and manually replace the Mac Release
-app before testing package operations.
+A manual developer installation, not a deployment. It is also the bootstrap for a lockstep
+protocol bump or a launcher/plist change (the new launcher refuses an older selection and runs
+its bundled Gateway; a registered plist changes only by reinstall and Pause/Resume). Never
+remove `~/.tron` or `~/.tron/agent`: they hold Gateway state, credentials, sessions and the
+internal workspace ([contract](../../gateway/docs/internal-workspace.md)).
 
-Do not remove `~/.tron`; it contains Gateway-owned state/credentials and Tron's
-internal workspace (`workspace/files` and capability-owned `workspace/state`).
-Preserve `gateway/workspace-state` lifecycle evidence with that workspace. Canonical
-session JSONL, provider credentials and runtime settings stay under
-`~/.tron/agent` (Debug: `~/.tron-dev/agent`); do not remove those either. Application
-replacement and local settings/credential reset do not delete the internal
-workspace. See the [workspace ownership and restore contract](../../gateway/docs/internal-workspace.md).
-Build and validate the replacement artifact first; source preparation does not
-require changing the running services. Before replacing an installed app, choose
-**Quit Tron** in the old wrapper. Quit waits for accepted Gateway work, requests
-an authenticated stop, verifies the exact observed process has exited without a
-replacement, and joins native-helper retirement. If any stage fails or cannot
-be proved, the wrapper stays open and presents the failure. Replace the app only
-after Quit succeeds, then launch the new copy. Stop any legacy Debug
-SMAppService separately; Release never takes over Debug lifecycle. Neither
-process absence alone nor a timer substitutes for a successful Quit.
-
-Quit leaves the approved Login Items registered. The Gateway LaunchAgent's
-successful exit policy prevents relaunch after its intentional clean stop; the
-next wrapper launch uses the existing approved LaunchAgent owner to start it.
-The native helper drains capture and automation work, confirms, then exits while its
-SMAppService registration remains enabled; its Mach service is started on demand
-by the next authenticated XPC connection. The helper exits only after the wrapper
-closes the retirement connection: the wrapper pins the helper's signature, so
-libxpc refuses a reply whose sender has already exited (`Received message
-forbidden due to code signing requirement`, `errSecCSNoSuchCode`) and the wrapper
-would correctly report unconfirmed retirement. The wrapper records
-`native-host.retirement-unconfirmed` in `~/.tron/logs` with either the XPC error
-(reply lost or refused) or `helper-reported-unjoined-capture`. No new approval or desired-state
-record is created. An unapproved or unknown service is never registered to make
-Quit succeed. A `.notFound` native-service status refuses retirement rather
-than being treated as evidence that work is absent. A retried Quit after the
-Gateway has already stopped resumes at native-host retirement while the service
-stays enabled and launchd reports no running Gateway process.
-
-Prepare a Release app with an explicit derived-data directory inside the
-worktree, so concurrent worktrees never share a build database or hand over each
-other's `.app`, and macOS temporary-directory cleanup cannot remove it:
+Build with a worktree-local derived-data path:
 
 ```bash
 scripts/tron mac generate
@@ -478,620 +120,113 @@ cd packages/mac-app
   -derivedDataPath build/DerivedData-Release build
 ```
 
-`TRON_CI_XCODE_VERSION` remains the deterministic CI reference, not an upper
-bound on local Mac development. A later selected Xcode is usable only when the
-pinned XcodeGen generation, Release build, complete signed-payload validation,
-and installed-app verification all pass; compiler success alone is insufficient.
-Mac asset validators therefore use stable tool projections rather than relying
-on command forms whose argument parsing changed between Xcode releases.
-
-In Finder, replace `/Applications/Tron.app` with that built `Tron.app`, then
-launch it. The existing onboarding marker keeps the wrapper in menu-bar mode.
-Startup reloads only the already-approved Gateway Login Item and reconnects to
-the native helper only while macOS reports it enabled. If Login Item approval
-was revoked, Tron leaves the service alone and surfaces the existing approval
-path; it does not register without consent or request TCC grants. Wait for the
-menu-bar status to report Running before reconnecting iOS. The new wrapper also
-detects a running same-bundle job without the supervision marker and repairs its
-registration before it settles into the healthy state.
-
-Do not install the new iOS app before this Mac verification succeeds. Verify
-the result with the read-only check:
-
-```bash
-scripts/tron mac verify
-```
-
-It fails unless Stable's Release-owned launchd PID is the sole 9847 listener,
-executes the validated active payload, and returns matching authenticated
-`system.info` channel/revision/fingerprint/epoch. Pointer admission mirrors the
-current required runtime contract, including a symlink-free, universal and
-canonically versioned pinned XcodeGen tree, rather than accepting an older
-self-consistent fingerprint alone. That executable's provenance is a valid
-signature or the pinned upstream digest: a store payload carries the pinned
-upstream binary unchanged, and that binary is unsigned.
-An incompatible or invalid external selection may remain as bounded rollback
-history after a protocol or runtime-contract bump; verification accepts it only
-when both the launcher and live PID have rejected it in favor of the signed
-bundled payload. If Debug is present, it also
-requires one lifecycle snapshot whose live supervisor and child PID/start
-identities, sole 9848 listener, selected manifest, command, and authenticated
-identity all agree. Both channels probe the exact owner's listeners in order:
-a TLS-only LAN socket may refuse the plain WebSocket probe, so verification
-continues to the main socket. The first answering socket must match the selected
-identity; a wrong identity never falls through to a later answer. Debug absence is informational; loaded legacy Debug,
-Preview or Stable dev-takeover services are collisions. Preview/dev-takeover
-plists left in `~/Library/LaunchAgents` also fail verification, even when unloaded:
-login could relaunch a retired owner against Stable's home and port. The maintainer
-must retire the exact legacy service and its login plist; the verifier never unloads
-services or removes files. A healthy current listener does not clear that gate.
-The collision check is in `scripts/verify-mac-install.sh` and runs against the
-installed app (`scripts/tron mac verify`). It also refuses the loaded dev-takeover
-job, even without a listener.
-
-Run `python3 scripts/test-verify-mac-install.py` for the complete verifier CLI
-regression (requires the pinned Node runtime and this worktree's Gateway `ws`
-dependency). It uses an isolated fixture app/home, synthetic macOS signing and
-process discovery, and real authenticated WebSocket/TLS listeners on ephemeral
-ports; it never accesses an installed app or live Gateway. The journey covers
-TLS-first Debug discovery, first-answer identity refusal, a single listener,
-missing sockets and optional Debug absence, retaining observations in
-`test-results/mac-verify/report.json`. This qualifies listener selection and
-identity verification, not real macOS signing or installed-app health.
-
-The verifier checks both signed runtimes and aliases on every Mac, but executes
-only the host-native runtime. The bundled
-foreign-architecture runtime is validated statically; this avoids false
-failures when Rosetta is unavailable or when translated Node cannot obtain its
-JIT permissions. If the required menu-bar controls are unavailable, stop for a
-reviewed maintainer procedure. Uninstall or re-registration is not a substitute
-for successfully draining and retiring the old native helper.
-
-The Release menu authenticates to a developer-owned Debug Gateway on 9848 and,
-when one coherent observation is healthy, exposes read-only Debug status and
-pairing information. The observation is generation-gated and pairing pins its
-exact admitted host/runtime, so overlapping refreshes and restarts cannot mix
-projections. It never controls Debug lifecycle or writes its cache. Stable remains independently owned
-by `com.tron.server`/`com.tron.mac` on 9847. `scripts/tron dev` uses
-`~/.tron-dev` and `~/.tron-dev/agent` without SMAppService registration.
+Then the maintainer chooses **Quit Tron** in the old app (it drains, stops and verifies the
+exact Gateway and retires the native helper; if anything is unproven it stays open), replaces
+`/Applications/Tron.app` in Finder only after Quit succeeds, launches the new copy and waits for
+Running. Do not install a new iOS app before `scripts/tron mac verify` passes: it requires
+Stable's launchd PID to be the sole 9847 listener running the validated payload with matching
+authenticated `system.info`, the current runtime contract (including the pinned XcodeGen tree,
+signed or the pinned upstream digest), an incompatible older selection only if the launcher
+rejected it, a coherent Debug if present, and no loaded or on-disk legacy Debug, Preview or
+dev-takeover job. It probes each exact owner's listeners in order (LAN TLS may refuse) and
+executes only the host-native runtime. Then check a historical chat, a fresh worker, browser,
+Ask User, pairing, settings, trust, models and packages; a pass proves supervision, not data
+continuity.
 
 ### Resumable local reinstall preparation
 
-While the old wrapper and every writer remain stopped, run
-`scripts/tron mac reinstall --select-bundled-offline`.
-This explicit maintainer operation validates both recorded app identities and
-retires the complete `~/.tron/gateway/payloads/stable` directory by same-filesystem
-exclusive rename into `~/.tron-maintenance/<operation>/retired-stable-payloads`.
-The private `stable-selection.json` manifest and receipt prove recovery before
-or after the rename; re-run the same command after an interruption. Existing
-current/previous/pending-attempt state stays with its payloads, outside launcher
-discovery. No Gateway starts, and the next installed-app launch uses its signed
-bundle. Never resume the old app against migrated state. No individual pointer
-is edited or deleted, and recovery never auto-restores an older runtime.
-
-Selection must complete before `--confirm-offline`. The helper refuses a
-selection after snapshot creation, changed evidence, or a channel reappearing
-before activation. Following bundled selection, `--verify` requires the bundled
-runtime explicitly, rather than accepting a coherent older external runtime.
-The read-only standalone equivalent is `scripts/tron mac verify --require-bundled`.
-Keep retired payloads through the observation window and any version-specific
-rollback review. This command is not a replacement for native retirement or
-for the pre-migration protected backup.
-
-After preparing the signed Release artifact above, the user/maintainer can use,
-from the root of the same worktree:
-
 ```bash
 scripts/tron mac reinstall --app packages/mac-app/build/DerivedData-Release/Build/Products/Release/Tron.app
-# After Quit Tron succeeds in the old app and all other writers are stopped:
-scripts/tron mac reinstall --confirm-offline
-# After the user replaces the app in Finder, launches it and chooses Resume:
-scripts/tron mac reinstall --verify
+scripts/tron mac reinstall --select-bundled-offline  # optional: retire external Stable payloads
+scripts/tron mac reinstall --confirm-offline         # after Quit succeeded and writers stopped
+scripts/tron mac reinstall --verify                  # after Finder replacement, launch, Resume
 scripts/tron mac reinstall --finish
 ```
 
-The regular command requires an existing private `~/.tron/agent`. It does not
-inspect, migrate or delete an old agent home.
-Neither command replaces an app, changes LaunchAgents, starts/stops a Gateway,
-or approves macOS permissions. Repository agents may test them on isolated
-fixtures, but must not execute a live cutover or confirm the operator's offline
-attestation. A missing helper retirement control still requires the reviewed
-maintainer procedure above; an empty process list never substitutes for it.
+Maintainer-only on live state (agents test on fixtures). It never replaces apps, changes
+LaunchAgents, starts or stops Gateways or approves permissions. The first call validates both
+apps and teams and records the candidate's code and resource seals
+(`scripts/verify-mac-install.sh --artifact-only` plus the signed Pi smoke test). Offline means
+`com.tron.server` and `com.tron.mac.native-host` registered with `state = not running` and no
+PID, and no loaded Debug, Preview or takeover job (`service-loaded`). Private
+`~/.tron-maintenance/<operation-id>/` receipts hold revision, phase, identities, backups (agent
+home, every other `~/.tron` entry, the old app, machine-group file, browser config; never
+Keychain or browser profiles) and SHA-256 manifests with modes, ACLs, xattrs and link text; only
+`com.apple.provenance`/`quarantine` copy values may differ. `--select-bundled-offline` renames
+the whole `gateway/payloads/stable` into `retired-stable-payloads` and must finish before
+`--confirm-offline`; `--verify` then requires the bundled runtime (`scripts/tron mac verify
+--require-bundled`). One lock serializes the commands; reruns resume; `--restart` begins a
+fresh inventory (refused mid-step or after verify); `--abandon` archives a superseded operation;
+`--status` shows the checkpoint. Nothing is retried, reset or rolled back automatically;
+`--finish` removes only the active pointer. Rollback restores the protected backup only when no
+accepted new work would be lost.
 
-The offline checkpoint accepts the Release Gateway (`com.tron.server`) and native
-host (`com.tron.mac.native-host`) only as registered but stopped jobs: `launchctl
-print` must report a single top-level `state = not running` and no `pid`, which is
-what Quit leaves behind. A running Release job, or any loaded Debug, Preview or
-takeover job, refuses with `service-loaded`.
+`~/.tron-maintenance` is the single local recovery root. Register a separately verified
+pre-cutover set with `scripts/tron mac reinstall --recovery-relocate --operation-id <id>
+--source <root>` and check it with `--recovery-verify --operation-id <id>`; the rename is
+exclusive and resumable. Retention is manual: keep one coherent set until its successor passed
+restore and continuity checks. These are local checkpoints, not off-device backups.
 
-Container permissions and data privacy are distinct: `~/.tron` may retain `0755`
-when it is a real, user-owned directory with owner read/write/search access,
-no group/other write access and no ACL requiring review. The cutover applies the
-same container checks to `~/.pi`. Agent homes, receipts and backup directories
-remain owner-only. Neither command silently chmods an existing directory.
+## One-tap Mac app replacement
 
-The first invocation validates both apps and their signing teams, then records
-the exact candidate identity (code seal plus resource seal). Candidate validation
-uses `TRON_APP_PATH=<artifact> scripts/verify-mac-install.sh --artifact-only` and
-the signed Pi smoke test; it never consults an installed payload selection or
-contacts the live Gateway. The offline checkpoint refuses loaded services,
-listeners, observed writers and path/config overrides; custom setups need a
-reviewed owner decision rather than an inferred default.
-
-Private `~/.tron-maintenance/<operation-id>/` receipts record the source revision,
-phase, signed app identities, exact source-to-backup mapping, and SHA-256
-manifests. Backups include the agent home, every other top-level `~/.tron` entry,
-the old app, machine-group file and separately owned default browser config
-(including explicit absence). The command never reads Keychain stores or copies
-browser profiles/cookies. POSIX modes, ACLs, extended attributes, file contents
-and symbolic-link text are checked; special files and unsafe root links stop
-preparation. A copied tree may have different `com.apple.provenance` or
-`com.apple.quarantine` values: macOS assigns copying-process provenance and may
-rewrite a download quarantine marker even when `copyfile` reports successful
-metadata preservation. Both attributes must still be present on source and copy;
-the helper retains their observed source digests in the inventory but allows
-only their copied values to differ. ACLs, link modes, mode bits and every other
-xattr remain exact. Live-source comparisons remain exact, including both
-attributes.
-Exclusive Stable-channel retirement may also reassign provenance on the renamed
-root directory only; quarantine and every other root metadata value must match.
-The original source inventory is retained unchanged, and an interrupted rename
-resumes through the same selection command. Link modes are applied without
-following targets.
-Owner-only maintenance directories protect backup contents; do not
-upload them or raw manifests/settings. External state referenced by custom
-settings or browser overrides requires its own operator-managed backup.
-
-One stable cross-process lock serializes both commands. Repeated invocations
-resume the recorded operation; partial backups only accept already copied bytes
-that still match the frozen source inventory. If an operation cannot be resumed
-because its frozen source inventory is stale, use `scripts/tron mac reinstall
---restart` to begin a fresh inventory without editing maintenance state. Restart
-is refused for an incomplete step (for example, finish an interrupted bundled
-selection with `--select-bundled-offline` first), an unexpected installed app,
-or a verified operation (use `--finish` for the latter). A partial backup is
-reversible and may be restarted; its partial copy remains untouched as evidence
-in the predecessor. The predecessor's old-app backup remains the rollback
-authority after Finder replacement; the new operation records the currently
-installed candidate as its original app. A completed bundled selection remains
-linked directly to its original journal and retired payload evidence, including
-for recovery-archive verification. After restart, stop writers and run
-`--confirm-offline` to take the new snapshot. Source changes, corrupt
-receipts, metadata loss, insufficient space and collisions stop without deleting evidence.
-Before offering either Finder replacement or Resume, every offline retry verifies
-the backups and unchanged data again. An already-replaced app exempts only that
-installed app from comparison with the old-app manifest; its exact candidate
-signature identity is checked separately. It never exempts agent data, rollback
-evidence or the cutover's single-authority check. Failed checks do not advance
-the saved phase. After actual activation, `--verify` checks live supervision
-rather than requiring legitimately changing live data to match an offline snapshot.
-No retries, resets, implicit cleanup or automatic rollback hide a failed check.
-Use the same command with `--status` for its saved checkpoint. `--finish` is
-accepted only after successful installed verification and removes only the active
-operation pointer; all receipts and backups remain. No retention cleanup runs.
-
-`--abandon` archives a superseded active operation so that `--app <new>` can begin
-again, for example when the maintainer installed the candidate by other means and
-its artifact path is gone. It requires the installed app to be the operation's
-recorded original or candidate. It is refused for a verified operation (use
-`--finish`), and after an irreversible step (a recorded bundled-selection
-retirement, or a replacement recorded as `awaiting-resume`) unless the installed
-app is that operation's candidate. The artifact path is not consulted. It records
-the abandonment in the operation receipt and moves the active pointer to
-`abandoned-active.json`; receipts, backups and retired payloads stay in place. It
-stops no process and changes no app, LaunchAgent or Gateway. Run it alone, then
-start the replacement with `--app`. An interrupted abandonment is completed by
-rerunning `--abandon`.
-
-`--verify` runs `scripts/tron mac verify`, checks the exact replacement identity
-and rejects loaded agent-directory overrides. A failure leaves the checkpoint
-unfinished. Success verifies app/supervision/runtime identity, **not** complete
-data or capability continuity: also open a historical conversation, run a fresh
-delegated worker and its extensions, exercise browser operation and a live Ask
-User form, and check historical answers, pairing, settings, trust, models and
-packages. Do not repeatedly restart after failure. Preserve post-update writes
-and use the coherent manual rollback procedure: restore the protected backup only
-when no accepted new work would be lost.
-
-### Local recovery location and retention
-
-Use `~/.tron-maintenance` as the single local recovery storage root, outside
-live `~/.tron` so snapshots cannot recursively include their own backups. The
-reinstall helper owns `<operation-id>/receipt.json`, source manifests,
-`backups/` and any `retired-stable-payloads/`; archive registration owns
-`recovery.json` and `<operation-id>/pre-cutover/`. Do not move these independently,
-rewrite completed receipts, or use symlinks to conceal relocated stores.
-
-For a recorded pre-cutover checkpoint, prepare the app checkpoint first to obtain the
-operation ID. Before publishing migrations, the maintainer prepares the separately
-verified **pre-write** backup, isolated restore evidence and journals in a private
-`~/.tron-maintenance/pre-cutover-<operation-id>/` staging root, with the checkpoint
-under its `pre-migration/` directory. Keep it distinct from the helper's **post-write**
-`<operation-id>/backups/`. After the operation is verified and finished, register
-and move the staging root to `<operation-id>/pre-cutover/` without reopening
-`active.json` (an existing external recovery root can use the same command):
+`scripts/tron mac replace` (iPhone Settings → Connections → Quick Rebuild → **Replace Mac
+App**, or the Mac, #984) replaces the app and its bundled Gateway in one tracked operation.
 
 ```bash
-scripts/tron mac reinstall --recovery-relocate \
-  --operation-id <verified-operation-id> \
-  --source <owner-only-pre-cutover-root>
-scripts/tron mac reinstall --recovery-verify \
-  --operation-id <verified-operation-id>
+scripts/tron mac replace --plan              # quick, full or none, and why
+scripts/tron mac replace --start             # start, retry or resume
+scripts/tron mac replace --status --follow
 ```
 
-The archive command exclusively renames the complete root, refuses collisions,
-and resumes an interrupted rename without copying or merging. It verifies the
-stored closure digest and actual pre-migration backups, isolated restore fixture,
-post-migration backups and retired payloads against their original evidence.
-Pre-migration owner maps verify original UID/GID; the older post-migration
-manifests lack owner maps, so registration records current ownership for later
-integrity checks without claiming historical UID/GID proof. Original source
-manifest digests stay exact; copied data admits only the existing Darwin
-copy-provenance exception. It does not inspect live homes or stop writers. The
-historical `verify-publications.py` is not an operational verifier and must not be
-executed against current state. Register the checkpoint from its recorded
-same-filesystem staging location; do not relocate live staging or journals
-merely to satisfy the archival layout.
+- **Path and revision.** Fetched `origin/main`. Quick (the Gateway's source update) when the
+  payload lock, dependency manifest and protocol match and `packages/mac-app` is unchanged;
+  otherwise a full signed Release build and swap.
+- **Runner.** Its own launchd job (`com.tron.mac.replace.<id>`) on a private script copy:
+  preflight → build → verify signature → stop workers → stop Gateway → swap → start → verify →
+  finish. RPC goes to the listener the `com.tron.server` PID holds on 9847 with the
+  `local-auth.json` bearer; failures name `client-output`, the Gateway code,
+  `connection-lost`, `timeout` or each unreachable endpoint.
+- **Preflight** checks source, HEAD, disk, signing, registrations, protocol with the requesting
+  iPhone (`--allow-protocol-change`) and that no `mac reinstall` is active; it refuses wrappers
+  without `TronReplacementQuitVersion`, which need one manual reinstall first.
+- **Workers** stop through Home's task stop path and can be resumed in place; **Stop** is the
+  app's coordinated Quit through the replacement handoff.
+- **Swap** clones `~/.tron` (`state-snapshot`), moves the Stable payload channel and old app into
+  the operation directory and installs the verified build. A failure after the swap restores and
+  verifies the previous app and payloads; the snapshot is never restored over newer data.
+- **Verify** requires the running revision and protocol, the app's cdhash and `scripts/tron mac
+  verify --require-bundled`. Builds live in `~/.tron-maintenance/replace/builds/<revision>`
+  (current and previous kept); git and builds run with Homebrew's bin on `PATH` for git-lfs.
+- E2E: `python3 scripts/test-tron-mac-replace.py` (fixture app and job, never Stable;
+  `--rpc-only`, `--quit-only`, `--checkout-only` for single boundaries; artifacts under
+  `test-results/mac-replace-*.json`).
 
-Keep one accepted, coherent recovery set, including both checkpoints when an
-operation kept them, until its replacement has passed restore and continuity
-checks. Retention is explicit and manual, never age-based automatic deletion.
-Review older sets for unique history or unmerged source before removing them.
-Historical source archives and concise incident evidence may live in the same
-root's `archives/`, clearly separate from verified operation components.
-Retire released build/test output before preparing a snapshot rather than
-silently excluding unknown workspace files from the backup inventory.
-
-Keep a concise recovery index identifying each retained checkpoint, original
-revision, verification evidence and recovery constraints. Completed archive
-registration records the historical source path as evidence but verifies only the
-centralized relative destination; it never requires a compatibility symlink or a
-live checkout. Do not make another full copy merely to reorganize folders.
-These are local recovery checkpoints, not scheduled ongoing backups and not
-protection against disk loss. Off-device backup requires a separately configured
-protected destination. Restoration and any app/Gateway transition remain
-maintainer actions.
-
-### One-tap Mac app replacement
-
-`scripts/tron mac replace` (started from iPhone Settings → Connections → Quick Rebuild →
-**Replace Mac App**, or from a Mac terminal) replaces the installed app and its bundled Gateway in
-one tracked operation (#984). It is the supported path for changes a source rebuild cannot apply.
+## Debug Gateway
 
 ```bash
-scripts/tron mac replace --plan              # quick or full, and why
-scripts/tron mac replace --start             # start, retry a failure, or resume an interrupted run
-scripts/tron mac replace --status --follow   # stream the journal until it settles
-```
-
-- **Path.** Quick (the Gateway's own source update) when the active payload's
-  `package-lock.json`, dependency manifest and protocol match the checkout and
-  `packages/mac-app` is unchanged since the installed build; otherwise a full signed Release
-  build and app swap. `none` when the checkout already runs.
-- **Revision.** Fetched `origin/main`, with no check receipt or last-passed-main
-  dependency. A checkout at another revision (or with tracked edits) uses the
-  existing detached full-build path instead of compiling different bytes through
-  Quick Rebuild. The separate source Rebuild Gateway action remains explicitly
-  checkout-owned; it no longer consults check history.
-- **Runner.** A launchd job of its own (`com.tron.mac.replace.<id>`) running a private copy of
-  the scripts, so it survives the Gateway and app it replaces. Steps: preflight → build →
-  verify signature → stop running workers → stop Gateway → swap app → start → verify → finish
-  (quick: preflight → stop workers → rebuild → verify → finish).
-- **Gateway RPC** goes to the listener the `com.tron.server` launchd PID actually holds on 9847
-  (Stable binds its Tailscale address and a TLS-only LAN listener, never loopback), with the
-  `local-auth.json` bearer and the installed app's protocol, because the old Gateway must answer
-  until cutover. The child drains its stdout before exiting, including large task-history replies.
-  Gateway error frames retain their code/message; a socket close names its WebSocket code/reason;
-  a deadline reports timeout. Invalid or missing child output is `client-output`, with exit code
-  and stdout byte count, not an unreachable Gateway. An unreachable error names each endpoint
-  tried and why it failed.
-- **Preflight** checks source cleanliness and HEAD, disk space, signing identity, Gateway and
-  native-helper registration, protocol compatibility with the requesting iPhone
-  (`--allow-protocol-change` overrides from the Mac), and that no manual `mac reinstall`
-  operation is active. Nothing changes before it passes.
-- **Workers** are stopped through Home's task stop path (sessions, worktrees, branches and claims
-  kept) and listed in the journal; iPhone offers Resume in place for each. Terminal task history
-  is not running work: when no workers are active, this step succeeds without any stop request.
-- **Stop** uses the app's coordinated Quit (an AppKit terminate request), with a
-  private exact-wrapper request/result handoff for replacement intent. It drains accepted
-  work and retires the native helper. Phase progress reaches the journal/iPhone;
-  a refusal fails the step immediately without an interactive **Keep Tron Open** modal.
-  Repeated/in-flight requests join their nonce, failed attempts start a new one,
-  and interrupted requests retain exact app/Gateway process fences until offline. A completed shutdown whose exact process
-  outlives the five-second exit grace is recovered by booting out only its
-  identity-checked Gateway job, preventing relaunch. The job's explicit
-  `ExitTimeOut=20` preserves its normal 15s SIGTERM cleanup budget. Recovery reads
-  the **effective loaded launchd timeout** plus 5s observation margin, not an
-  assumed system default or another five-second deadline. Unknown/infinite or
-  unsupported (>120s) policy fails before removal. The bounded launchctl client
-  never signals the service or replays an uncertain operation. Job absence alone
-  never proves the captured PID exited. Missing completion evidence never permits
-  termination; neither Login Item is globally disabled.
-- **Swap** takes an APFS clone of `~/.tron` (`state-snapshot`, the data rollback point), moves the
-  external Stable payload channel and the old app into the operation directory, journaling each
-  move first, then installs the verified build.
-- **Failure** stops at its step with the exact message and step log. After the swap the previous
-  app and payload channel are restored and verified automatically; the `~/.tron` snapshot is
-  kept, never restored over newer data. A failed copy removes its owned partial
-  staging app. A retry reuses the verified build; a completed prior stop may resume
-  offline without demanding a live Gateway or replaying worker stops. A runner that died
-  mid-run is resumed by `--start`, restoring the previous app first if it had swapped.
-- **Verify** requires the running Gateway's revision and protocol, the installed app's cdhash,
-  and `scripts/tron mac verify --require-bundled`; the Gateway then pushes the result.
-
-**Adoption of #1307:** an old installed wrapper cannot execute the fixed Mac-side
-Quit code or understand replacement intent. The runner refuses such a wrapper
-(`TronReplacementQuitVersion` missing) during preflight, before worker stops/build/swap.
-The maintainer must use the **Reinstall a local Release build** runbook once to
-prepare and manually install a fixed Release app after retiring the old app.
-A source-only Gateway rebuild does not activate this fix. Agents may prepare the
-artifact but never perform that production transition. Subsequent replacements
-use the noninteractive protocol; no compatibility fallback opens the old modal.
-
-Builds live in detached worktrees under `~/.tron-maintenance/replace/builds/<revision>` (the
-current and one previous are kept). Every git call (plan, preflight status, checkout) and
-the build run with Homebrew's bin on PATH, since the repository requires the git-lfs filter;
-a failed git or build command reports the whole command and the tail of its output in the
-step error. E2E: `python3 scripts/test-tron-mac-replace.py` drives the
-real runner under launchd against a fixture app and Gateway job (never Stable) and writes
-`test-results/mac-replace-e2e.json`. It builds the current-source Gateway directly
-before starting the fixture; missing or stale worktree `dist` is never an implicit
-prerequisite. It has no shared admission or gate. For the RPC boundary alone, run
-`python3 scripts/test-tron-mac-replace.py --rpc-only`: a real child process and protocol-8
-WebSocket responder exercise large terminal-task history, nothing-to-stop, Gateway errors,
-socket closure and timeout without building or touching an app or launchd. Its repeatable
-artifact is `test-results/mac-replace-rpc-e2e.json`. `--quit-only` compiles a
-standalone isolated AppKit fixture using the production termination/handoff owners;
-the real replacement platform requests Quit, observes refusal with no ordinary
-modal, retries, joins an in-flight request and verifies actual app exit/receipt
-cleanup. Artifact: `test-results/mac-replace-quit-e2e.json`. This and the runner's
-Gateway/swap/rollback fixture are separate boundary journeys, not an installed
-Stable replacement. `--checkout-only` runs the real `git worktree add` of an
-LFS-required fixture repository from the runner's launchd environment and a failing
-checkout's reported git stderr (`test-results/mac-replace-checkout-e2e.json`). The full
-command runs all four.
-
-### Gateway payload operations
-
-The installed wrapper owns Stable only. Developer tooling owns Debug. `status` and
-`preflight` are read-only; the user or maintainer must initiate every listed mutating
-lifecycle or handoff command. Repository agents report the needed command but do not
-execute it:
-
-```bash
-scripts/tron dev start       # build, immutable-stage, offline provider activation, start 9848
-scripts/tron dev restart     # stage and authentically drain/restart
+scripts/tron dev start       # build, stage, offline provider activation, start on 9848
+scripts/tron dev restart     # stage and drain-restart
 scripts/tron dev status
 scripts/tron dev stop
-scripts/tron dev handoff     # exact tested Debug artifact -> inactive Stable candidate
+scripts/tron dev handoff     # maintainer only: tested Debug artifact → inactive Stable candidate
 ```
 
-Debug start/restart build the explicitly selected worktree source directly,
-without a main-check receipt. Status, stop and handoff do not reselect source.
-
-The bundler's `stage-gateway-app.sh` step copies the Tron-owned `pi-subagents`
-pin, both selections' source archives/locks/closures, and the activation installer
-and checker into the existing fingerprinted `app` tree. It checks those staged
-inputs before dependency installation; the payload verifier independently uses
-the trusted source checker against that app root, rejecting missing or invalid
-current/retained provider inputs. This step never installs into a Gateway home.
-The owning regression is `managed-subagents.payload.integration.test.ts` (build the Gateway
-first): it runs this real staging step, imports its compiled startup boundary
-with TCP denied, and verifies activation plus retained-closure refusal.
-
-Startup installs it offline into the home-owned versioned reserved root before
-extension discovery, or verifies and reuses an existing exact install; damaged
-bytes/receipts refuse startup. Debug uses `~/.tron-dev/internal/pi-subagents/`.
-Stable receives this build only when the maintainer updates/promotes its reviewed
-payload (or performs the Release reinstall runbook above). No user npm manifest
-or Stable package tree is modified by Debug staging. The
-[Gateway install contract](../../gateway/README.md#tron-owned-pi-subagents-build)
-owns provider activation and rollback.
-
-Fresh starts default to loopback; pass `--tailscale` when iOS must connect.
-Status, restart, handoff, and stop without a host flag inherit a live
-supervisor's recorded host. A conflicting explicit flag is rejected; stop the
-supervisor before changing exposure. `scripts/tron dev` resolves the pinned
-repository Node once and uses its absolute Node and sibling npm for every
-helper, build, and deployment command. Node-only payload aliases are skipped
-rather than shadowing a complete pinned NVM or Homebrew toolchain; it fails
-before touching `~/.tron-dev` when no complete pair is available. Mutating commands use a short-lived atomic
-command lock, released before the supervisor continues running, so concurrent
-start/restart/stop/handoff commands fail closed. If the supervisor is stale but
-the exact recorded child PID/start identity is still live, start first terminates
-that owned orphan through `stopping` → `stopped`; a listener without that exact
-identity remains foreign and is never killed.
-
-The handoff proves the selected Debug fingerprint/revision/epoch before and
-after copying, and compares the Node version plus the complete `runtime/` subtree
-byte-for-byte with installed Stable. Debug staging validates the installed app's
-bundled Gateway and uses its signed runtime only when its Node version matches
-the candidate. The same validated installed snapshot supplies every Mach-O file
-under candidate `app/node_modules`, detected by binary contents rather than an
-addon list. This includes both architectures' addons and spawned executables
-such as `spawn-helper` and `esbuild`. Each file's owning package must match the
-installed lockfile's exact version and integrity (including scoped and nested
-packages); missing identities, missing or substituted native files, and native
-aliases outside the npm tree refuse staging with `rebuild and install a signed
-app`. Non-native candidate files remain worktree-owned. Staging neither re-signs
-addons nor changes Node entitlements: signed Node's library validation remains
-in force. The assembled fingerprint covers these installed bytes and must pass
-normal payload validation before immutable publication. Without a matching
-installed Node version, staging keeps the official runtime and worktree native
-files, so changed runtime bytes or version refuse handoff and require a manual
-signed `Tron.app` update. The handoff never changes Stable `current.json`
-or restarts 9847. The confirmed iOS
-**Promote Debug Gateway to Stable** action pins both candidate version and
-fingerprint and invokes the existing asynchronous Stable deployment core.
-
-The command serializes selection publication per channel, verifies complete
-payload fingerprints, calls authenticated drain-aware `gateway.restart`, waits
-without a startup deadline for the exact local pre-restart listener process to
-exit or be replaced, and only then starts bounded exact-candidate health checks.
-Health absence alone is never accepted as a drain transition. Local listener ownership
-uses bounded `lsof` terse PID output plus a separate process-start identity probe; field
-mode is intentionally excluded because macOS always emits an extra file-descriptor record.
-Normal promotion never kickstarts from listener absence: launchd owns candidate relaunch,
-and a live startup process may not have bound its listener yet. On failure the helper
-restores and revalidates the prior selection, accepts an already-running exact restored
-payload, or uses one fixed recovery kickstart only after the candidate deadline and only
-for an absent/exact captured failed listener; unknown listeners fail closed.
-Recovery never issues RPC to the failed Gateway. The Mac menu Restart seam uses
-authenticated `gateway.restart` instead of `launchctl kickstart`. Never automate
-copying into `/Applications`, release deployment, or launchd registration.
-
-## Efficient focused tests
-
-Stage generated gateway payloads only when a build/archive needs them:
-
-```bash
-packages/mac-app/scripts/bundle-gateway.sh
-scripts/tron mac generate
-```
-
-The TronMac build and test commands follow below.
-CI only compiles the Mac app and test sources, unsigned. Run the app-hosted
-`TronMacIntegrationTests` locally, because they need the team's signing certificate.
-
-The Release app packages only `Tron Agent.app` under the stable
-`com.tron.server` label. Developer tooling reuses that installed signed launcher
-with the isolated Debug payload and never registers a second Login Item.
-
-Gateway payload deployment has two real-boundary checks, run with the pinned Node (`scripts/tron-node exec`):
-`node --test --test-concurrency=2 scripts/gateway-payload-deploy.test.mjs` (a dev
-candidate staged through the real `tron-dev-state.mjs` and `gateway-payload-deploy.mjs`
-CLIs in a git checkout, and a bounded process-tree kill).
-`node --test scripts/gateway-install-inputs.test.mjs` runs real `npm ci` against a
-temp Gateway whose `node_modules` drifted from its lock. That is the repair Rebuild from
-Source performs (#1010).
-
-```bash
-../../scripts/tron-xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath build/DerivedData
-
-xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath build/DerivedData \
-  -only-testing:TronMacIntegrationTests/SingleInstanceLockTests \
-  -only-testing:TronMacIntegrationTests/GatewayLauncherArgvTests
-```
-
-`TronMacIntegrationTests` holds only real-boundary tests: spawned processes and
-pipes (`SubprocessTests`, `CodeSignatureProbeTests`, `CuaProcessOwnerTests`,
-`MenuBarTerminationTests`), a loopback WebSocket (`MenuBarLogReaderTransportTests`),
-the built Gateway launcher and immutable filesystem selection
-(`GatewayLauncherArgvTests`), private onboarding-marker publication
-(`SubprocessTests`), and the production native-helper retirement owner in a launchd-demand-launched Mach service probe
-answering a signature-pinning client (`NativeHostRetirementTests`). The filesystem
-journeys use actual immutable payload trees, selection pointers and file modes;
-they reject changed fingerprints, symlink pointers and non-directory marker parents.
-Helper-only tests confined to mocked calls or in-memory values are not kept;
-cover a change with its real-boundary test or the fixture scripts above.
-
-`MacQuitGatewayTests` executes the built Quit coordinator against the signed bundled
-Gateway in a uniquely named disposable launchd job, using the production
-`KeepAlive.SuccessfulExit=false` and `ExitTimeOut` from the shipped plist. It proves
-normal exit 0, a real held model request longer than the 20s launchd termination
-budget, cancellation of a Quit caller without abandoning its accepted operation,
-and automatic recovery of signal-insensitive completed Node exit
-without relaunch, exactly one flushed `app.quit.gateway-exit` JSONL outcome
-(`clean`, `recovered` or `blocked`, with command ID, PID and elapsed milliseconds),
-missing/stale completion receipts, receipt publication failure,
-explicit Retry after uncertainty, and a restart-75 supervisor
-control. The delayed-retirement RED uses a real 20s launchd termination window;
-the old five-second post-bootout deadline fails with the captured process still
-alive. GREEN waits for actual disappearance, not a longer sleep. This deterministic
-exit hold reproduces recovery timing, not #1120's native threadpool-join deadlock;
-that is removed at the Gateway's exit and reproduced by `exit-after-shutdown.e2e.test.ts`.
-Each fixture has isolated HOME/TMPDIR/agent/Gateway stores, bootouts only
-its own job, and removes its files. No installed service or app is addressed.
-Run after the signed build above (test execution HOME/TMPDIR must be scratch
-directories outside live stores):
-
-```bash
-xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath build/DerivedData \
-  -only-testing:TronMacIntegrationTests/MacQuitGatewayTests \
-  -resultBundlePath build/MacQuitGateway.xcresult
-```
-
-The signed build uses the existing Xcode user/signing context; do not carry a
-test's isolated HOME into that build, disable signing, or substitute ad-hoc
-signing for hosted test acceptance. Keep test execution isolated. The result
-bundle is behavioral evidence, not deployment or physical-device validation.
-
-`WizardProgressFilesystemTests` drives the real `WizardState`, `AtomicFileWriter`
-and sole `TronLog` JSONL writer. An actual parent-file obstruction blocks publication
-while preserving the prior tree/bytes and visible navigation. Removing it permits the
-next explicit navigation to publish; initializer failures, unsafe-step clamping,
-owner-only file modes and unknown-version preservation are also covered. The scheme's
-`TRON_DATA_DIR` isolates the singleton before host startup, and the tests require that
-isolation before any write. Execute with scratch `HOME`/`TMPDIR` as above and select
-`-only-testing:TronMacIntegrationTests/WizardProgressFilesystemTests`, retaining an
-explicit `-resultBundlePath`. `wizard.progress-write` is the publication signal;
-`wizard.step` alone reports only in-memory navigation. No UI error chrome or retry is added.
-
-`TronLogFilesystemTests` publishes real private JSONL through the production writer,
-then decodes the file after its explicit flush. ASCII and two-/three-/four-byte scalar
-cuts must retain leading context inside the existing byte cap; short/exact-cap text,
-credential redaction and the additional field limit remain unchanged. Select
-`-only-testing:TronMacIntegrationTests/TronLogFilesystemTests` with the same signed
-build/isolated execution commands. This is file/publication proof, not an OSLog,
-rotation-stress or live incident validation.
-
-`SingleInstanceLockTests` launches the test-only `SingleInstanceLockProbe` in
-separate processes. The owner and contender communicate through bounded pipe
-markers, proving exclusion while the first process holds a disposable lock and
-successful acquisition after release; it does not use sleeps or application
-lifecycle state.
-
-After an edit, rerun the incremental `build-for-testing`, then keep using
-`test-without-building`. This separates compilation from execution and avoids
-repeatedly paying for unrelated suites. `TronMacIntegrationTests` is hosted by the app and
-must inherit the app's signing team; forcing the bundle to an ad-hoc identity
-causes macOS to reject it before tests bootstrap.
-
-CI holds no signing certificate, so its Mac job builds the same
-`build-for-testing` products with `CODE_SIGNING_ALLOWED=NO`. That catches compile
-and link breaks in the app, its helpers and `TronMacIntegrationTests`, but runs nothing. On
-a Mac that has the team's Mac Development certificate, run the hosted tests
-above. Then run `packages/mac-app/scripts/test-signed-pi-payload-smoke.sh` on
-the built `TronMac.app`.
-
-## Pairing checks
-
-Pairing requires:
-
-- a healthy authenticated gateway on the selected port;
-- an owner-only, unexpired `gateway/enrollment.json`;
-- a detected Tailscale address;
-- a code whose trimmed length is 8–32 characters.
-
-The wrapper's local credential path is `gateway/local-auth.json`; never put the
-local token in the URL. Provider credentials remain in the Pi runtime store.
+Debug builds the selected worktree directly, runs the installed signed launcher with the `dev`
+selection and keeps `~/.tron-dev` (provider install in `~/.tron-dev/internal/pi-subagents/`,
+[Gateway install contract](../../gateway/README.md#tron-owned-pi-subagents-build)). It is
+loopback unless `--tailscale`; later commands inherit the recorded host and reject a conflict.
+A short atomic command lock fails concurrent commands closed; an orphan child with the exact
+recorded identity is stopped, a foreign listener never. Staging takes every Mach-O file under
+`app/node_modules` from the installed app's validated bundle, matched by package version and
+integrity, and its signed runtime when the Node version matches; otherwise handoff refuses with
+"rebuild and install a signed app". Handoff compares Node and `runtime/` byte for byte with
+Stable and never changes Stable's selection or restarts it.
 
 ## Release
 
-Mac release is manual. The Xcode build preflight stages the Gateway, then the
-maintainer archives with the Developer ID identity. `package-dmg.sh` verifies
-the deep strict app/helper signatures, authoritative complete payload
-fingerprint, exact Node architectures and allow-jit entitlements, runtime
-execution, production dependency tree, and Login Item both before imaging and
-from the read-only mounted DMG. Notarize and staple the app and DMG, then publish the
-release assets deliberately. `packages/mac-app/scripts/package-dmg.sh`
-owns DMG layout verification and requires `create-dmg` on `PATH`. Never add an
-automated production release or deployment command.
-
-### Session embedding helper qualification
-
-The Release app bundles `Resources/TronSearchEmbeddingHelper`, a separately
-signed NaturalLanguage process. Before enabling semantic readiness, run the
-built helper with bounded synthetic JSONL frames and record its model language,
-dimension, timeout/crash behavior, and zero-overlap paraphrase cosine result.
-Bundled Gateway launches derive the helper beside the packaged runtime; the
-`TRON_SEARCH_EMBEDDING_HELPER` override is development-only and requires
-`NODE_ENV=development`. An absent or unqualified helper leaves semantic
-coverage explicitly unavailable and does not disable lexical search. Do not use
-private or live transcript text for qualification.
+Manual. Archive with the Developer ID identity; `packages/mac-app/scripts/package-dmg.sh`
+(needs `create-dmg`) verifies deep strict signatures, the payload fingerprint, both Node
+architectures and JIT entitlements, runtime execution (host-native only; the foreign runtime
+is checked statically), the production tree, the Login Item and
+`scripts/validate-native-host.py`, before imaging and from the mounted DMG. Notarize and staple
+the app and DMG and publish deliberately. Never add an automated release or deployment.

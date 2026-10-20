@@ -179,7 +179,7 @@ The pinned `pi-agent-browser-native` package keeps its global configuration at i
 - [Gateway architecture and protocol](packages/gateway/README.md)
 - [iOS architecture](packages/ios-app/docs/architecture.md)
 - [iOS development](packages/ios-app/docs/development.md)
-- [Mac architecture](packages/mac-app/docs/architecture.md)
+- [Mac architecture](packages/mac-app/README.md)
 - [Mac development and packaging](packages/mac-app/docs/development.md)
 - [Repository development: toolchain, Debug Gateway, releases](docs/development.md)
 - [Charter: rules for every change](AGENTS.md)

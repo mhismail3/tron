@@ -1,6 +1,7 @@
 {
   "layer": "L5",
   "owns": [
+    "README.md",
     "bundle-gateway.sh",
     "ensure-gateway-bundle.sh",
     "gateway-payload.module.json",
