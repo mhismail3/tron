@@ -1,57 +1,46 @@
 # Settings contract
 
-How every model and harness setting is declared, stored, resolved, changed and
-shown. Owner: the Gateway [`admin` module](../src/admin/README.md); iOS, Home,
-providers and the push relay consume it. Edge cases follow from a
-[foundation](#foundations), never a new rule.
+How every model and harness setting is declared, stored, resolved, changed and shown. Owner:
+the Gateway [`admin` module](../src/admin/README.md); iOS, Home, providers and the push relay
+consume it. Edge cases follow from a [foundation](#foundations), never a new rule.
 
 ## Foundations
 
-- **F1 Schema.** Each setting is one key, declared once on the Gateway
-  (`src/admin/settings-schema.ts`): type and validation, group, allowed layers,
-  timing, effect point, tier floor, writers, redaction and display. iOS renders
-  every key generically, so a new model, feature or key needs no iOS release.
-  "Mac only" or "a chat may override it" are allowed layers, never rules.
-- **F2 Truth.** Each layer's store is the truth. The change record is audit and
-  undo, never consulted to compute a value. A store that differs from the value
-  last observed is an [outside change](#outside-changes), offered **Apply
-  again**; Tron never re-applies a value on its own.
-- **F3 Policy.** Every change goes through one Gateway path and gets one tier:
-  `tier = max(floor + web, assessment)`, capped at approve. No per-key
-  exceptions: "trust, credentials and budget raises need a tap" is those keys'
-  default floor ([tiers](#tiers)).
-- **F4 Layers.** Precedence, top wins: **Chat > Home profile > Project > Mac >
-  Built-in**, among the layers the target has and the key allows. One resolver
-  takes the topmost layer that the target has, holds a value, is allowed by the
-  key, and is applied. The effective value is computed, never stored.
+- **F1 Schema.** Each setting is one key declared once (`src/admin/settings-schema.ts`): type
+  and validation, group, allowed layers, timing, effect point, tier floor, writers, redaction
+  and display. iOS renders keys generically, so a new key needs no iOS release. "Mac only" or
+  "a chat may override it" are allowed layers, never rules.
+- **F2 Truth.** Each layer's store is the truth; the change record is audit and undo, never
+  consulted for a value. A store that differs from the last observed value is an
+  [outside change](#outside-changes), offered **Apply again**; Tron never re-applies on its own.
+- **F3 Policy.** Every change takes one Gateway path and one tier:
+  `tier = max(floor + web, assessment)`, capped at approve; no per-key exceptions
+  ([tiers](#tiers)).
+- **F4 Layers.** Top wins: **Chat > Home profile > Project > Mac > Built-in**, among the
+  layers the target has and the key allows. One resolver takes the topmost applied layer with
+  a value; the effective value is computed, never stored.
 
 ## Layers
 
 | Layer | Store | Owner |
 |---|---|---|
-| Chat | The session JSONL: SDK `model_change`/`thinking_level_change`, `tron.context-window.v1`, the active tools, and `tron.settings.v1` (other Chat keys and fixed-value provenance) | The session's runtime slot lane |
-| Profile | `<tronHome>/gateway/home/profile.json`, typed, capped at 256 KiB; undeclared fields never resolve and are preserved | The settings change path (locked JSON write) |
+| Chat | Session JSONL: SDK `model_change`/`thinking_level_change`, `tron.context-window.v1`, active tools, `tron.settings.v1` (other Chat keys and fixed-value provenance) | The session's runtime slot lane |
+| Profile | `<tronHome>/gateway/home/profile.json` (typed, ≤ 256 KiB; undeclared fields preserved, never resolved) | The settings change path |
 | Project | `.pi/settings.json`, `.pi/mcp.json` at the chat's worktree root | The repository; Tron writes and stages, never commits |
-| Mac | `<tronHome>/agent/settings.json`, `models.json`, `mcp.json`, `trust.json`; Gateway stores under `<tronHome>/gateway/settings/` (`floors.json`, `gateway.json`) and `notifications.json` | The Gateway; pi CLI runs and hand edits are outside writers |
+| Mac | `<tronHome>/agent/settings.json`, `models.json`, `mcp.json`, `trust.json`; `<tronHome>/gateway/settings/` (`floors.json`, `gateway.json`) and `notifications.json` | The Gateway; pi CLI runs and hand edits are outside writers |
 | Built-in | pi defaults and the schema's `builtin` values | The release |
 
-**A target has a layer when it has its store.** An ordinary chat (a Home task
-worker too) has Chat, Project, Mac, Built-in; Home's chat has Chat, Profile, Mac,
-Built-in (no project). Workers get profile-derived values only as Chat values
-Home writes at delegation. A key appears where one of its layers exists.
-
-**Project root and trust.** The Project store is `.pi/` at the worktree root
-(`TrustInspection.projectDir`, passed to pi as `projectDir`;
-[Gateway README](../README.md#project-root)). Trust is the Mac key
-`permissions.projectTrust[project]`, so a repository never grants itself trust.
-An untrusted `.pi/` is read as JSON, **present but not applied** (`reason:
-"untrusted"`), never written; an unparseable one is `projectUnreadable`.
-
-**Instances.** A fixed qualifier is part of the id; a dynamic `model` qualifier
-resolves for the effective model, combining per-model and plain values within a
-scope before scope precedence. `defaultTools` `+name`/`-name` lists and
-thinking-budget maps compose over the layer below. An unsupported value is
-clamped to the closest supported one (**Clamped** badge).
+A target has a layer when it has its store: an ordinary chat (a Home task worker too) has
+Chat, Project, Mac, Built-in; Home's chat has Chat, Profile, Mac, Built-in. Workers get
+profile-derived values only as Chat values Home writes at delegation. The Project store is
+`.pi/` at the worktree root (`TrustInspection.projectDir`, pi's `projectDir`;
+[project root](../src/machine/README.md#project-root)). Trust is the Mac key
+`permissions.projectTrust[project]`, so a repository never trusts itself; an untrusted `.pi/`
+is read but not applied (`reason: "untrusted"`) and never written; an unparseable one is
+`projectUnreadable`. A fixed qualifier is part of the id; a dynamic `model` qualifier resolves
+for the effective model, per-model before plain within a scope. `defaultTools` `+name`/`-name`
+lists and thinking-budget maps compose over the layer below; unsupported values clamp
+(**Clamped** badge).
 
 ## Keys
 
@@ -118,180 +107,120 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 | `accounts.models.provider` | accounts | provider | notify |
 <!-- /tron docs -->
 
-Other schema fields: `subgroup`, `type`, `options` or an `optionsSource`
-(`catalog.models`, `catalog.thinkingLevels(model)`, `catalog.tools`, ...),
-`builtin`, `direction`, `writers` (`ui`, `home`, `worker`, `agent`: the list is
-the grant), `redacted`, `applier`, and display fields (`label`, `help`, `order`,
-`importance`, `control`/`fallback`, `unit`/`format`, `confirm`, `entry`). MCP and
-Accounts keep their own RPCs; record subjects are compared by digest only.
+Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
+`catalog.thinkingLevels(model)`, `catalog.tools`, ...), `builtin`, `direction`, `writers`
+(`ui`, `home`, `worker`, `agent`: the list is the grant), `redacted`, `applier`, and display
+fields (`label`, `help`, `order`, `importance`, `control`/`fallback`, `unit`/`format`,
+`confirm`, `entry`). MCP and Accounts keep their own RPCs; record subjects compare by digest.
 
 ## Timing
 
-Timing may differ by direction; the effect point (`next-turn`, `next-request`,
-`new-chat`, `reload`, `restart`, ...) is shown when a change is not immediate.
+The effect point (`next-turn`, `next-request`, `new-chat`, `reload`, `restart`, ...) is shown
+when a change is not immediate; timing may differ by direction.
 
-- **Fixed** keys (model, thinking, context window, tools, resources, image
-  resizing) are captured at chat start as Chat-layer values with provenance
-  `{ value, from, at, ref }`. Origins: `launch` (canonical snapshot), `override`
-  (explicit choice), `legacy-session` (no attributable provenance), `inherited`.
-  History is never mined to invent provenance. **Use the current default**
-  resolves the lower layers once and writes that value through the change path.
-- **Live** keys are read at their effect point. Chat-bound Run keys resolve
-  before each prompt and provider request onto the session's `SettingsManager`
-  (Home included) and, for optional provider timeouts, at
+- **Fixed** keys (model, thinking, context window, tools, resources, image resizing) are
+  captured at chat start as Chat values with provenance `{ value, from, at, ref }` (`launch`,
+  `override`, `legacy-session`, `inherited`; history is never mined). **Use the current
+  default** writes the lower layers' value through the change path.
+- **Live** keys are read at their effect point; Chat-bound Run keys resolve before each prompt
+  and request onto the session's `SettingsManager` (Home too) and, for provider timeouts, at
   `ModelRuntime.streamSimple`. **Follow the default** unsets a Chat value.
-- **Per direction**, e.g. `context.images.block`: narrowing applies from the next
-  request, widening waits for a new chat unless approved or tapped. Directional
-  values keep `requestPins` in `tron.settings.v1`; an approved Mac/Project
-  widening releases inherited pins in open chats at that scope, never an explicit
-  Chat value or a Project-shadowed pin.
-- Fork, cold resume and Home rollover carry `tron.settings.v1`, never the
-  record. Changing a model or thinking never persists a default.
+- **Per direction** (`context.images.block`): narrowing applies next request; widening waits
+  for a new chat unless approved or tapped. `requestPins` in `tron.settings.v1` hold directional
+  values; an approved Mac/Project widening releases inherited pins, never explicit Chat values.
+- Fork, cold resume and Home rollover carry `tron.settings.v1`, never the record. Changing a
+  model or thinking never persists a default.
 
 ## Change path
 
-`settings.change { commandId, target, changes[], reason, dryRun? }`; each change
-is `{ key, qualifiers, layer, op: set | unset, value, expected }`. `reason` is
-required for every non-UI actor; `expected` refuses stale writes; a Chat-layer
-change carries `fence: { runtimeGeneration, model?, revision? }`. Actors: the
-maintainer's tap (`ui`); Home, workers and agents through the `settings` tool
-(Home may name a `taskId`); `outside` (observed, never admitted).
+`settings.change { commandId, target, changes[], reason, dryRun? }`; a change is `{ key, qualifiers, layer, op: set | unset, value, expected }`. `reason` is required for non-UI actors;
+`expected` refuses stale writes; Chat changes carry `fence: { runtimeGeneration, model?, revision? }`. Actors: `ui` (the maintainer's tap); Home, workers and agents via the `settings`
+tool (Home may name a `taskId`); `outside` (observed only).
 
-1. Validate type, options, allowed layer and writer.
-2. Compute the tier; an `approve` request from a non-UI actor is held pending.
-3. Apply through the key's applier under its store lock; atomic within a store,
-   ordered with rollback across stores. A request's changes share one target;
-   requests serialize per target.
+1. Validate type, options, layer and writer. 2. Compute the tier; a non-UI `approve` is held
+pending. 3. Apply through the key's applier under its store lock (atomic within a store,
+ordered with rollback across stores; one target per request, serialized per target).
 4. Append to the record and broadcast `settings.changed`.
 
-Each outcome names key, layer, status, tier and `before`/`after` (redacted:
-`redacted: true` only). A chat's own Chat layer changes only while it is idle;
-`setup.sessionDir` has no writer; Home Chat compaction values are refused.
-
-**Record.** `<tronHome>/gateway/settings/changes/`: append-only segments of 500
-entries named in `index.json`, kept forever, read in pages by
-`settings.history` (a page may be empty and still carry `nextCursor`). Entries
-hold actor, target, key, `before`/`after` (never credentials), reason, tier
-basis, status (`applied`, `pending`, `approved`, `declined`, `expired`,
-`superseded`, `failed`, `outside`), git result and `undoOf`/`applyAgainOf`;
-later facts are new entries referencing `changeId`.
-
-**Undo and Apply again** are ordinary changes. `settings.undo` writes `before`
-back and is refused with `conflict` (current and applied values) when the store
-moved; undoing a narrowing widens. Redacted entries are **Not undoable**.
-`settings.applyAgain` restores Tron's value after an outside change, expecting
-the outside value.
+Outcomes name key, layer, status, tier and redacted `before`/`after`. A chat's own Chat layer
+changes only while idle; `setup.sessionDir` has no writer; Home Chat compaction values are
+refused. **Record:** `<tronHome>/gateway/settings/changes/`, append-only 500-entry segments
+listed in `index.json`, kept forever, paged by `settings.history` (a page may be empty with a
+`nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials), reason,
+tier basis, status (`applied`, `pending`, `approved`, `declined`, `expired`, `superseded`,
+`failed`, `outside`), git result and `undoOf`/`applyAgainOf`. **Undo** (`settings.undo`) writes
+`before` back, refused with `conflict` when the store moved; redacted entries are **Not
+undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over an outside one.
 
 ## Tiers
 
-- **quiet** applies and records; **notify** also pushes with Undo; **approve**
-  waits for the maintainer's tap and expires after 24 hours.
-- **Floor**: per key and direction, overridable through `permissions.floor[key]`
-  (lowering one is a widening, approve by default). Every entry names the floor
-  and whether it was overridden. Record-subject floors are not overridable.
-- **Web mark**: one step up for the rest of a run once any tool that does not
-  declare `annotations.openWorldHint: false` is called (nested codemode calls
-  included). pi's `read`, `edit`, `write`, `grep`, `find`, `ls`, `bash`,
-  `codemode` and `tool_search` are declared closed-world. The mark never travels
-  with content another turn reads later.
-- **Assessment**: for non-UI, non-dry-run requests an optional Jev classifier
-  (`settings-risk.ts`) may raise, never lower, within a 1.5 s request deadline;
-  failure or timeout keeps the deterministic tier. It sees only key, layer,
-  actor kind, floor, web mark, a redacted reason and a lossy diff.
-- **The maintainer's tap** applies at any tier (after any `confirm` text). A
-  request takes its highest change's tier and is held or applied whole.
-- **Approvals** (`settings.approvals`, `settings.decide`) bind to a digest of
-  target and `before`/`after`; a newer request for the same instance supersedes;
-  expiry is evaluated on use. The waiting push carries the `settings-approval`
-  category only to a relay advertising it
-  ([push relay](../../push-relay/README.md#notification-categories)). The
-  requester's next run hears each declined, expired or superseded change once
-  (`tron.settings-outcome.v1`).
-- **A running Home task worker** can be changed by Home (`taskId`) or the
-  maintainer. Model, thinking and Chat Run keys apply from its next provider
-  request and send one fenced `Settings changed` steer (`signal`: `queued`,
-  `not-running` or `failed`); context window and tools are refused `busy` until
-  the task settles. `resolve` adds a `worker` block (`selected`,
-  `lastResponse`).
+- **quiet** applies and records; **notify** also pushes with Undo; **approve** waits for the
+  maintainer's tap and expires after 24 hours. A request takes its highest change's tier.
+- **Floor** per key and direction, overridable through `permissions.floor[key]` (lowering one
+  is a widening); record-subject floors are not.
+- **Web mark:** one step up for the rest of a run once a tool not declaring
+  `annotations.openWorldHint: false` is called (nested codemode calls too); pi's `read`,
+  `edit`, `write`, `grep`, `find`, `ls`, `bash`, `codemode` and `tool_search` are closed-world.
+- **Assessment:** for non-UI requests an optional Jev classifier (`settings-risk.ts`) may raise,
+  never lower, within 1.5 s, seeing only key, layer, actor kind, floor, web mark, a redacted
+  reason and a lossy diff.
+- **Approvals** (`settings.approvals`, `settings.decide`) bind a digest of target and
+  `before`/`after`; a newer request supersedes; the push carries `settings-approval` only to a
+  relay advertising it ([push relay](../../push-relay/README.md#notification-categories)); the
+  requester hears each declined, expired or superseded change once (`tron.settings-outcome.v1`).
+- **A running Home task worker** can be changed by Home (`taskId`) or the maintainer: model,
+  thinking and Run keys apply from its next request with one fenced `Settings changed` steer
+  (`signal`: `queued`, `not-running`, `failed`); context window and tools are `busy` until it
+  settles; `resolve` adds a `worker` block (`selected`, `lastResponse`).
 
 ## Outside changes
 
-`OutsideChanges` (`settings-outside.ts`) compares each store with the values Tron
-last observed (`<tronHome>/gateway/settings/observed.json`) on every settings
-read and on debounced directory events: the Mac `settings.json`, `trust.json`,
-`mcp.json`, `models.json`, and each known project's `.pi/settings.json` and
-`.pi/mcp.json` (at most 64 projects). A store's first sight is its baseline.
-
-- Each differing key instance is one `outside` entry (file, `HEAD` and branch
-  for repository files; redacted keys by digest). MCP servers and custom model
-  providers are record subjects: name and added/changed/removed only, then
-  `mcp.changed` or `models.customChanged`.
-- Tron's own writes bracket the store (`begin`/`end`, `adopt`), so they are
-  never outside changes. An entry that replaced Tron's value refers to it and
-  offers Apply again.
-- The tier is the key's floor for the direction and decides only the push.
-  A revert, stash, reset or branch switch that drops Tron's value is just an
-  outside change.
+`OutsideChanges` (`settings-outside.ts`) compares stores with the values last observed
+(`<tronHome>/gateway/settings/observed.json`) on every read and on debounced directory events:
+the Mac `settings.json`, `trust.json`, `mcp.json`, `models.json` and each known project's `.pi/`
+files (≤ 64 projects); first sight is the baseline. Each differing instance is one `outside`
+entry (with `HEAD` and branch for repository files; redacted keys by digest); MCP servers and
+custom providers report only added/changed/removed, then `mcp.changed` or
+`models.customChanged`. Tron's own writes are bracketed (`begin`/`end`, `adopt`). The floor
+decides only the push.
 
 ## Project writes
 
-Tron edits a repository's `.pi/` under the project's store lock, keeping other
-keys and layout, and stages it with `git add`. It never commits, pushes or opens
-a pull request. When git cannot stage (no repository, ignored `.pi/`, locked
-index) the write stands and the entry says why; other staged work is staged
-anyway with a warning. The value applies from the working tree whether staged or
-not. Row badges: matches `HEAD` → Project; else **Staged** or **Uncommitted**;
-**Local only** outside a repository or when ignored. A commit holding Tron's blob
-appends `committed` to the change.
+Tron edits `.pi/` under the project's store lock, keeps other keys and layout, and stages with
+`git add`; it never commits, pushes or opens a pull request. If git cannot stage the write
+stands and the entry says why. Badges: matches `HEAD` → Project; else **Staged** or
+**Uncommitted**; **Local only** outside a repository or when ignored. A commit holding Tron's
+blob appends `committed`.
 
 ## Home profile
 
-Typed Profile keys resolve like any layer; learned notes may explain a value
-but never carry one. A maintainer save of Home's chat model, thinking or tools
-also sets the active chapter's Chat value in one bundle (refused whole while the
-chapter runs). `permissions.budget.task` (`{ inputTokens?, outputTokens? }`) is
-fixed at task admission; a raise waits for approval, a lower applies live.
+Typed Profile keys resolve like any layer; learned notes may explain a value but never carry
+one. A maintainer save of Home's model, thinking or tools also sets the active chapter's Chat
+value (refused while it runs). `permissions.budget.task` (`{ inputTokens?, outputTokens? }`) is
+fixed at admission; raises need approval, lowers apply live.
 
-**Model queues** (`model.queue[role]`, ordered `provider/id`, built-in `[]`):
-
-| Role | Runs | Resolves | Empty means |
+| Queue role | Runs | Resolves | Empty means |
 |---|---|---|---|
-| `worker` | Home task workers | Profile > Mac, captured at task admission | Home's own model |
-| `subagent` | Managed subagent children (`tron/subagent`) | Mac; Home task children use the captured queue | Each agent's own model |
-| `background` | Home memory (Profile > Mac) and Knowledge (Mac) | as stated | The subagent queue |
+| `worker` | Home task workers | Profile > Mac, captured at admission | Home's model |
+| `subagent` | Managed subagent children (`tron/subagent`) | Mac; task children use the captured queue | Each agent's model |
+| `background` | Home memory (Profile > Mac), Knowledge (Mac) | as stated | The subagent queue |
 
-`ModelQueueOwner` (`src/providers/model-queue.ts`) skips unregistered, virtual
-or uncredentialed models, a usage-limit error in the last 15 minutes or ≥ 95%
-provider usage, and moves on after a usage-limit error. Captured launch queues
-are read-only and outrank later Mac defaults. Worker thinking is built in as
-`{ "sameAs": "home" }`; an explicit `delegate` choice wins field by field.
-
-**Learned-profile changes** (`home.profileChange`, Home's `profile` tool) go
-through `SettingsChangePath.changeProfile`: one quiet entry per note (key
-`home.profile.item`, qualifier `note`), grouped per change, undone as a group,
-refused on a stale revision.
+`ModelQueueOwner` (`src/providers/model-queue.ts`) skips unregistered, virtual or
+uncredentialed models, models with a usage-limit error in the last 15 minutes or ≥ 95% usage,
+and moves on after a usage-limit error; captured queues are read-only. Worker thinking is
+`{ "sameAs": "home" }` by default. **Learned-profile changes** (`home.profileChange`, the
+`profile` tool) use `SettingsChangePath.changeProfile`: one quiet `home.profile.item` entry per
+note, grouped and undone together, refused on a stale revision.
 
 ## Presentation
 
-Words, badges and displayed values come from the schema and resolver; iOS
-decides only layout and style.
-
-- **Sections** are served by `settings.resolve`: Model, Workers & delegation,
-  Compaction, Tools, Connection, Advanced, then Accounts, Sources, Storage.
-- **Badges** are `{ kind, label, detail?, action? }` of kind Layer, Source,
-  Scope, Authority or State; an unknown kind renders neutrally. Actions (Apply
-  again, Use the current default, Follow the default, Review trust) go back
-  through `settings.change`.
-- **Controls**: `toggle`, `choice`, `number`, `text`, `secret`, `list`,
-  `checklist`, `catalog`, `readOnly`. The client sends the controls and renderer
-  version it implements; the Gateway serves the declared control, else its
-  `fallback`, else `readOnly` with "Update Tron to edit". Never crash, never hide
-  a value: every instance carries its `display`.
-- **Options and validation** are served: `settings.options` pages a key's
-  options (re-requested when a dependency changes); `dryRun` returns per-key
-  errors and the tier. There is no client copy of a key's rules.
-- **Changes** (`settings.history` + `presentation`): pending approvals first;
-  Undo, Apply again, Approve, Decline.
-- **Surfaces**: Global writes Mac, Session the Chat layer, Home only `profile`;
-  Project is inspection only. Reset removes the owned override. Hand-built
-  screens remain only for guided flows and content viewers.
+Words, badges and values come from the schema and resolver; iOS decides only layout.
+`settings.resolve` serves sections (Model, Workers & delegation, Compaction, Tools,
+Connection, Advanced, Accounts, Sources, Storage) and badges `{ kind, label, detail?, action? }`
+(Layer, Source, Scope, Authority, State; unknown kinds render neutrally; actions go through
+`settings.change`). Controls: `toggle`, `choice`, `number`, `text`, `secret`, `list`,
+`checklist`, `catalog`, `readOnly`; the client sends what it implements and gets the declared
+control, its `fallback`, or `readOnly` with "Update Tron to edit" — never a hidden value.
+`settings.options` pages options; `dryRun` returns per-key errors and the tier. Changes list
+pending approvals first. Global writes Mac, Session the Chat layer, Home only `profile`;
+Project is inspection only. Hand-built screens remain only for guided flows and viewers.

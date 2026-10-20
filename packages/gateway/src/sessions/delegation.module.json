@@ -6,6 +6,7 @@
     "codemode-nested-delegation.integration.test.ts",
     "delegated-provider.ts",
     "delegated-root-migration.ts",
+    "delegated-activity.md",
     "delegation.lock.integration.test.ts",
     "delegation.module.json",
     "home-managed-provider.integration.test.ts",

@@ -46,9 +46,20 @@ connector details: [contract](contract.md).
   and expected revisions; reads never take the workspace mutex.
 - **Upgrade.** The user-initiated start of an updated Gateway runs the one explicit
   `upgradeStorage()` (`CATALOG_STORAGE_VERSION` 4); reads refuse an older manifest.
-- Chronicle generation is retired (#1315): no path creates observations or coverage
-  cuts; existing ones stay readable, citable, correctable and clearable history,
-  shown on iOS as **Legacy history**.
+- **One searchable history, centered on Home.** Chronicle generation is retired (#1315):
+  no path creates observations or coverage cuts; existing ones stay readable, citable,
+  correctable, reflectable and clearable history (iOS **Legacy history**), and a record
+  whose transcript vanished is unverified evidence. History is retrieved only through its
+  owners: Home's memory tools for Home, `session_search`/`session_read` for other chats
+  (Home chapters excluded; context edits and credential redaction applied before indexing),
+  accepted task reports for delegated work, Knowledge for sources, notes and legacy
+  observations. No composed adapter, summary cache or per-read model call exists. Results
+  carry followable evidence (session/entry and digest, Home index plus physical provenance,
+  record revision with its citation, task report entry); overlapping evidence is grouped
+  before ranking; old range citations are never reinterpreted per item; exclusions, forget
+  and admission are re-checked at publication; retrieved text is quoted evidence, and raw
+  `home.memory.evidence` stays out of model tools
+  (`src/sessions/legacy-chronicle.integration.test.ts`).
 - `knowledge.changed` carries the latest state revision and, when ≤ 64 IDs, the
   touched `recordIds`, coalesced over a fixed 250 ms window; an input without IDs
   makes the whole window ID-less (clients refresh the projection). Replays and
@@ -118,5 +129,5 @@ Behavior lock: `knowledge.store.lock.integration.test.ts`. Journeys:
 ## Not here
 
 Home's chapter memory: [gateway/episodic](../episodic/README.md). The internal
-workspace root: [internal-workspace.md](../../docs/internal-workspace.md). The
-decision record for retiring observation: [searchable history](../../docs/searchable-history.md).
+workspace root: [internal-workspace.md](../../docs/internal-workspace.md). Other-chat
+search: [session search](../../docs/session-search.md).

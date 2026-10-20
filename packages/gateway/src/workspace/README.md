@@ -68,4 +68,4 @@ Behavior lock: `tron-workspace.lock.integration.test.ts`.
 
 The delegated provider's install and admission:
 [Pi SDK maintenance](../../docs/pi-sdk-maintenance.md#tron-owned-pi-subagents-build).
-Delegated activity projection: [delegated-activity.md](../../docs/delegated-activity.md).
+Delegated activity projection: [delegated activity](../sessions/delegated-activity.md).

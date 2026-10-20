@@ -4,7 +4,7 @@ Live execution as clients see it: snapshots and progress, Stop, extension forms,
 queues, compaction, creation, terminals, workspace reads and resource invocation.
 Owner: `gateway/run` ([README](README.md)); canonical reads are in
 [catalog](catalog.md), producer attribution in
-[delegated activity](../../docs/delegated-activity.md), shared admission in
+[delegated activity](delegated-activity.md), shared admission in
 [protocol](../transport/protocol.md).
 
 ## Snapshots and progress

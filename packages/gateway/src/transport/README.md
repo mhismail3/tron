@@ -23,7 +23,7 @@ liveness), [execution](../sessions/execution.md), [catalog](../sessions/catalog.
 [display](../display/README.md), [uploads](../machine/uploads.md),
 [runtime configuration](../admin/runtime-configuration.md),
 [host control](../admin/host-control.md),
-[delegated activity](../../docs/delegated-activity.md) and
+[delegated activity](../sessions/delegated-activity.md) and
 [connection resilience](../../docs/connection-resilience.md).
 
 **Protocol versions.** One protocol range is projected from the repository manifest

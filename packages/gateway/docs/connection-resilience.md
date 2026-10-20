@@ -1,608 +1,203 @@
 # Connection resilience and diagnosis
 
-A lost mobile connection is not proof of Gateway overload. Diagnose the owning
-boundary before changing limits or restarting anything. The Gateway remains the
-owner of accepted commands; mobile reconnect never replays a prompt blindly.
+A lost mobile connection is not proof of Gateway overload. Diagnose the owning boundary
+before changing limits or restarting anything. The Gateway owns accepted commands; mobile
+reconnect never replays a prompt blindly. Wire bounds, receipts and the outbound queue:
+[protocol](../src/transport/protocol.md); records: [transport Signals](../src/transport/README.md#signals).
 
 ## Failure boundaries
 
-- **Gateway outbound queue:** at most 8 MiB and 4,096 encoded frames per connection,
-  including the active write. Exactly one frame enters `ws` at a time. Completion
-  releases both its payload reference and byte reservation. A newer session
-  summary replaces the unsent summary of that session, and a newer session
-  snapshot supersedes the unsent sequenced state of its own runtime generation
-  that it fully re-states, up to its own `eventSequence`, so a slow link carries
-  current state rather than every superseded revision of it. A superseded
-  sequence is never left uncovered: the surviving snapshot is sent as the
-  `session.rebaseline` carrying the whole snapshot and the connection's
-  installed `subscriptionToken`, which the phone installs as fresh authority
-  instead of resynchronizing, and a snapshot for a session this connection holds
-  no token for supersedes nothing. State is dropped only where that replacement
-  restores it: a sequenced frame whose effect no snapshot installation performs
-  (a failure receipt, a resource/structure/context revision bump, an editor
-  directive) is a fence, and it and every frame behind it are delivered in
-  order, as are frames of another runtime generation. The frame
-  already entering `ws` is never recalled, what a client receives stays in
-  enqueue order, and a dropped frame is not counted as outstanding. A peer
-  exceeding either limit loses request/subscription admission immediately; a
-  one-second forced-close deadline bounds a stalled close handshake. Other peers
-  and accepted domain commands continue independently.
-- **WebSocket admission:** live sockets cap at 32 globally and 4 per
-  authenticated identity. A roaming or suspended phone leaves half-open sockets
-  that heartbeat reaping retires only after three missed 25-second intervals,
-  so a new socket from the same identity supersedes that identity's least
-  recently active sockets (close code 4000, `connection.superseded`) instead of
-  locking the device out with 503. Other identities are never displaced;
-  global capacity still rejects them. Closing sockets are not live capacity.
-- **Heartbeat:** every 25-second tick counts one miss for each open socket,
-  and any inbound frame (message, client ping or pong) resets the count; the
-  tick that finds three misses terminates the socket
-  (`connection.heartbeat-timeout`). A dead client is therefore retired on the
-  fourth tick after its last frame, whatever was sent to it. The Gateway sends
-  its own ping on a tick only when the client initiated nothing (no message or
-  client ping) during the preceding interval. A foreground phone pings every
-  10 seconds, so it is never pinged by the Gateway; silent and pong-only clients
-  are pinged on every tick, because a pong answers the Gateway's ping and never
-  suppresses the next one. The only difference from pinging every tick is the
-  transition from active to quiet: the first tick after a client's last own frame
-  may skip its ping, so its first ping can come one tick later and that pong must
-  return within about 50 seconds instead of 75 before the fourth tick. Real mobile
-  clients enforce an 8-second pong deadline on their own pings, and pong-only
-  clients are unaffected. A skipped ping is never an unanswered one. A socket that
-  stops proving liveness for 12 seconds — a ping the Gateway sent that the client
-  left unanswered, or a client that pings on its own and has gone quiet — logs
-  one `connection.inbound-silent` (warning) with the peer's Tailscale path, and
-  its next inbound frame logs
-  `connection.inbound-resumed` (info) with `silentMs`. A client that only answers
-  the Gateway's pings is idle between them, not silent, and is never reported:
-  its silence says nothing until a ping goes unanswered.
-  Both are read from the Gateway log alone and neither changes what the tick does.
-  `server-heartbeat.integration.test.ts` pins each case against real sockets on a
-  fake heartbeat clock.
-- **Phone liveness (C-4):** the phone pings every socket on the one shared
-  ten-second wakeup grid the energy plan fixed, and any inbound frame that
-  reaches the app after a ping was sent is proof of liveness for that ping:
-  messages, pongs and any other data all answer it. A probe's pong returns on
-  the downlink, behind the bytes the Gateway has already written toward the
-  phone, so a pong can miss its eight-second deadline on a link that is carrying
-  data. The Gateway writes a pong ahead of frames still waiting in its outbound
-  queue (`server-pong-backlog.integration.test.ts`), so that wait is bounded by
-  bytes in flight, not by the backlog. Such a probe retires the epoch only when
-  nothing arrived after it was sent, and the next grid tick re-arms the wait.
-  Only a fully delivered frame counts as that proof, so a frame whose last byte
-  arrives later than that deadline (about 1 MiB on a path below 1 Mbit/s) leaves a busy link with no
-  proof at all and the epoch is still retired as `pong_timeout`. Dead-link
-  detection stays within 18 seconds of the last inbound frame: no grid tick is
-  later than 10 seconds after it and the deadline is 8 seconds after the tick.
-  An excused probe leaves a debug-level `liveness` record with
-  `outcome=excused` in the phone's connection log, so a run that shows no
-  `pong_timeout` retirement can still tell an excused probe from a probe that
-  never missed its deadline.
-- **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
-  node ceiling for local and mobile clients. Transcript pages reserve 24,000
-  nodes and snapshots 30,000; dense detail is compacted without editing canonical
-  history. Byte size alone does not establish native decoder admission. Final
-  overflow gets a correlated `response_too_large` error or an event resync notice.
-  Diagnostics include sizes, node-count lower bound and maximum, not content.
-  Rejected mutation/receipt projections remain an unknown command outcome, never
-  proof that execution failed. Limits are not invitations to allocate an
-  unbounded input before projecting it.
-- **HTTP transport:** physical sockets, including incomplete headers and
-  upgrades, cap at 128 globally / 64 per source address. Pending requests and
-  upgrade authentication cap at 128 globally / 32 per address / eight per
-  connection; authenticated HTTP requests additionally cap at 16 per identity.
-  Headers have a 15-second allowance checked every second. Complete bodies retain
-  Node's five-minute allowance for slow uploads; socket/response inactivity and
-  pending-upgrade authentication are separately bounded at 30 seconds.
-  EOF/error/close retires a pending upgrade even after Node hands off its parser.
-  Credential reads remove canceled mutex waiters; a running credential operation
-  retains its serialization lock until actual settlement and cannot admit a
-  canceled caller. Read/staging transport waits may retire while their bounded
-  physical producer finishes; late leases release at the original resource owner.
-  Socket closure never manufactures free, unaccounted I/O capacity. Physical
-  filesystem stalls can still leave that resource's bounded producer allowance
-  unavailable; this does not promise recovery from a broken filesystem.
-  Normal close and failed-startup cleanup join one operation, immediately fence
-  observers and force physical HTTP socket retirement after one second. Accepted
-  domain/pairing/discard mutations keep their settlement authority. Revocation
-  closes token-bound live viewers but does not undo an admitted canonical asset
-  read. Display-owner removal durably denies future reads immediately; the final
-  reader releases the retained bytes under the store's mutation lane. Empty-owner
-  metadata is cleanup-only on startup, never restored authority. A blob acquire
-  that fails after prune/dispose also releases its retired reservation and bytes.
-  A lost upload receipt discards only unclaimed staging, with the store's
-  serialized claim check protecting accepted prompt attachments.
-- **Deadlines, caps and load shedding (`G-12`):** every limit is one named
-  constant next to its only user. A request that is shed is answered `busy` with
-  a `retryAfterMs` hint and one `gateway.shed` record. A deadline, a cancel and
-  the phone's retry never apply to an admitted mutation or prompt: their owners
-  settle them durably. The heap bound is the one bound that can refuse an
-  admission, and it refuses only a cold load, before that load starts its write —
-  a `session.import` is a cold load too, so it can be refused, and its
-  `gateway.shed` record names the admission it refused (`open` for a cold runtime
-  load, `import` for the import) rather than claiming the RPC that asked for it:
-  `acquire` serves reads, leases and automation alike.
-
-  | Bound | Value | Owner | What it does |
-  | --- | --- | --- | --- |
-  | `DISPOSABLE_READ_DEADLINES_MS` (`session.open`) | 10 s | `transport/server.ts` | A cold open may parse a large transcript before its subscription commits, so it gets the longer bound. |
-  | `DISPOSABLE_READ_DEADLINES_MS` (`session.list`, `session.transcript`, `session.history.list`, `session.history.entry`) | 5 s | `transport/server.ts` | The request is aborted at its deadline and answered `busy` with `SHED_RETRY_AFTER_MS`; the work it abandoned keeps running only while another waiter needs it. A disposable read outside this table — `provider.usage` (10 s per fetch, then a typed timed-out snapshot), `model.list`, `provider.list` — has no deadline and is never shed. |
-  | `MAXIMUM_CONCURRENT_COLD_LOADS` | 2 | `sessions/runtime-registry.ts` | Cold runtime loads (a `session.open` or a JSONL import) queue in FIFO order; a queued load whose *last* waiter left is dropped, so one requester leaving does not end the load another still waits for. |
-  | `MAXIMUM_CONCURRENT_SESSION_EXPORTS` | 1 | `transport/gateway-service.ts` | A second export queues rather than halving both. |
-  | `MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS` | 2 | `transport/gateway-service.ts` | Directory/git inspections queue behind each other. |
-  | `HEAP_EVICTION_SHARE` | 0.70 of the V8 heap limit | `sessions/runtime-registry.ts` | A cold load first retires idle runtimes largest first until the projected share — the sampled heap less the estimates it just gave back — is under it; the registry's own accounting ends the pass, because `heapUsed` does not fall until V8 collects. |
-  | `HEAP_REFUSAL_SHARE` | 0.85 of the V8 heap limit | `sessions/runtime-registry.ts` | A cold load is refused with `busy` and `HEAP_REFUSAL_RETRY_AFTER_MS`; a protected runtime is never retired to make room. |
-  | `GatewayDisposableReadPolicy.busyRetryLimit` / `.maximumRetryAfterDelay` | one retry / 10 s | `ios-app/Core/Gateway/GatewayProtocol.swift` | The phone waits a shed read's hint (bounded) and retries it once, recording `rpc.retry-after`; a mutation is never retried. |
-
-  The heap shares are read from the process's own `process.memoryUsage()` and
-  `getHeapStatistics().heap_size_limit`, so the launcher's
-  `--max-old-space-size` is what they are a share of. The byte budget
-  (`LIVE_RUNTIME_BYTE_BUDGET`, G-5) stays eviction pressure and never refuses;
-  this gate is where refusal lives.
-- **Route workload envelope:** `BlobStore` defaults to 128 items / 200 MiB
-  total / 25 MiB per item with 32 concurrent readers and four file
-  productions. Attachment downloads reserve 32 readers before metadata/path I/O;
-  display artifacts reserve their four-reader allowance before verification/open.
-  Browser live views allow 64 registrations, four viewers per
-  view, 16 viewers total, and expire idle viewers after 15 seconds. Terminals
-  retain 128 records, admit 16 active PTYs, split output into 64 KiB chunks,
-  and cap replay at 768 KiB. `UploadStore` independently bounds each configured
-  item, 1,024 staging entries, 16,384 retained entries, eight item-sized
-  staging units, and a 24-hour unclaimed age; default body admission is four
-  concurrent bodies, derived from that staging envelope. These owners release
-  on their own finish/close/error
-  paths rather than duplicating HTTP counters.
-- **Mobile recovery:** while foregrounded with a satisfied network path, one
-  reconnect owner retries transient failures indefinitely with a 2-second initial
-  delay, 1.7× progression, a 15-second cap, and 20% jitter. A dashboard pool
-  entry follows the same progression without jitter, so a pool wait is
-  deterministic and its cap is a floor; once three of its consecutive attempts
-  have failed it escalates by ×4 from the delay it had reached to a five-minute
-  cap, so an unreachable secondary profile makes one attempt every five minutes.
-  It counts its own failed attempts and a successful attempt is what clears
-  them, so a secondary Mac that drops after connecting, a handshake the Gateway
-  never answers and a 503 all keep backing off. Background and
-  unsatisfied network paths pause attempts. One pending delay is cancelled by
-  a foreground cycle, an explicit Retry, and a real path change — the interfaces
-  the monitored route uses changing, or an unsatisfied path becoming satisfied.
-  A path change also restarts the backoff curve and, while an attempt is on the
-  wire, is consumed by the attempt that follows it, so the route that just came
-  back is attempted at once instead of after the wait the route that went away
-  had grown (C-3). A monitor update on a path that did not change restarts no
-  curve: the pool leaves its wait alone, so a repeated "network available"
-  notice cannot cut the five-minute cap short, and the primary lifecycle
-  cancels its wait without returning an unchanged path to the base interval. A
-  path that goes away during a pool attempt ends that retry when its wait runs
-  out instead of holding the entry, and the return then starts the next attempt
-  at once. Only
-  authentication, authorization, protocol, and identity
-  failures stop automatic recovery. A hello whose protocol the Gateway cannot
-  speak is refused with the application close code 4006
-  (`PROTOCOL_MISMATCH_CLOSE_CODE`) and a close reason that carries
-  `{"code":"protocol_mismatch","gatewayProtocol","minProtocol"}`, so the phone
-  names which build must update instead of retrying a version pair that can
-  never connect; the same refusal keeps its `http.upgrade` record with
-  `reason=protocol_mismatch` and `peerProtocolVersion`. A Gateway built before
-  that refusal still closes the same hello with `1008 "protocol version
-  mismatch"`, which the phone reads as a retryable transport failure, so the
-  typed close only protects a Mac that runs it. The WebSocket open and the hello after it
-  have separate bounds: a socket that never opens gives up at the 5-second
-  `clientTransportOpenDeadline`, and only a socket that opened may spend the
-  15-second `clientHelloDeadline` on hello and authentication, so a down path is
-  named in 5 s while a slow Mac still gets its full hello budget. Last-good
-  projections and mutation receipts remain intact. After two
-  consecutive failed handshakes whose `transport-open` record says
-  `transportOpened=false`, the dashboard labels the server **No path to this Mac**
-  and names the current interface when known. A handshake that opened a transport,
-  or an episode that began with `ping_timeout`, stays **Reconnecting**. A successful
-  connection resets this presentation; retry timing and ownership do not change.
-
-- **Administrative restart:** `gateway.restart` normally drains accepted work.
-  It restarts through the existing bounded shutdown path if the drain makes no
-  progress for 180 seconds. An authenticated `{ commandId, restartNow: true }`
-  request can escalate an existing drain immediately; it shares command receipts,
-  authorization and terminal/install admission guards. The response acknowledges
-  command admission, not process replacement. If its response is lost, the
-  owning client may reconcile through `gateway.drain.status`; any explicit retry
-  uses the same command ID. Receipt deduplication does not authorize automatic
-  command replay after reconnect, and an unacknowledged restart must not be
-  assumed absent. Shutdown retains the existing cancellation,
-  grace and runtime disposal behavior, and unresolved runs recover as interrupted
-  or `outcomeUnknown` rather than a successful terminal receipt. Drain logs include
-  blocker session, category, state and age. Persistence diagnostics are logged to
-  the Gateway log, whose eight active/rotated segments are bounded to 5 MiB
-  each (40 MiB total).
+- **Outbound queue** (8 MiB / 4,096 frames per connection, one frame in `ws` at a time,
+  supersession by `session.summary`/`session.rebaseline`, fences never dropped): a peer over
+  either bound loses admission and is force-closed after one second; other peers and accepted
+  commands continue.
+- **WebSocket admission:** 32 live sockets globally, 4 per identity. A new socket from an
+  identity at its cap supersedes that identity's least recently active sockets (close 4000,
+  `connection.superseded`) instead of a 503; other identities are never displaced.
+- **Heartbeat:** each 25 s tick counts a miss per socket and any inbound frame resets it; three
+  misses terminate (`connection.heartbeat-timeout`), so a dead client goes on the fourth tick.
+  The Gateway pings only clients that sent nothing during the interval (a foreground phone
+  pings every 10 s itself); the first quiet tick may skip its ping, so that pong has about
+  50 s instead of 75. Twelve seconds without expected liveness logs `connection.inbound-silent`
+  with the Tailscale path; the next frame logs `connection.inbound-resumed` (`silentMs`).
+  Pong-only clients are idle, never silent (`server-heartbeat.integration.test.ts`).
+- **Phone liveness (C-4):** pings on one shared 10 s grid; any fully delivered inbound frame
+  after a ping answers it, and the Gateway writes pongs ahead of its queued frames
+  (`server-pong-backlog.integration.test.ts`). A probe retires the epoch (`pong_timeout`) only
+  when nothing arrived within its 8 s deadline, so a dead link is detected within 18 s. Excused
+  probes leave a debug `liveness outcome=excused` record.
+- **Projection:** 1 MiB frames and 32,768 JSON nodes; overflow is a correlated
+  `response_too_large` or a resync notice. A rejected mutation projection stays an unknown
+  outcome, never a failure.
+- **HTTP transport:** the socket, request, upgrade and identity bounds and deadlines in
+  [protocol](../src/transport/protocol.md#http-admission). Socket closure never frees
+  unaccounted I/O capacity; a stalled filesystem can hold its owner's bounded allowance.
+  Revocation closes token-bound viewers but does not undo an admitted asset read;
+  display-owner removal denies future reads at once; a lost upload receipt discards only
+  unclaimed staging.
+- **Shedding (G-12):** every limit is one named constant beside its user; a shed read is
+  `busy` with `retryAfterMs` and one `gateway.shed`. Deadlines, cancels and retries never touch
+  admitted mutations or prompts. Bounds: `DISPOSABLE_READ_DEADLINES_MS` (`session.open` 10 s;
+  list and transcript pages 5 s), `MAXIMUM_CONCURRENT_COLD_LOADS` 2 (FIFO; dropped when its
+  last waiter leaves), `MAXIMUM_CONCURRENT_SESSION_EXPORTS` 1,
+  `MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS` 2, `HEAP_EVICTION_SHARE` 0.70 and
+  `HEAP_REFUSAL_SHARE` 0.85 of `heap_size_limit` (so of `--max-old-space-size`; only a cold
+  `open` or `import` is refused), and on the phone
+  `GatewayDisposableReadPolicy` (one retry, hint capped at 10 s). `LIVE_RUNTIME_BYTE_BUDGET`
+  (G-5) is eviction pressure only.
+- **Route workloads:** `BlobStore` 128 items / 200 MiB / 25 MiB, 32 readers, four file
+  productions; attachments reserve 32 readers and displays four before I/O; live views 64
+  registrations, four viewers per view, 16 total, 15 s idle; terminals 128 records, 16 PTYs,
+  64 KiB chunks, 768 KiB replay; uploads as in [uploads](../src/machine/uploads.md). Each owner
+  releases on its own finish, close or error path.
+- **Mobile recovery:** in the foreground on a satisfied path one reconnect owner retries
+  transient failures forever: 2 s, ×1.7, 15 s cap, 20% jitter. Dashboard pool entries use the
+  same curve without jitter and, after three failed attempts, ×4 up to five minutes until an
+  attempt succeeds. Background or unsatisfied paths pause. A foreground cycle, explicit Retry
+  or real path change (route interfaces changed, or unsatisfied → satisfied) cancels the wait;
+  a path change also restarts the curve (C-3); an unchanged-path notice does not. Only
+  authentication, authorization, protocol and identity failures stop recovery. A hello the
+  Gateway cannot speak closes 4006 (`PROTOCOL_MISMATCH_CLOSE_CODE`) with
+  `{"code":"protocol_mismatch","gatewayProtocol","minProtocol"}` (older Gateways: 1008,
+  retried). The open has a 5 s `clientTransportOpenDeadline`; only an opened socket spends the
+  15 s `clientHelloDeadline`. Two consecutive handshakes with `transportOpened=false` label the
+  server **No path to this Mac**; others stay **Reconnecting**.
+- **Administrative restart:** see [host control](../src/admin/host-control.md#drain-and-exit).
+  A lost restart response is reconciled through `gateway.drain.status` and retried only with
+  the same command ID; unresolved runs recover as interrupted or `outcomeUnknown`.
 
 ## Frame compression
 
-Paired devices that offer `permessage-deflate` (URLSession offers it with no
-parameters) receive compressed frames; local-credential clients (the Mac app,
-CLI) stay uncompressed even when they offer it. `ws` negotiates per server
-instance, so the upgrade handler picks one of two instances by the
-authenticated credential kind (`PAIRED_PER_MESSAGE_DEFLATE` in
-`src/transport/server.ts`). A paired client that does not offer the extension
-keeps today's uncompressed frames.
+Paired devices that offer `permessage-deflate` (URLSession offers it bare) get compressed
+frames; local-credential clients never do. `ws` negotiates per server instance, so the upgrade
+picks one of two by credential kind (`PAIRED_PER_MESSAGE_DEFLATE` in `src/transport/server.ts`).
 
-- **Settings:** server context takeover stays on, so a cumulative
-  `session.progress` frame compresses to roughly its new text. A client may
-  still request `server_no_context_takeover`; it is honored rather than
-  rejected, and only then does `ws`'s 1 KiB threshold leave small frames
-  uncompressed. Otherwise every frame is compressed. zlib level 6, memLevel 8,
-  window bits 15. `ws`'s zlib limiter is process-global and shared by inflate and
-  deflate; it is capped at two concurrent operations so file I/O keeps half of
-  libuv's four-thread pool. Retained deflate/inflate state is about 300 KiB per
-  compressed connection, bounded by the 32-socket cap.
-- **Measured (2026-09-27, Apple silicon Mac, host load about 10):** the real
-  `GatewayServer` broadcasting to one paired client. Repository TypeScript,
-  Swift and Markdown filled a recorded snapshot-burst transcript. Nine
-  600 KB `session.snapshot` frames went from 5,465,624 to 1,132,866 wire bytes
-  (20.7%). 223 cumulative `session.progress` frames up to 24 KiB went from
-  3,038,448 to 39,157 (1.3%). 200 small responses and summaries went from 51,199
-  to 6,817 (13.3%). Isolated zlib deflate cost about 24 ms of Mac CPU per
-  uncompressed MB for snapshots, about 14 ms per 600 KB snapshot, and about
-  0.1 ms per progress frame. Levels 1/3 saved 2–4 points less on snapshots and
-  gave 7×/1.6× the progress bytes. Level 9 cost 1.5× the CPU for no gain, and
-  memLevel 9 or 7 changed bytes by under 0.2%. Without context takeover, the
-  progress sequence stayed at 33.8% of its size.
-- **Latency:** at level 6 a fresh 24 KiB progress frame deflates in about
-  0.14 ms and a 600 KB snapshot in about 12.6 ms (levels 1 and 3: about 4.8 and
-  3.2 ms, with 22% and 14% more snapshot bytes). Broadcast to decoded delivery on
-  loopback measured 0.6 ms against 0.4 ms uncompressed for progress and 18.4 ms
-  against 3.0 ms for a snapshot. That is under one display frame, and less than
-  the transmission time the smaller frame saves on any phone link slower than
-  about 250 Mbit/s. The zlib cap of two only delays a third concurrent snapshot
-  compression by one more deflate.
-- **Bounds:** inbound `maxPayload` (the 1 MiB frame ceiling) bounds each
-  message after inflation as well as on the wire, and an over-limit message
-  closes with 1009 before dispatch. Outbound, the 1 MiB frame ceiling and the
-  8 MiB / 4,096-frame queue count uncompressed bytes as queued, exactly as for
-  uncompressed peers. A frame completes, and advances `completedFrames` and
-  write progress, only from `ws`'s send callback. That callback runs after the
-  compressed frame is written, and `ws` compresses one message at a time per
-  socket, so order is unchanged. `wsBufferedBytes` includes uncompressed bytes
-  awaiting compression. As without compression, a frame not yet written when the
-  peer vanishes is reported as `connection.write-error`. Compression lengthens
-  that window by the deflate time. Heartbeat pings wait behind an in-progress
-  deflate of at most one frame.
-- **Phone:** CFNetwork inflates before delivery, and its `maximumMessageSize`
-  (1 MiB) applies to compressed wire bytes. A macOS 26 probe received 8 MiB and
-  256 MiB inflated messages; uncompressed, anything over 1 MiB fails the receive
-  with POSIX 40. With `permessage-deflate` the phone's decoded 1 MiB check
-  (`GatewayFramePolicy`) therefore runs after inflation. An over-ceiling frame
-  still retires the epoch as a retryable transport failure, now with reason
-  `frame_too_large`. Correct traffic is unchanged, because the Gateway refuses a
-  decoded frame over 1 MiB on every send path before enqueue and so before
-  compression. `server-compression.integration.test.ts` checks direct responses,
-  `emitToClient`, global and session broadcasts and synchronization-barrier
-  replay. The residual risk is memory use before rejection, and only against a
-  malicious or broken authenticated paired Gateway. Such a Gateway already
-  controls everything the phone displays.
-- **Diagnosis:** `connection.opened` carries `compression=permessage-deflate`
-  or `compression=none`. `ws` answers a malformed `Sec-WebSocket-Extensions`
-  offer from a paired client with HTTP 400; URLSession never sends one.
+- **Settings:** server context takeover on (a cumulative `session.progress` frame costs about
+  its new text); a requested `server_no_context_takeover` is honored, and only then do frames
+  under 1 KiB go uncompressed. zlib level 6, memLevel 8, window 15; `ws`'s process-global zlib
+  limiter is capped at two so file I/O keeps half the libuv pool; about 300 KiB of state per
+  compressed connection. Level 6 was chosen by measurement: snapshots
+  shrink to about a fifth, progress frames to about 1%, at about 12 ms per 600 KB snapshot.
+- **Bounds:** inbound `maxPayload` (1 MiB) applies after inflation (1009 before dispatch);
+  outbound frame and queue bounds count uncompressed bytes. A frame completes only from `ws`'s
+  send callback, after the compressed write; order is unchanged; `wsBufferedBytes` includes
+  bytes awaiting compression; pings wait behind at most one deflate.
+- **Phone:** CFNetwork inflates first and its `maximumMessageSize` applies to wire bytes, so the
+  decoded 1 MiB check (`GatewayFramePolicy`) runs after inflation and an over-ceiling frame
+  retires the epoch (`frame_too_large`). The Gateway refuses decoded frames over 1 MiB before
+  enqueue on every path (`server-compression.integration.test.ts`); the residual risk is
+  memory before rejection from a malicious paired Gateway.
+- **Diagnosis:** `connection.opened` carries `compression=permessage-deflate|none`. A malformed
+  `Sec-WebSocket-Extensions` offer gets HTTP 400.
 
 ## Collect evidence before recovery
 
-1. Run `scripts/tron-triage PHONE-EXPORT...` first. It reads the export(s) and
-   `<tronHome>/logs` (`gateway.jsonl` with its rotations; `--gateway-logs DIR`
-   for another home) read-only and prints one row per outage with its cause and
-   the records behind it: `path`, `phone-background`, `phone-stall`,
-   `gateway-stall`, `gateway-capacity` or `unknown`, decided by the first
-   matching rule in `scripts/tron_triage.py`. `--json` prints the report and
-   `--out PATH` writes it; `--tailscale-window` captures the Tailscale network
-   extension's own log with `log show` over the export's range and uses it as
-   path evidence for logs written before O-2, and `--tailscale-peer NODEKEY`
-   restricts that read to the phone's Magicsock peer so another tailnet peer's
-   relay stretch is not read as the phone's. Start there, then read the
-   evidence lines it prints. Upgrade-arrival evidence uses only `http.upgrade`.
-2. Export iOS Logs if `tron-triage` was given no export yet. Keep its capture
-   time, represented time range, app build, source freshness, profile
-   labels/aliases, and available Gateway identity. Retained/offline records are
-   not a live Gateway health check. If the initial fault predates the
-   represented range, it is missing evidence.
-3. Compare the same UTC interval with `<tronHome>/logs/gateway.jsonl` and its
-   `gateway.jsonl.1`–`.7` rotations. The tool joins the two sides by the O-1
-   key: a phone record's `gatewayConnectionId` is the Gateway record's
-   `connectionId`, and its `clientId`/`attemptId`/`epoch` are the Gateway's
-   `peerClientId`, `peerAttemptId` and `peerEpoch`. Only logs from before the
-   correlation key shipped (protocol 5) have to be matched by time window
-   instead, and the report says which join each episode used (`joinedBy`). One
-   join decides an episode: when the key joins any record, only key-joined
-   records and Gateway-wide records (a delayed event loop, host resources)
-   count as evidence, so a neighbour connection's slow span is never read as
-   this episode's cause. A connection the Gateway opened during the episode is
-   the recovery's, not the one the outage lost, so it is neither this episode's
-   join key nor its cause; rule 4 also reads a socket that opened within the
-   handshake the reconnect had just completed before the loss, one the previous
-   stretch's own recovery opened a flicker earlier, and a socket the phone's own
-   unchanged connection id says never dropped, as the recovery's for the cause,
-   because the refresh the reconnect runs on any of them is not the Gateway
-   stalling on the connection the loss dropped. A published outage is reported as one
-   episode per scene phase: the app parks recovery in the background and resumes
-   it on the foreground without publishing a new state, so the foreground
-   stretches carry the path, label and gap evidence and only the time really
-   spent in the background reads `phone-background`. One attempt belongs to the
-   stretch it began in (its end timestamp less its `durationMs`), so a connect
-   that started in a background blip is not counted against the silent stretch
-   after it. A Tailscale relay window explains an episode only when the loss
-   falls inside the window and the episode ends inside it or within the app's
-   own recovery delay after it closes; a window that closed minutes earlier is
-   context, so a measured silent gap stays an `unknown` gap with its window
-   named beside it. A cause is only as good as its evidence
-   line: an `unknown` episode lists what the records did contain, and an
-   `unknown` for a foreground silent gap is the measured silent recovery gap
-   until C-1 removes it.
-4. Use existing local Mac status/health observations to distinguish a responsive
-   Gateway from an unreachable mobile path. An OS network path of `satisfied`
-   proves neither Tailscale tunnel health nor reachability of the selected Mac.
-5. Preserve the first fault and the source/payload revisions used to reproduce it.
-   Do not clear app data, Keychain, canonical sessions, or credentials. Gateway
-   transitions remain explicit user/maintainer actions.
+1. Run `scripts/tron-triage PHONE-EXPORT...` first. It reads the exports and
+   `<tronHome>/logs/gateway.jsonl` with rotations (`--gateway-logs DIR` for another home)
+   read-only and prints one row per outage with cause `path`, `phone-background`,
+   `phone-stall`, `gateway-stall`, `gateway-capacity` or `unknown` (first matching rule in
+   `scripts/tron_triage.py`) and the evidence lines. `--json`, `--out PATH`;
+   `--tailscale-window` reads the Tailscale extension's log for the export's range as path
+   evidence, `--tailscale-peer NODEKEY` restricts it to the phone's peer.
+2. Export iOS logs; keep capture time, range, build, source freshness, profile labels and
+   Gateway identity. Retained records are not a live health check.
+3. The tool joins phone and Gateway by key (`gatewayConnectionId` = `connectionId`;
+   `clientId`/`attemptId`/`epoch` = `peerClientId`/`peerAttemptId`/`peerEpoch`), else by time
+   for pre-protocol-5 logs (`joinedBy`). With a key join only key-joined and Gateway-wide
+   records count, and the connection a recovery opened is never the lost one's cause. Outages
+   split per scene phase; an attempt belongs to the stretch it began in; a relay window explains
+   an episode only if it covers the loss and ends within the recovery delay.
+4. A `satisfied` OS path proves neither Tailscale health nor reachability of the Mac.
+5. Preserve the first fault and revisions. Never clear app data, Keychain, sessions or
+   credentials; Gateway transitions stay the user's or maintainer's.
 
 ## Interpret the diagnostics
 
 | Evidence | Interpretation / next check |
 | --- | --- |
-| `stage=transport-open` (`transportOpened=false`) timeout | The WebSocket never opened: the phone's path did not reach the Mac (endpoint, network or Tailscale path). `waitedForConnectivity=true` means URLSession itself waited for a path; `interfaces=` lists the phone's current path interfaces (`other` is typically the Tailscale tunnel). Not evidence about the Gateway. |
-| `stage=hello-receive` timeout with `transportOpened=true` | The socket opened (`transportOpenMs`) but the Mac did not answer hello within the deadline. Check the Gateway log for a matching `connection.opened` and for `gateway.event-loop-delay` around that time. |
-| `connection.closed` or `connection.opened` carrying `swapUsedBytes` near `swapTotalBytes`, or `memoryPressure=warn`/`critical` | The host was paging when the phone's socket ended or was re-established. These facts come from the same heartbeat-refreshed sample as `gateway.event-loop-delay`'s, and `hostSampleAgeMs` says how old that sample was when the record was written: a probe that loses its 1 s race is discarded, so the age — not the 25 s tick — bounds the staleness. Read the fields as described under the table; the drop itself can still be the path or the client, so this is evidence about the Mac, not attribution. |
-| `stage=hello-send` timeout with `transportOpened=true` | The socket opened but the hello write did not complete; suspect a stalled path after opening. |
-| `ping_timeout` with zero event-queue admission/high-water | The local event reducer did not overflow that epoch. Investigate transport/path or an unobserved process stall. |
-| Fast successful `session.open`, no `session.sync`, then client close / `decode_limit` | The client rejected response structure before sync. Compare `frameBytes`, `decodeLimit`, `decodeActual`, `decodeMaximum` and sanitized `decodePath`; a sub-megabyte response can still exceed the node ceiling. This is not proof of path loss. |
-| `event_overflow` with topic, count/byte limit, oldest age and dequeue timing | Mobile consumer pressure. Trace what held the consumer, including synchronization reads; do not merely enlarge the queue. |
-| `connection.outbound-capacity` | Actual server queue count/byte pressure. Inspect high-water marks, `wsBufferedBytes`, `nextTopic`/`nextBytes` for the frame that did not fit, `oldestTopic` for the frame everything was waiting behind, and process memory. |
-| `http.request-capacity` / `http.connection-capacity`, or `http.upgrade` with `reason=request_capacity` / `connection_capacity` | Inspect the named global, identity, address or connection bound and retiring owners; one physical socket is not one request. The upgrade record names its bound in `reason` and carries the counts in its message. |
-| `connection.superseded` | The same identity reconnected while at its socket cap. Its logged `lastInboundAgeMs` shows how stale the replaced socket was; repeated supersession of fresh sockets suggests a client owning more concurrent sockets than the cap. A socket that had not said hello yet reports the supersession in its own `http.upgrade` (`reason=superseded`). |
-| `http.upgrade` with `outcome=abandoned` | The peer reached this Mac and opened the socket, then the attempt ended before hello (`phaseReached=handshake`; `helloMs` is how long it kept the phase open). `reason` names which side ended it: `peer_closed` the peer vanishing, `hello_timeout` the Gateway's own hello deadline (`GATEWAY_CONNECTION_POLICY.helloDeadlineMs`), `superseded` a newer connection from the same identity, `device_revoked` a revocation of the device, `shutting_down` a Gateway shutdown. A large `authMs` means the credential wait was slow, a large `acceptToUpgradeMs` means the request waited behind other HTTP work — neither is a path fault. |
-| `http.upgrade` with `outcome=rejected` | The Gateway refused the upgrade; `reason` names which bound or phase did. `phaseReached=request` means before credentials (`warming_up`, `shutting_down`, `request_capacity`, `unexpected_path`, `unreadable_request`), `auth` means the credential or the readiness recheck (`unauthenticated`, `warming_up`, `shutting_down`, `authentication_timeout`) or capacity (`connection_capacity`), `handshake` means the WebSocket handshake itself was refused, `hello` means a hello arrived and was refused (`hello_required`, `protocol_mismatch`) or a frame was (`invalid_frame`: a first frame that is not JSON, or one the WebSocket library itself refuses as oversized or malformed). |
-| `http.upgrade` with `outcome=abandoned` and `phaseReached=auth` | The attempt ended while the credential was still being read: `reason=peer_closed` means the peer left, `shutting_down` means a Gateway shutdown destroyed the socket. A peer that left is not a refusal: check the phone's records at that instant before the Gateway's readiness. |
-| `http.upgrade` with `outcome=opened` and `authMs` or `helloMs` near or over `UPGRADE_SLOW_WARNING_MS` (1,000 ms) | The connection needed a second or more to become usable. The record is a warning whenever the attempt took at least 1,000 ms from the TCP accept (`acceptToUpgradeMs + authMs + handshakeMs + helloMs`), whatever the phase that was slow. `authMs` is the credential read (device-store mutex); `helloMs` runs from handshake completion to the Gateway processing the hello frame, so it includes the peer's own send delay and the network path, not only the Gateway's handling. Check `gateway.event-loop-delay` and `gateway.resources` around the same instant; the peer's hello key joins this record to its phone records. |
-| `connection.inbound-silent` | The socket stayed open, received no frame for at least 12 s, and liveness was expected: either a ping the Gateway sent went unanswered or the client pings on its own and went quiet. `peerPath=relay` or `offline` points at the Tailscale path (`peerRelay` names the relay carrying it, empty for a direct or offline peer); `direct` with a silent socket points at the phone or its process; `unknown` means there is no usable Tailscale answer for that address (loopback/LAN, no CLI, a status timeout, or a missing/malformed `Online` value) and says nothing about the path. The paired `connection.inbound-resumed`, when the socket survives the episode, gives its `silentMs`. Repeated silences at `peerPath=relay`/`offline` are a Tailscale flap (see "Tailscale flaps"). |
-| `http.upgrade` with `reason=authentication_timeout` | A pending upgrade exceeded its authentication deadline, so the Gateway refused it (`outcome=rejected`, `phaseReached=auth`). The callback is fenced and its cancellable credential wait is retired. |
-| `closeCode` / `httpStatusCode` / `platformCode` | Separate facts, never interchangeable numbers. HTTP 401/403 stop automatic admission; 503 is retryable capacity/unavailability. URLSession may report 1005/1006 rather than expose the peer's exact close frame; that absence must remain explicit. |
-| `connection.projection-rejected` | A producer violated the projection contract. Narrow/reproduce that producer instead of reconnecting the whole service indefinitely. |
-| `gateway.event-loop-delay` | A sampled heartbeat timer was delayed by at least one second (`durationMs`). Counts, queued bytes, RSS, heap and external-memory bytes help separate queue pressure from wider process work. Over exactly the delayed heartbeat interval it also carries `gcCount`, `gcPauseMs`, `gcMaxPauseMs` and `eventLoopUtilization`, plus host `hostFreeBytes`, `hostTotalBytes`, `swapUsedBytes`, `swapTotalBytes`, `memoryPressure`, `hostMemoryAvailablePercent` and `hostSampleAgeMs` (sampled once per record, bounded to 1 s, `host=unavailable` otherwise). GC pause time close to the delay points at garbage collection; utilization near 1 with little GC points at the Gateway's own synchronous work; low utilization with heavy swap or a low `hostMemoryAvailablePercent` points at the host not running the process. These are observations, not attribution. |
-| `gateway.restart-drain.waiting` / `gateway.restart-drain.stalled` | Inspect blocker session, category, method (for `rpc-mutation`), state and age; the stalled path has requested bounded shutdown, not durable success. |
+| `stage=transport-open` timeout (`transportOpened=false`) | The socket never opened: path, endpoint or Tailscale, not the Gateway. `waitedForConnectivity`, `interfaces=` describe the phone's path. |
+| `stage=hello-send` / `hello-receive` timeout, `transportOpened=true` | Opened but stalled; for receive, look for `connection.opened` and `gateway.event-loop-delay`. |
+| `ping_timeout` with zero event-queue pressure | Not the reducer: transport, path or an unobserved process stall. |
+| Fast `session.open`, no `session.sync`, then `decode_limit` | The client rejected structure (`frameBytes`, `decodeLimit`, `decodeActual`, `decodePath`); not path loss. |
+| `event_overflow` | Mobile consumer pressure; trace what held it, do not enlarge the queue. |
+| `connection.outbound-capacity` | Server queue pressure: high-water marks, `wsBufferedBytes`, `nextTopic`/`nextBytes`, `oldestTopic`, memory. |
+| `http.*-capacity`, `http.upgrade reason=*_capacity` | The named bound; one socket is not one request. |
+| `connection.superseded` | Same identity reconnected at its cap; repeated fresh supersessions mean a client holding too many sockets. |
+| `http.upgrade outcome=abandoned` | Reached the Mac, ended before hello: `reason` `peer_closed`, `hello_timeout`, `superseded`, `device_revoked`, `shutting_down`; large `authMs` or `acceptToUpgradeMs` are local waits, not path faults. |
+| `http.upgrade outcome=rejected` | `phaseReached` `request`, `auth` (incl. `authentication_timeout`), `handshake` or `hello` (`hello_required`, `protocol_mismatch`, `invalid_frame`). |
+| `http.upgrade outcome=opened` ≥ `UPGRADE_SLOW_WARNING_MS` | Slow to usable; `helloMs` includes the peer's send and path. Check loop delay and resources. |
+| `connection.inbound-silent` | `peerPath=relay`/`offline`: Tailscale path; `direct`: phone or its process; `unknown`: no usable answer. Repeats at relay are flaps (below). |
+| `closeCode` / `httpStatusCode` / `platformCode` | Separate facts. 401/403 stop admission; 503 is retryable; 1005/1006 may hide the peer's close. |
+| `connection.projection-rejected` | A producer broke the projection contract; fix that producer. |
+| `gateway.event-loop-delay` | GC pause near the delay → GC; utilization near 1 → the Gateway's own work; heavy swap or low `hostMemoryAvailablePercent` → the host. Observations, not attribution. |
+| Host fields on `connection.opened`/`closed` | The host was paging around the drop; evidence about the Mac only. |
+| `gateway.restart-drain.waiting` / `.stalled` | Blocker session, category, method, state, age; stalled means bounded shutdown, not success. |
 
-Memory measurements and timer drift are observations, not attribution. The
-25-second heartbeat sampler cannot prove absence of every shorter event-loop
-stall. A current low-RSS process likewise does not describe its historical peak.
+The 25 s sampler cannot prove the absence of shorter stalls; a low current RSS says nothing
+about the historical peak.
 
 ### Reading the host memory fields
 
-- `hostMemoryAvailablePercent` (`kern.memorystatus_level`) is the percentage of
-  memory the kernel still considers available: the same number `memory_pressure`
-  prints, so a value an operator recognizes from that tool reads the same here.
-  This is the field that answers "was the Mac short of memory?", read together
-  with the other fields below rather than against a fixed threshold.
-- `memoryPressure` (`kern.memorystatus_vm_pressure_level`) is the kernel's own
-  normal/warn/critical verdict. It can lag a sudden squeeze; read it next to the
-  percentage instead of as a substitute for it.
-- `swapUsedBytes` against `swapTotalBytes` is what "paging hard" means: used at
-  or near the total is a host that is out of headroom, while a small used value
-  on a large total is ordinary long-run macOS behavior.
-- `hostFreeBytes`/`hostTotalBytes` are Node's `os.freemem`/`os.totalmem`. On
-  macOS `os.freemem` counts free pages only, so a healthy, busy Mac normally
-  reports a small `hostFreeBytes`; that number alone is not pressure, which is
-  why this list carries the kernel's percentage as well.
-- `hostSampleAgeMs` is the age of the cached sample when the record was written
-  (0 when the record's own probe supplied it). The transport probes the host at
-  startup and once per 25 s heartbeat, but a probe that exceeds its 1 s bound is
-  discarded and the previous sample stays, so the age — not the tick — bounds
-  how stale these numbers can be. Judge a drop or a reconnect with that age in
-  view, because a small `swapUsedBytes` can simply be an old sample.
+- `hostMemoryAvailablePercent` (`kern.memorystatus_level`): the kernel's available share, the
+  number `memory_pressure` prints; the field that answers "was the Mac short of memory?".
+- `memoryPressure` (`kern.memorystatus_vm_pressure_level`): normal/warn/critical; can lag.
+- `swapUsedBytes` near `swapTotalBytes` is paging hard; a small used value is normal.
+- `hostFreeBytes`/`hostTotalBytes` are `os.freemem`/`os.totalmem`; free pages only, so small on
+  a healthy Mac.
+- `hostSampleAgeMs`: age of the cached sample (probed at startup and each heartbeat, 1 s bound;
+  a slow probe keeps the old sample).
 
 ## Tailscale flaps
 
-A flap is Tailscale's path between the phone and this Mac dropping to relay-only
-(or offline) while the local network keeps working. Nothing in the Gateway is at
-fault: the socket at the Mac carries nothing in either direction until the path
-returns. How long the path stays quiet decides whether that socket survives it.
-The phone pings every 10 s and waits 8 s for the answer
-(`GatewayConnectionPolicy.clientPingInterval`/`clientPongDeadline`), and a probe
-whose deadline passes with no inbound frame since it was sent retires the
-connection, so the phone drops the socket within about 18 s of the path going
-quiet. The Gateway retires a socket only after three missed 25 s heartbeats
-(`GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs`). A flap shorter than about
-18 s therefore ends with the socket still open and nothing but the records
-below; the worked example's 30–121 s flaps disconnect the phone.
+A flap is Tailscale's path dropping to relay-only or offline while the LAN works; nothing flows
+until it returns. The phone drops its socket within about 18 s; the Gateway after three missed
+heartbeats, so shorter flaps leave only records. The pinned LAN lane is the release's answer:
+on a shared network the phone races it against the Tailscale endpoint (E-3c, E-3d); kill switch
+`--lan-endpoint off` / `TRON_GATEWAY_LAN_ENDPOINT=off`
+([LAN listener](../src/transport/protocol.md#lan-listener)).
 
-The release's own answer is the pinned LAN lane: while the phone and the Mac
-share a network, E-3c races the advertised LAN endpoint against the saved
-Tailscale endpoint and keeps the winner for the epoch, so a relay-only window
-on the tailnet never sits on the socket (E-3c, E-3d). The lane is on by default
-for a Gateway that is not bound to loopback; `--lan-endpoint off` or
-`TRON_GATEWAY_LAN_ENDPOINT=off` disables it, and that setting is the kill switch
-R-4 reviews. The Mac-supervised Gateway takes the variable through its launchd
-session instead — `launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off` and a restart
-the user performs, because the wrapper's plist arguments and environment are
-fixed ([protocol](../src/transport/protocol.md#lan-listener)).
-
-- **Gateway records.** One `connection.inbound-silent` (warning) per silence
-  episode per socket, written at the first heartbeat tick (every 25 s) that
-  finds no inbound frame for `INBOUND_SILENCE_WARNING_MS` (12 s) with liveness
-  expected: the record lands between 12 s and about 37 s after the last frame,
-  and a flap that ends sooner leaves no Gateway record at all. It names the
-  peer (`connectionId`, `peerClientId`, `peerAttemptId`, `peerEpoch`) and the
-  path (`peerPath=relay`/`offline`, `peerRelay` the relay carrying it). When the
-  socket survives the flap, its next inbound frame writes
-  `connection.inbound-resumed` (info) with the episode's `silentMs`, and that
-  pair is the whole flap. When the flap disconnects the phone, the silent record
-  stays unpaired: the phone has already retired its connection with a liveness
-  `ping_timeout` failure and is reconnecting, and the Mac ends the socket either
-  when the phone's close reaches it after the path returns (`connection.closed`
-  with a large `lastInboundAgeMs`) or, if no close arrives, on the
-  three-missed-heartbeat bound (`connection.heartbeat-timeout` at roughly
-  75–100 s of silence, followed by that socket's `connection.closed`) — the
-  worked example's "abnormal Gateway close with a long-silent phone". `direct`
-  with silence points at the phone or its process, and `unknown` says nothing
-  about the path.
-- **Triage output.** `scripts/tron-triage EXPORT` reports each outage as one
-  episode whose cause is `path` when the Gateway's `connection.inbound-silent`
-  for it carries `peerPath=relay`/`offline` (the resume record is not required),
-  or when an attempt's own `transport-open` timeout never reached the Mac. Add
-  `--tailscale-window` for a log written before those records: the tool reads
-  the Tailscale network extension's own log over the export's range and names
-  the covering window as cause evidence (`[cause] tailscale … path.change: relay
-  path window <start>..<end>`). A window that closed before the outage ended is
-  `[context]` ("does not cover this episode") and the episode keeps its measured
-  cause, so a silent recovery gap is not blamed on the path. Filter the read with
-  `--tailscale-peer NODEKEY`: the extension serves every tailnet peer, so
-  another peer's relay stretch could otherwise be read as the phone's. The
-  report carries the windows it read (`inputs.tailscaleWindow.relayWindows`), so
-  `--out` keeps them after the unified log has dropped the lines.
-- **Worked example** (2026-09-28, the incident these records were added for).
-  The phone and the Mac shared a LAN, yet Tailscale's direct path between them
-  dropped to relay-only about 14 times in 5.5 hours for 30–121 s each, with no
-  traffic in either direction. Every abnormal Gateway close with a long-silent
-  phone (01:35, 02:40, 03:24, 03:53, 04:56, 05:38, 05:46, 05:55, 05:58 UTC) and
-  every phone episode in the 01:27–01:35 cluster fell inside one of those
-  windows. On that incident's export the capture reported 14 `path` episodes,
-  each naming a relay window that covers it or the phone's own timeout, against
-  5 without it; the two silent recovery gaps (03:24:45–03:30:30,
-  04:56:31–04:58:46) stayed `unknown` because the windows overlapping them had
-  closed 248 s and 111 s earlier. The capture is bounded by what the unified log
-  still holds: the 01:27–01:36 windows had already aged out of it, so re-run it
-  soon after an incident or read the windows it retained.
-- **User-side checks** when flaps recur:
-  - iPhone Tailscale: keep the app current (App Store) and confirm its VPN
-    configuration is enabled and shows a **direct** connection to the Mac while
-    both are on the same Wi-Fi. With the extension disabled the phone has no
-    route to the Mac's Tailscale address, so it opens no socket at all: the
-    symptom is the phone's own `transport-open` timeouts with no matching
-    Gateway `http.upgrade`, which triage reports as `path`. An outdated app is
-    worth updating, but nothing here attributes a relay-only socket to one.
-  - Wi-Fi private address (iOS Settings → Wi-Fi → the network's info button →
-    Private Wi-Fi Address): a rotating address presents a new MAC to the router
-    and discards the state the direct path was using. Check whether a flap lines
-    up with a network change or an address rotation.
-  - Router client steering: band/mesh steering and fast roaming (802.11k/v/r)
-    move the phone between radios and access points. Check the router's client
-    or steering log for the phone at the same timestamps, and whether 2.4 GHz and
-    5 GHz share one SSID.
-  - Read both logs together: `peerPath`/`peerRelay` on the Gateway side and the
-    phone's own `gateway.attempt` records decide whether the path or the phone
-    was down.
+- **Gateway records:** one `connection.inbound-silent` per episode per socket (12–37 s after the
+  last frame) naming the peer and `peerPath`/`peerRelay`; a surviving socket then logs
+  `connection.inbound-resumed`. A disconnected phone leaves the silent record unpaired; the Mac
+  ends the socket when the close arrives (`connection.closed` with a large `lastInboundAgeMs`)
+  or at about 75–100 s (`connection.heartbeat-timeout`).
+- **Triage:** an episode is `path` when its silent record carries `relay`/`offline` or its own
+  `transport-open` timed out; `--tailscale-window` names covering windows (`[cause]`) and
+  earlier ones as `[context]`, keeping them in `inputs.tailscaleWindow.relayWindows`. Re-run
+  soon after an incident: the unified log ages out.
+- **User checks:** iPhone Tailscale current and showing a **direct** connection on shared
+  Wi-Fi (disabled extension → `transport-open` timeouts with no `http.upgrade`); a rotating
+  Private Wi-Fi Address; router band/mesh steering and 802.11k/v/r roaming at the same times;
+  read `peerPath` beside the phone's `gateway.attempt` records.
 
 ## Regression expectations and remaining limits
 
-`server-capacity.integration.test.ts` protects payload-reference accounting,
-count/byte admission, stalled-close retirement, late subscription rejection and
-unrelated-client responsiveness. Its regression controls fail against the old
-unaccounted-retention/admission behavior. Its ordered-burst and overflow cases
-run for local and compressed paired clients; `server-compression.integration.test.ts`
-covers negotiation by credential kind, URLSession's bare offer, a requested
-`server_no_context_takeover`, and the inflated-size inbound bound. The synchronization and revocation
-integration suites protect ordering and accepted-command ownership. iOS recovery
-and dashboard owner tests cover attempt exhaustion, explicit retry and entry
-replacement without silently resetting the budget.
+`server-capacity`, `server-compression`, `server-heartbeat`, `server-pong-backlog`, the
+synchronization and revocation integration suites, and the iOS recovery and dashboard owner
+tests protect these boundaries; the shared JSON-limit fixture is checked against producer and
+native constants. Subagent transcript leases keep their reservation until their physical read
+drains after close.
 
-Capacity integration tests (`server-capacity.integration.test.ts`) cover exact node limits, read-local fallback, both client roles,
-and rejected-open subscription cleanup. The shared JSON-limit fixture is checked
-against both producer and native constants; the native transport regression drives
-an actual over-node-budget frame through decoding, diagnostic capture and strict
-retirement. Native confirmed-mutation tests ensure an oversized command/status
-response cannot be mistaken for a failed command or authorize replay.
-
-Published subagent transcript leases retain their capacity reservation and exact
-identity until their physical read lane drains after close. Closing aborts queued
-reads and detaches watchers/timers immediately; an already running filesystem
-read remains accounted for until settlement. Delayed page/invalidation callbacks
-cannot publish into a successor lease. Repeated close is idempotent, and accepted
-stop commands retain their mutation owner. The lease regression verifies capacity
-remains occupied while retired physical reads are blocked.
-
-These boundaries are not a certification of unlimited sessions or browser
-processes. Cold SDK session opening still parses complete JSONL synchronously;
-runtime snapshots perform history-dependent derivations, and projecting large
-provider results can do work before final wire truncation. Browser viewer bounds
-do not bound provider-owned browser process creation. Session recovery claims the
-existing bounded quarantine synchronously and runs only its network wait in an
-owned task; optional auth-completion refreshes do not block global intake. Input
-cost and provider process creation still require a documented workload envelope,
-not a blanket scalability claim. Do not introduce transcript mirrors, workers,
-or higher queue limits to conceal them; the cost belongs to the owner that has
-it, not to a cache in front of it.
-
-The session catalog is one owner, not a cache. `session-catalog.ts` holds one
-in-memory row per canonical session file and is the request path's only
-membership source: `session.list`, a cold open, attention resolution, automation
-admission, workspace lookup and storage maintenance all read its rows, so no
-request walks the session folder. The owner keeps each row current from three
-feeds. The Gateway's own commit points (create, persist, summary change, rename,
-rekey, fork, delete) apply the row at the same boundary that commits the change.
-A recursive `fs.watch` on the sessions root treats each event as a hint and
-re-reads that path once per `CATALOG_EVENT_DEBOUNCE_MS` (250 ms) quiet spell,
-capped at `CATALOG_EVENT_MAX_WAIT_MS` (1 s) so a writer that never goes quiet
-still reaches its row. An event naming a folder re-reads the transcripts under
-it; a folder that disappears while it is being walked (an `rm -rf` still in
-progress under the named folder) is absence, so only its published rows are
-re-read and dropped rather than starting a whole-folder pass. Only a folder
-that cannot be read (including one replaced by a file), or holds more transcripts than one event can name, falls
-back to that pass. Pending per-path timers are capped at
-`CATALOG_EVENT_PENDING_PATH_LIMIT` (256); a burst beyond that bound clears the
-individual hints and runs one whole-folder reconcile. Events arriving during
-that overflow pass use the unnamed-event debounce (250 ms quiet spell, capped at
-1 s), rather than triggering another pass per event. Overflow reconciles are
-marked `trigger=watcher-overflow` in `catalog.reconciled`; rows covered by that
-cut produce no per-row `catalog.changed` records. A whole-folder reconcile every
-`CATALOG_RECONCILE_INTERVAL_MS` (30 minutes) is the backstop for what the
-watcher cannot see — a dropped event, a watcher that had stopped, a root that
-moved back — and runs in bounded batches that yield to the background-work
-scheduler between them, so it never holds the loop while a request waits. A
-watcher error or a folder it cannot watch records `catalog.watcher-reset`,
-restarts the watcher and reconciles once; reads keep serving the last good cut.
-
-JSONL stays authoritative. The durable `gateway/catalog-metadata-v2.json`
-document is the owner's own acceleration and holds only identity/summary
-metadata, file identity, size/mtime/EOF and a tail-boundary hash; only the owner
-writes it, debounced, and a read never does. A missing, corrupt or foreign-root
-document leaves the index to rebuild every row from canonical files. A pass that
-cannot prove a file publishes the rows it could prove, keeps the previous row for
-the file it could not, and refuses retryably (`catalog_not_ready`) rather than
-answering membership from a cut that might be wrong; a read that lands before the
-first cut is retryable `busy` for the same reason. Membership fences at a commit
-check the target file's own identity and header, never the tree. The request path
-therefore does no work proportional to catalog size, and a change-driven index —
-not a speculative cache — is what makes that true.
+These are not certifications of unlimited sessions or browser processes: cold SDK opens parse
+whole JSONL, snapshots do history-dependent work, and browser viewer bounds do not bound
+provider browser processes. Do not add transcript mirrors, workers or higher queue limits to
+hide those costs; the catalog ([catalog](../src/sessions/catalog.md#the-catalog-owner)) is one
+change-driven owner, not a cache.
 
 ## Isolated qualification
 
-- `server-http-lifecycle` and `server-http-admission` exercise cancellation behind
-  blocked credentials, pending-upgrade EOF/deadline, bounded late file acquisition,
-  partial headers, pipelining, startup failure, and physical close. Resource-store
-  regressions protect pre-await reader reservations, exact late release, failed
-  acquisitions after prune/dispose, and durable display revocation during reads.
-- `server-capacity` checks three connect/fanout/close waves at 1/4/16/32 peers,
-  including global summaries for unsubscribed sessions and ordered wire fences.
-- `scripts/ios-gateway-e2e-test all` uses a private Gateway and a fixture-only
-  bounded proxy. The proxy verifies the harness's sibling Gateway process, its
-  birth/command identity and ownership of the loopback listener before forwarding.
-  The proxy accepts the app's `permessage-deflate` offer and offers it upstream
-  only when the app negotiated it. Its `proxy.bridge-opened` lines and the Gateway's
-  `connection.opened` records show what the app negotiated.
-  It exercises compressed frames at and one byte over the 1 MiB decoded ceiling,
-  delayed hello/open/sync, blackholed traffic, HTTP upgrade statuses,
-  remote-close metadata, and loss of an accepted response followed by durable
-  receipt/canonical exactly-once verification. A skipped boundary case fails the
-  runner. It runs on this Mac (a direct journey for connection-path
-  changes); hosted CI does not run it.
-- `scripts/ios-gateway-e2e-test run-lan` renews the same private Gateway with its
-  pinned LAN lane bound to this Mac's private address and runs the E-3c two-lane
-  case: the app pairs over the proxy, races the advertised pinned lane against
-  the saved Tailscale endpoint, and then holds a live LAN connection through a
-  90 s blackhole of the saved lane (WebSocket frames and plain HTTP), where an
-  attachment upload is the route that proves the epoch's HTTP requests followed
-  the winning lane. The same case blocks the lane at a listening socket that
-  never answers TLS, so the saved lane must win after the 250 ms stagger and the
-  losing socket must be retired rather than left dialing. It needs a private
-  address on this host; the lane is off for the boundary case above, which keeps
-  the fault proxy on every leg it drives. Run it after the boundary case.
-- Build source, then run `node --expose-gc packages/gateway/scripts/measure-projection.mjs`
-  from the repository root (`--extended` adds 25k/100k-entry histories;
-  `--baseline /path/to/compiled/dist` enables balanced comparisons). The tool
-  checks canonical input and independent row/content/cursor equality while
-  recording input size, branch walks, output bytes/nodes and raw timing samples.
-  One canonical branch cut is reused per projection; full-branch tool ownership
-  is not replaced by a tail cache. These are warm CPU measurements, not cellular,
-  cold-start, energy or unlimited-concurrency certification.
+- `server-http-lifecycle` and `server-http-admission`: cancellation behind blocked
+  credentials, upgrade EOF and deadlines, late file acquisition, partial headers, pipelining,
+  startup failure, physical close. `server-capacity`: connect/fan-out/close waves at
+  1/4/16/32 peers.
+- `scripts/ios-gateway-e2e-test all`: a private Gateway behind a fixture proxy that verifies
+  its sibling Gateway before forwarding and mirrors compression; covers compressed frames at
+  and one byte over 1 MiB, delayed hello/open/sync, blackholes, upgrade statuses, close
+  metadata and a lost accepted response verified exactly once. A skipped case fails. Local
+  only; hosted CI does not run it.
+- `scripts/ios-gateway-e2e-test run-lan` (after the above; needs a private address): the E-3c
+  two-lane race, a live LAN connection through a 90 s blackhole of the saved lane (an upload
+  proves HTTP follows the winner), and a lane that never answers TLS losing after the 250 ms
+  stagger.
+- `node --expose-gc packages/gateway/scripts/measure-projection.mjs [--extended] [--baseline DIST]` after a build: warm CPU projection measurements with equality checks, not cellular,
+  cold-start or energy certification.
