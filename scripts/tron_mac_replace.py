@@ -27,8 +27,9 @@ import time
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from tron_mac_replace_journal import Journal, TERMINAL_STATES, describe, now, private_mkdir  # noqa: E402
-from tron_mac_replace_platform import Failure, MacPlatform, RpcError, capture, git, git_succeeds  # noqa: E402
+from tron_mac_replace_journal import Journal, TERMINAL_STATES, describe, now, private_mkdir, write_json_atomic  # noqa: E402
+from tron_mac_replace_platform import Failure, MacPlatform, capture, git, git_succeeds  # noqa: E402
+from tron_mac_replace_rpc import RpcError  # noqa: E402
 
 LIBC = ctypes.CDLL(None, use_errno=True)
 DISK_RESERVE = {'full': 15 * 1024 ** 3, 'quick': 3 * 1024 ** 3}
@@ -521,7 +522,7 @@ def launch_runner(platform, journal, script_dir):
     """Detach the runner as its own launchd job, from a private copy of this script."""
     operation = journal.directory
     runtime = private_mkdir(operation / 'runner')
-    for name in ('tron_mac_replace.py', 'tron_mac_replace_journal.py', 'tron_mac_replace_platform.py', *platform.runner_files()):
+    for name in (*(f'tron_mac_replace{part}.py' for part in ('', '_journal', '_platform', '_rpc')), *platform.runner_files()):
         shutil.copy2(Path(script_dir) / name, runtime / name)
     label = runner_label(journal.data['id'])
     plist = operation / 'runner.plist'
@@ -566,7 +567,6 @@ def start(platform, root, client_protocol=None, allow_protocol_change=False, scr
                 'root': decided['root'], 'revision': decided['revision'], 'head': decided['head'],
                 'running': decided['running'],
                 'clientProtocol': client_protocol, 'allowProtocolChange': allow_protocol_change})
-            from tron_mac_replace_journal import write_json_atomic
             write_json_atomic(platform.store / 'current.json', {'id': operation})
         else:
             journal.data['source'].update(clientProtocol=client_protocol, allowProtocolChange=allow_protocol_change)
