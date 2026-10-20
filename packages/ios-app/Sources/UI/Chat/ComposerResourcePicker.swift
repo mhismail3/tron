@@ -7,16 +7,18 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
 
     let id: String
     let kind: Kind
-    let invocationName: String
     let displayName: String
     let friendlyName: String
-    let description: String?
-    let argumentHint: String?
-    let source: CommandInfo.Source
-    let sourcePath: String?
-    let resourceSource: String?
-    let resourceScope: CommandInfo.ResourceScope?
-    let resourceOrigin: CommandInfo.ResourceOrigin?
+    /// The catalog row this entry presents; staging and detail reads send it back as is.
+    let commandInfo: CommandInfo
+    var invocationName: String { commandInfo.name }
+    var description: String? { commandInfo.description }
+    var argumentHint: String? { commandInfo.argumentHint }
+    var source: CommandInfo.Source { commandInfo.source }
+    var sourcePath: String? { commandInfo.sourcePath }
+    var resourceSource: String? { commandInfo.resourceSource }
+    var resourceScope: CommandInfo.ResourceScope? { commandInfo.resourceScope }
+    var resourceOrigin: CommandInfo.ResourceOrigin? { commandInfo.resourceOrigin }
     fileprivate let normalizedName: String
     fileprivate let normalizedSearch: String
 
@@ -38,33 +40,13 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
         guard !displayName.isEmpty else { return nil }
         self.id = command.id
         self.kind = kind
-        invocationName = command.name
         self.displayName = displayName
         friendlyName = ComposerResourceNameFormatter.friendly(displayName)
-        description = command.description
-        argumentHint = command.argumentHint
-        source = command.source
-        sourcePath = command.sourcePath
-        resourceSource = command.resourceSource
-        resourceScope = command.resourceScope
-        resourceOrigin = command.resourceOrigin
+        commandInfo = command
         normalizedName = displayName.lowercased()
         normalizedSearch = [displayName, command.description, command.argumentHint]
             .compactMap { $0?.lowercased() }
             .joined(separator: "\u{1f}")
-    }
-
-    var commandInfo: CommandInfo {
-        CommandInfo(
-            name: invocationName,
-            description: description,
-            argumentHint: argumentHint,
-            source: source,
-            sourcePath: sourcePath,
-            resourceSource: resourceSource,
-            resourceScope: resourceScope,
-            resourceOrigin: resourceOrigin
-        )
     }
 
     func invocation(arguments: String = "") -> ComposerResourceInvocation {
