@@ -10,8 +10,11 @@ extension XCTestCase {
     @MainActor
     func assertToolbarTint(_ app: XCUIApplication, title: String, excluding: Set<String> = [],
                            file: StaticString = #filePath, line: UInt = #line) {
-        let titleText = app.navigationBars.staticTexts[title].firstMatch
-        XCTAssertTrue(titleText.waitForExistence(timeout: 5), "No sheet titled \(title): \(app.debugDescription)", file: file, line: line)
+        let titles = app.navigationBars.staticTexts.matching(identifier: title)
+        XCTAssertTrue(titles.firstMatch.waitForExistence(timeout: 5), "No sheet titled \(title): \(app.debugDescription)", file: file, line: line)
+        // A covered sheet of the same title (Profile under its item) stays in the tree
+        // with no activation point; the frontmost sheet's title is the last.
+        let titleText = titles.allElementsBoundByIndex.last ?? titles.firstMatch
         // Let the presentation settle so the screenshot shows final colours.
         _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: titleText)], timeout: 3)
         let bar = app.navigationBars.containing(.staticText, identifier: title).allElementsBoundByIndex

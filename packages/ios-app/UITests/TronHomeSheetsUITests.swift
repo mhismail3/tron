@@ -832,20 +832,20 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(waitFor(element(app, "home-profile-item-\(decision)"), "label CONTAINS 'top wins'"))
         app.buttons["home-sheet-done-profile"].tap()
 
-        // Changes: Home's own learn is in the default feed, with its detail and Undo.
+        // Changes: the default feed is everyone's, newest first (#1305); Home's own learn is below, with its Undo.
         let settings = element(app, "home-manage-settings")
         for _ in 0..<6 where !settings.isHittable { app.swipeUp() }
         settings.tap()
         let changes = app.buttons["Changes"].firstMatch
         XCTAssertTrue(changes.waitForExistence(timeout: 8))
         changes.tap()
-        let entry = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label CONTAINS 'Profile item'")).firstMatch
-        XCTAssertTrue(entry.waitForExistence(timeout: 8), app.debugDescription)
-        XCTAssertTrue(entry.label.contains("Inferred preference"), entry.label)
+        let entries = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label CONTAINS 'Profile item'"))
+        XCTAssertTrue(entries.firstMatch.waitForExistence(timeout: 8) && entries.firstMatch.label.contains("Changed by You"), app.debugDescription)
+        let entry = entries.matching(NSPredicate(format: "label CONTAINS 'Changed by Home'")).firstMatch
+        for _ in 0..<8 where !entry.isHittable { app.swipeUp() }; XCTAssertTrue(entry.label.contains("Inferred preference"), entry.label)
         keep("profile-edit-08-changes")
         entry.tap()
-        let undo = app.buttons["Undo"].firstMatch
-        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Undo"].firstMatch.waitForExistence(timeout: 5))
         keep("profile-edit-09-change-detail")
     }
 
