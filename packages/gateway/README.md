@@ -114,10 +114,9 @@ See [notifications](src/notifications/README.md).
 ## Transport
 
 Wire families and the subscription barrier: [transport](src/transport/README.md#contract).
-Display and live viewing: [display](src/display/README.md); uploads and exports:
-[uploads](src/machine/uploads.md). Models, context windows and provider login:
-[runtime configuration](src/admin/runtime-configuration.md); update, drain and exit:
-[host control](src/admin/host-control.md).
+Also [display](src/display/README.md), [uploads](src/machine/uploads.md),
+[runtime configuration](src/admin/runtime-configuration.md) (models, context windows,
+login) and [host control](src/admin/host-control.md) (update, drain, exit).
 
 ## Session invariants
 
