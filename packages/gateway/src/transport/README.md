@@ -51,7 +51,7 @@ redacted `message` and the writer-stamped `process`, `runtimeEpoch`, `payloadVer
 call sites add correlation as fields (`sessionId`, `connectionId`, `commandId`,
 `requestID`, `method`, `outcome`, `code`, `reason`, `durationMs`, `step`) and pass a
 thrown value as `error` (stored bounded and redacted with one level of `cause`). Levels,
-streams, rotation and the event catalog: [observability](../../docs/observability.md).
+streams and rotation: [observability](../../docs/observability.md); records: Signals below.
 
 ## Invariants
 
@@ -83,9 +83,47 @@ streams, rotation and the event catalog: [observability](../../docs/observabilit
 
 ## Signals
 
-Transport's records (`http.upgrade`, `connection.*`, `rpc.*`, `gateway.resources`) are
-catalogued in [observability](../../docs/observability.md) and
-[connection resilience](../../docs/connection-resilience.md).
+Connection records carry `connectionId`, `peerClientId`, `peerAttemptId` and `peerEpoch`
+(the peer's hello key, when sent); "the host sample" is `stall-diagnostics.ts`'s
+heartbeat-refreshed memory reading with its age.
+
+| Signal | Level | Meaning |
+|---|---|---|
+| `gateway.bound` | info | The listener bound, before warmup; with `gateway.listening` it bounds the warmup window |
+| `gateway.startup-phase` | info | `setStartupPhase` named the warmup phase `/health` reports during a 503 warmup (phase in the message) |
+| `gateway.listening` | info | Warmup finished and the Gateway serves; host and port in the message |
+| `gateway.transport-closing` | info | `finishClose` began retiring sockets; separates transport retirement from process stop |
+| `lan.listener` | info for a bind, a rebind or an expected disable (`setting_off`, `no_private_address`); warning for `bind_failed` and the `certificate_*` disables | The private-LAN listener (`lan-endpoint.ts`) bound, moved or disabled, written only on a transition: `state`, `family`, `port`, and `reason` while disabled; never the address |
+| `gateway.restart.requested` | info | An authenticated client requested a restart (`gateway-service.ts`); active-session count in the message; opens the drain timeline |
+| `gateway.stop.requested` | info | An authenticated client requested an intentional stop, recorded before its receipt settles |
+| `gateway.event-loop-delay` | warning | A heartbeat arrived `EVENT_LOOP_DELAY_WARNING_MS` (1,000 ms) late: `durationMs`, GC pauses, loop utilization and the host sample ([reading the host fields](../../docs/connection-resilience.md#reading-the-host-memory-fields)) |
+| `gateway.resources` | debug for a quiet minute; info when a named step moved; warning past `HEAP_WARNING_SHARE` (0.70), `EVENT_LOOP_P99_WARNING_MS` (100 ms) or `UNAUDIENCED_SNAPSHOT_WARNING` | One closed window per `RESOURCE_SAMPLE_INTERVAL_MS` (60 s): heap, RSS, loop delay p50/p99/max and utilization, live runtimes with transcript bytes and subscribers, snapshot builds (and those with no ready recipient), per-topic frames and bytes, catalog walks, fsyncs (`syncDurably`), outbound accepted and coalesced bytes. Steps: p99 in 20 ms bands, max in 250 ms bands, heap ±256 MiB, RSS ±10%, a runtime published or evicted |
+| `gateway.resources-failed` | warning, once per run of failures | A resource sample threw (`error`), or a tick found the previous sample still running (`reason`) |
+| `connection.opened` | debug for a local probe, info for a paired device | The first valid hello on an admitted socket: correlation, local/paired, role, `compression` ([frame compression](../../docs/connection-resilience.md#frame-compression)), admission-to-hello time; for a device the host sample and `hostSampleAgeMs` |
+| `http.connection-unused` | warning | An admitted TCP socket (main or LAN) closed before any request or upgrade: `transport`, `acceptToCloseMs`, `bytesRead`, platform `code`, `transportEnd`, `reason` (`silent`, `partial_http`, `invalid_http`, `tls_error`, `incomplete_tls_or_http`); never packets, paths or addresses |
+| `connection.closed` | debug for a local probe, info for a device | The socket closed: correlation, `durationMs`, `transportEnd` (`reset`, `timeout`, `fin`, `none` = no cause observed); close detail, frame counters and queue ages in the message; for a device the host sample |
+| `connection.superseded` | warning | A newer connection from one device identity displaced older ones: the displaced socket's correlation, inbound age and the limits |
+| `connection.heartbeat-timeout` | warning | Three heartbeat intervals passed with no inbound frame; miss count, inbound and write-progress ages and queue counters say whether the peer was silent or the writer stuck |
+| `connection.inbound-silent` | warning | No inbound frame for `INBOUND_SILENCE_WARNING_MS` (12 s) while liveness was expected; once per episode: `peerPath`, `peerPathSource`, `peerRelay` and Tailscale peer counters from one bounded `tailscale status` read, `unansweredPingMs` |
+| `connection.inbound-resumed` | info | The first inbound frame after a silence episode; `silentMs` |
+| `connection.outbound-capacity` | warning | The outbound queue hit its frame or byte bound and the connection closes: queue counts, high-water marks, `oldestTopic`, `nextTopic`/`nextBytes`, socket buffer and process pressure |
+| `connection.write-error` | error | A socket write failed: `error`, completed and accepted frame counts |
+| `connection.projection-rejected` | warning when an oversized frame becomes a bounded preview; error when encoding throws | Type, topic, byte count and node bounds; never the payload or the exception |
+| `http.connection-capacity` | warning | A new HTTP socket arrived at the connection limit; counts and limits in the message |
+| `http.request-capacity` | warning | An HTTP request arrived at admission capacity; a refused upgrade is `http.upgrade` `reason=request_capacity` |
+| `http.upgrade` | debug when opened at hello within `UPGRADE_SLOW_WARNING_MS` (1,000 ms); info for `warming_up`/`shutting_down`; warning when abandoned, otherwise rejected or slower | One record per WebSocket upgrade, at the phase it ends: `outcome`, `phaseReached`, `reason` (the bound or side that ended it), `transport` (`lan`, `tailscale`, `primary`), `acceptToUpgradeMs` (from the TCP accept), `authMs`, `handshakeMs`, `helloMs`, correlation once known, `peerProtocolVersion` on `protocol_mismatch` |
+| `http.upload.phase` | info | An authenticated `/v1/uploads` request with a valid `X-Tron-Request-ID` reached the route (`step=received`) or was staged (`step=staged`); elapsed time, staged bytes; never host, filename, MIME type, token or body |
+| `http.upload` | info when the response finished; warning on failure | One terminal record per upload: `requestID`, `outcome` (`response-finished`, `failure`), failure category, `durationMs`, staged or observed bytes; finishing is not proof the phone received it |
+| `http.upload-cleanup` | warning | Discarding an abandoned upload failed other than by conflict or not-found; owned bytes remain |
+| `rpc.error` | warning for a `GatewayError` other than `internal`; error, with `error`, for a fault or `internal` | An RPC handler threw: `method`, `requestID`, `connectionId`, `sessionId`, `commandId`, `code`, `outcome`, `reason`, `operationId`, `ageMs` |
+| `rpc.received` | info | An admitted `system.logs.export` reached its handler (`outcome=admitted`); joins the phone's `logs.export.requested` to `rpc.completed` |
+| `rpc.completed` | debug for a success under `SLOW_RPC_WARNING_MS` (1,000 ms), or `SLOW_PROMPT_WARNING_MS` (250 ms) for a prompt; warning at or above it, on failure or on `connectionClosed` | Every RPC end: correlation, `outcome`, `durationMs`, `stages` (`request-span.ts`, most expensive first, ≤ 1,024 bytes) and `unaccountedMs`. Prompt spans name lane waits, inventory admission, receipt persistence and response write; `settings.resolve` names its store awaits as finite `settings.*` stages |
+| `receipt.completed-persist-failed` | warning | The detached completed-receipt write after an accepted `session.prompt` response failed (`gateway-service.ts`); the pending receipt stays the replay fence |
+| `rpc.cancelled` | debug under `SLOW_RPC_WARNING_MS`; warning at or above it | A `{type:"cancel",id}` frame named a disposable read this connection owns, or a shared `session.open` lost its last waiter: `stage` (innermost open), `durationMs`, `stages`; replaces `rpc.completed`. Mutations and prompts are never cancelled |
+| `gateway.shed` | warning | A disposable read outlived its `DISPOSABLE_READ_DEADLINES_MS` deadline (`reason=deadline`), or a cold load (raised from `runtime-registry.ts`) met a heap past `HEAP_REFUSAL_SHARE` (`reason=heap`, `admission` `open`/`import`, heap bytes); the client gets `busy` with `retryAfterMs`; replaces `rpc.completed` |
+| `session.abort.settled` | info | `session.abort` settled (`gateway-service.ts`); `sessionId`, kind and operation in the message |
+| `session.abort.unsettled` | warning | `session.abort` threw; the runtime stays busy |
+| `artifacts.session-cleanup-pending` | warning | A deleted session's owned-artifact cleanup rejected; the leftover bytes remain |
 
 ## Verify
 

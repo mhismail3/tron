@@ -107,7 +107,13 @@ enforces its executable bit and terminal tests open a real PTY.
 
 ## Signals
 
-Machine records are catalogued in [observability](../../docs/observability.md).
+| Signal | Level | Meaning |
+|---|---|---|
+| `terminal.auto-closed` | info | The Gateway closed a non-busy app terminal: terminal id, `reason` (`idle`, `restart`), `elapsedMs` since its last input or attachment; never content or cwd |
+| `terminal.idle-check-failed` | warning | An idle pass could not read the idle setting or process table; every terminal is kept: `error` |
+| `host.started`, `host.stopped`, `host.idle-exit`, `shell.opened`, `shell.exited`, `shell.quit`, `terminal.auto-closed`, `terminal.idle-check-failed` in `gateway/mac-terminal/host.log` | JSON lines with `at` and `event` (not the Gateway log) | Mac Terminal's shell host (`mac-terminal-host.ts`) lifecycle and idle closures: `pid`, `protocol`, shell id, `exitCode`, `closed`, `reason`, `elapsedMs`; never input, output or cwd |
+| `uploads.storage-pressure` | info on return to `normal`; warning otherwise | A 10-minute maintenance pass changed attachment storage pressure; free bytes and the floor in the message |
+| `storage.maintenance-failed` | warning | The bounded artifact maintenance pass threw and will retry: `error` |
 
 ## Verify
 

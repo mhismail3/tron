@@ -103,13 +103,26 @@ disposable projection or an in-flight command owner.
 
 ## Signals
 
-| Signal | Meaning |
-|---|---|
-| `gateway.catalog` | Catalog admission and terminal decisions with generations, failure, page, revision and retry budget |
-| `reconnect.parked` | Recovery parked on an unsatisfied path; resumes at the 30 s probe |
-| `reconnect.skipped` | A reconnect request refused by a named guard |
-| `model.catalog.rejected` | A model page refused: page, schema path and finite reason, never values |
-| iOS client ring | 200 in-memory records (including typed decode failures) merged into Logs as `iOS client` |
+| Signal | Level | Meaning |
+|---|---|---|
+| `gateway.catalog` | info, or warning/error as the call site marks it | Catalog admission and terminal decisions with generations, failure, page, revision and retry budget |
+| `model.catalog.rejected` | error | A model page refused: page, schema path and finite reason, never values |
+| iOS client ring | memory | 200 in-memory records (including typed decode failures) merged into Logs as `iOS client` |
+| `app.started` | info | Once per launch: app version, build and OS in `details`; `lifecycleGeneration` |
+| `scene.resign-active` | info | The scene resigned active from a foreground phase and the buffer flushed: `sceneAt`, `from` |
+| `scene.foreground` | info | The scene left the background (a resume's inactive phase): `sceneAt`, `from=background` |
+| `scene.background` | info | The scene entered the background and the buffer flushed; recovery parks here |
+| `scene.active` | info | The scene became active, including at launch: `sceneAt`, `from` |
+| `pairing.result` | info on success; warning on failure | A pairing attempt settled: `outcome`, failure `code` |
+| `session.open.failure` | warning | Opening a session failed: `code` (`transport` only when the Gateway was never reached), `gatewayCode` (the Gateway's own code, `none` when minted locally), `profileID`, `connectionID`, `lifecycleGeneration` |
+| `session.sync.failure` | warning | A mounted projection could not resynchronize: `code`, `profileID`, `connectionID`, `lifecycleGeneration` |
+| `diagnostics.upload-failed` | warning | The export upload failed and the share sheet took over: `code` |
+| `gateway.attempt` | info | One finished connect attempt per profile, from the selected lifecycle or a dashboard pool entry: `owner` (`selected`, `pool`), `attemptId`, `retry`, `stageReached`, `reason`, `interfaces`, `pathSatisfied`, `delayBeforeMs`, `foreground`, `durationMs`, `outcome`; an unreachable pool profile writes about one per five minutes |
+| `connection.episode` | info | An admitted loss ended (`endedBy` `connected`, `background`, `stopped`): `startedAt`, `endedAt`, `attempts`, `causes`, `foregroundMs`, `maxGapBetweenAttemptsMs`, `durationMs` |
+| `reconnect.stalled` | error | A foreground episode spent `RECONNECT_STALL_BOUND` (20 s) with no attempt in flight or scheduled; at most once per episode: `guard`, `heldForMs`, `silentForMs`, `attempts`, `boundMs` |
+| `app.main-stall` | warning | The main actor missed a 1 s off-main ping for `MAIN_STALL_BOUND` (2 s) during a foreground episode (selected profile only): `durationMs`, `boundMs`, `foreground` |
+| `gateway.lifecycle` | info | An admitted reconnect/path/detail event in the incident store (`AppDiagnostics.swift`): `kind` (`reconnect.*`, `path.changed`, `detail.*`), `profileID`; `reconnect.parked`/`-resume` (`reason=pathUnsatisfied`, 30 s `boundMs`) and `reconnect.skipped` (refusing guard) are one record per park, resume and guard change |
+| `ios.metrickit` | info | A MetricKit metric or diagnostic payload was recorded (`IOSMetricKitDiagnostics.swift`) |
 
 ## Verify
 

@@ -29,12 +29,6 @@
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
-      "path": "observability.md",
-      "budget": "doc",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Decomposed into module docs (plan Phase 1)"
-    },
-    {
       "path": "wire-host-control.md",
       "budget": "doc",
       "reason": "As-is size at the 0.7 budget baseline (#1460)",

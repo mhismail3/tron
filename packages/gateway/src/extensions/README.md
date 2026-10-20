@@ -54,7 +54,8 @@ component registry, presentation store, terminal sanitizer).
 
 ## Signals
 
-Extension records are catalogued in [observability](../../docs/observability.md).
+None of its own; extension artifact and discovery records are rows of
+[gateway/run](../sessions/README.md#signals).
 
 ## Verify
 

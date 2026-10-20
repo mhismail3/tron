@@ -66,7 +66,13 @@ curation and connector contract is [knowledge.md](../../docs/knowledge.md).
 
 ## Signals
 
-Knowledge records are catalogued in [observability](../../docs/observability.md).
+| Signal | Level | Meaning |
+|---|---|---|
+| `knowledge.model-failed` | warning | A summary job failed because the model errored or broke its contract (`knowledge-curation.ts`): `code`, bounded `reason` naming the model, stop reason and reply shape; never reply or source text |
+| `knowledge.upgrade-failed` | warning | `knowledgeStore.upgradeStorage()` rejected after an update: `error`; Knowledge stays unavailable, chat is unaffected |
+| `Connector credential tests require an explicit keychain path` | test-runner failure | `MacKeychainConnectorCredentialStore` refuses construction in Vitest or `NODE_ENV=test` without an injected keychain path; no `security` process starts (`connector-credentials.integration.test.ts`) |
+| `Connector credential is invalid: expected printable ASCII` (`TypeError`) | caller error | A secret with Unicode or control characters cannot round-trip through `security -w`; no child starts |
+| `Mac Keychain credential command is too long` | caller error | The escaped stdin command would reach the CLI's 4096-byte input limit; refusing prevents truncation |
 
 ## Verify
 

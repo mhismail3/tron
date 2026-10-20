@@ -97,8 +97,17 @@ running-worker `announce`; Home supplies `HomeProfileItems` for learned notes.
 | `settings.risk.failed` | warning | Risk classification failed or hit its 1.5 s deadline; the deterministic tier stands |
 | `settings.notification.failed` | warning | A notify or pending-approval push could not be queued; the change is already recorded |
 | `settings.outside.failed` | warning | An outside-change comparison failed |
-| `settings-run-applied` | session diagnostic | The operational settings resolved and applied at request admission |
+| `settings-run-applied` code on `session.diagnostic` | session diagnostic | The operational settings resolved and applied at request admission |
 | `gateway.shutdown-step` `step=outside-settings-dispose` | info | Time spent retiring outside-change watches and observers at shutdown |
+| `runtime.diagnostic` | error for a resource reload or extension load failure; warning for a per-provider refresh failure | Global provider or extension resources (`global-provider-resources.ts`) failed to load or refresh; the failure text in the message |
+| `mcp.startup.problem` | warning | An explicit `mcp.list` found a CLI, configuration or server problem: bounded `reason`, `scope`; no URL, stderr or credentials |
+| `mcp.auth-url.routed` | info | A provider-authored MCP authorization URL reached its active session operation; fixed message, no URL or callback data |
+| `mcp.callback-relay.succeeded` | info | Pi's captured MCP callback was relayed to its loopback listener |
+| `mcp.callback-relay.failed` | warning | The captured callback could not reach its loopback listener; no host, port, query, code or token |
+| `auth.login.started` | info | A provider login was admitted; provider and auth type in the message |
+| `auth.login.recovered` | info | An existing login was reattached to a new client |
+| `auth.login.succeeded` | info | The login retired with a stored credential, or SDK-confirmed commitment was projected after it ended; a later success corrects an earlier retirement |
+| `auth.login.ended` | warning | The login retired before SDK completion or failed (reason, elapsed seconds); retirement alone does not prove no credential committed |
 
 ## Verify
 

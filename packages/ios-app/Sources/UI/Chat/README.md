@@ -124,8 +124,10 @@ Session, session history and subagent activity.
 
 ## Signals
 
-Chat records opening, projection, viewport, submission and composer availability into the
-content-free `ChatInteractionTrace` ([Core](../../../Core/README.md#signals)).
+| Signal | Level | Meaning |
+|---|---|---|
+| `display.media` | error | A current artifact download failed or its AVPlayerItem failed, once per preparation (`DisplayVideoPlayback.swift`): `requestID`, `stage`, player `status`, allowlisted error `domain`/`code` and one underlying pair; never names, paths or URLs |
+| `opening.failed` | warning | The conversation layout did not settle and the open failed (`ChatView.swift`); settlement reasons in `details`. Chat's trace records: [Core](../../../Core/README.md#signals) |
 
 ## Verify
 

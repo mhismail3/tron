@@ -96,7 +96,7 @@ See [Home module](src/home/README.md), [Home tasks](docs/home-tasks.md) and
 
 State layout, process environment and background work:
 [foundation](src/README.md#contract). Logging: [transport](src/transport/README.md#contract)
-and [observability](docs/observability.md), which also owns startup and shutdown records.
+and [observability](docs/observability.md); startup and shutdown records: [foundation](src/README.md#signals).
 
 ### Diagnostic bundle
 
@@ -185,3 +185,16 @@ See [delegated activity](docs/delegated-activity.md#session-subagent-activity).
 ## Extension activity lifecycle and history
 
 See [delegated activity](docs/delegated-activity.md#extension-activity-lifecycle-and-history).
+
+## Signals
+
+Rows of the Pi SDK and managed-provider updater scripts (`gateway/pi-sdk`), kept here until it
+has a README; every other Gateway module's rows are in its own README
+(`scripts/tron docs signals`).
+
+| Signal | Level | Meaning |
+|---|---|---|
+| `probe process join failed; staging preserved` / `Refusing fixture removal after process join failure` | updater or probe stderr; `TRON_TEST_PROCESS_OWNER_FAILURE` record | A fixture process could not be joined after TERM/KILL; staging stays owned and publications are restored. Settle those exact PIDs before retiring staging; never retry the removal |
+| `pi-subagents update failed` | `npm run update:pi-subagents` stderr | Dependency preparation failed, not activation; the suffix names dirty inputs, source, release, packaging or check failure. Candidates are rolled back |
+| `pi-subagents update failed: … execution gate failed` / `… rollback probe failed` | updater stderr, before publication | The unpublished candidate cannot execute, or the return leg cannot discover, execute or resume; the original pin stays |
+| `pi-subagents pin check failed` during payload staging/verification | bundler or checker stderr | Selected pin metadata, archive, lock or closure is missing or invalid; reject the payload before startup |

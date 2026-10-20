@@ -3,6 +3,7 @@
   "owns": [
     ".gitignore",
     "Configuration/**",
+    "README.md",
     "TronMac.entitlements",
     "TronNode.entitlements",
     "cua-driver-release.json",

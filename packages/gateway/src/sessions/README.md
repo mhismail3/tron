@@ -121,9 +121,13 @@ metadata, never JSONL, and never implies parallel execution.
 
 | Signal | Level | Meaning |
 |---|---|---|
-| `attention-pending` (`rpc.error` reason) | warning | Prompt admission waits on an exact completion's unsettled durable attention; names `operationId` and `ageMs` |
-| `runtime.loaded` | info | A runtime went live; `reason`, `transcriptBytes`, `estimatedHeapBytes`, `overBudget` |
-| `runtime.evicted` | info | A runtime stopped being live; `reason` (`bytes`, `heap`, `idle`, `capacity`, …) and its bytes |
+| `attention-pending` reason on `rpc.error`; `session_operation_busy`; `catalog_not_ready`; `rpc.error` / `session_configuration_*` | warning RPC reasons | Prompt admission waits on an exact completion's unsettled attention (`operationId`, `ageMs`); a model, delete or archive mutation blocked by real session work; a read before the catalog owner published its first cut (retryable); a model/thinking/context command refused by parent configuration policy (`running`, `queued`, `settling`, `mutation`, `interaction`, `unavailable`) |
+| `runtime.loaded`; `runtime.evicted`; `runtime.dispose-timeout`; `canonical-ownership-persistence-retrying`; `canonical-ownership-persistence-blocked`; `terminal-receipt-persistence-failed`; `recent-model-record-failed` | info; dispose timeout and persistence codes warn | A runtime went live or stopped (`reason`, `transcriptBytes`, `estimatedHeapBytes`, `overBudget`); a 5 s disposal grace overran; persistence diagnostics whose event is the code, with `sessionId` (a blocked ownership write leaves the slot `suspect`) |
+| `Foreground work did not stop` (`conflict`, retryable); `Interrupted by <Home \| the maintainer>: this <tool> call was cancelled`; `Tool <name> did not stop within 2000 ms of cancellation`; `session.stop-steering-continuation` | RPC error and canonical tool results; continuation info | A refused Stop is not interruption proof; an interrupt or abandoned tool shows at its call in the transcript (`home-task-tool.e2e.test.ts`); Stop re-admitted accepted queued steering: steer count and `outcome` |
+| `session.compaction.completed`; `session.compaction.manual-adopted`; `codemode.execution.completed`; `sessions.archive.persist-failed`; `sessions.archive.auto-unarchived`; `extension.artifact-rejected`; `extension.discovery-truncated`; `extensionPresentation.diagnostics` with `semantic.<operation>` | info; failures, rejections and truncation warn; a failed compaction is error | Compaction end (`operationId`, `reason`, `outcome`) or adoption of a queued manual request; top-level codemode outcome, nested count, `complete`; archive store failure or auto-unarchive (no session ID); a rejected extension artifact (`reason`); a discovery pass stopped at a budget (`counts`); a void extension callback rejection in the snapshot |
+| `catalog-index.failure`; `catalog.reconciled`; `catalog.changed`; `catalog.watcher-reset`; `session-search.warm`; `session-search.warm-failed`; `session-search.index-unavailable`; `session-search.helper-unavailable` | info; `catalog.changed` debug; failures, incomplete reconciles and resets warn | Session catalog (`step`, `outcome`, `trigger`, `counts` added/removed/modified/unproven, watcher `reason`) and search warm-up (`counts` reused/parsed sessions), index or embedding-helper unavailability |
+| `rpc.error` / managed pi-subagents entry refusal; `pi-subagents.user-package-ignored`; `pi-subagents.agent-definition-invalid`; `The subagent tool is reserved`; `managed pi-subagents installed closure mismatch` / `install receipt mismatch`; `managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT bound to this Tron home's delegated artifact root before loading`; `managed pi-subagents unavailable` / `managed pi-subagents is not installed` | warnings and admission conflicts; closure mismatch fails startup | Managed provider admission (`managed-subagents.ts`): malformed `pi.extensions` entries, ignored user declarations (`counts.declarations`), invalid agent definitions (`counts.definitions`), a foreign claim on the `subagent` tool, tampered bytes or receipt, an unbound delegated temp root, no installed build; refuse, never repair in place |
+| Native subagent `processActivities[].model` and counters; Native subagent `processActivities[].childSessionRef`; `tron.chat-invocation.v1` internal subagent wake; `session.extensionError` / `subagent-wake-admission-failed`; `tron.context-delivery.v4` managed producer origin | snapshot fields and canonical receipts; no log stream | Delegated attribution: a workflow row missing a model its child has means an incomplete host join; shared refs for resumed edges are not ambiguity; `source=subagentWake` with `origin.kind=subagent` marks a provider wake; a wake refused by prompt admission is reported, never replayed; `origin.owner` proves a managed producer, and only a wake binding yields `delivery=triggeredTurn` |
 
 ## Verify
 
@@ -133,12 +137,8 @@ scripts/tron test gateway src/sessions/runtime-registry.integration.test.ts \
   src/sessions/runtime-tool-loadout.integration.test.ts
 ```
 
-`runtime-registry.integration.test.ts` covers follow-up steering receipts, failed Stop
-then natural completion, materialization and reopen, and 128 concurrent parent runs;
-`src/transport/session-archive.integration.test.ts` covers session-replacing commands
-and fork-inherited rows; `src/home/home-task-tool.e2e.test.ts` covers abandoned tools.
-Behavior locks: `run.lock.integration.test.ts`, `run.store.lock.integration.test.ts`,
-`run-markers.lock.integration.test.ts`.
+Also `src/transport/session-archive.integration.test.ts` (session-replacing commands, fork
+rows). Locks: `run.lock`, `run.store.lock`, `run-markers.lock` (`.integration.test.ts`).
 
 ## Not here
 

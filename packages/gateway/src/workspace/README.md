@@ -51,7 +51,9 @@ section and the `subagent` handoff hook).
 
 ## Signals
 
-Workspace records are catalogued in [observability](../../docs/observability.md).
+| Signal | Level | Meaning |
+|---|---|---|
+| `workspace.unavailable` | warning | The internal workspace could not be initialized, or its root was lost or replaced (`tron-workspace.ts`): `cause` (`invalid-record`, `unsafe-directory`, `missing-root`, `owned-elsewhere`, `record-write-failed`, `root-changed`) |
 
 ## Verify
 

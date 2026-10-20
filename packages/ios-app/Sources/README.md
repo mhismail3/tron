@@ -37,7 +37,9 @@ module.
 
 ## Signals
 
-None of its own.
+| Signal | Level | Meaning |
+|---|---|---|
+| `connection.state-changed` | info | Every connection state transition (`App/TronMobileApp.swift`): `connectionID`; old and new state and the Gateway runtime epoch in `details` |
 
 ## Verify
 

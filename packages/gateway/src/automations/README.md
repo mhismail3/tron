@@ -80,7 +80,11 @@ sync the file and its directory before acknowledgement.
 
 ## Signals
 
-Automation records are catalogued in [observability](../../docs/observability.md).
+| Signal | Level | Meaning |
+|---|---|---|
+| `automation.dispatch-failed` | warning | Dispatch, recovery or settlement failed (`automation-diagnostic.ts`): `referenceHash` (automation ID, or `scheduler` for a scan) and optional `operationHash` (run ID), 16 hex characters of SHA-256 |
+| `automation.recovery-step` | info | One part of recovery finished: `step` (`store`, `reconcile-targets`, `scheduler-recover`), `durationMs`; target count and slowest target kind in the message |
+| `automation.recovery-deferred` | warning | Initialization ran before the catalog's first cut, so targets are re-checked next start: `reason=catalog_not_ready` |
 
 ## Verify
 

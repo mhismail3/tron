@@ -97,7 +97,13 @@ and `SemanticUIBroker` callbacks in [gateway/run](../sessions/README.md).
 
 ## Signals
 
-Notification records are catalogued in [observability](../../docs/observability.md).
+| Signal | Level | Meaning |
+|---|---|---|
+| `notification.inbox.read_failed` | warning | Session read state could not be persisted; unread state is kept in memory only |
+| `notification.push.refused` | warning | Admission refused at the bounded pending-intent capacity: `kind`, `outcome=refused`, `reason=pending_capacity` |
+| `notification.push.failed` | warning | Relay delivery ended non-accepted, or a legacy intent was retired by migration: `kind`, `outcome=failed`, bounded `reason` or `schema_upgrade` |
+| `notification.push.rate-limited` | info | The relay refused one request at a device cap: `kind`, `outcome=rate_limited`, `reason` (`daily_limit`, `hourly_limit`); never retried blindly |
+| `notification.inbox.list` row `title`, `sessionId`, `isUnread` and whole-inbox `unreadCount` | RPC projection, no log | For a Home row left unread after opening a completion, compare the rows' session identities: two Home chapters can differ. A synchronized opening reads the ledger-owned Home rows in its cut; `notification.inbox.changed` carries the committed count |
 
 ## Verify
 

@@ -78,10 +78,42 @@ command-receipt pruning, and attachment/display-artifact maintenance.
 
 ## Signals
 
+Also the rows of `src/` modules that have no README yet: process lifecycle
+(`gateway-main.ts`, `index.ts`, `lifecycle/`), `episodic/`, `client/` and `integrations/`.
+
 | Signal | Level | Meaning |
 |---|---|---|
-| `background.slice` | debug; warning on failure | One background slice ran; `step` names the job |
-| `background.backlog` | warning | A job starved past `BACKGROUND_BACKLOG_WARNING_MS`; once per spell |
+| `background.slice` | debug; warning on failure | One background slice ran: `step` (the job), `outcome`, `durationMs`, `counts.waitedMs` past its due time, `error`; a failure is retried only by the next slice |
+| `background.backlog` | warning | A job starved past `BACKGROUND_BACKLOG_WARNING_MS` (5 min) while the scheduler was paused: `step`, `reason` (`requests-in-flight`, `event-loop-p99`), `counts`; once per spell |
+| `gateway.fatal-startup` | error | Loading the module graph or startup threw before the logger existed (`index.ts`): `error`, `runtimeEpoch`, `payloadVersion` |
+| `gateway.started` | info | The first record of a process: `durationMs` since process start; pid, Node version and revision in the message |
+| `gateway.startup-step` | info | Each startup checkpoint: `step`, `durationMs` |
+| `gateway.startup-budget` | info; warning past `STARTUP_LISTEN_BUDGET_MS` (5,000 ms, `lifecycle/startup-budget.ts`) | Once, when serving: `durationMs` from process start to listening, the dominant `step`, budget and overrun in the message. A restarting client measures from its own socket close, not this |
+| `gateway.stopping` | info | Shutdown began; the reason is in the message |
+| `gateway.shutdown-step` | info | Each awaited shutdown operation settled: `step`, `durationMs` |
+| `gateway.shutdown-cleanup-expired` | warning | The 2 s cleanup grace ended with owned work outstanding (count in the message) |
+| `gateway.shutdown-failed` | error | Shutdown itself threw: `error` |
+| `gateway.stop-completion.failed` | error | Publishing the intentional-stop receipt failed after every owner settled; the exit stays 0 so launchd does not relaunch |
+| `gateway.stopped` | info; warning for a non-zero exit code | The last record before exit: `pid`, `code`, `durationMs` (shutdown time) |
+| `gateway.exit-stalled` | warning | A non-zero exit after a completed shutdown had not ended the process within `EXIT_STALL_GRACE_MS` (5,000 ms); the detached watcher (`lifecycle/exit-after-shutdown.ts`) then SIGKILLs that PID: `pid`, `code`, `durationMs` |
+| `gateway.restart-drain` | info | The restart was scheduled and the drain began |
+| `gateway.restart-drain.waiting` | info | Every 15 s while draining, at each stall decision and at an immediate restart: the blockers (`sessionId`, `category`, `method`, `state`, `ageMs`, `progressAt`) in the message |
+| `gateway.restart-drain.stalled` | warning | The oldest blocker made no progress for `DRAIN_STALL_LIMIT_MS` (180 s), or an immediate restart was requested: its category, method and age |
+| `gateway.restart-drain.unresolved-owner` | error | Every remaining blocker is a suspect `terminal-receipt-persistence` owner, so the restart proceeds; one record per owner with `sessionId` |
+| `gateway.restart-drain.completed` | info | The drain reached zero blockers |
+| `gateway.restart-drain-failed` | error | The drain promise rejected: `error` |
+| `gateway.stop-drain` | info | The stop receipt settled and the process owner began waiting |
+| `gateway.stop-drain.completed` | info | No accepted-work blockers remain; cleanup begins |
+| `gateway.stop-drain.failed` | error | The stop wait rejected or the final snapshot could not prove completion; the Gateway keeps running with admission closed |
+| `process.uncaught-exception` | error | An uncaught exception reached the process: `error`, before `gateway.stopped` |
+| `process.unhandled-rejection` | error | An unhandled rejection reached the process: `error` |
+| `episodic.source-invalidated` | info | A context edit or navigation changed an ingested message, or open-time recovery found nodes depending on a revoked one; their summaries were revoked: `counts.invalidated`, `generation` |
+| `episodic.source-read-retried` | warning | A canonical-source parse failed while the source changed or its final snapshot was unprovable; the cursor waits for the next update; fixed message only |
+| `episodic.node-blocked` | warning | A compactor call, canonical read or store append blocked the memory and stopped its pump: `reason` (`permanent-failure`, `retries-exhausted`, `usage-limit`, `source-unavailable`). Every Home activation re-arms once and `home.resumeMemory` at once, so a recurring record means the cause persists |
+| `episodic.store-recovered` | warning | Loading the store discarded a torn trailing record: `counts.bytes` |
+| `episodic.store-refused` | error | The store is unreadable (`reason` `invalid-store`, `unsafe-store`); the memory is refused, never rebuilt |
+| Terminal `[Tron disconnected; reconnecting…] reason=…` and `[Tron resync required: reason=event-gap …]` | terminal stderr | `client/terminal-chat.ts`: one reason per reconnect (`disconnected`, `resync-required`, `event-gap`, `command-recovery`) and an event-gap record (topic, expected and received sequence) before resynchronizing; no tokens, IDs, paths or payloads |
+| `connection.legacy-jev-retired` | info | The first accepted connection write after load removed persisted unsupported `knowledge.jev` instances (`integrations/connection-owner.ts`), once after the retirement persists: sorted `instanceIds` |
 
 ## Verify
 
@@ -91,6 +123,6 @@ scripts/tron verify --module gateway/foundation
 
 ## Not here
 
-- Startup order, `gateway.fatal-startup` and shutdown steps: `gateway-main.ts`,
-  `index.ts` and [observability](../docs/observability.md).
+- Startup order and shutdown steps: `gateway-main.ts` and `index.ts`; streams and
+  levels: [observability](../docs/observability.md).
 - Diagnostic bundles: [Gateway README](../README.md#diagnostic-bundle).

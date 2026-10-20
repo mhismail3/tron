@@ -3,8 +3,8 @@
 Owner: [gateway/home](../src/home/README.md). Home delegates finite project work through
 `delegate` into ordinary worker sessions; each worker seals an explicit immutable report, and
 results reach Home through the wake inbox. This contract spans the Home owner, RuntimeSlot and
-`OwnedSessionDispatch`, the managed subagent provider and the iOS task surfaces. Signal names
-are owned by [observability.md](observability.md).
+`OwnedSessionDispatch`, the managed subagent provider and the iOS task surfaces. Signal rows
+live in the [home module](../src/home/README.md#signals).
 
 ## Persistence
 

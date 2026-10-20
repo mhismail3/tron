@@ -74,11 +74,18 @@ the hosted test targets link.
 
 ## Signals
 
-| Signal | Meaning |
-|---|---|
-| `gateway.rpc` | Bounded `session.list` request record: sanitized request ID, outcome, failure code, duration, profile |
-| lifecycle incidents | Reconnect scheduling/attempt/failure, foreground/background and path changes with loop IDs; LAN/Tailscale race fields (`packages/ios-app/docs/events.md`) |
-| `ChatInteractionTrace` | 256-record, content-free, in-memory chat trace merged into Logs |
+| Signal | Level | Meaning |
+|---|---|---|
+| `gateway.rpc` | info on success, warning otherwise | An RPC diagnostic admitted into the incident store, such as the bounded `session.list` record: method, sanitized request ID, outcome, `durationMs`, `code`, profile |
+| lifecycle incidents | info | Reconnect scheduling/attempt/failure, foreground/background and path changes with loop IDs; LAN/Tailscale race fields (`packages/ios-app/docs/events.md`) |
+| `ChatInteractionTrace` | info, warning and error records in memory | 256-record, content-free ring with the `chat.` prefix, merged into Logs and reserved first in a `device-exports/` bundle. Under pressure it drops unchanged `chat.composer.availability` repeats, then those samples, then geometry/viewport/checkpoint samples, then other info; `chat.context.begin`, warnings and errors go last |
+| `operation.<name>` — names are `gatewayConnect`, `sessionOpen`, `sessionSync`, `sessionResync`, `receiptResolution`, `cacheLoad`, `cacheSave`, `chatProjection`, `firstReadyFrame`, `terminalAttachReplay`, `configurationSliderExpand`, `configurationSliderCollapse` | warning; error when the operation failed and the scene did not retire it | A signpost-measured operation (`PerformanceSignposts.swift`) ended at or above 250 ms, or was open when the scene backgrounded (`outcome=backgrounded`): `durationMs`, `itemCount`, `outcome` |
+| `rpc.completed` | debug, memory only | Every RPC completion: `method`, `requestID`, `outcome`, `code`, `durationMs`. A successful `session.setModel` proves the phone got the receipt |
+| `rpc.retry-after` | debug, memory only | A disposable read answered `busy` with `retryAfterMs` was waited out (≤ 10 s) and retried once (`GatewayClient.swift`): the phone's half of one `gateway.shed`; never for a mutation |
+| `rpc.cancelled` | debug, memory only | A disposable read timed out or was cancelled after it may have been sent, so the phone sent a cancel frame: `method`, `requestID`, `durationMs`; never for a mutation |
+| `gateway.connection` | info; warning for a failed handshake outcome; debug for an excused liveness probe | Each handshake stage (`queue-pressure`, `transport-open`, `hello-send`, `hello-receive`, `transport-race`, `liveness`, `transport`): outcome, IDs, `gatewayConnectionId`, `transportOpenMs`, `waitedForConnectivity`, `interfaces`, `transport` (`lan`/`tailscale` when both raced), `reason` (`lan_unreachable`, `lan_pin_mismatch`, `lan_denied`, …), close code |
+| `gateway.client-work` | info; warning when the window had slow work | The event consumer's per-category/phase window: count, slow count, maximum and total duration |
+| `gateway.response.invalid` | error | An `invalid_response` failure was admitted; only `code=invalid_response`, never the response |
 
 ## Verify
 
