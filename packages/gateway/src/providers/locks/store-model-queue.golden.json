@@ -33,7 +33,7 @@
           "reason": "not registered"
         }
       ],
-      "after11Minutes": [
+      "at10Minutes": [
         {
           "model": "corpus-provider/corpus-a",
           "available": true
@@ -56,7 +56,7 @@
           "available": true
         }
       ],
-      "after16Minutes": [
+      "at15Minutes": [
         {
           "model": "corpus-provider/corpus-a",
           "available": true
@@ -91,7 +91,7 @@
           "available": true
         }
       ],
-      "after16Minutes": [
+      "at15Minutes": [
         {
           "model": "corpus-limited/corpus-b",
           "available": true

@@ -106,12 +106,13 @@ export const DERIVED_STORES: readonly StoreSpec[] = [
       await owner.publishProjection({ sessionId: CORPUS_IDS.session, queue: TASK_QUEUE });
     },
     async read(home) {
-      // A child reads its projection as of its own clock: the recorded skips, then after they expire.
+      // A child reads its projection as of its own clock: a skip ends exactly at its expiry
+      // (ten minutes for a projected read, fifteen for a recorded usage limit).
       const at = async (path: string, ms: number) => projectionSource(path, () => CORPUS_EPOCH + ms).availability("subagent");
       return {
-        mac: { now: await at(modelQueueProjectionPath(home), 0), after11Minutes: await at(modelQueueProjectionPath(home), 11 * 60_000),
-          after16Minutes: await at(modelQueueProjectionPath(home), 16 * 60_000) },
-        task: { now: await at(taskProjectionPath(home), 0), after16Minutes: await at(taskProjectionPath(home), 16 * 60_000) },
+        mac: { now: await at(modelQueueProjectionPath(home), 0), at10Minutes: await at(modelQueueProjectionPath(home), 10 * 60_000),
+          at15Minutes: await at(modelQueueProjectionPath(home), 15 * 60_000) },
+        task: { now: await at(taskProjectionPath(home), 0), at15Minutes: await at(taskProjectionPath(home), 15 * 60_000) },
       };
     },
   },
