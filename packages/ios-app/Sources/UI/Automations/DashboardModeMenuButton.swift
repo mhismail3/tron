@@ -89,9 +89,6 @@ struct DashboardModeMenuButton: UIViewRepresentable {
         /// Presents the same menu for a hold: a menu-primary button the touch
         /// does not belong to, so UIKit presents it on request.
         private let holdMenu = UIButton(type: .custom)
-        /// The context-menu style tap for the hold; bound to the button in
-        /// `makeButton` so the system routes it to this window.
-        private var haptic: UIImpactFeedbackGenerator?
         init(parent: DashboardModeMenuButton) { self.parent = parent }
 
         func makeButton() -> UIButton {
@@ -115,12 +112,11 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             holdMenu.frame = button.bounds
             holdMenu.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             button.addSubview(holdMenu)
-            let haptic = UIImpactFeedbackGenerator(style: .medium, view: button)
-            self.haptic = haptic
-            // Warm the Taptic Engine at touch-down so the hold's tap lands with the menu.
-            button.addAction(UIAction { [weak self] _ in
-                guard self?.parent.home != nil else { return }
-                haptic.prepare()
+            // Warm the Taptic Engine at touch-down so the hold's tap lands with
+            // the menu; bound to the button so the system routes it to this window.
+            button.addAction(UIAction { [weak self, weak button] _ in
+                guard self?.parent.home != nil, let button else { return }
+                TronHaptics.shared.prepare(.menuOpened, in: button)
             }, for: .touchDown)
             hold.minimumPressDuration = DashboardModeMenuButton.menuHoldDuration
             hold.addTarget(self, action: #selector(held(_:)))
@@ -152,10 +148,7 @@ struct DashboardModeMenuButton: UIViewRepresentable {
         @objc private func held(_ gesture: UILongPressGestureRecognizer) {
             guard gesture.state == .began, parent.home != nil, let view = gesture.view else { return }
             holdMenu.menu = makeMenu()
-            haptic?.impactOccurred(at: gesture.location(in: view))
-            #if HOSTED_TEST
-            DashboardMenuFeedbackProbe.shared.count += 1
-            #endif
+            TronHaptics.shared.play(.menuOpened, in: view, at: gesture.location(in: view))
             holdMenu.performPrimaryAction()
         }
 
@@ -224,13 +217,3 @@ struct DashboardModeMenuButton: UIViewRepresentable {
         }
     }
 }
-
-#if HOSTED_TEST
-/// Menu-opening haptics played, so UI journeys prove a hold plays one and a tap
-/// plays none (XCUITest cannot feel the Taptic Engine).
-@MainActor @Observable
-final class DashboardMenuFeedbackProbe {
-    static let shared = DashboardMenuFeedbackProbe()
-    var count = 0
-}
-#endif

@@ -14,7 +14,8 @@ reusable components. Its binding rules are [presentation parity](../../docs/pres
   `TronSafariView`.
 - `Components/`: `TronDocumentSheet`, `TronPagedList`, `TronTextEntrySheet`, `StructuredJSONView`,
   `TechnicalDetailPresentation`, `InAppNoticePresentation` (`InAppNoticeHost`),
-  `ProcessActivityOrb`, `ResourceTagLabel`, `ThinkingLevelPresentation`.
+  `ProcessActivityOrb`, `ResourceTagLabel`, `ThinkingLevelPresentation`, `TronHaptics` (the app's one
+  haptic seam; hosted journeys read `TronHapticsProbe`).
 
 The feature folders under `UI/` are their own modules with their own READMEs: [Chat](Chat/README.md),
 [Settings](Settings/README.md), [Automations](Automations/README.md),

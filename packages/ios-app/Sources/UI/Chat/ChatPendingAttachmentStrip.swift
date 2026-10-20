@@ -9,6 +9,9 @@ struct ChatPendingAttachmentStrip: View {
 
     @State private var presentedAttachments: [PendingAttachment]
     @State private var reconciliationTask: Task<Void, Never>?
+    /// Every chip this strip has shown: a rejected send's restored chips slide
+    /// back in without ticking, as do drafts restored on open.
+    @State private var shownAttachmentIDs: Set<String>
 
     init(
         attachments: [PendingAttachment],
@@ -21,6 +24,7 @@ struct ChatPendingAttachmentStrip: View {
         self.submissionTransitionActive = submissionTransitionActive
         self.onRemove = onRemove
         _presentedAttachments = State(initialValue: attachments)
+        _shownAttachmentIDs = State(initialValue: Set(attachments.map(\.id)))
     }
 
     var body: some View {
@@ -58,6 +62,9 @@ struct ChatPendingAttachmentStrip: View {
         reconciliationTask?.cancel()
         reconciliationTask = nil
 
+        let newlyImported = target.filter { $0.isLocalImport && !shownAttachmentIDs.contains($0.id) }.count
+        shownAttachmentIDs.formUnion(target.map(\.id))
+
         if submissionTransitionActive {
             var transaction = Transaction()
             transaction.disablesAnimations = true
@@ -66,6 +73,8 @@ struct ChatPendingAttachmentStrip: View {
         }
 
         if reduceMotion {
+            // Without the cascade every chip fades in at once: one tick.
+            if newlyImported > 0 { TronHaptics.shared.play(.attachmentAdded) }
             withAnimation(ChatMotion.attachmentArrive(reduceMotion: true)) {
                 presentedAttachments = target
             }
@@ -93,6 +102,8 @@ struct ChatPendingAttachmentStrip: View {
         }
 
         guard !insertionIDs.isEmpty else { return }
+        // One tick per new chip as the cascade begins, capped and spaced.
+        if newlyImported > 0 { TronHaptics.shared.playCascade(.attachmentAdded, count: newlyImported) }
         reconciliationTask = Task { @MainActor in
             for (rank, id) in insertionIDs.enumerated() {
                 if rank > 0 {

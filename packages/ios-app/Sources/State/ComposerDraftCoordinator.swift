@@ -29,6 +29,9 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
     /// Cached when the attachment is admitted. Handoff identity must not hash
     /// the payload again while the view recomputes its projection tag.
     let previewIdentity: UInt64?
+    /// Minted by this device's own pick, paste, capture or file import; a
+    /// restored draft mints `restored-` IDs and a handoff keeps its upload ID.
+    var isLocalImport: Bool { id.hasPrefix("local:") }
 
     init(
         id: String,

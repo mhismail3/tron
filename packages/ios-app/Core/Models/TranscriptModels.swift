@@ -752,7 +752,7 @@ package enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     package var provider: String? { if case .message(let value) = self { value.provider } else { nil } }
     package var modelId: String? { if case .message(let value) = self { value.modelId } else { nil } }
     package var thinkingLevel: String? { if case .message(let value) = self { value.thinkingLevel } else { nil } }
-    var stopReason: String? { if case .message(let value) = self { value.stopReason } else { nil } }
+    package var stopReason: String? { if case .message(let value) = self { value.stopReason } else { nil } }
     package var errorMessage: String? { if case .message(let value) = self { value.errorMessage } else { nil } }
     package var toolCallId: String? { if case .message(let value) = self { value.toolCallId } else { nil } }
     package var toolName: String? { if case .message(let value) = self { value.toolName } else { nil } }

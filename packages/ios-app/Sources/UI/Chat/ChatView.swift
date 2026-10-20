@@ -292,6 +292,24 @@ struct ChatView: View {
             admitPendingFloatingDisplay()
         }
         .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in openManageForStagedSettingsDecision() }
+        .modifier(ChatLiveHapticsModifier(facts: liveHapticFacts) { selectedAuthoritativeSnapshot?.transcript ?? [] })
+    }
+
+    private var liveHapticFacts: ChatLiveHapticFacts {
+        let snapshot = selectedAuthoritativeSnapshot
+        let live = presentationActivity.allowsPresentationPublication && scenePhase == .active
+            && sessionPresentation.permitsExtensionInteractionPresentation && snapshot != nil
+        let epoch = presentationTarget.flatMap { target in
+            model.presentationSubscriptionToken(for: sessionID).map {
+                ChatLiveHapticFacts.Epoch(generation: target.generation, subscription: $0)
+            }
+        }
+        return ChatLiveHapticFacts(
+            epoch: live ? epoch : nil,
+            phase: snapshot?.phase,
+            tailID: snapshot?.transcript.last?.id,
+            questionID: pendingPresentedInteraction?.id
+        )
     }
 
     private func presentPendingExtensionInteraction(_ interaction: ExtensionInteraction) {
@@ -446,6 +464,7 @@ struct ChatView: View {
             sessionPresentation.cancelImports()
             return
         }
+        TronHaptics.shared.prepare(.attachmentAdded)
         sessionPresentation.photoImportTask?.cancel()
         sessionPresentation.photoImportTarget = target
         sessionPresentation.photoImportTask = Task { @MainActor in
@@ -3468,6 +3487,7 @@ struct ChatView: View {
                 return (submission: submission, grafted: grafted)
             }
             let submission = admission.submission
+            TronHaptics.shared.prepare(.promptSent)
             model.chatInteractionTrace.submission(
                 .lifecycleGrafted,
                 context: traceContext,
@@ -3491,6 +3511,9 @@ struct ChatView: View {
             Task { @MainActor in
                 do {
                     try await model.sendComposer(submission)
+                    // The send's one tap marks the Gateway's acceptance, never
+                    // a rejected or disabled send, and only in the chat that sent it.
+                    if presentationTarget == target { TronHaptics.shared.play(.promptSent) }
                     model.chatInteractionTrace.submission(
                         .transportSucceeded,
                         context: traceContext,

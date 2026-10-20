@@ -82,6 +82,11 @@ Session, session history and subagent activity.
   tap. Compaction, branch, configuration and extension status share one notification-pill language;
   command pills never show arguments. `custom_message` is right-aligned context; worker results
   read **Worker · task title**; subagent messages use the seafoam **Subagent** chip.
+- **Haptics.** Through the one `TronHaptics` seam, only for live events in the active, uncovered
+  chat: an accepted send (light), each newly imported attachment (selection tick, ≤ 6, 70 ms
+  apart; one under Reduce Motion), a run settling with `stop` (success), a worker or subagent
+  message (soft) and a presented question (rigid). `ChatLiveHapticLedger` re-baselines on every
+  open, reconnect subscription and return to the foreground, and dedupes per event ID.
 - **Extension interactions.** The mounted route is the sole sheet owner and presents pending
   interactions only after the first ready frame. Forms (one to four questions) keep a device-local
   draft; swipe-down preserves it and only Cancel resolves. Retained extension state is reachable
@@ -134,7 +139,7 @@ Session, session history and subagent activity.
 Classes under `TronMobileUITests/`: `TronHomeDashboardUITests`, `TronHomeSheetsUITests`,
 `TronDashboardHomeButtonUITests`, `TronNewSessionUITests`, `TronSubagentParityUITests`,
 `TronToolSheetsPolishUITests`, `TronChatDisplayStripUITests`, `TronChatAnnotationUITests`,
-`TronComposerUploadUITests`, `TronReadonlyAttachmentUITests`, `TronCameraCaptureUITests`,
+`TronComposerUploadUITests`, `TronChatHapticsUITests`, `TronReadonlyAttachmentUITests`, `TronCameraCaptureUITests`,
 `TronSessionRowClockUITests`, and the Home, Manage Session and Ask User journeys in
 `TronSmokeUITests` ([runbook](../../../docs/development.md#efficient-focused-tests)). Real
 boundaries: `scripts/ios-gateway-e2e-test run-ui` and `scripts/tron test gateway
