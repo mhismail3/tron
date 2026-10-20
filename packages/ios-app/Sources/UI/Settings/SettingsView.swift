@@ -53,13 +53,9 @@ struct SettingsView: View {
                         }
                     }
                     SettingsGroupCard(.agent) {
-                        SettingsSectionLinks(ids: ["model", "workers", "context"], sections: sections,
-                                             target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
-                                             selection: .allExcept(TrustedProjectsSettingsView.keys))
+                        SettingsSectionLinks(ids: ["model", "workers", "context"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
                         TronSettingsDivider()
-                        settingsLink("Trusted Projects", summary: "Projects whose extensions and hooks load", icon: "checkmark.shield") {
-                            TrustedProjectsSettingsView()
-                        }
+                        settingsLink("Trusted Projects", summary: "Projects whose extensions and hooks load", icon: "checkmark.shield") { TrustedProjectsSettingsView() }
                         TronSettingsDivider()
                         SettingsSectionLinks(ids: ["run", "advanced"], sections: sections,
                                              target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
