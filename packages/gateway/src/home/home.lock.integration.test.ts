@@ -1,6 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, type TranscriptContext } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, hashPromptText, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
@@ -18,8 +18,9 @@ import { waitFor } from "../../test-support/wait-for.js";
  * reopen snapshot of the settled chapter among them), the payload structure of
  * every event topic the outbound queue never drops, each provider request split
  * into Home's and the worker's (tools in order, prompt sections and hash,
- * messages; Home's own `## ` headings), the `home.context` section names, both
- * canonical JSONL files and the Home store's files.
+ * messages; Home's own `## ` headings), each runtime's tool schema digests and
+ * loaded extensions (paths, tools, handlers, commands, in load order), the
+ * `home.context` section names, both canonical JSONL files and the Home store's files.
  * Home's and the worker's requests interleave by host timing, so each stream is
  * kept in its own order; everything else is ordered by the scenario.
  */
@@ -38,6 +39,8 @@ interface HomeLockTrace {
   readonly providerRequests: { readonly home: readonly TraceValue[]; readonly worker: readonly TraceValue[] };
   readonly contextSections: TraceValue;
   readonly homePrompts: readonly TraceValue[];
+  readonly toolSchemas: { readonly home: TraceValue; readonly worker: TraceValue };
+  readonly extensions: { readonly home: TraceValue; readonly worker: TraceValue };
   readonly canonicalJsonl: { readonly home: readonly TraceValue[]; readonly worker: readonly TraceValue[] };
   readonly homeStore: { readonly files: readonly string[]; readonly designation: TraceValue; readonly task: TraceValue };
 }
@@ -78,6 +81,21 @@ function stabilize(value: TraceValue, key = ""): TraceValue {
 
 type Caller = "home-input" | "home-delegated" | "home-wake" | "worker";
 
+/** Each loaded extension of a live runtime, in load order: its tools, event
+ * handlers (with their count) and commands. This is the profile a slot was
+ * built with (k0-kernel.md §8 B1), which no request carries. */
+async function loadedExtensions(gateway: LockGateway, sessionId: string): Promise<TraceValue> {
+  const slot = await gateway.registry.acquire(sessionId) as unknown as { runtime: { session: { resourceLoader: { getExtensions(): { extensions: Array<{
+    path: string; tools: Map<string, unknown>; handlers: Map<string, unknown[]>; commands: Map<string, unknown>;
+  }> } } } } };
+  return normalizeTraceValue(slot.runtime.session.resourceLoader.getExtensions().extensions.map((extension) => ({
+    path: extension.path,
+    tools: [...extension.tools.keys()],
+    handlers: [...extension.handlers].map(([event, handlers]) => `${event}×${handlers.length}`),
+    commands: [...extension.commands.keys()],
+  })), gateway.normalization);
+}
+
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;
   return Array.isArray(content) ? content.map((part) => (part as { text?: unknown }).text ?? "").join("") : "";
@@ -106,9 +124,15 @@ describe("gateway/home scenario lock", () => {
     const workerReleased = new Promise<void>((resolve) => { releaseWorker = resolve; });
     const callers: Caller[] = [];
     const homePrompts: Array<{ caller: Caller; headings: string[]; promptHash: string }> = [];
+    // Model-visible tool text: each tool's description and parameter schema, as the first request of each runtime sent them.
+    const toolSchemas: { home?: TraceValue; worker?: TraceValue } = {};
     const route = async (context: TranscriptContext) => {
       const caller = callerOf(context);
       callers.push(caller);
+      const runtime = caller === "worker" ? "worker" : "home";
+      toolSchemas[runtime] ??= getCurrentTools(context.messages).map((tool) => ({
+        name: tool.name, schema: hashPromptText(JSON.stringify({ description: tool.description, parameters: tool.parameters }), gateway.normalization),
+      }));
       if (caller !== "worker") {
         const prompt = getCurrentSystemPrompt(context.messages);
         homePrompts.push({ caller, headings: [...prompt.matchAll(/^#{1,3} .+$/gm)].map((match) => match[0]), promptHash: hashPromptText(prompt, gateway.normalization) });
@@ -189,6 +213,8 @@ describe("gateway/home scenario lock", () => {
       contextSections: normalizeTraceValue((context.result.breakdown.sections as Array<{ id: string; count?: number; tokens: number }>)
         .map(({ id, count, tokens }) => ({ name: id, ...(count === undefined ? {} : { count }), tokens })), gateway.normalization),
       homePrompts: homePrompts.map((prompt) => normalizeTraceValue(prompt, gateway.normalization)),
+      toolSchemas: { home: toolSchemas.home ?? null, worker: toolSchemas.worker ?? null },
+      extensions: { home: await loadedExtensions(gateway, homeSessionId), worker: await loadedExtensions(gateway, workerSessionId) },
       canonicalJsonl: { home: await gateway.canonical(homeSessionId), worker: await gateway.canonical(workerSessionId) },
       homeStore: {
         files: await gateway.tree(homeRoot),

@@ -2010,6 +2010,355 @@
       "promptHash": "sha256:434f7bb1d36868a6f1565e2d15e0126b35897389d6e0ab3f1b4c7000402b3550"
     }
   ],
+  "toolSchemas": {
+    "home": [
+      {
+        "name": "ask_user",
+        "schema": "sha256:0b14447ee42202c61709519fee11f1ffe8c6d9ba7143bc4f188b3c39e1d239b6"
+      },
+      {
+        "name": "display",
+        "schema": "sha256:ea96083c1b363840822a9a0d4f451d8a729902e4c641f78d811f95db3c7f6b27"
+      },
+      {
+        "name": "zoom",
+        "schema": "sha256:5d3ce5db6caccfaf2c4fd092d9fb2fc6c92272e022153206103f80f4a3842324"
+      },
+      {
+        "name": "date",
+        "schema": "sha256:46e6e8491ace97d8a426819cd32600bd1a393ff93ed8afa973f57c1e8d97a333"
+      },
+      {
+        "name": "memory_search",
+        "schema": "sha256:dbb4d7574e6c5034c1945b6543e0f6bd9b943c1e3b92b5670c4618625c44ce1a"
+      },
+      {
+        "name": "delegate",
+        "schema": "sha256:932c49b990649405ad6b915b82929698c1153177052664b14537c88c395c78e2"
+      },
+      {
+        "name": "task",
+        "schema": "sha256:568c791581a58047e5d9fa56d713ebda0f2632d360dc26010cbb56128103a375"
+      },
+      {
+        "name": "profile",
+        "schema": "sha256:7ba2f19f2984209262263c39a8c219b974041502b51e8315587e7c09a7f51732"
+      },
+      {
+        "name": "web_search",
+        "schema": "sha256:073273ac434c8afa20ce5bb0d4d06260c23e1aab23af45b470933f62e0fceb23"
+      },
+      {
+        "name": "web_fetch",
+        "schema": "sha256:c25dca38b94b8a662f898932ad3f0361d09d4c897a394275f2776806746f0fc4"
+      },
+      {
+        "name": "session_search",
+        "schema": "sha256:87149f6b0e68fd1833daf777559f23b4a146341380133dabb400569cee0ecf86"
+      },
+      {
+        "name": "session_read",
+        "schema": "sha256:5b97b39ecc85114edf6dba72394c855e9bc08a1eac99467226fc72e26dd46c57"
+      },
+      {
+        "name": "knowledge",
+        "schema": "sha256:1eeefc0f098d1acd741db09b1e69354a897793c0a091bd7bd0fc749607165ad6"
+      },
+      {
+        "name": "read_file",
+        "schema": "sha256:e9d95e72eb0b0a78fe8fd7871aa2f17f98d6c860ab4b7f585305758291778387"
+      },
+      {
+        "name": "settings",
+        "schema": "sha256:9b6c827670149cefec8f97f5f2a917775aeafbed55abbdd50735487df3e19f17"
+      }
+    ],
+    "worker": [
+      {
+        "name": "read",
+        "schema": "sha256:86d509e2c8214ea8c088e013602b6f02d52822e1aad17df09a5383f7d5697141"
+      },
+      {
+        "name": "bash",
+        "schema": "sha256:3cfd039563ac1b6a2701deb2a4231c241efb34b0ae71dec05645d4f2bcdc8079"
+      },
+      {
+        "name": "edit",
+        "schema": "sha256:6394edd858da193d8b2935f7eab53a198439fc88c4fa4bf50ad30412bdef9d91"
+      },
+      {
+        "name": "write",
+        "schema": "sha256:4195fa2661cbe1c709e297713621d92b1b49dd12f223609a2c9e26d02f5dbef7"
+      },
+      {
+        "name": "jev",
+        "schema": "sha256:914181a60dc912cb401fd0ffb83a07657f54a629b93a40204b46a8da54b09fc8"
+      },
+      {
+        "name": "settings",
+        "schema": "sha256:9b6c827670149cefec8f97f5f2a917775aeafbed55abbdd50735487df3e19f17"
+      },
+      {
+        "name": "ask_user",
+        "schema": "sha256:0b14447ee42202c61709519fee11f1ffe8c6d9ba7143bc4f188b3c39e1d239b6"
+      },
+      {
+        "name": "display",
+        "schema": "sha256:ea96083c1b363840822a9a0d4f451d8a729902e4c641f78d811f95db3c7f6b27"
+      },
+      {
+        "name": "swift_app",
+        "schema": "sha256:75247360f6c2bf6449f04fedf8e1428e40f3de1bd952f8527c021ad29459cb89"
+      },
+      {
+        "name": "computer",
+        "schema": "sha256:0b6e40c2ef9852fe29a890d7cef8a5edde8b3715000f2c07e9225ef756d0023d"
+      },
+      {
+        "name": "checkin",
+        "schema": "sha256:04cfad135dcf284bcee4f272ef8ca033bbf0ff230d8d3f55292309c2cb55afd1"
+      },
+      {
+        "name": "report",
+        "schema": "sha256:fbe5d43f3d9ff7812d654d54cba4738c028fb5f5b9015b64a7259d7b2725a272"
+      }
+    ]
+  },
+  "extensions": {
+    "home": [
+      {
+        "commands": [],
+        "handlers": [
+          "session_start×1",
+          "session_tree×1",
+          "model_select×1",
+          "before_agent_start×1",
+          "turn_start×1"
+        ],
+        "path": "<inline:tron-context-window>",
+        "tools": []
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "message_end×1",
+          "session_start×1",
+          "session_before_compact×1"
+        ],
+        "path": "<inline:tron-compaction-policy>",
+        "tools": []
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "agent_start×1",
+          "tool_call×1",
+          "before_agent_start×1"
+        ],
+        "path": "<inline:tron-settings>",
+        "tools": [
+          "settings"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [],
+        "path": "<inline:tron-ask-user>",
+        "tools": [
+          "ask_user"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "tool_result×1",
+          "agent_end×1",
+          "session_shutdown×1"
+        ],
+        "path": "<inline:tron-display>",
+        "tools": [
+          "display"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "agent_start×1",
+          "tool_call×1",
+          "cache_warming_decision×1",
+          "before_provider_request×1"
+        ],
+        "path": "<inline:tron-home>",
+        "tools": [
+          "zoom",
+          "date",
+          "memory_search",
+          "profile",
+          "delegate",
+          "task"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [],
+        "path": "<inline:tron-home-research>",
+        "tools": [
+          "web_search",
+          "web_fetch",
+          "session_search",
+          "session_read",
+          "knowledge",
+          "read_file"
+        ]
+      }
+    ],
+    "worker": [
+      {
+        "commands": [],
+        "handlers": [],
+        "path": "builtin:codemode",
+        "tools": [
+          "codemode"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [],
+        "path": "builtin:tool-search",
+        "tools": [
+          "tool_search"
+        ]
+      },
+      {
+        "commands": [
+          "mcp"
+        ],
+        "handlers": [
+          "session_start×1",
+          "before_agent_start×1",
+          "tool_call×1",
+          "turn_start×1",
+          "mcp_servers_change×1",
+          "session_shutdown×1"
+        ],
+        "path": "builtin:mcp",
+        "tools": []
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "turn_start×1",
+          "message_end×1"
+        ],
+        "path": "<inline:tron-invocation-settlement>",
+        "tools": []
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "session_start×1",
+          "session_tree×1",
+          "model_select×1",
+          "before_agent_start×1",
+          "turn_start×1"
+        ],
+        "path": "<inline:tron-context-window>",
+        "tools": []
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "message_end×1",
+          "session_start×1",
+          "session_before_compact×1"
+        ],
+        "path": "<inline:tron-compaction-policy>",
+        "tools": []
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "before_agent_start×1",
+          "tool_call×1"
+        ],
+        "path": "<inline:tron-core>",
+        "tools": [
+          "jev"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "agent_start×1",
+          "tool_call×1",
+          "before_agent_start×1"
+        ],
+        "path": "<inline:tron-settings>",
+        "tools": [
+          "settings"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [],
+        "path": "<inline:tron-ask-user>",
+        "tools": [
+          "ask_user"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "tool_result×1",
+          "agent_end×1",
+          "session_shutdown×1"
+        ],
+        "path": "<inline:tron-display>",
+        "tools": [
+          "display"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [],
+        "path": "<inline:tron-swift-apps>",
+        "tools": [
+          "swift_app"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "session_shutdown×1",
+          "before_agent_start×1"
+        ],
+        "path": "<inline:tron-computer>",
+        "tools": [
+          "computer"
+        ]
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "session_start×3",
+          "agent_before_settle×2",
+          "session_shutdown×1",
+          "tool_call×1"
+        ],
+        "path": "<inline:tron-model-queue>",
+        "tools": []
+      },
+      {
+        "commands": [],
+        "handlers": [
+          "before_agent_start×1",
+          "tool_call×1"
+        ],
+        "path": "<inline:tron-home-task-worker>",
+        "tools": []
+      }
+    ]
+  },
   "canonicalJsonl": {
     "home": [
       {
