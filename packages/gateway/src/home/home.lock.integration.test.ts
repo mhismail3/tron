@@ -14,10 +14,12 @@ import { waitFor } from "../../test-support/wait-for.js";
  * runtime) and sends one activation that delegates a task; the worker reports,
  * and the result wakes Home into a second activation.
  *
- * The trace records the client's request/response values, every event topic's
- * payload structure, each provider request split into Home's and the worker's
- * (tools in order, prompt sections and hash, messages; Home's own `## ` headings),
- * both canonical JSONL files, the transcript and the Home store's files.
+ * The trace records the client's request/response values (a second device's
+ * reopen snapshot of the settled chapter among them), the payload structure of
+ * every event topic the outbound queue never drops, each provider request split
+ * into Home's and the worker's (tools in order, prompt sections and hash,
+ * messages; Home's own `## ` headings), the `home.context` section names, both
+ * canonical JSONL files and the Home store's files.
  * Home's and the worker's requests interleave by host timing, so each stream is
  * kept in its own order; everything else is ordered by the scenario.
  */
@@ -40,6 +42,14 @@ interface HomeLockTrace {
   readonly homeStore: { readonly files: readonly string[]; readonly designation: TraceValue; readonly task: TraceValue };
 }
 
+/**
+ * Topics a newer snapshot re-states, which the outbound queue may drop while a
+ * socket lags (`SNAPSHOT_STATED_TOPICS`, transport/ordered-outbound-queue.ts):
+ * which of them a client receives is host timing. Their state is recorded by the
+ * settled reopen snapshot and the transcript instead.
+ */
+const SNAPSHOT_STATED_TOPICS = new Set(["session.snapshot", "session.rebaseline", "session.progress", "session.configuration",
+  "session.toolProgress", "session.processActivity", "session.extensionActivity", "session.compaction"]);
 /** Sizes that include the result notice's measured duration, and token counts the
  * faux provider derives from text holding the host's temp and checkout paths. */
 const SIZE_KEYS = new Set(["bytes", "currentBytes", "viewBytes", "effectiveTokens", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "tokens"]);
@@ -157,6 +167,11 @@ describe("gateway/home scenario lock", () => {
     expect(context.ok, JSON.stringify(context)).toBe(true);
     expect((await phone.request("session.transcript", { sessionId: homeSessionId })).ok).toBe(true);
 
+    // A second device opens the settled chapter: the snapshot every dropped frame converges to.
+    const reopen = await gateway.connect("reopen");
+    const reopened = await reopen.request("session.open", { sessionId: homeSessionId });
+    expect(reopened.ok, JSON.stringify(reopened)).toBe(true);
+
     const recorded = gateway.record();
     const requests = recorded.providerRequests as unknown as Array<{ promptSections: readonly string[]; messages: readonly TraceValue[] }>;
     const isWorker = (request: { messages: readonly TraceValue[] }) => JSON.stringify(request.messages).includes(WORKER_MARKER);
@@ -165,7 +180,7 @@ describe("gateway/home scenario lock", () => {
     const trace = stabilize({
       lock: LOCK,
       exchanges: recorded.exchanges,
-      events: recorded.events,
+      events: recorded.events.filter((event) => !SNAPSHOT_STATED_TOPICS.has((event as { topic: string }).topic)),
       providerRequests: {
         home: requests.filter((request) => !isWorker(request)) as unknown as TraceValue[],
         worker: requests.filter(isWorker) as unknown as TraceValue[],
