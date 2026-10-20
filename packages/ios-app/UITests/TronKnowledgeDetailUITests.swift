@@ -793,8 +793,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Updating tags")).firstMatch
     }
 
-    /// The Library filters sheet covers the Knowledge sheet, which has its own
-    /// Done; dismiss the filters through their own bar.
+    /// Library filters cover the Knowledge sheet's own Done: dismiss through the filters' bar.
     @MainActor
     private func doneLibraryFilters(_ app: XCUIApplication) {
         app.navigationBars.containing(.staticText, identifier: "Library filters").firstMatch.buttons["Done"].tap()

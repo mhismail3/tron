@@ -3616,15 +3616,13 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["dashboard.menu"].tap()
         let knowledge = app.buttons["Knowledge"]
         XCTAssertTrue(knowledge.waitForExistence(timeout: 3))
-        // The fixture performs thirty controlled parent updates. Wait for their
+        // The fixture performs thirty controlled parent updates. Wait for its
         // completion while the actual tapped menu remains presented.
         let finished = NSPredicate(format: "label == %@", "Revision 30")
         let updates = expectation(for: finished, evaluatedWith: app.staticTexts["menu-fixture-revision"])
         wait(for: [updates], timeout: 10)
         XCTAssertTrue(knowledge.isHittable, "Parent updates must not dismiss the native menu")
-        XCTAssertTrue(app.buttons["Automations"].exists)
-        // UIKit owns the presented tree: it keeps the entry it opened with.
-        XCTAssertTrue(app.buttons["New Session 0"].exists, app.debugDescription)
+        XCTAssertTrue(app.buttons["Automations"].exists && app.buttons["New Session 0"].exists, app.debugDescription)
         keepScreenshot(named: "dashboard-menu-after-updates")
         knowledge.tap()
         XCTAssertTrue(app.staticTexts["menu-fixture-selection"].waitForExistence(timeout: 3))
@@ -3984,10 +3982,8 @@ final class TronSmokeUITests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed, "The sheet expands to the large detent: \(bar.frame)")
 
-        // No search: Filter is the floating control in the search button's
-        // former bottom-trailing spot, and opens the filter sheet.
-        XCTAssertFalse(app.buttons["automations.search"].exists)
-        XCTAssertFalse(app.buttons["Search Automations"].exists)
+        // No search: Filter is the floating bottom-trailing control and opens the filter sheet.
+        XCTAssertFalse(app.buttons["automations.search"].exists || app.buttons["Search Automations"].exists)
         let filter = app.buttons["automations.filter"]
         XCTAssertTrue(filter.isHittable, app.debugDescription)
         XCTAssertFalse(bar.buttons["automations.filter"].exists, "Filter is not a toolbar action")
@@ -4010,8 +4006,7 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(card.label.contains(fact), "Missing \(fact): \(card.label)")
         }
         XCTAssertTrue(app.buttons["automation-card.automation-1"].label.contains("No runs yet"))
-        // One compact dashboard list row per Automation, stacked at the
-        // dashboard's row rhythm.
+        // One compact dashboard list row per Automation, at the dashboard's row rhythm.
         let next = app.buttons["automation-card.automation-1"]
         XCTAssertLessThan(card.frame.height, 60, "An Automation is one compact dashboard row: \(card.frame)")
         XCTAssertEqual(card.frame.height, next.frame.height, accuracy: 1)
