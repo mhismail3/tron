@@ -18,6 +18,9 @@ modules own real Python tests, and runs verify as a worker would:
    real `layers ios` on it, runs the locks by `--only-testing` owner, and reuses the
    build on the next run with an identical digest; a failing or empty XCTest summary
    fails the run.
+6. `scripts/tron mutate` over a fake Gateway runner: a mutant whose locks hang is
+   stopped at the per-mutant timeout with its whole process group, and an
+   interrupted run restores the source and keeps the mutants it finished.
 
 The last run's output is kept in `test-results/verify-cli/`.
 """
@@ -26,9 +29,13 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -286,6 +293,86 @@ class IosLaneTests(VerifyCase):
         self.assertIn("selected tests were not run: ios-lanes", module.stdout)
         self.assertEqual(calls.read_text().splitlines(), [
             "run --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests"])
+
+
+# The Gateway runner `mutate` drives, faked at `scripts/tron-node`: a flipped comparison
+# fails the lock, a flipped flag hangs it (with a child the timeout must also stop).
+FAKE_RUNNER = """#!/usr/bin/env python3
+import json, pathlib, subprocess, sys, time
+out = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--outputFile="))
+source = pathlib.Path("src/store/store.ts").read_text()
+if "hang = false" in source:
+    child = subprocess.Popen(["sleep", "300"])
+    pathlib.Path("hung.pid").write_text(f"{child.pid}\\n")
+    time.sleep(300)
+failed = 0 if "1 === 1" in source else 1
+pathlib.Path(out).write_text(json.dumps({"numFailedTests": failed, "numFailedTestSuites": 0, "numPassedTests": 1 - failed}))
+"""
+SOURCE = "export const kill = 1 === 1;\nexport const hang = true;\n"
+
+
+class MutateTests(VerifyCase):
+    def setUp(self) -> None:
+        super().setUp()
+        r = self.repo
+        r.write("scripts/tron-node", FAKE_RUNNER)
+        (r.path / "scripts/tron-node").chmod(0o755)
+        r.write("packages/gateway/src/store/store.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write("packages/gateway/src/store/store.ts", SOURCE)
+        r.write("packages/gateway/src/store/store.lock.integration.test.ts", "// faked by scripts/tron-node\n")
+        r.write(".gitignore", "test-results/\npackages/gateway/hung.pid\n")
+        manifest = json.loads((r.path / "tooling.module.json").read_text())
+        manifest["owns"].append("scripts/tron-node")
+        r.write("tooling.module.json", json.dumps(manifest))
+        r.commit("gateway store")
+        # The seed that samples the failing mutant first: candidates are in line order.
+        self.seed = next(seed for seed in range(100) if (lambda pool: (random.Random(seed).shuffle(pool), pool)[1])([0, 1]) == [0, 1])
+
+    def mutate(self, *args: str) -> subprocess.Popen:
+        return subprocess.Popen([str(self.repo.path / "scripts/tron"), "mutate", "packages/gateway/src/store/store.ts",
+                                 "--seed", str(self.seed), *args], cwd=self.repo.path, env=self.repo.env,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    def report(self) -> dict:
+        return json.loads((self.repo.path / "test-results/mutate/packages__gateway__src__store__store.ts.json").read_text())
+
+    def assert_hung_child_stopped(self) -> None:
+        pid = int((self.repo.path / "packages/gateway/hung.pid").read_text())
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.1)
+        self.fail(f"the hung lock's child {pid} outlived its mutant")
+
+    def test_a_hanging_mutant_times_out_and_counts_as_detected(self) -> None:
+        started = time.time()
+        process = self.mutate("--timeout", "3")
+        output, _ = process.communicate(timeout=120)
+        self.assertEqual(process.returncode, 0, output)
+        self.assertLess(time.time() - started, 60, output)
+        report = self.report()
+        self.assertEqual([(m["line"], m["outcome"]) for m in report["mutants"]], [(1, "killed"), (2, "timeout")])
+        self.assertEqual((report["killed"], report["timeouts"], report["rate"], report["complete"]), (2, 1, 1.0, True))
+        self.assertIn("TIMEOUT", output)
+        self.assertEqual((self.repo.path / "packages/gateway/src/store/store.ts").read_text(), SOURCE)
+        self.assert_hung_child_stopped()
+
+    def test_an_interrupted_run_restores_the_source_and_keeps_finished_mutants(self) -> None:
+        process = self.mutate("--timeout", "120")
+        pid_file = self.repo.path / "packages/gateway/hung.pid"
+        deadline = time.time() + 60
+        while not pid_file.exists() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertTrue(pid_file.exists(), "the hanging mutant never started")
+        process.send_signal(signal.SIGTERM)
+        output, _ = process.communicate(timeout=60)
+        self.assertNotEqual(process.returncode, 0, output)
+        self.assertEqual((self.repo.path / "packages/gateway/src/store/store.ts").read_text(), SOURCE)
+        report = self.report()
+        self.assertEqual(([(m["line"], m["outcome"]) for m in report["mutants"]], report["complete"]), ([(1, "killed")], False))
+        self.assert_hung_child_stopped()
 
 
 if __name__ == "__main__":

@@ -63,7 +63,7 @@ Commands:
                                     tests fail; iOS lane: one stamped tron-ios-test build
                                     per commit (reused), layers ios, then the selected
                                     UI tests; local and worker-owned, never a gate
-  mutate <gateway-src-file> [--count N] [--seed S]
+  mutate <gateway-src-file> [--count N] [--seed S] [--timeout SECONDS]
                                     Seeded sampled mutation of one file against the tests
                                     verify selects for it (lock sensitivity, plan 6.6);
                                     test-results/mutate/; measures, never gates

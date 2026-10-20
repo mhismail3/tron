@@ -105,7 +105,7 @@ worker.
 
 ## Mutation sampling
 
-`scripts/tron mutate <packages/gateway/src file> [--count 30] [--seed 1465]` measures
+`scripts/tron mutate <packages/gateway/src file> [--count 30] [--seed 1465] [--timeout 300]` measures
 lock sensitivity (plan §6.6; the maintainer's 0.10 decision). For one file it:
 1. takes a seeded sample of single-operator flips (`===`/`!==`, `&&`/`||`,
    `true`/`false`, comparisons, `±1`);
@@ -114,11 +114,15 @@ lock sensitivity (plan §6.6; the maintainer's 0.10 decision). For one file it:
    journeys can take minutes per run. The unmutated locks run first; if they do
    not pass cleanly, no mutant runs;
 3. counts a mutant as killed only when its run's vitest report shows a failing
-   test or a suite the mutant broke. A run with no readable report is a harness
-   error, excluded from the rate, and makes the command exit 1.
+   test or a suite the mutant broke, or when the run outlives `--timeout`
+   (default 300 s; an infinite loop starves vitest's own timers). A timed-out
+   run is stopped with its whole process group and reported as `timeout`. A run
+   with no readable report is a harness error, excluded from the rate, and makes
+   the command exit 1.
 
-The file is restored after every mutant. The report goes to
-`test-results/mutate/`. It measures and never gates. Stryker is deferred until a
+The file is restored after every mutant, also on interrupt or SIGTERM. The
+report goes to `test-results/mutate/` and is rewritten after each mutant
+(`complete: false` until the run ends), so an interrupted run keeps its results. It measures and never gates. Stryker is deferred until a
 known-kill probe proves its vitest runner activates mutants with the pinned vitest.
 
 ## Verify
@@ -133,5 +137,7 @@ refusal, and identical result digests. Its iOS lane case uses a stand-in
 store with `swiftc` and writes the real stamp, and `run` writes an XCTest-style
 `summary.json`. The case checks that a change selects only the UI locks, the build
 runs once and is reused with an identical digest, the real `layers ios` runs on it,
-and failing or empty summaries fail.
+and failing or empty summaries fail. Over a fake Gateway runner it also covers
+`mutate`: a hanging mutant stopped at its timeout with its process group, and an
+interrupted run that restores the source and keeps its finished mutants.
 Output is kept in `test-results/verify-cli/`.

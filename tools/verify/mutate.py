@@ -5,14 +5,19 @@ Milestone lock sensitivity (plan §3 M1, §6.6; maintainer decision 2026-10-19 o
 the #1465 evaluation): each sampled mutant flips one operator in the file, the *locks*
 `scripts/tron verify` would select for a change to that file run, and a failing run kills
 the mutant. M1 measures what locks catch, so module journeys are not part of the run. It measures and never gates: the exit status is non-zero only for usage errors.
-The source file is restored after every mutant, including on interrupt.
+A mutant whose locks outlive `--timeout` (an infinite loop starves vitest's own timers) is
+stopped with its whole process group and counted as detected. The source file is restored
+after every mutant, including on interrupt or SIGTERM, and the report is rewritten after
+each mutant, so an interrupted run keeps what it finished.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -41,6 +46,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("file", help="repository-relative Gateway source file")
     parser.add_argument("--count", type=int, default=30)
     parser.add_argument("--seed", type=int, default=1465)
+    parser.add_argument("--timeout", type=float, default=300, help="seconds one mutant's lock run may take")
     args = parser.parse_args(argv)
     path = verify.ROOT / args.file
     if not path.is_file() or not args.file.startswith(f"{verify.GATEWAY}/src/") or args.file.endswith(".test.ts"):
@@ -59,10 +65,20 @@ def main(argv: list[str]) -> int:
     command = [str(verify.ROOT / "scripts" / "tron-node"), "exec", "npx", "vitest", "run", "--reporter=json",
                f"--outputFile={report_path}", *[test[len(verify.GATEWAY) + 1:] for test in tests]]
 
-    def run_locks() -> dict | None:
-        """The run's vitest summary, or None when no readable report proves the tests ran."""
+    def run_locks(timeout: float | None) -> dict | str | None:
+        """The run's vitest summary, "timeout", or None when no readable report proves the tests ran."""
         report_path.unlink(missing_ok=True)
-        subprocess.run(command, cwd=verify.ROOT / verify.GATEWAY, capture_output=True)
+        # Its own process group, so a hung run is stopped with every vitest worker it started.
+        process = subprocess.Popen(command, cwd=verify.ROOT / verify.GATEWAY, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return "timeout"
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
         try:
             return json.loads(report_path.read_text())
         except (OSError, ValueError):
@@ -77,38 +93,50 @@ def main(argv: list[str]) -> int:
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
     # A broken harness would otherwise count every mutant as killed.
-    baseline = run_locks()
-    if not baseline or baseline.get("numFailedTests", 1) or baseline.get("numFailedTestSuites", 1) or not baseline.get("numPassedTests"):
+    baseline = run_locks(None)
+    if not isinstance(baseline, dict) or baseline.get("numFailedTests", 1) or baseline.get("numFailedTestSuites", 1) or not baseline.get("numPassedTests"):
         print("mutate: the unmutated locks do not pass cleanly; no mutant was run", file=sys.stderr)
         return 1
     mutants, started = [], time.time()
+    out = verify.ROOT / "test-results" / "mutate" / f"{args.file.replace('/', '__')}.json"
+
+    def write_report(complete: bool) -> dict:
+        killed = sum(mutant["killed"] for mutant in mutants)
+        errors = sum(mutant["outcome"] == "error" for mutant in mutants)
+        measured = len(mutants) - errors
+        report = {"schema": "tron.mutate.v1", "file": args.file, "commit": verify.git("rev-parse", "HEAD").strip(),
+                  "seed": args.seed, "candidates": len(pool), "sampled": len(mutants), "complete": complete,
+                  "killed": killed, "timeouts": sum(mutant["outcome"] == "timeout" for mutant in mutants), "errors": errors,
+                  "rate": round(killed / measured, 3) if measured else None, "tests": tests,
+                  "seconds": round(time.time() - started), "mutants": mutants}
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2) + "\n")
+        return report
+
+    # SIGTERM (an outer `timeout`) unwinds like an interrupt, so the source is restored.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         for number, (index, start, end, replacement) in enumerate(sample, 1):
             mutated = lines[:]
             mutated[index] = lines[index][:start] + replacement + lines[index][end:]
             path.write_text("\n".join(mutated))
             begun = time.time()
-            summary = run_locks()
+            summary = run_locks(args.timeout)
             path.write_text(source)
-            # Killed only by a failing test or a suite the mutant broke; no report is a harness error.
-            outcome = "error" if summary is None else "killed" if summary.get("numFailedTests") or summary.get("numFailedTestSuites") else "survived"
+            # Killed by a failing test, a suite the mutant broke, or a run it hung; no report is a harness error.
+            outcome = summary if summary == "timeout" else "error" if summary is None \
+                else "killed" if summary.get("numFailedTests") or summary.get("numFailedTestSuites") else "survived"
             mutants.append({"line": index + 1, "from": lines[index][start:end].strip(), "to": replacement.strip(),
-                            "killed": outcome == "killed", "outcome": outcome, "seconds": round(time.time() - begun, 1)})
+                            "killed": outcome in ("killed", "timeout"), "outcome": outcome, "seconds": round(time.time() - begun, 1)})
+            write_report(False)
             print(f"[{number}/{len(sample)}] line {index + 1}: {mutants[-1]['from']} → {mutants[-1]['to']} "
                   f"{outcome.upper() if outcome != 'killed' else outcome}", flush=True)
     finally:
         path.write_text(source)
-    killed = sum(mutant["killed"] for mutant in mutants)
-    errors = sum(mutant["outcome"] == "error" for mutant in mutants)
-    measured = len(mutants) - errors
-    report = {"schema": "tron.mutate.v1", "file": args.file, "commit": verify.git("rev-parse", "HEAD").strip(),
-              "seed": args.seed, "candidates": len(pool), "sampled": len(mutants), "killed": killed, "errors": errors,
-              "rate": round(killed / measured, 3) if measured else None, "tests": tests,
-              "seconds": round(time.time() - started), "mutants": mutants}
-    out = verify.ROOT / "test-results" / "mutate" / f"{args.file.replace('/', '__')}.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, indent=2) + "\n")
-    print(f"mutate: {killed}/{measured} killed ({report['rate']})"
+    report = write_report(True)
+    killed, errors, timeouts = report["killed"], report["errors"], report["timeouts"]
+    print(f"mutate: {killed}/{len(mutants) - errors} killed ({report['rate']})"
+          f"{f', {timeouts} by timeout' if timeouts else ''}"
           f"{f', {errors} harness error(s) excluded' if errors else ''} in {report['seconds']}s; report {out.relative_to(verify.ROOT)}")
     report_path.unlink(missing_ok=True)
     return 1 if errors else 0
