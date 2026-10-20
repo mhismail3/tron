@@ -39,20 +39,24 @@ interface HomeLockTrace {
   readonly homeStore: { readonly files: readonly string[]; readonly designation: TraceValue; readonly task: TraceValue };
 }
 
+/** Sizes that include the result notice's measured duration, and token counts the
+ * faux provider derives from text holding the host's temp and checkout paths. */
+const SIZE_KEYS = new Set(["bytes", "currentBytes", "viewBytes", "effectiveTokens", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"]);
 /** Pi's 8-hex entry ids, which every reference to a canonical entry repeats. */
 const ENTRY_ID = /^[0-9a-f]{8}$/;
 /**
  * Home's per-run values the shared normalization does not cover: entry ids under
  * Home's own keys (`entryId`, `activationStartEntryId`, …), the host's load in
- * `hostPressure` (structure only), a chapter's byte count (zero or not), which
- * moves with recorded durations, and the result notice's measured duration.
+ * `hostPressure` (structure only), byte and token counts (zero or not), which
+ * move with the result notice's measured duration and the host's paths, and that
+ * duration itself.
  */
 function stabilize(value: TraceValue, key = ""): TraceValue {
   if (typeof value === "string") {
     if (ENTRY_ID.test(value)) return "<entry>";
     return value.replace(/\| duration: \d+ms/g, "| duration: <duration>");
   }
-  if (typeof value === "number") return key === "currentBytes" && value > 0 ? "<bytes>" : value;
+  if (typeof value === "number") return SIZE_KEYS.has(key) && value > 0 ? "<size>" : value;
   if (Array.isArray(value)) return value.map((item) => stabilize(item, key));
   if (value !== null && typeof value === "object") {
     if (key === "hostPressure") return Object.fromEntries(Object.keys(value).map((name) => [name, "<host>"]));

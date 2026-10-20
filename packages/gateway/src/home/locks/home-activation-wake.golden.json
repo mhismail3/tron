@@ -492,9 +492,9 @@
           "sessionId": "<id>",
           "spend": {
             "cacheReadTokens": 0,
-            "cacheWriteTokens": 6159,
-            "inputTokens": 6159,
-            "outputTokens": 30,
+            "cacheWriteTokens": "<size>",
+            "inputTokens": "<size>",
+            "outputTokens": "<size>",
             "sourceDigest": "<base64:64>"
           },
           "stopIntent": null,
@@ -566,9 +566,9 @@
               "sessionId": "<id>",
               "spend": {
                 "cacheReadTokens": 0,
-                "cacheWriteTokens": 6159,
-                "inputTokens": 6159,
-                "outputTokens": 30,
+                "cacheWriteTokens": "<size>",
+                "inputTokens": "<size>",
+                "outputTokens": "<size>",
                 "sourceDigest": "<base64:64>"
               },
               "target": "<tmp>/workspace",
@@ -599,7 +599,7 @@
                 "state": "settled"
               },
               "contextWindow": 128000,
-              "effectiveTokens": 3473,
+              "effectiveTokens": "<size>",
               "sections": [
                 {
                   "id": "<id>",
@@ -632,15 +632,15 @@
               ]
             },
             "contextWindow": 128000,
-            "effectiveTokens": 3473,
-            "viewBytes": 1486,
+            "effectiveTokens": "<size>",
+            "viewBytes": "<size>",
             "viewLines": 11
           },
           "available": true,
           "bindingRevision": 1,
           "chapter": {
             "count": 1,
-            "currentBytes": "<bytes>",
+            "currentBytes": "<size>",
             "currentEntries": 23,
             "recoveryDecision": "none"
           },
@@ -699,47 +699,47 @@
               "view": {
                 "budgetBytes": 128000,
                 "built": 6,
-                "bytes": 662,
+                "bytes": "<size>",
                 "parts": [
                   {
                     "address": "0+1",
                     "built": true,
-                    "bytes": 29,
+                    "bytes": "<size>",
                     "messages": 1,
                     "start": 0
                   },
                   {
                     "address": "1+1",
                     "built": true,
-                    "bytes": 224,
+                    "bytes": "<size>",
                     "messages": 1,
                     "start": 1
                   },
                   {
                     "address": "2+1",
                     "built": true,
-                    "bytes": 148,
+                    "bytes": "<size>",
                     "messages": 1,
                     "start": 2
                   },
                   {
                     "address": "3+1",
                     "built": true,
-                    "bytes": 30,
+                    "bytes": "<size>",
                     "messages": 1,
                     "start": 3
                   },
                   {
                     "address": "4+1",
                     "built": true,
-                    "bytes": 190,
+                    "bytes": "<size>",
                     "messages": 1,
                     "start": 4
                   },
                   {
                     "address": "5+1",
                     "built": true,
-                    "bytes": 41,
+                    "bytes": "<size>",
                     "messages": 1,
                     "start": 5
                   }
@@ -799,7 +799,7 @@
               "state": "settled"
             },
             "contextWindow": 128000,
-            "effectiveTokens": 3473,
+            "effectiveTokens": "<size>",
             "sections": [
               {
                 "id": "<id>",
@@ -832,8 +832,8 @@
             ]
           },
           "contextWindow": 128000,
-          "effectiveTokens": 3473,
-          "viewBytes": 1486,
+          "effectiveTokens": "<size>",
+          "viewBytes": "<size>",
           "viewLines": 11
         }
       }
@@ -5040,9 +5040,9 @@
       "sessionId": "<id>",
       "spend": {
         "cacheReadTokens": 0,
-        "cacheWriteTokens": 6159,
-        "inputTokens": 6159,
-        "outputTokens": 30,
+        "cacheWriteTokens": "<size>",
+        "inputTokens": "<size>",
+        "outputTokens": "<size>",
         "sourceDigest": "<base64:64>"
       },
       "stopIntent": null,
