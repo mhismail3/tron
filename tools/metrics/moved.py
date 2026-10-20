@@ -57,10 +57,10 @@ def measure(base: str, head: str) -> dict:
     for row, (removed, added) in zip(rows, pending):
         for counts, available, field in ((removed, available_out, "movedOut"), (added, available_in, "moved")):
             matched = counts & available
-            row[field] += matched.total()
+            row[field] += sum(matched.values())
             counts.subtract(matched)
             available.subtract(matched)
-        deleted, new = removed.total(), added.total()
+        deleted, new = sum(removed.values()), sum(added.values())  # Counter.total() needs Python 3.10
         row["rewritten"] = min(deleted, new)
         row["changedInMove"] = row["rewritten"] if row["status"] == "R" else 0
         row["deleted"] = deleted - row["rewritten"]
