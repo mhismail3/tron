@@ -35,7 +35,8 @@ enum HostedExtensionsReview {
     }
 
     /// #1491: Codemode starts off on the Mac while the scope saves `+codemode`;
-    /// `-settings-ui-project-tools` serves one project's layers over the Mac's.
+    /// `-settings-ui-project-tools` renders a project's view-only Tools (as
+    /// Project Settings does) and serves its layers over the Mac's.
     static var builtinOff: Bool { ProcessInfo.processInfo.arguments.contains("-settings-ui-builtin-off") }
     static var project: Bool { ProcessInfo.processInfo.arguments.contains("-settings-ui-project-tools") }
 

@@ -119,7 +119,6 @@ struct HostedSettingsRendererFixture: View {
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("context"))
                     } else if HostedExtensionsReview.project {
-                        // A project's view-only Tools, as Project Settings renders them.
                         SettingsRendererView(target: SettingsTarget.project(cwd: "/fixture/project").gatewayTarget, writeLayer: nil, presentation: .section("tools"))
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-providers") {
                         providerReview
@@ -627,13 +626,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         ].merging(extra) { $1 })
     }
 
-    private func choice(_ value: String, _ label: String) -> JSONValue {
-        .object(["value": .string(value), "label": .string(label)])
-    }
+    private func choice(_ value: String, _ label: String) -> JSONValue { .object(["value": .string(value), "label": .string(label)]) }
 
     private func section(_ id: String, _ title: String, _ order: Int, _ description: String) -> JSONValue {
-        .object(["id": .string(id), "title": .string(title), "description": .string(description), "order": .number(Double(order))])
-    }
+        .object(["id": .string(id), "title": .string(title), "description": .string(description), "order": .number(Double(order))]) }
 
     private func enqueue(_ frame: JSONValue) throws {
         let data = try JSONEncoder.gateway.encode(frame)

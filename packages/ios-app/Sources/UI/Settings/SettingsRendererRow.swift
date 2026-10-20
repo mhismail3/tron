@@ -28,8 +28,7 @@ struct SettingsRendererRow: View {
     /// An instance's own description, when its group's help does not say it
     /// (an approval level describes the setting it governs).
     var instanceHelp: String? = nil
-    /// Why the saved value has no effect at this scope, shown in Value & Source.
-    var inactiveNote: String? = nil
+    var inactiveNote: String? = nil  // Why the saved value has no effect here, for Value & Source.
     /// The options the key's source serves, read by the renderer with the
     /// resolution itself, so a row is never without them once it renders.
     let options: SettingsOptionsResponse?
@@ -133,11 +132,8 @@ struct SettingsRendererRow: View {
     }
 
     private var inspection: TronSettingsRowInspection {
-        return TronSettingsRowInspection(
-            label: "Value and source for \(title)",
-            identifier: "\(settingsRowIdentifier(setting))-source",
-            destination: { AnyView(SettingsProvenanceView(setting: setting, inactiveNote: inactiveNote)) }
-        )
+        TronSettingsRowInspection(label: "Value and source for \(title)", identifier: "\(settingsRowIdentifier(setting))-source",
+                                  destination: { AnyView(SettingsProvenanceView(setting: setting, inactiveNote: inactiveNote)) })
     }
 
     private var accessory: (@MainActor @Sendable () -> AnyView)? {
