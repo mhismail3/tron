@@ -16,6 +16,7 @@ import { MacTerminalKeys } from "../src/security/mac-terminal.js";
 import { DeviceStore } from "../src/security/device-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
+import type { NotificationService } from "../src/notifications/notification-service.js";
 import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { GatewayService, type GatewayServiceDependencies } from "../src/transport/gateway-service.js";
 import { GatewayServer } from "../src/transport/server.js";
@@ -50,6 +51,18 @@ export interface LockGatewayOptions {
   readonly extensions?: ReadonlyArray<{ name: string; source: string }>;
   /** Extra `settings.json` keys; the default model is always the faux model. */
   readonly settings?: Record<string, unknown>;
+  /**
+   * The production notification owner, built under the Gateway's Tron home. When
+   * given, it is wired as `gateway-main` wires it: the registry (with the machine
+   * id automatic pushes route by) and the service both receive it, replacing the
+   * recording relay-boundary stub. The lock owns its relay and its disposal.
+   */
+  readonly notifications?: (tronHome: string) => NotificationService | Promise<NotificationService>;
+}
+
+export interface LockConnectOptions {
+  /** `mobile` is the phone's presentation role: it may publish chat visibility. */
+  readonly clientRole?: "mobile";
 }
 
 export interface ProviderRequestRecord {
@@ -82,7 +95,7 @@ export interface LockGateway {
   readonly token: string;
   /** Script the provider: each step answers one request and is recorded. */
   script(steps: readonly Step[]): void;
-  connect(label: string): Promise<LockClient>;
+  connect(label: string, options?: LockConnectOptions): Promise<LockClient>;
   /** A deterministic command id, unique within the lock. */
   commandId(): string;
   /** Wait until the session's run, queue and maintenance have settled. */
@@ -176,8 +189,10 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   await devices.ensureEnrollment();
 
   let server: GatewayServer | undefined;
+  const notificationService = await options.notifications?.(tronHome);
   const registry = new RuntimeRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
+    ...(notificationService ? { notifications: notificationService, machineId: "lock-machine" } : {}),
     // Mirrors gateway-main: slot events reach subscribed sockets.
     broadcast: (sessionId, topic, payload) => server?.broadcastSession(sessionId, topic, payload as never),
     sessionSummaryChanged: () => {},
@@ -207,7 +222,8 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const service = new GatewayService({
     config: { machineId: "lock-machine", machineGroupID: "lock-group", machineName: "Lock Mac", tronHome, agentDir },
     modelRuntime, devices, sessions: registry, trust, settingsModel, settingsChanges, receipts,
-    notifications: { enqueue: async (push: unknown) => { notifications.push(normalizeTraceValue(push, normalization)); } },
+    notifications: notificationService
+      ?? { enqueue: async (push: unknown) => { notifications.push(normalizeTraceValue(push, normalization)); } },
     broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
     logger: { log: () => {} },
@@ -247,7 +263,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
         }),
       ]);
     },
-    async connect(label) {
+    async connect(label, connectOptions = {}) {
       const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
       sockets.push(socket);
       const frames: any[] = [];
@@ -261,7 +277,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
         }
       });
       await waitFor(() => socket.readyState === WebSocket.OPEN, `the ${label} socket to open`);
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 8 }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, ...connectOptions }));
       await waitFor(() => frames.some((frame) => frame.type === "hello"), `the ${label} hello`);
       const send = (method: string, params: Record<string, unknown>) => {
         const id = `${label}-${String(++frameCounter).padStart(3, "0")}`;

@@ -1,0 +1,1641 @@
+{
+  "lock": "notifications-push",
+  "relayRequests": [
+    {
+      "envelope": {
+        "expiresAt": "<timestamp>",
+        "kind": "agent_alert",
+        "machineId": "lock-machine",
+        "message": "The agent finished responding.",
+        "notificationKind": "agent_finished",
+        "requestId": "<id>",
+        "sessionId": "<id>",
+        "title": "finish the quiet run",
+        "version": 1
+      },
+      "grantId": "lock-grant-0001",
+      "method": "POST",
+      "path": "/v3/notifications"
+    },
+    {
+      "envelope": {
+        "expiresAt": "<timestamp>",
+        "interruptionLevel": "time-sensitive",
+        "kind": "agent_alert",
+        "machineId": "lock-machine",
+        "message": "Tron needs your input. Open Tron to respond.",
+        "notificationKind": "ask",
+        "requestId": "<id>",
+        "sessionId": "<id>",
+        "title": "Input needed",
+        "version": 1
+      },
+      "grantId": "lock-grant-0001",
+      "method": "POST",
+      "path": "/v3/notifications"
+    },
+    {
+      "envelope": {
+        "expiresAt": "<timestamp>",
+        "kind": "agent_alert",
+        "machineId": "lock-machine",
+        "message": "The agent finished responding.",
+        "notificationKind": "agent_finished",
+        "requestId": "<id>",
+        "sessionId": "<id>",
+        "title": "finish the quiet run",
+        "version": 1
+      },
+      "grantId": "lock-grant-0001",
+      "method": "POST",
+      "path": "/v3/notifications"
+    },
+    {
+      "envelope": {
+        "expiresAt": "<timestamp>",
+        "kind": "agent_alert",
+        "machineId": "lock-machine",
+        "message": "The agent stopped because of an error.",
+        "notificationKind": "agent_finished",
+        "requestId": "<id>",
+        "sessionId": "<id>",
+        "title": "Renamed lock chat",
+        "version": 1
+      },
+      "grantId": "lock-grant-0001",
+      "method": "POST",
+      "path": "/v3/notifications"
+    },
+    {
+      "envelope": {
+        "expiresAt": "<timestamp>",
+        "kind": "agent_alert",
+        "machineId": "lock-machine",
+        "message": "The agent was stopped.",
+        "notificationKind": "agent_finished",
+        "requestId": "<id>",
+        "sessionId": "<id>",
+        "title": "Renamed lock chat",
+        "version": 1
+      },
+      "grantId": "lock-grant-0001",
+      "method": "POST",
+      "path": "/v3/notifications"
+    }
+  ],
+  "receipts": [
+    {
+      "result": "accepted_by_apns",
+      "grants": 1
+    },
+    {
+      "result": "accepted_by_apns",
+      "grants": 1
+    },
+    {
+      "result": "accepted_by_apns",
+      "grants": 1
+    },
+    {
+      "result": "suppressed",
+      "grants": 0
+    },
+    {
+      "result": "suppressed",
+      "grants": 0
+    },
+    {
+      "result": "accepted_by_apns",
+      "grants": 1
+    },
+    {
+      "result": "accepted_by_apns",
+      "grants": 1
+    }
+  ],
+  "exchanges": [
+    {
+      "client": "phone",
+      "method": "push.registration.upsert",
+      "params": {
+        "commandId": "lock-command-0001",
+        "grantId": "lock-grant-0001",
+        "installationId": "lock-installation",
+        "notifyWhenAskPresented": true,
+        "notifyWhenFinished": true,
+        "notifyWhenWaiting": true,
+        "previewsEnabled": false,
+        "relayOrigin": "https://relay.lock.invalid",
+        "secret": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "available": true,
+          "deviceRegistered": true,
+          "enabledDeviceCount": 1,
+          "notifyWhenAskPresented": true,
+          "notifyWhenFinished": true,
+          "notifyWhenWaiting": true,
+          "pendingCount": 0,
+          "registered": true,
+          "relayOrigin": "https://relay.lock.invalid",
+          "requiresGrantRotation": false
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.create",
+      "params": {
+        "commandId": "lock-command-0002",
+        "cwd": "<tmp>/workspace"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "sessionId": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.open",
+      "params": {
+        "sessionId": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "completionRevision": 0,
+          "session": {
+            "acceptsQueuedPrompts": false,
+            "automaticCompactionEnabled": false,
+            "availableThinkingLevels": [
+              "off"
+            ],
+            "compactionPolicy": {
+              "currentBudgets": {
+                "enabled": false,
+                "keepRecentTokens": 120,
+                "reserveTokens": 2048
+              },
+              "extensionMayOverride": false,
+              "next": {
+                "effectiveThinkingLevel": "off",
+                "enabled": false,
+                "instructions": "",
+                "keepRecentTokens": 120,
+                "model": {
+                  "id": "<id>",
+                  "provider": "tron-lock-notifications-push"
+                },
+                "requestedThinkingLevel": "off",
+                "reserveTokens": 2048,
+                "source": {
+                  "enabled": "global",
+                  "instructions": "default",
+                  "keepRecentTokens": "global",
+                  "reserveTokens": "global",
+                  "thinkingLevel": "default"
+                },
+                "thinkingLevel": "inherit"
+              }
+            },
+            "compactionQueued": false,
+            "configurationBlocker": null,
+            "contextUsage": {
+              "contextWindow": "<value>",
+              "percent": "<value>",
+              "tokens": "<value>"
+            },
+            "contextWindowPolicy": {
+              "default": 128000,
+              "effective": 128000,
+              "maximum": 128000,
+              "minimum": 3192,
+              "model": {
+                "id": "<id>",
+                "provider": "tron-lock-notifications-push"
+              },
+              "override": 128000,
+              "source": "session",
+              "warning": "This new session and its context override are not yet saved to disk; they persist after the first user or assistant message."
+            },
+            "cwd": "<tmp>/workspace",
+            "diagnostics": [],
+            "eventSequence": "<n>",
+            "extensionActivityAsOf": "<timestamp>",
+            "extensionPresentation": {
+              "capabilities": [
+                "semantic.dialogs",
+                "tron.form.v1",
+                "semantic.notifications",
+                "semantic.status",
+                "semantic.working",
+                "semantic.hidden-thinking-label",
+                "semantic.string-widgets",
+                "semantic.title",
+                "semantic.revisioned-editor",
+                "semantic.tools-expanded",
+                "surfaces.full-frame"
+              ],
+              "diagnostics": [
+                {
+                  "code": "remote-components.enabled",
+                  "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                },
+                {
+                  "code": "remote-components.overlay-deferred",
+                  "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                },
+                {
+                  "code": "theme.baseline-only",
+                  "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                }
+              ],
+              "hostEpoch": "<id>",
+              "pendingInteractions": [],
+              "revision": "<n>",
+              "semanticState": {
+                "editorRevision": 0,
+                "editorText": "",
+                "statusOwners": {},
+                "statuses": {},
+                "toolsExpanded": false,
+                "widgets": [],
+                "working": {
+                  "indicator": {
+                    "frames": [],
+                    "kind": "default"
+                  },
+                  "visible": true
+                }
+              },
+              "surfaces": [],
+              "version": 3
+            },
+            "leafEntryId": "<id>",
+            "liveActivityRevision": 0,
+            "model": {
+              "id": "<id>",
+              "provider": "tron-lock-notifications-push"
+            },
+            "phase": "idle",
+            "processOverview": {
+              "activeCount": 0,
+              "asOf": "<timestamp>",
+              "problemCount": 0,
+              "recentCount": 0,
+              "revision": "<n>",
+              "version": 1,
+              "visibility": "hidden"
+            },
+            "queueRevision": 0,
+            "queuedItems": [],
+            "revision": "<n>",
+            "runtimeGeneration": "<id>",
+            "sessionId": "<id>",
+            "stats": {
+              "assistantMessages": "<value>",
+              "cost": "<value>",
+              "tokens": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "toolCalls": "<value>",
+              "toolResults": "<value>",
+              "totalMessages": "<value>",
+              "userMessages": "<value>"
+            },
+            "thinkingLevel": "off",
+            "toolExecutions": [],
+            "transcript": [
+              {
+                "id": "<id>",
+                "kind": "modelChange",
+                "modelRef": {
+                  "id": "<id>",
+                  "provider": "tron-lock-notifications-push"
+                },
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "id": "<id>",
+                "kind": "thinkingChange",
+                "level": "off",
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              }
+            ],
+            "transcriptStart": 0,
+            "transcriptTotal": 2
+          },
+          "subscriptionToken": "<id>",
+          "syncToken": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.sync",
+      "params": {
+        "sessionId": "<id>",
+        "syncToken": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "synchronized": true
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.prompt",
+      "params": {
+        "commandId": "lock-command-0003",
+        "sessionId": "<id>",
+        "text": "finish the quiet run"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "operationId": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.prompt",
+      "params": {
+        "commandId": "lock-command-0004",
+        "sessionId": "<id>",
+        "text": "ask me while I am away"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "operationId": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "extension.respond",
+      "params": {
+        "commandId": "lock-command-0005",
+        "hostEpoch": "<id>",
+        "interactionId": "<id>",
+        "presentationRevision": 1,
+        "sessionId": "<id>",
+        "value": "Keep"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "answered": true
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.presentation.set",
+      "params": {
+        "revision": "<n>",
+        "sessionId": "<id>",
+        "subscriptionToken": "<id>",
+        "visible": true
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "revision": "<n>",
+          "visible": true
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.prompt",
+      "params": {
+        "commandId": "lock-command-0006",
+        "sessionId": "<id>",
+        "text": "ask me while I am watching"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "operationId": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "extension.respond",
+      "params": {
+        "commandId": "lock-command-0007",
+        "hostEpoch": "<id>",
+        "interactionId": "<id>",
+        "presentationRevision": 3,
+        "sessionId": "<id>",
+        "value": "Keep"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "answered": true
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.presentation.set",
+      "params": {
+        "revision": "<n>",
+        "sessionId": "<id>",
+        "subscriptionToken": "<id>",
+        "visible": false
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "revision": "<n>",
+          "visible": false
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.rename",
+      "params": {
+        "commandId": "lock-command-0008",
+        "name": "Renamed lock chat",
+        "sessionId": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "updated": true
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.prompt",
+      "params": {
+        "commandId": "lock-command-0009",
+        "sessionId": "<id>",
+        "text": "fail this run"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "operationId": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.prompt",
+      "params": {
+        "commandId": "lock-command-0010",
+        "sessionId": "<id>",
+        "text": "start a run to stop"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "operationId": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.abort",
+      "params": {
+        "commandId": "lock-command-0011",
+        "operationId": "<id>",
+        "sessionId": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "aborted": true
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "notification.inbox.list",
+      "params": {},
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "notifications": [
+            {
+              "createdAt": "<timestamp>",
+              "id": "<id>",
+              "isUnread": true,
+              "kind": "agent_finished",
+              "message": "The agent was stopped.",
+              "outcome": "accepted_by_apns",
+              "sessionId": "<id>",
+              "title": "Renamed lock chat",
+              "updatedAt": "<timestamp>",
+              "version": 1
+            },
+            {
+              "createdAt": "<timestamp>",
+              "id": "<id>",
+              "isUnread": true,
+              "kind": "agent_finished",
+              "message": "The agent stopped because of an error.",
+              "outcome": "accepted_by_apns",
+              "sessionId": "<id>",
+              "title": "Renamed lock chat",
+              "updatedAt": "<timestamp>",
+              "version": 1
+            },
+            {
+              "createdAt": "<timestamp>",
+              "id": "<id>",
+              "isUnread": false,
+              "kind": "agent_finished",
+              "message": "The agent finished responding.",
+              "outcome": "accepted_by_apns",
+              "sessionId": "<id>",
+              "title": "finish the quiet run",
+              "updatedAt": "<timestamp>",
+              "version": 1
+            },
+            {
+              "createdAt": "<timestamp>",
+              "id": "<id>",
+              "isUnread": false,
+              "kind": "ask",
+              "message": "Tron needs your input. Open Tron to respond.",
+              "outcome": "accepted_by_apns",
+              "sessionId": "<id>",
+              "title": "Input needed",
+              "updatedAt": "<timestamp>",
+              "version": 1
+            },
+            {
+              "createdAt": "<timestamp>",
+              "id": "<id>",
+              "isUnread": false,
+              "kind": "agent_finished",
+              "message": "The agent finished responding.",
+              "outcome": "accepted_by_apns",
+              "sessionId": "<id>",
+              "title": "finish the quiet run",
+              "updatedAt": "<timestamp>",
+              "version": 1
+            }
+          ],
+          "revision": "<n>",
+          "unreadCount": 2
+        }
+      }
+    }
+  ],
+  "events": [
+    {
+      "topic": "session.configuration",
+      "paths": [
+        ":object",
+        "data.configurationBlocker:null",
+        "data.configurationBlocker:string",
+        "data:object",
+        "eventSequence:number",
+        "revision:number",
+        "runtimeGeneration:string"
+      ]
+    },
+    {
+      "topic": "session.diagnostic",
+      "paths": [
+        ":object",
+        "data.code:string",
+        "data.followUpMode:string",
+        "data.imagesBlocked:boolean",
+        "data.retry.baseDelayMs:number",
+        "data.retry.enabled:boolean",
+        "data.retry.maxAgentDelayMs:number",
+        "data.retry.maxRetries:number",
+        "data.retry:object",
+        "data.steeringMode:string",
+        "data.transport:string",
+        "data:object",
+        "eventSequence:number",
+        "revision:number",
+        "runtimeGeneration:string"
+      ]
+    },
+    {
+      "topic": "session.extensionPresentation",
+      "paths": [
+        ":object",
+        "data.hostEpoch:string",
+        "data.interactionList:array",
+        "data.interactionList[].hostEpoch:string",
+        "data.interactionList[].id:string",
+        "data.interactionList[].invocationId:string",
+        "data.interactionList[].method:string",
+        "data.interactionList[].operationId:string",
+        "data.interactionList[].options:array",
+        "data.interactionList[].options[]:string",
+        "data.interactionList[].owner.id:string",
+        "data.interactionList[].owner.kind:string",
+        "data.interactionList[].owner.source:string",
+        "data.interactionList[].owner.title:string",
+        "data.interactionList[].owner:object",
+        "data.interactionList[].presentationRevision:number",
+        "data.interactionList[].title:string",
+        "data.interactionList[]:object",
+        "data.revision:number",
+        "data.version:number",
+        "data:object",
+        "eventSequence:number",
+        "revision:number",
+        "runtimeGeneration:string"
+      ]
+    },
+    {
+      "topic": "session.listChanged",
+      "paths": [
+        ":object"
+      ]
+    },
+    {
+      "topic": "session.progress",
+      "paths": [
+        ":object",
+        "data:object",
+        "eventSequence:number",
+        "revision:number",
+        "runtimeGeneration:string"
+      ]
+    },
+    {
+      "topic": "session.rebaseline",
+      "paths": [
+        ":object",
+        "reason:string",
+        "snapshot.acceptsQueuedPrompts:boolean",
+        "snapshot.automaticCompactionEnabled:boolean",
+        "snapshot.availableThinkingLevels:array",
+        "snapshot.availableThinkingLevels[]:string",
+        "snapshot.compactionPolicy.currentBudgets.enabled:boolean",
+        "snapshot.compactionPolicy.currentBudgets.keepRecentTokens:number",
+        "snapshot.compactionPolicy.currentBudgets.reserveTokens:number",
+        "snapshot.compactionPolicy.currentBudgets:object",
+        "snapshot.compactionPolicy.extensionMayOverride:boolean",
+        "snapshot.compactionPolicy.next.effectiveThinkingLevel:string",
+        "snapshot.compactionPolicy.next.enabled:boolean",
+        "snapshot.compactionPolicy.next.instructions:string",
+        "snapshot.compactionPolicy.next.keepRecentTokens:number",
+        "snapshot.compactionPolicy.next.model.id:string",
+        "snapshot.compactionPolicy.next.model.provider:string",
+        "snapshot.compactionPolicy.next.model:object",
+        "snapshot.compactionPolicy.next.requestedThinkingLevel:string",
+        "snapshot.compactionPolicy.next.reserveTokens:number",
+        "snapshot.compactionPolicy.next.source.enabled:string",
+        "snapshot.compactionPolicy.next.source.instructions:string",
+        "snapshot.compactionPolicy.next.source.keepRecentTokens:string",
+        "snapshot.compactionPolicy.next.source.reserveTokens:string",
+        "snapshot.compactionPolicy.next.source.thinkingLevel:string",
+        "snapshot.compactionPolicy.next.source:object",
+        "snapshot.compactionPolicy.next.thinkingLevel:string",
+        "snapshot.compactionPolicy.next:object",
+        "snapshot.compactionPolicy:object",
+        "snapshot.compactionQueued:boolean",
+        "snapshot.configurationBlocker:string",
+        "snapshot.contextUsage.contextWindow:number",
+        "snapshot.contextUsage.percent:number",
+        "snapshot.contextUsage.tokens:number",
+        "snapshot.contextUsage:object",
+        "snapshot.contextWindowPolicy.default:number",
+        "snapshot.contextWindowPolicy.effective:number",
+        "snapshot.contextWindowPolicy.maximum:number",
+        "snapshot.contextWindowPolicy.minimum:number",
+        "snapshot.contextWindowPolicy.model.id:string",
+        "snapshot.contextWindowPolicy.model.provider:string",
+        "snapshot.contextWindowPolicy.model:object",
+        "snapshot.contextWindowPolicy.override:number",
+        "snapshot.contextWindowPolicy.source:string",
+        "snapshot.contextWindowPolicy:object",
+        "snapshot.cwd:string",
+        "snapshot.diagnostics:array",
+        "snapshot.eventSequence:number",
+        "snapshot.extensionActivityAsOf:string",
+        "snapshot.extensionPresentation.capabilities:array",
+        "snapshot.extensionPresentation.capabilities[]:string",
+        "snapshot.extensionPresentation.diagnostics:array",
+        "snapshot.extensionPresentation.diagnostics[].code:string",
+        "snapshot.extensionPresentation.diagnostics[].message:string",
+        "snapshot.extensionPresentation.diagnostics[]:object",
+        "snapshot.extensionPresentation.hostEpoch:string",
+        "snapshot.extensionPresentation.pendingInteractions:array",
+        "snapshot.extensionPresentation.revision:number",
+        "snapshot.extensionPresentation.semanticState.editorRevision:number",
+        "snapshot.extensionPresentation.semanticState.editorText:string",
+        "snapshot.extensionPresentation.semanticState.statusOwners:object",
+        "snapshot.extensionPresentation.semanticState.statuses:object",
+        "snapshot.extensionPresentation.semanticState.toolsExpanded:boolean",
+        "snapshot.extensionPresentation.semanticState.widgets:array",
+        "snapshot.extensionPresentation.semanticState.working.indicator.frames:array",
+        "snapshot.extensionPresentation.semanticState.working.indicator.kind:string",
+        "snapshot.extensionPresentation.semanticState.working.indicator:object",
+        "snapshot.extensionPresentation.semanticState.working.visible:boolean",
+        "snapshot.extensionPresentation.semanticState.working:object",
+        "snapshot.extensionPresentation.semanticState:object",
+        "snapshot.extensionPresentation.surfaces:array",
+        "snapshot.extensionPresentation.version:number",
+        "snapshot.extensionPresentation:object",
+        "snapshot.leafEntryId:string",
+        "snapshot.liveActivityRevision:number",
+        "snapshot.model.id:string",
+        "snapshot.model.provider:string",
+        "snapshot.model:object",
+        "snapshot.name:string",
+        "snapshot.operation.id:string",
+        "snapshot.operation.invocationId:string",
+        "snapshot.operation.kind:string",
+        "snapshot.operation.lifecycle:string",
+        "snapshot.operation.startedAt:string",
+        "snapshot.operation:object",
+        "snapshot.phase:string",
+        "snapshot.processOverview.activeCount:number",
+        "snapshot.processOverview.asOf:string",
+        "snapshot.processOverview.problemCount:number",
+        "snapshot.processOverview.recentCount:number",
+        "snapshot.processOverview.revision:number",
+        "snapshot.processOverview.version:number",
+        "snapshot.processOverview.visibility:string",
+        "snapshot.processOverview:object",
+        "snapshot.queueRevision:number",
+        "snapshot.revision:number",
+        "snapshot.runtimeGeneration:string",
+        "snapshot.sessionId:string",
+        "snapshot.stats.assistantMessages:number",
+        "snapshot.stats.cost:number",
+        "snapshot.stats.latestCacheHitRate:number",
+        "snapshot.stats.tokens.cacheRead:number",
+        "snapshot.stats.tokens.cacheWrite:number",
+        "snapshot.stats.tokens.input:number",
+        "snapshot.stats.tokens.output:number",
+        "snapshot.stats.tokens.total:number",
+        "snapshot.stats.tokens:object",
+        "snapshot.stats.toolCalls:number",
+        "snapshot.stats.toolResults:number",
+        "snapshot.stats.totalMessages:number",
+        "snapshot.stats.userMessages:number",
+        "snapshot.stats:object",
+        "snapshot.thinkingLevel:string",
+        "snapshot.transcript:array",
+        "snapshot.transcriptStart:number",
+        "snapshot.transcriptTotal:number",
+        "snapshot.transcript[].completedAt:string",
+        "snapshot.transcript[].content:array",
+        "snapshot.transcript[].content[].arguments:object",
+        "snapshot.transcript[].content[].groupCount:number",
+        "snapshot.transcript[].content[].groupFinalized:boolean",
+        "snapshot.transcript[].content[].groupId:string",
+        "snapshot.transcript[].content[].groupIndex:number",
+        "snapshot.transcript[].content[].id:string",
+        "snapshot.transcript[].content[].label:string",
+        "snapshot.transcript[].content[].name:string",
+        "snapshot.transcript[].content[].ordinal:number",
+        "snapshot.transcript[].content[].text:string",
+        "snapshot.transcript[].content[].toolCallId:string",
+        "snapshot.transcript[].content[].toolSegmentId:string",
+        "snapshot.transcript[].content[].type:string",
+        "snapshot.transcript[].content[]:object",
+        "snapshot.transcript[].details.answer:string",
+        "snapshot.transcript[].details:object",
+        "snapshot.transcript[].durationMs:number",
+        "snapshot.transcript[].errorMessage:string",
+        "snapshot.transcript[].extensionOrigin.owner.id:string",
+        "snapshot.transcript[].extensionOrigin.owner.kind:string",
+        "snapshot.transcript[].extensionOrigin.owner.source:string",
+        "snapshot.transcript[].extensionOrigin.owner.title:string",
+        "snapshot.transcript[].extensionOrigin.owner:object",
+        "snapshot.transcript[].extensionOrigin.source:string",
+        "snapshot.transcript[].extensionOrigin:object",
+        "snapshot.transcript[].groupCount:number",
+        "snapshot.transcript[].groupFinalized:boolean",
+        "snapshot.transcript[].groupId:string",
+        "snapshot.transcript[].groupIndex:number",
+        "snapshot.transcript[].id:string",
+        "snapshot.transcript[].isError:boolean",
+        "snapshot.transcript[].kind:string",
+        "snapshot.transcript[].lastProgressAt:string",
+        "snapshot.transcript[].level:string",
+        "snapshot.transcript[].modelId:string",
+        "snapshot.transcript[].modelRef.id:string",
+        "snapshot.transcript[].modelRef.provider:string",
+        "snapshot.transcript[].modelRef:object",
+        "snapshot.transcript[].parentId:null",
+        "snapshot.transcript[].parentId:string",
+        "snapshot.transcript[].presentationId:string",
+        "snapshot.transcript[].progressSequence:number",
+        "snapshot.transcript[].provider:string",
+        "snapshot.transcript[].role:string",
+        "snapshot.transcript[].semantic.contextEffect:string",
+        "snapshot.transcript[].semantic.delivery:string",
+        "snapshot.transcript[].semantic.direction:string",
+        "snapshot.transcript[].semantic.invocationId:string",
+        "snapshot.transcript[].semantic.kind:string",
+        "snapshot.transcript[].semantic.lifecycle:string",
+        "snapshot.transcript[].semantic.operationId:string",
+        "snapshot.transcript[].semantic.origin.confidence:string",
+        "snapshot.transcript[].semantic.origin.kind:string",
+        "snapshot.transcript[].semantic.origin:object",
+        "snapshot.transcript[].semantic.sequence:number",
+        "snapshot.transcript[].semantic.version:number",
+        "snapshot.transcript[].semantic.visibility:string",
+        "snapshot.transcript[].semantic:object",
+        "snapshot.transcript[].startedAt:string",
+        "snapshot.transcript[].stopReason:string",
+        "snapshot.transcript[].thinkingLevel:string",
+        "snapshot.transcript[].timestamp:string",
+        "snapshot.transcript[].toolCallId:string",
+        "snapshot.transcript[].toolLabel:string",
+        "snapshot.transcript[].toolName:string",
+        "snapshot.transcript[].toolSegmentId:string",
+        "snapshot.transcript[].usage.cacheRead:number",
+        "snapshot.transcript[].usage.cacheWrite:number",
+        "snapshot.transcript[].usage.cost.cacheRead:number",
+        "snapshot.transcript[].usage.cost.cacheWrite:number",
+        "snapshot.transcript[].usage.cost.input:number",
+        "snapshot.transcript[].usage.cost.output:number",
+        "snapshot.transcript[].usage.cost.total:number",
+        "snapshot.transcript[].usage.cost:object",
+        "snapshot.transcript[].usage.input:number",
+        "snapshot.transcript[].usage.output:number",
+        "snapshot.transcript[].usage.totalTokens:number",
+        "snapshot.transcript[].usage:object",
+        "snapshot.transcript[]:object",
+        "snapshot:object",
+        "subscriptionToken:string"
+      ]
+    },
+    {
+      "topic": "session.snapshot",
+      "paths": [
+        ":object",
+        "acceptsQueuedPrompts:boolean",
+        "automaticCompactionEnabled:boolean",
+        "availableThinkingLevels:array",
+        "availableThinkingLevels[]:string",
+        "compactionPolicy.currentBudgets.enabled:boolean",
+        "compactionPolicy.currentBudgets.keepRecentTokens:number",
+        "compactionPolicy.currentBudgets.reserveTokens:number",
+        "compactionPolicy.currentBudgets:object",
+        "compactionPolicy.extensionMayOverride:boolean",
+        "compactionPolicy.next.effectiveThinkingLevel:string",
+        "compactionPolicy.next.enabled:boolean",
+        "compactionPolicy.next.instructions:string",
+        "compactionPolicy.next.keepRecentTokens:number",
+        "compactionPolicy.next.model.id:string",
+        "compactionPolicy.next.model.provider:string",
+        "compactionPolicy.next.model:object",
+        "compactionPolicy.next.requestedThinkingLevel:string",
+        "compactionPolicy.next.reserveTokens:number",
+        "compactionPolicy.next.source.enabled:string",
+        "compactionPolicy.next.source.instructions:string",
+        "compactionPolicy.next.source.keepRecentTokens:string",
+        "compactionPolicy.next.source.reserveTokens:string",
+        "compactionPolicy.next.source.thinkingLevel:string",
+        "compactionPolicy.next.source:object",
+        "compactionPolicy.next.thinkingLevel:string",
+        "compactionPolicy.next:object",
+        "compactionPolicy:object",
+        "compactionQueued:boolean",
+        "configurationBlocker:null",
+        "configurationBlocker:string",
+        "contextUsage.contextWindow:number",
+        "contextUsage.percent:number",
+        "contextUsage.tokens:number",
+        "contextUsage:object",
+        "contextWindowPolicy.default:number",
+        "contextWindowPolicy.effective:number",
+        "contextWindowPolicy.maximum:number",
+        "contextWindowPolicy.minimum:number",
+        "contextWindowPolicy.model.id:string",
+        "contextWindowPolicy.model.provider:string",
+        "contextWindowPolicy.model:object",
+        "contextWindowPolicy.override:number",
+        "contextWindowPolicy.source:string",
+        "contextWindowPolicy:object",
+        "cwd:string",
+        "diagnostics:array",
+        "eventSequence:number",
+        "extensionActivityAsOf:string",
+        "extensionPresentation.capabilities:array",
+        "extensionPresentation.capabilities[]:string",
+        "extensionPresentation.diagnostics:array",
+        "extensionPresentation.diagnostics[].code:string",
+        "extensionPresentation.diagnostics[].message:string",
+        "extensionPresentation.diagnostics[]:object",
+        "extensionPresentation.hostEpoch:string",
+        "extensionPresentation.pendingInteractions:array",
+        "extensionPresentation.pendingInteractions[].hostEpoch:string",
+        "extensionPresentation.pendingInteractions[].id:string",
+        "extensionPresentation.pendingInteractions[].invocationId:string",
+        "extensionPresentation.pendingInteractions[].method:string",
+        "extensionPresentation.pendingInteractions[].operationId:string",
+        "extensionPresentation.pendingInteractions[].options:array",
+        "extensionPresentation.pendingInteractions[].options[]:string",
+        "extensionPresentation.pendingInteractions[].owner.id:string",
+        "extensionPresentation.pendingInteractions[].owner.kind:string",
+        "extensionPresentation.pendingInteractions[].owner.source:string",
+        "extensionPresentation.pendingInteractions[].owner.title:string",
+        "extensionPresentation.pendingInteractions[].owner:object",
+        "extensionPresentation.pendingInteractions[].presentationRevision:number",
+        "extensionPresentation.pendingInteractions[].title:string",
+        "extensionPresentation.pendingInteractions[]:object",
+        "extensionPresentation.revision:number",
+        "extensionPresentation.semanticState.editorRevision:number",
+        "extensionPresentation.semanticState.editorText:string",
+        "extensionPresentation.semanticState.statusOwners:object",
+        "extensionPresentation.semanticState.statuses:object",
+        "extensionPresentation.semanticState.toolsExpanded:boolean",
+        "extensionPresentation.semanticState.widgets:array",
+        "extensionPresentation.semanticState.working.indicator.frames:array",
+        "extensionPresentation.semanticState.working.indicator.kind:string",
+        "extensionPresentation.semanticState.working.indicator:object",
+        "extensionPresentation.semanticState.working.visible:boolean",
+        "extensionPresentation.semanticState.working:object",
+        "extensionPresentation.semanticState:object",
+        "extensionPresentation.surfaces:array",
+        "extensionPresentation.version:number",
+        "extensionPresentation:object",
+        "leafEntryId:string",
+        "liveActivityRevision:number",
+        "model.id:string",
+        "model.provider:string",
+        "model:object",
+        "name:string",
+        "operation.id:string",
+        "operation.invocationId:string",
+        "operation.kind:string",
+        "operation.lifecycle:string",
+        "operation.startedAt:string",
+        "operation:object",
+        "phase:string",
+        "processOverview.activeCount:number",
+        "processOverview.asOf:string",
+        "processOverview.problemCount:number",
+        "processOverview.recentCount:number",
+        "processOverview.revision:number",
+        "processOverview.version:number",
+        "processOverview.visibility:string",
+        "processOverview:object",
+        "queueRevision:number",
+        "revision:number",
+        "runtimeGeneration:string",
+        "sessionId:string",
+        "stats.assistantMessages:number",
+        "stats.cost:number",
+        "stats.latestCacheHitRate:number",
+        "stats.tokens.cacheRead:number",
+        "stats.tokens.cacheWrite:number",
+        "stats.tokens.input:number",
+        "stats.tokens.output:number",
+        "stats.tokens.total:number",
+        "stats.tokens:object",
+        "stats.toolCalls:number",
+        "stats.toolResults:number",
+        "stats.totalMessages:number",
+        "stats.userMessages:number",
+        "stats:object",
+        "thinkingLevel:string",
+        "transcript:array",
+        "transcriptStart:number",
+        "transcriptTotal:number",
+        "transcript[].completedAt:string",
+        "transcript[].content:array",
+        "transcript[].content[].arguments:object",
+        "transcript[].content[].groupCount:number",
+        "transcript[].content[].groupFinalized:boolean",
+        "transcript[].content[].groupId:string",
+        "transcript[].content[].groupIndex:number",
+        "transcript[].content[].id:string",
+        "transcript[].content[].label:string",
+        "transcript[].content[].name:string",
+        "transcript[].content[].ordinal:number",
+        "transcript[].content[].text:string",
+        "transcript[].content[].toolCallId:string",
+        "transcript[].content[].toolSegmentId:string",
+        "transcript[].content[].type:string",
+        "transcript[].content[]:object",
+        "transcript[].details.answer:string",
+        "transcript[].details:object",
+        "transcript[].durationMs:number",
+        "transcript[].errorMessage:string",
+        "transcript[].extensionOrigin.owner.id:string",
+        "transcript[].extensionOrigin.owner.kind:string",
+        "transcript[].extensionOrigin.owner.source:string",
+        "transcript[].extensionOrigin.owner.title:string",
+        "transcript[].extensionOrigin.owner:object",
+        "transcript[].extensionOrigin.source:string",
+        "transcript[].extensionOrigin:object",
+        "transcript[].groupCount:number",
+        "transcript[].groupFinalized:boolean",
+        "transcript[].groupId:string",
+        "transcript[].groupIndex:number",
+        "transcript[].id:string",
+        "transcript[].isError:boolean",
+        "transcript[].kind:string",
+        "transcript[].lastProgressAt:string",
+        "transcript[].level:string",
+        "transcript[].modelId:string",
+        "transcript[].modelRef.id:string",
+        "transcript[].modelRef.provider:string",
+        "transcript[].modelRef:object",
+        "transcript[].parentId:null",
+        "transcript[].parentId:string",
+        "transcript[].presentationId:string",
+        "transcript[].progressSequence:number",
+        "transcript[].provider:string",
+        "transcript[].role:string",
+        "transcript[].semantic.contextEffect:string",
+        "transcript[].semantic.delivery:string",
+        "transcript[].semantic.direction:string",
+        "transcript[].semantic.invocationId:string",
+        "transcript[].semantic.kind:string",
+        "transcript[].semantic.lifecycle:string",
+        "transcript[].semantic.operationId:string",
+        "transcript[].semantic.origin.confidence:string",
+        "transcript[].semantic.origin.kind:string",
+        "transcript[].semantic.origin:object",
+        "transcript[].semantic.sequence:number",
+        "transcript[].semantic.version:number",
+        "transcript[].semantic.visibility:string",
+        "transcript[].semantic:object",
+        "transcript[].startedAt:string",
+        "transcript[].stopReason:string",
+        "transcript[].thinkingLevel:string",
+        "transcript[].timestamp:string",
+        "transcript[].toolCallId:string",
+        "transcript[].toolLabel:string",
+        "transcript[].toolName:string",
+        "transcript[].toolSegmentId:string",
+        "transcript[].usage.cacheRead:number",
+        "transcript[].usage.cacheWrite:number",
+        "transcript[].usage.cost.cacheRead:number",
+        "transcript[].usage.cost.cacheWrite:number",
+        "transcript[].usage.cost.input:number",
+        "transcript[].usage.cost.output:number",
+        "transcript[].usage.cost.total:number",
+        "transcript[].usage.cost:object",
+        "transcript[].usage.input:number",
+        "transcript[].usage.output:number",
+        "transcript[].usage.totalTokens:number",
+        "transcript[].usage:object",
+        "transcript[]:object"
+      ]
+    },
+    {
+      "topic": "session.toolProgress",
+      "paths": [
+        ":object",
+        "eventSequence:number",
+        "revision:number",
+        "runtimeGeneration:string"
+      ]
+    }
+  ],
+  "providerRequests": [
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "settings",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "messages": [
+        {
+          "role": "user",
+          "text": "finish the quiet run"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "settings",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "messages": [
+        {
+          "role": "user",
+          "text": "finish the quiet run"
+        },
+        {
+          "role": "assistant",
+          "text": "Finished the quiet run."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am away"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "settings",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "messages": [
+        {
+          "role": "user",
+          "text": "finish the quiet run"
+        },
+        {
+          "role": "assistant",
+          "text": "Finished the quiet run."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am away"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_select"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "chosen: Keep",
+          "toolName": "lock_select"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "settings",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "messages": [
+        {
+          "role": "user",
+          "text": "finish the quiet run"
+        },
+        {
+          "role": "assistant",
+          "text": "Finished the quiet run."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am away"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_select"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "chosen: Keep",
+          "toolName": "lock_select"
+        },
+        {
+          "role": "assistant",
+          "text": "Keeping the hidden path."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am watching"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "settings",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "messages": [
+        {
+          "role": "user",
+          "text": "finish the quiet run"
+        },
+        {
+          "role": "assistant",
+          "text": "Finished the quiet run."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am away"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_select"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "chosen: Keep",
+          "toolName": "lock_select"
+        },
+        {
+          "role": "assistant",
+          "text": "Keeping the hidden path."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am watching"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_select"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "chosen: Keep",
+          "toolName": "lock_select"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "settings",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "messages": [
+        {
+          "role": "user",
+          "text": "finish the quiet run"
+        },
+        {
+          "role": "assistant",
+          "text": "Finished the quiet run."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am away"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_select"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "chosen: Keep",
+          "toolName": "lock_select"
+        },
+        {
+          "role": "assistant",
+          "text": "Keeping the hidden path."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am watching"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_select"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "chosen: Keep",
+          "toolName": "lock_select"
+        },
+        {
+          "role": "assistant",
+          "text": "Keeping the presented path."
+        },
+        {
+          "role": "user",
+          "text": "fail this run"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "settings",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "messages": [
+        {
+          "role": "user",
+          "text": "finish the quiet run"
+        },
+        {
+          "role": "assistant",
+          "text": "Finished the quiet run."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am away"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_select"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "chosen: Keep",
+          "toolName": "lock_select"
+        },
+        {
+          "role": "assistant",
+          "text": "Keeping the hidden path."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am watching"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_select"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "chosen: Keep",
+          "toolName": "lock_select"
+        },
+        {
+          "role": "assistant",
+          "text": "Keeping the presented path."
+        },
+        {
+          "role": "user",
+          "text": "fail this run"
+        },
+        {
+          "role": "assistant",
+          "text": "partial"
+        },
+        {
+          "role": "user",
+          "text": "start a run to stop"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "settings",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify",
+        "checkin",
+        "report"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:e25ea82e53765128b29e61821c94f05cec53ef08f7a6a8f2d8a65aca3a1588cc",
+      "messages": [
+        {
+          "role": "user",
+          "text": "do the lock task"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "settings",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify",
+        "checkin",
+        "report"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:e25ea82e53765128b29e61821c94f05cec53ef08f7a6a8f2d8a65aca3a1588cc",
+      "messages": [
+        {
+          "role": "user",
+          "text": "do the lock task"
+        },
+        {
+          "role": "assistant",
+          "text": "Worker reply without a report."
+        },
+        {
+          "role": "user",
+          "text": "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report."
+        }
+      ]
+    }
+  ],
+  "worker": {
+    "roles": [
+      "system",
+      "user",
+      "assistant",
+      "assistant"
+    ]
+  }
+}

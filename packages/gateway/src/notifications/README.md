@@ -117,8 +117,10 @@ scripts/tron test gateway src/notifications/notification-inbox.integration.test.
 `runtime-terminal-notifications.integration.test.ts` drives a local fake relay and the
 real mobile open/sync/visible journey, writing
 `test-results/runtime-terminal-notifications.integration.json` and
-`test-results/home-title-payloads-{preview,redacted}.json`. Behavior lock:
-`notifications.store.lock.integration.test.ts`.
+`test-results/home-title-payloads-{preview,redacted}.json`. Behavior locks:
+`notifications.store.lock.integration.test.ts` and `notifications.push.lock.integration.test.ts`
+(terminal and input-required pushes at the relay boundary, presence suppression, the
+task-worker skip).
 
 ## Not here
 

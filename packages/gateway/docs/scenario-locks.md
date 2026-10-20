@@ -45,6 +45,7 @@ the `computer` module registers only on darwin.
 | `gateway/run` | `run-extension-ui` | an extension tool's `select` waits for `extension.respond` |
 | `gateway/transport` | `transport-reconnect-snapshot` | a client drops mid-run and reopens to the live run, then the settled one; the prompt runs once |
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Mac layer: resolution, a live chat, history, files, notifications |
+| `gateway/notifications` | `notifications-push` | a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat; a presented chat's are suppressed; a Home task worker's end pushes nothing |
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 
@@ -52,7 +53,9 @@ The reconnect lock records the two reopen snapshots in full but no event
 shapes: which coalesced snapshot a socket that drops mid-run receives before
 it closes is host timing. The subagent lock enters at `RuntimeRegistry`: the delegation kernel's
 contract is the canonical record and the process activity, which the
-transport only projects. It runs in the nested serial pass.
+transport only projects. It runs in the nested serial pass. The push lock runs the
+production `NotificationService` (harness option `notifications`) with only the relay's
+HTTP fetcher replaced, and records each relay request's envelope and every receipt.
 
 ## Persisted stores (V4)
 
