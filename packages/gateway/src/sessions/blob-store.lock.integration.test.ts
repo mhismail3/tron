@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it, onTestFinished } from "vitest";
 import { countRandomUUID } from "../../test-support/fixed-recording.js";
@@ -100,6 +100,14 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
     try { return await store.acquire(text); } finally { await first.release(); await second.release(); }
   }, "refused");
   await log.step("a reader is admitted again once a lease is released", () => read(text, { start: 0, end: 4 }), "result");
+  await log.step("a lease released twice frees only its own reader", async () => {
+    const first = await store.acquire(text);
+    const second = await store.acquire(text);
+    await first.release();
+    await first.release();
+    const third = await store.acquire(text);
+    try { return await store.acquire(text); } finally { await second.release(); await third.release(); }
+  }, "refused");
 
   await log.step("a production while another runs is refused", async () => {
     let open!: () => void;
@@ -125,6 +133,17 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   await log.step("the same file content is the same blob and leaves no staging file", () => store.registerFile(exported, "text/plain"), "result");
   await log.step("read a file blob", () => read(file), "result");
   await log.step("read a file blob range", () => read(file, { start: 9, end: 12 }), "result");
+  // A file blob whose file is gone, or no longer a file, is retired as missing.
+  const replaced = async (name: string, replace: (path: string) => Promise<void>) => {
+    const before = new Set(await readdir(directory));
+    const id = await store.registerFile(await source(name, `${name} body`), "text/plain");
+    const path = join(directory, (await readdir(directory)).find((entry) => !before.has(entry))!);
+    await replace(path);
+    return { first: await read(id).catch((error: Error) => error.message), again: await read(id).catch((error: Error) => error.message) };
+  };
+  await log.step("a file blob whose file was removed is retired as missing", () => replaced("removed.txt", (path) => rm(path)));
+  await log.step("a file blob whose file became a link loop is retired as missing", () =>
+    replaced("looped.txt", async (path) => { await rm(path); await symlink(path, path); }));
   await log.step("a file over the item bound is refused", async () => store.registerFile(await source("large.txt", "x".repeat(65)), "text/plain"), "refused");
   await log.step("a directory is refused", () => store.registerFile(sources, "text/plain"), "refused");
   await log.step("a missing file is refused", () => store.registerFile(join(sources, "missing.txt"), "text/plain"), "refused");

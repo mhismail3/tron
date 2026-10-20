@@ -315,6 +315,16 @@
       "files": {}
     },
     {
+      "step": "a lease released twice frees only its own reader",
+      "refused": {
+        "message": "Concurrent blob downloads reached their bounded capacity",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {}
+    },
+    {
       "step": "a production while another runs is refused",
       "refused": {
         "message": "Concurrent export generation reached its bounded capacity",
@@ -398,6 +408,26 @@
       }
     },
     {
+      "step": "a file blob whose file was removed is retired as missing",
+      "result": {
+        "first": "Blob is not available; refresh the session snapshot",
+        "again": "Blob is not available; refresh the session snapshot"
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "a file blob whose file became a link loop is retired as missing",
+      "result": {
+        "first": "Blob is not available; refresh the session snapshot",
+        "again": "Blob is not available; refresh the session snapshot"
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
       "step": "a file over the item bound is refused",
       "refused": {
         "message": "Blob exceeds the 25 MiB item limit",
@@ -445,7 +475,7 @@
       "result": "qVLot834Zp-977q1nNulmE2GgReUNIImrbU4fxYVXCI",
       "files": {
         "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
-        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+        "gateway/blobs/blob-00000009-0000-4000-8000-000000000000": "<0 bytes>"
       }
     },
     {
@@ -460,7 +490,7 @@
       },
       "files": {
         "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
-        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+        "gateway/blobs/blob-00000009-0000-4000-8000-000000000000": "<0 bytes>"
       }
     },
     {
@@ -473,7 +503,7 @@
       },
       "files": {
         "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
-        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+        "gateway/blobs/blob-00000009-0000-4000-8000-000000000000": "<0 bytes>"
       }
     },
     {
@@ -484,7 +514,7 @@
       ],
       "files": {
         "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
-        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+        "gateway/blobs/blob-00000009-0000-4000-8000-000000000000": "<0 bytes>"
       }
     },
     {
@@ -497,7 +527,7 @@
       },
       "files": {
         "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
-        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+        "gateway/blobs/blob-00000009-0000-4000-8000-000000000000": "<0 bytes>"
       }
     },
     {
@@ -510,7 +540,7 @@
       },
       "files": {
         "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
-        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+        "gateway/blobs/blob-00000009-0000-4000-8000-000000000000": "<0 bytes>"
       }
     },
     {
