@@ -3,7 +3,7 @@ import {
   type ProgramStatus,
   type Terminal,
   type TerminalCapabilities,
-} from "@earendil-works/pi-tui";
+} from "../../kernel/pi/tui.js";
 
 const REMOTE_TUI_MAX_COLUMNS = 160;
 const REMOTE_TUI_MAX_ROWS = 120;

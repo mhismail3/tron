@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { AuthInteraction } from "@earendil-works/pi-ai";
+import type { AuthInteraction } from "../kernel/pi/ai.js";
 import { dirname, join } from "node:path";
-import type { Extension, ExtensionContext, ExtensionUIContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Extension, ExtensionContext, ExtensionUIContext, ToolDefinition } from "../kernel/pi/coding-agent.js";
 import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../protocol/types.js";
 import { EXTENSION_FORM_MAX_INTERACTION_BYTES } from "./semantic-form.js";
 import type { FormCapableUI, FormRequest } from "../sessions/extension-adapter-contract.js";

@@ -10,7 +10,7 @@ import type {
   RegisteredCommand,
   RegisteredTool,
   ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE, adaptMcpAuthCommandHandler } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";

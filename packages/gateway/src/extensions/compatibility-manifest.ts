@@ -10,7 +10,7 @@ import type {
   MessageRenderOptions,
   ToolDefinition,
   ToolRenderResultOptions,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 
 export { PI_VERSION };
 export const EXTENSION_PRESENTATION_VERSION = 3 as const;

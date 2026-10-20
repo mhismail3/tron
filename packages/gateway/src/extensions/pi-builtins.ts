@@ -4,7 +4,7 @@ import {
   createMcpExtension,
   createToolSearchExtension,
   type ExtensionFactory,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 
 /** Pi's MCP loader reads mcp.json from getAgentDir() and only reads project
  * configuration after the resource loader's TrustService-owned trust gate. The

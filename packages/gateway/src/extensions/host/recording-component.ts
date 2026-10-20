@@ -4,7 +4,7 @@ import {
   visibleWidth,
   type Component,
   type Focusable,
-} from "@earendil-works/pi-tui";
+} from "../../kernel/pi/tui.js";
 import { boundedDisplayError } from "./terminal-sanitizer.js";
 
 export type ComponentDiagnosticCode =

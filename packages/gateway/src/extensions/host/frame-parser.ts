@@ -1,4 +1,4 @@
-import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, visibleWidth } from "../../kernel/pi/tui.js";
 
 export const EXTENSION_FRAME_MAX_COLUMNS = 160;
 export const EXTENSION_FRAME_MAX_LINES = 120;

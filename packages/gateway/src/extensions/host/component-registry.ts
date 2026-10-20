@@ -1,5 +1,5 @@
-import type { Component, TUI } from "@earendil-works/pi-tui";
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Component, TUI } from "../../kernel/pi/tui.js";
+import type { Theme } from "../../kernel/pi/coding-agent.js";
 import { RecordingComponent, type ComponentDiagnostic } from "./recording-component.js";
 import { boundedDisplayError } from "./terminal-sanitizer.js";
 

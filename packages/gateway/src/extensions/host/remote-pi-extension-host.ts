@@ -1,5 +1,5 @@
-import type { ExtensionUIContext, KeybindingsManager as PiKeybindingsManager } from "@earendil-works/pi-coding-agent";
-import { Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionUIContext, KeybindingsManager as PiKeybindingsManager } from "../../kernel/pi/coding-agent.js";
+import { Theme } from "../../kernel/pi/coding-agent.js";
 import {
   KeybindingsManager as TuiKeybindingsManager,
   TUI_KEYBINDINGS,
@@ -7,7 +7,7 @@ import {
   type OverlayHandle,
   type OverlayOptions,
   type TUI,
-} from "@earendil-works/pi-tui";
+} from "../../kernel/pi/tui.js";
 import type { ExtensionFrame, ExtensionOwner, ExtensionSurface } from "../../protocol/types.js";
 import { CapturingTuiMainScreen } from "./capturing-tui-main-screen.js";
 import { ComponentRegistry, type ComponentRecord, type RemoteComponentFactory } from "./component-registry.js";

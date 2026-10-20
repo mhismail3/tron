@@ -1,4 +1,4 @@
-import type { ExtensionFactory, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory, SessionBeforeCompactEvent } from "../kernel/pi/coding-agent.js";
 import type { TronModuleSummary } from "../protocol/types.js";
 import { compactionPolicyExtension, type CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { contextWindowExtension, type SessionContextWindowPolicy } from "../providers/context-window-policy.js";

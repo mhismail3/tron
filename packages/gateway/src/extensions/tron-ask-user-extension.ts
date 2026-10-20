@@ -1,6 +1,6 @@
-import { Box, Text, TruncatedText, truncateToWidth } from "@earendil-works/pi-tui";
-import { Type } from "@earendil-works/pi-ai";
-import type { ExtensionFactory, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Box, Text, TruncatedText, truncateToWidth } from "../kernel/pi/tui.js";
+import { Type } from "../kernel/pi/ai.js";
+import type { ExtensionFactory, ToolDefinition } from "../kernel/pi/coding-agent.js";
 import type {
   ExtensionFormAnswer,
   ExtensionFormDescriptor,

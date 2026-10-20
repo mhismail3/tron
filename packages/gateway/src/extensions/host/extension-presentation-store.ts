@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth } from "../../kernel/pi/tui.js";
 import { GatewayError } from "../../errors.js";
 import type {
   ExtensionInputLease,
