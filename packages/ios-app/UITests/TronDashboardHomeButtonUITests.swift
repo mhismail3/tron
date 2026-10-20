@@ -37,14 +37,23 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             XCTAssertTrue(waitFor(feedback, "label == 'menu-feedback:1'"), "The menu opening plays one haptic")
 
             // Dismiss by tapping outside: the menu closes and Home still does not open.
-            app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)).tap()
+            let outside = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2))
+            outside.tap()
             XCTAssertTrue(settings.waitForNonExistence(timeout: 5), app.debugDescription)
             XCTAssertFalse(app.textViews["Message input"].waitForExistence(timeout: 2), "Dismissing the menu does not open Home")
             keep("1461-home-button-\(appearance)-menu-dismissed")
 
+            // A natural hold, past UIKit's own context-menu hold, still opens the
+            // menu through the 0.3 s hold and its haptic (#1480).
+            button.press(forDuration: 1.2)
+            XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(waitFor(feedback, "label == 'menu-feedback:2'"), "A long hold plays the haptic: \(feedback.label)")
+            outside.tap()
+            XCTAssertTrue(settings.waitForNonExistence(timeout: 5), app.debugDescription)
+
             button.tap()
             XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 15), app.debugDescription)
-            XCTAssertEqual(feedback.label, "menu-feedback:1", "Dismissing the menu and tapping into Home play no haptic")
+            XCTAssertEqual(feedback.label, "menu-feedback:2", "Dismissing the menu and tapping into Home play no haptic")
             keep("1461-home-button-\(appearance)-tap-opened-home")
         }
     }
