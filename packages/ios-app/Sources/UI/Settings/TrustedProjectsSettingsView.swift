@@ -1,13 +1,17 @@
 import SwiftUI
 import TronMobileCore
 
-/// Settings › Trusted Projects: every project with a saved trust decision, as
-/// the schema's `permissions.projectTrust` instances, and Add Project. Adding
+/// Settings › Trusted Projects: the default trust policy, every project with a
+/// saved trust decision (the schema's `permissions.projectTrust` instances),
+/// and Add Project. Adding
 /// records an explicit Not trusted decision through the ordinary settings
 /// change path, so a project joins the list without being granted trust;
 /// trusting it is the row's own toggle and its confirmation.
 struct TrustedProjectsSettingsView: View {
     static let key = "permissions.projectTrust"
+    static let policyKey = "permissions.defaultProjectTrust"
+    /// The keys this sheet owns; More Settings does not repeat them.
+    static let keys: Set<String> = [key, policyKey]
 
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var colorScheme
@@ -27,6 +31,9 @@ struct TrustedProjectsSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 20) {
+                TronSettingsGroup(nil) {
+                    SettingsRendererView(target: target, writeLayer: "mac", presentation: .keys([Self.policyKey]), detailedKeys: true)
+                }
                 SettingsRendererView(target: target, writeLayer: "mac", presentation: .instances(key: Self.key), embedded: true)
                 Button { choosingFolder = true } label: {
                     TronSettingsRow(

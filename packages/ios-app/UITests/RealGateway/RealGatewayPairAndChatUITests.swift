@@ -1918,6 +1918,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                     coverage.valueChecked += 1
                     continue
                 }
+                if key.id == "permissions.defaultProjectTrust" && name == "settings" {
+                    // Trusted Projects owns this key on Settings (#1517); its
+                    // journey proves the row there.
+                    XCTAssertEqual(rows.count, 0, "More Settings must not repeat the default trust policy")
+                    coverage.customOwnerChecked += 1
+                    continue
+                }
                 guard rows.count > 0 else {
                     XCTAssertTrue((key.qualifier == "project" || key.qualifier == "device") && isMacTarget,
                                   "\(name) serves \(key.id) but shows no row")

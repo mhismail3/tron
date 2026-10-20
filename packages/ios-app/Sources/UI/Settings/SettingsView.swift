@@ -55,7 +55,11 @@ struct SettingsView: View {
                     SettingsGroupCard(.agent) {
                         SettingsSectionLinks(ids: ["model", "workers", "context", "run", "advanced"], sections: sections,
                                              target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
-                                             selection: .allExcept([TrustedProjectsSettingsView.key]))
+                                             selection: .allExcept(TrustedProjectsSettingsView.keys))
+                        TronSettingsDivider()
+                        settingsLink("Trusted Projects", summary: "Projects whose extensions and hooks load", icon: "checkmark.shield") {
+                            TrustedProjectsSettingsView()
+                        }
                     }
                     SettingsGroupCard(.tools) {
                         SettingsSectionLinks(ids: ["tools"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
@@ -70,10 +74,6 @@ struct SettingsView: View {
                         TronSettingsDivider()
                         settingsLink("Hooks", summary: "Event handlers extensions register", icon: "bolt.horizontal.circle") {
                             HooksSettingsView(projectCWD: nil)
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Trusted Projects", summary: "Projects whose extensions and hooks load", icon: "checkmark.shield") {
-                            TrustedProjectsSettingsView()
                         }
                     }
                     let placed = SettingsGroupKind.placedSections

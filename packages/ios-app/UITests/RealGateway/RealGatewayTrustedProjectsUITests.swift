@@ -1,102 +1,84 @@
 import Foundation
 import XCTest
 
-/// #1517: Settings › Trusted Projects against the real Gateway. The per-project
-/// trust rows live on their own sheet, not in More Settings, and Add Project
-/// records the chosen folder through `settings.change` as Not trusted: it joins
-/// the list untoggled and the Gateway's trust store holds `false` for it.
+/// #1517: Settings › Trusted Projects against the real Gateway. The Agent
+/// group's Trusted Projects row opens a sheet that owns the default trust
+/// policy and every saved project decision (More Settings repeats neither),
+/// and Add Project records the chosen folder through `settings.change` as Not
+/// trusted: it joins the list untoggled and the Gateway's trust store holds
+/// `false` for it. A per-model key's all-models instance is titled "All
+/// models", never by its fixed `role=chat` qualifier.
 extension RealGatewayPairAndChatUITests {
     @MainActor
     func testTrustedProjectsListsAndAddsProjectsUntrusted() throws {
-        continueAfterFailure = true
+        continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let added = URL(fileURLWithPath: fixture.workspace).deletingLastPathComponent().appendingPathComponent("added-project")
-        try FileManager.default.createDirectory(at: added, withIntermediateDirectories: true)
-        // A saved decision the Gateway reads from its trust store: the sheet lists it.
-        let seeded = added.deletingLastPathComponent().appendingPathComponent("trusted-project")
-        try FileManager.default.createDirectory(at: seeded, withIntermediateDirectories: true)
+        let root = URL(fileURLWithPath: fixture.workspace).deletingLastPathComponent()
+        let added = root.appendingPathComponent("added-project")
+        let seeded = root.appendingPathComponent("trusted-project")
+        for folder in [added, seeded] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        // A saved decision the Gateway reads from its own trust store.
         let trustStore = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).appendingPathComponent("trust.json")
         try JSONSerialization.data(withJSONObject: [seeded.resolvingSymlinksInPath().path: true]).write(to: trustStore)
-        defer { XCUIDevice.shared.appearance = .light }
-        XCUIDevice.shared.appearance = .light
-        let app = launchApp(additionalArguments: ["-appearanceMode", "auto"])
+
+        let app = launchApp(additionalArguments: ["-appearanceMode", "light"])
         defer { app.terminate() }
         open(fixture.invitationLink())
         completeFirstRunSetup(app, inWorkspace: fixture.workspace)
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
+        gear.tap()
+        XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
 
-        func openSettings() {
-            let gear = app.navigationBars.buttons["Settings"]
-            XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
-            gear.tap()
-            XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
-        }
-        func reveal(_ element: XCUIElement) { revealBelowNavigationBar(app, element) }
-        func tour(_ scheme: String) {
-            openSettings()
-            keepScreenshot(app, name: "\(scheme)-settings-top")
-            let trusted = app.buttons["settings-link-Trusted Projects"]
-            reveal(trusted)
-            keepScreenshot(app, name: "\(scheme)-settings-tools")
-            reveal(app.buttons["settings-section-model-open"])
-            keepScreenshot(app, name: "\(scheme)-settings-agent")
-            for _ in 0..<6 { app.swipeDown() }
+        openSettingsSection(app, "model")
+        let allModels = app.staticTexts["All models"].firstMatch
+        revealBelowNavigationBar(app, allModels)
+        XCTAssertTrue(allModels.exists, "Thinking's all-models instance must be titled All models")
+        XCTAssertFalse(app.staticTexts["chat"].exists, "a fixed qualifier must not title a row")
+        dismissTopSheet(app)
 
-            openSettingsSection(app, "model")
-            keepScreenshot(app, name: "\(scheme)-models-top")
-            reveal(app.staticTexts["All models"].firstMatch)
-            keepScreenshot(app, name: "\(scheme)-models-thinking")
-            dismissTopSheet(app)
+        openSettingsSection(app, "advanced")
+        XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].waitForExistence(timeout: 30))
+        for _ in 0..<4 { app.swipeUp() }
+        XCTAssertFalse(app.staticTexts["Trust for this project"].exists, "More Settings still lists per-project trust")
+        XCTAssertFalse(app.staticTexts["Default trust policy"].exists, "More Settings still lists the default trust policy")
+        dismissTopSheet(app)
 
-            openSettingsSection(app, "context")
-            reveal(app.staticTexts["Response reserve"].firstMatch)
-            keepScreenshot(app, name: "\(scheme)-compaction-reserve")
-            reveal(app.staticTexts["Kept after compaction"].firstMatch)
-            keepScreenshot(app, name: "\(scheme)-compaction-kept")
-            dismissTopSheet(app)
+        // The row sits in the Agent group, after More Settings.
+        let trusted = app.buttons["settings-link-Trusted Projects"]
+        let more = app.buttons["settings-section-advanced-open"]
+        revealBelowNavigationBar(app, trusted)
+        XCTAssertEqual(trusted.frame.minX, more.frame.minX, accuracy: 1)
+        XCTAssertTrue(trusted.frame.minY >= more.frame.maxY - 1 && trusted.frame.minY < more.frame.maxY + 12,
+                      "Trusted Projects must directly follow More Settings in the Agent card: \(more.frame) \(trusted.frame)")
+        keepScreenshot(app, name: "after-settings-agent-trusted-projects")
+        trusted.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"].waitForExistence(timeout: 30),
+                      app.debugDescription)
+        let seededRow = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "trusted-project")).firstMatch
+        XCTAssertTrue(seededRow.waitForExistence(timeout: 30), "the saved decision is not listed: \(app.debugDescription)")
+        XCTAssertEqual(seededRow.value as? String, "1")
 
-            openSettingsSection(app, "advanced")
-            keepScreenshot(app, name: "\(scheme)-more-settings-top")
-            for _ in 0..<3 { app.swipeUp() }
-            keepScreenshot(app, name: "\(scheme)-more-settings-scrolled")
-            XCTAssertFalse(app.staticTexts["Trust for this project"].exists, "More Settings still lists per-project trust")
-            dismissTopSheet(app)
-
-            reveal(trusted)
-            trusted.tap()
-            XCTAssertTrue(app.staticTexts["Trust for this project"].waitForExistence(timeout: 30), app.debugDescription)
-            keepScreenshot(app, name: "\(scheme)-trusted-projects")
-        }
-
-        tour("light")
         let add = app.buttons["trusted-projects-add"]
-        reveal(add)
+        revealBelowNavigationBar(app, add)
         add.tap()
         let folder = app.buttons.matching(NSPredicate(format: "label == %@", "added-project")).firstMatch
         XCTAssertTrue(folder.waitForExistence(timeout: 60), app.debugDescription)
-        keepScreenshot(app, name: "light-add-project-browser")
         folder.tap()
         let useCurrent = app.buttons["Use current folder"]
         XCTAssertTrue(waitForEnabled(useCurrent, timeout: 60), app.debugDescription)
-        keepScreenshot(app, name: "light-add-project-chosen")
         useCurrent.tap()
 
         let row = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "added-project")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 30), "the added project is not listed: \(app.debugDescription)")
         XCTAssertEqual(row.value as? String, "0", "an added project must start untrusted")
-        keepScreenshot(app, name: "light-add-project-added")
-        let stored = try? JSONSerialization.jsonObject(with: Data(contentsOf: trustStore)) as? [String: Any]
-        XCTAssertEqual(stored?.first { ($0.key as NSString).lastPathComponent == "added-project" }?.value as? Bool, false,
-                       "the Gateway trust store must record the added project as not trusted: \(String(describing: stored))")
-        dismissTopSheet(app) // Trusted Projects
-        dismissTopSheet(app) // Settings
-
-        XCUIDevice.shared.appearance = .dark
-        tour("dark")
-        reveal(add)
-        add.tap()
-        XCTAssertTrue(folder.waitForExistence(timeout: 60), app.debugDescription)
-        keepScreenshot(app, name: "dark-add-project-browser")
+        XCTAssertTrue(waitUntil(timeout: 15) {
+            let stored = (try? JSONSerialization.jsonObject(with: Data(contentsOf: trustStore))) as? [String: Any]
+            return stored?.first { ($0.key as NSString).lastPathComponent == "added-project" }?.value as? Bool == false
+        }, "the Gateway trust store must record the added project as not trusted")
+        XCTAssertEqual(seededRow.value as? String, "1", "adding must not change another project's decision")
+        keepScreenshot(app, name: "after-trusted-projects-default-policy")
     }
 }

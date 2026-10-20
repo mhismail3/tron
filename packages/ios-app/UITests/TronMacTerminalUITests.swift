@@ -303,3 +303,58 @@ final class TronMacTerminalUITests: XCTestCase {
         }
     }
 }
+
+/// #1517: while Mac Terminal checks the Mac, its sheet is one uniform surface
+/// under the standard pulse. The fixture's `loading` scenario never answers
+/// the status read. The loading content is a zero-size pulse request; before
+/// the fix the sheet's top blur and tint attached to it, painting a band with
+/// a hard edge across the middle of the sheet. Sampled from the screen, so the
+/// oracle is what the user sees, away from the toolbar blur and the pulse.
+final class TronMacTerminalLoadingUITests: XCTestCase {
+    @MainActor
+    func testLoadingSheetIsOneUniformBackground() throws {
+        continueAfterFailure = true
+        for scheme in ["dark", "light"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-mac-terminal-fixture", "-mac-terminal-scenario", "loading"]
+                + (scheme == "light" ? ["-mac-terminal-light"] : [])
+            app.launch()
+            let row = app.buttons["settings-link-Mac Terminal"]
+            XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
+            for _ in 0..<12 where !row.isHittable { app.swipeUp() }
+            row.tap()
+            let title = app.descendants(matching: .any)["terminal-sheet-title"].firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 15), app.debugDescription)
+            Thread.sleep(forTimeInterval: 2) // the sheet's presentation settles
+            let screenshot = XCUIScreen.main.screenshot()
+            let attachment = XCTAttachment(screenshot: screenshot)
+            attachment.name = "mac-terminal-loading-\(scheme)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            // Below the toolbar blur (title bottom + its 116 pt blur), above the
+            // sheet's bottom corners, at a fifth of the width beside the pulse.
+            let window = app.windows.firstMatch.frame
+            let top = title.frame.maxY + 120, bottom = window.maxY - 80
+            let spread = try Self.lumaSpread(screenshot.image, x: window.width * 0.2, from: top, to: bottom, scale: window.width)
+            XCTAssertLessThanOrEqual(spread, 4, "\(scheme): the loading sheet is not one uniform background (luma spread \(spread))")
+            app.terminate()
+        }
+    }
+
+    /// The largest luma difference down one column, in points of a `width`-wide screen.
+    private static func lumaSpread(_ image: UIImage, x: CGFloat, from top: CGFloat, to bottom: CGFloat, scale width: CGFloat) throws -> Int {
+        let cg = try XCTUnwrap(image.cgImage)
+        let factor = CGFloat(cg.width) / width
+        let (w, h) = (cg.width, cg.height)
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        let context = try XCTUnwrap(CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let column = Int(x * factor)
+        let lumas = stride(from: Int(top * factor), to: min(Int(bottom * factor), h), by: 3).map { y -> Int in
+            let i = (y * w + column) * 4
+            return (Int(pixels[i]) * 299 + Int(pixels[i + 1]) * 587 + Int(pixels[i + 2]) * 114) / 1000
+        }
+        return (lumas.max() ?? 0) - (lumas.min() ?? 0)
+    }
+}
