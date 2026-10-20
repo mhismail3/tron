@@ -17,6 +17,11 @@ import { DeviceStore } from "../src/security/device-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import type { NotificationService } from "../src/notifications/notification-service.js";
+import { GatewayAutomationExecutor } from "../src/automations/automation-executor.js";
+import { AutomationScheduler } from "../src/automations/automation-scheduler.js";
+import { AutomationService } from "../src/automations/automation-service.js";
+import { AutomationStore } from "../src/automations/automation-store.js";
+import { GatewayScheduleToolOperations } from "../src/automations/automation-tool-operations.js";
 import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { GatewayService, type GatewayServiceDependencies } from "../src/transport/gateway-service.js";
 import { GatewayServer } from "../src/transport/server.js";
@@ -58,6 +63,13 @@ export interface LockGatewayOptions {
    * recording relay-boundary stub. The lock owns its relay and its disposal.
    */
   readonly notifications?: (tronHome: string) => NotificationService | Promise<NotificationService>;
+  /**
+   * Wire the production automation owners as `gateway-main` does: the store under
+   * the Tron home (its changes broadcast `automation.changed`), the executor over
+   * the registry's work registry, the scheduler, the service the RPCs reach, the
+   * registry's session-removal observers and the sessions' `schedule` tool.
+   */
+  readonly automations?: boolean;
 }
 
 export interface LockConnectOptions {
@@ -193,6 +205,11 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const registry = new RuntimeRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     ...(notificationService ? { notifications: notificationService, machineId: "lock-machine" } : {}),
+    ...(options.automations ? {
+      beforeSessionRekey: (previousId: string, nextId: string) => automations!.rekeySessionTarget(previousId, nextId),
+      beforeSessionDelete: (sessionId: string) => automations!.blockSessionTarget(sessionId),
+      scheduleToolOperations: { execute: (sessionId, toolCallId, request) => scheduleTool!.execute(sessionId, toolCallId, request) },
+    } satisfies Partial<ConstructorParameters<typeof RuntimeRegistry>[0]> : {}),
     // Mirrors gateway-main: slot events reach subscribed sockets.
     broadcast: (sessionId, topic, payload) => server?.broadcastSession(sessionId, topic, payload as never),
     sessionSummaryChanged: () => {},
@@ -217,11 +234,27 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   // The relay boundary: what would be pushed to the maintainer's iPhone.
   const notifications: TraceValue[] = [];
   const receipts = new CommandReceiptStore(tronHome);
+  let automations: AutomationService | undefined;
+  let scheduleTool: GatewayScheduleToolOperations | undefined;
+  if (options.automations) {
+    const store: AutomationStore = new AutomationStore(tronHome, {
+      changed: (automationId) => server?.broadcast("automation.changed", {
+        catalogRevision: store.status().catalogRevision,
+        ...(automationId === undefined ? {} : { automationId }),
+      }),
+    });
+    const work = registry.administrativeWorkRegistry;
+    const scheduler = new AutomationScheduler(store,
+      new GatewayAutomationExecutor(registry, work, notificationService, "lock-machine"), { hostEpoch: work.runtimeEpoch });
+    automations = new AutomationService(store, scheduler, registry);
+    scheduleTool = new GatewayScheduleToolOperations(automations, receipts);
+  }
   // The real upload owner: a prompt materializes its (empty) attachment list through it.
   const uploads = new UploadStore(tronHome, 1_048_576);
   const service = new GatewayService({
     config: { machineId: "lock-machine", machineGroupID: "lock-group", machineName: "Lock Mac", tronHome, agentDir },
     modelRuntime, devices, sessions: registry, trust, settingsModel, settingsChanges, receipts,
+    ...(automations ? { automations } : {}),
     notifications: notificationService
       ?? { enqueue: async (push: unknown) => { notifications.push(normalizeTraceValue(push, normalization)); } },
     broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
@@ -241,6 +274,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     logger: { log: () => {} } as never,
   });
   await server.listen();
+  await automations?.initialize();
   const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
 
   const exchanges: Array<{ client: string; method: string; params: unknown; response: unknown }> = [];
@@ -336,6 +370,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     async dispose() {
       for (const socket of sockets) socket.terminate();
       await server?.close();
+      await automations?.dispose();
       await registry.dispose().catch(() => {});
       await receipts.dispose();
       await outside.dispose();

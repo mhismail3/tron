@@ -95,8 +95,10 @@ scripts/tron test gateway src/automations/automation-scheduler.integration.test.
 
 `automation-scheduler.integration.test.ts` uses the real executor, SDK and canonical
 JSONL: fresh success, reserved-run cancellation, unreserved drain-time cancellation,
-durable reopen and explicit successor. Behavior lock:
-`automations.store.lock.integration.test.ts`.
+durable reopen and explicit successor. Behavior locks:
+`automations.store.lock.integration.test.ts` and `automations.owned-run.lock.integration.test.ts`
+(a session and a workspace prompt run now through the owned-session boundary on the real
+Gateway: provider requests, JSONL, frames, records and command receipts).
 
 ## Not here
 

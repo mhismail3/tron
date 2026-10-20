@@ -46,6 +46,7 @@ the `computer` module registers only on darwin.
 | `gateway/transport` | `transport-reconnect-snapshot` | a client drops mid-run and reopens to the live run, then the settled one; the prompt runs once |
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Mac layer: resolution, a live chat, history, files, notifications |
 | `gateway/notifications` | `notifications-push` | a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat; a presented chat's are suppressed; a Home task worker's end pushes nothing |
+| `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged |
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 
@@ -55,7 +56,9 @@ it closes is host timing. The subagent lock enters at `RuntimeRegistry`: the del
 contract is the canonical record and the process activity, which the
 transport only projects. It runs in the nested serial pass. The push lock runs the
 production `NotificationService` (harness option `notifications`) with only the relay's
-HTTP fetcher replaced, and records each relay request's envelope and every receipt.
+HTTP fetcher replaced, and records each relay request's envelope and every receipt. The
+automation lock wires the production store, scheduler, executor and service (harness option
+`automations`) and records every command receipt's contents.
 
 ## Persisted stores (V4)
 
