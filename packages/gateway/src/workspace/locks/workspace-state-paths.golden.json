@@ -1,0 +1,504 @@
+{
+  "store": "workspace-state-paths",
+  "module": "gateway/workspace",
+  "steps": [
+    {
+      "step": "describe an absent workspace",
+      "result": {
+        "root": "<tmp>/home/workspace",
+        "available": false,
+        "reason": "unavailable"
+      },
+      "files": {}
+    },
+    {
+      "step": "initialize a fresh home",
+      "result": {
+        "describe": {
+          "root": "<tmp>/home/workspace",
+          "available": true
+        },
+        "causes": []
+      },
+      "files": {
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        }
+      }
+    },
+    {
+      "step": "describe the existing workspace",
+      "result": {
+        "root": "<tmp>/home/workspace",
+        "available": true
+      },
+      "files": {
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        }
+      }
+    },
+    {
+      "step": "no feature is initialized",
+      "result": {
+        "knowledge": false,
+        "episodic": false,
+        "home-tasks": false,
+        "apps": false
+      },
+      "files": {
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        }
+      }
+    },
+    {
+      "step": "mark home-tasks",
+      "result": "<void>",
+      "files": {
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        }
+      }
+    },
+    {
+      "step": "mark home-tasks again is unchanged",
+      "result": "<void>",
+      "files": {
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        }
+      }
+    },
+    {
+      "step": "mark knowledge rewrites the shared record",
+      "result": "<void>",
+      "files": {
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "mark apps twice at once",
+      "result": [
+        null,
+        null
+      ],
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "marked features are initialized",
+      "result": {
+        "knowledge": true,
+        "episodic": false,
+        "home-tasks": true,
+        "apps": true
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "a second owner of the same home is unavailable",
+      "result": {
+        "describe": {
+          "root": "<tmp>/home/workspace",
+          "available": false,
+          "reason": "owned_elsewhere"
+        },
+        "causes": [
+          "owned-elsewhere"
+        ]
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "files root before it exists is refused",
+      "refused": {
+        "message": "Tron internal files must be an existing directory writable only by its owner",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "an owner-only files root",
+      "result": "<tmp>/home/workspace/files",
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "a files root its owner cannot write is refused",
+      "refused": {
+        "message": "Tron internal files must be an existing directory writable only by its owner",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "a files root others can enter but not write",
+      "result": "<tmp>/home/workspace/files",
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "a files root its group can write is refused",
+      "refused": {
+        "message": "Tron internal files must be an existing directory writable only by its owner",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "hand-written feature markers",
+      "result": {
+        "version 1": true,
+        "another key": "refused: episodic: invalid initialization record",
+        "version 2": "refused: episodic: invalid initialization record",
+        "a list": "refused: episodic: invalid initialization record",
+        "null": "refused: episodic: invalid initialization record",
+        "empty": "refused: episodic: invalid initialization record"
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "marking over an invalid feature marker is refused",
+      "refused": "episodic: invalid initialization record",
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1,
+          "knowledgeInitialized": true
+        }
+      }
+    },
+    {
+      "step": "hand-written shared records",
+      "result": {
+        "version 1": false,
+        "knowledge false": false,
+        "knowledge true": true,
+        "another key": "refused: knowledge: invalid initialization record",
+        "version 2": "refused: knowledge: invalid initialization record",
+        "knowledge text": "refused: knowledge: invalid initialization record",
+        "a list": "refused: knowledge: invalid initialization record"
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": [
+          {
+            "version": 1
+          }
+        ]
+      }
+    },
+    {
+      "step": "dispose closes the workspace",
+      "result": {
+        "root": "<tmp>/home/workspace",
+        "available": false,
+        "reason": "closed"
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": [
+          {
+            "version": 1
+          }
+        ]
+      }
+    },
+    {
+      "step": "dispose again is unchanged",
+      "result": "<void>",
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": [
+          {
+            "version": 1
+          }
+        ]
+      }
+    },
+    {
+      "step": "an invalid shared record makes the workspace unavailable",
+      "result": {
+        "describe": {
+          "root": "<tmp>/home/workspace",
+          "available": false,
+          "reason": "unavailable"
+        },
+        "causes": [
+          "invalid-record"
+        ]
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": [
+          {
+            "version": 1
+          }
+        ]
+      }
+    },
+    {
+      "step": "a valid shared record admits a new owner",
+      "result": {
+        "describe": {
+          "root": "<tmp>/home/workspace",
+          "available": true
+        },
+        "causes": []
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        }
+      }
+    },
+    {
+      "step": "a workspace-state directory others can read is unsafe",
+      "result": {
+        "describe": {
+          "root": "<tmp>/home/workspace",
+          "available": false,
+          "reason": "unavailable"
+        },
+        "causes": [
+          "unsafe-directory"
+        ]
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        }
+      }
+    },
+    {
+      "step": "describe after the root was removed",
+      "result": {
+        "root": "<tmp>/home/workspace",
+        "available": false,
+        "reason": "unavailable"
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        }
+      }
+    },
+    {
+      "step": "a removed root is lost data, not a fresh install",
+      "result": {
+        "describe": {
+          "root": "<tmp>/home/workspace",
+          "available": false,
+          "reason": "unavailable"
+        },
+        "causes": [
+          "missing-root"
+        ]
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        }
+      }
+    },
+    {
+      "step": "a regular file in place of the root is unsafe",
+      "result": {
+        "describe": {
+          "root": "<tmp>/home/workspace",
+          "available": false,
+          "reason": "unavailable"
+        },
+        "causes": [
+          "unsafe-directory"
+        ]
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        }
+      }
+    }
+  ]
+}
