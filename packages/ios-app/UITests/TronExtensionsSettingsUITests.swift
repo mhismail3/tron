@@ -33,6 +33,35 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         add(shot)
     }
 
+    /// Installed is the one package list: the bundled provider the Gateway appends
+    /// is labelled and has no Update/Remove menu, there is no Sources summary row,
+    /// and the npm command sits in the Install Package card.
+    @MainActor
+    func testInstalledIsTheOnePackageList() {
+        let app = openExtensions()
+        defer { app.terminate() }
+        let rows = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@ OR label ENDSWITH %@", ". Global", ". Bundled with Tron"))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(rows.count, 6, "five configured packages and the bundled provider: \(app.debugDescription)")
+        let bundled = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "tron:pi-subagents")).firstMatch
+        XCTAssertTrue(bundled.exists, app.debugDescription)
+        XCTAssertTrue(bundled.label.hasSuffix(". Bundled with Tron"), "bundled row label: \(bundled.label)")
+        XCTAssertFalse(bundled.buttons["More"].exists, "the bundled provider has no Update/Remove menu")
+
+        let searchPaths = app.staticTexts["Search paths"]
+        for _ in 0..<6 where !(searchPaths.exists && searchPaths.isHittable) { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(searchPaths.exists, app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Sources"].exists, "no Sources group: \(app.debugDescription)")
+        XCTAssertFalse(app.buttons["settings-row-sources.packages-source"].exists, "no second package summary row")
+        let install = app.buttons["Install Package"].firstMatch
+        let npm = app.buttons["settings-row-sources.npmCommand-source"]
+        XCTAssertTrue(install.exists && npm.exists, app.debugDescription)
+        // Same card: the npm row starts where the Install Package row ends,
+        // and both precede Search paths.
+        XCTAssertEqual(npm.frame.minY, install.frame.maxY, accuracy: 4, "npm command is in the Install Package card: \(app.debugDescription)")
+        XCTAssertLessThan(npm.frame.maxY, searchPaths.frame.minY)
+    }
+
     /// Captures the whole sheet, top to the Search paths group, per appearance.
     @MainActor
     func testExtensionsSheetCaptures() {
