@@ -138,7 +138,7 @@ extension RealGatewayPairAndChatUITests {
 
         let trustRow = app.buttons["project-settings-trust"]
         XCTAssertTrue(trustRow.waitForExistence(timeout: 30), "Project Settings offers no way to change trust: \(app.debugDescription)")
-        XCTAssertTrue(app.staticTexts["Resources blocked"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(waitUntil(timeout: 30) { trustRow.value as? String == "Resources blocked" }, "\(String(describing: trustRow.value))")
         keepScreenshot(app, name: "project-settings-blocked")
         trustRow.tap()
         let trust = app.buttons["Trust Project"]
@@ -146,7 +146,8 @@ extension RealGatewayPairAndChatUITests {
         trust.tap()
         XCTAssertTrue(waitUntil(timeout: 15) { stored() == true }, "the Gateway trust store must record the project as trusted")
         dismissTopSheet(app)
-        XCTAssertTrue(app.staticTexts["Trusted"].waitForExistence(timeout: 30), "Project Settings must show the new decision: \(app.debugDescription)")
+        XCTAssertTrue(waitUntil(timeout: 30) { trustRow.value as? String == "Trusted" },
+                      "Project Settings must show the new decision: \(String(describing: trustRow.value))")
         keepScreenshot(app, name: "project-settings-trusted")
     }
 }
