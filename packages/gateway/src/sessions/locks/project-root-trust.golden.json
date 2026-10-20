@@ -1347,15 +1347,6 @@
       ]
     },
     {
-      "topic": "session.toolProgress",
-      "paths": [
-        ":object",
-        "eventSequence:number",
-        "revision:number",
-        "runtimeGeneration:string"
-      ]
-    },
-    {
       "topic": "settings.changed",
       "paths": [
         ":object",

@@ -69,7 +69,7 @@ describe("gateway/session-catalog project-root lock", () => {
     await write(join(project, ".pi", "extensions", "root-probe.ts"), probeExtension("project_probe"));
     await write(join(project, "lock-skills", "root-lock-skill", "SKILL.md"), skill("root-lock-skill", "The project root's lock skill"));
     await write(join(project, "AGENTS.md"), "ROOT-INSTRUCTIONS: the project root's AGENTS.md.\n");
-    await write(join(nested, ".pi", "settings.json"), `${JSON.stringify({ retry: { maxRetries: 99 }, skills: ["../nested-skills"] })}\n`);
+    await write(join(nested, ".pi", "settings.json"), `${JSON.stringify({ retry: { maxRetries: 9 }, skills: ["../nested-skills"] })}\n`);
     await write(join(nested, ".pi", "extensions", "nested-probe.ts"), probeExtension("nested_probe"));
     await write(join(nested, "nested-skills", "nested-lock-skill", "SKILL.md"), skill("nested-lock-skill", "A subdirectory skill that must not load"));
     await write(join(nested, "AGENTS.md"), "NESTED-INSTRUCTIONS: the subdirectory's AGENTS.md.\n");
@@ -108,7 +108,9 @@ describe("gateway/session-catalog project-root lock", () => {
     const trace = {
       lock: "project-root-trust",
       exchanges: recorded.exchanges,
-      events: recorded.events,
+      // Whether an instant tool emits a progress frame before its result is host
+      // timing; its settled result is in the transcript and JSONL.
+      events: recorded.events.filter((event) => (event as { topic: string }).topic !== "session.toolProgress"),
       providerRequests: recorded.providerRequests as unknown as TraceValue[],
       canonicalJsonl: await gateway.canonical(sessionId),
       // The trust store is keyed by path; normalization rewrites values, so list its entries.
