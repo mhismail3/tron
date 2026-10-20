@@ -1,0 +1,153 @@
+{
+  "store": "command-receipt-races",
+  "module": "gateway/transport",
+  "steps": [
+    {
+      "step": "a copy sent while the lane's second holder runs waits for it and replays",
+      "result": {
+        "first": {
+          "refused": "no such session",
+          "code": "not_found"
+        },
+        "second": {
+          "result": {
+            "second": true
+          },
+          "ran": 2
+        },
+        "thirdSettledDuringOperation": false,
+        "third": {
+          "result": {
+            "result": {
+              "second": true
+            },
+            "ran": 0
+          }
+        }
+      },
+      "files": {
+        "gateway/command-receipts/Zr5153DsKYjQyujnmcsI65LD9GS-Zhiz_j7UCmgs5l4.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "race-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "second": true
+          }
+        }
+      }
+    },
+    {
+      "step": "a receipt to expire",
+      "result": {
+        "result": {
+          "first": true
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/eD1ZOX8xs8Kwegi8nG14AH-vieZGoN7T1OPh_5e3VVY.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "race-0101",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "first": true
+          }
+        }
+      }
+    },
+    {
+      "step": "a prune holding the inventory when a duplicate arrives expires its receipt",
+      "result": {
+        "result": {
+          "again": true
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/eD1ZOX8xs8Kwegi8nG14AH-vieZGoN7T1OPh_5e3VVY.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "race-0101",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "result": {
+            "again": true
+          }
+        }
+      }
+    },
+    {
+      "step": "a receipt to replay",
+      "result": {
+        "result": {
+          "kept": true
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/HwAD60OpJRezKrD_8qbwUuiCA3YfKg4ByeOKkODEgeE.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "race-0201",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "result": {
+            "kept": true
+          }
+        }
+      }
+    },
+    {
+      "step": "a rebuild while a replaying duplicate holds its lane counts its receipt, so the store is full",
+      "refused": {
+        "message": "Command receipt capacity is full; completed receipts expire, but unresolved outcomes retain replay protection and require operator reconciliation",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {
+        "gateway/command-receipts/HwAD60OpJRezKrD_8qbwUuiCA3YfKg4ByeOKkODEgeE.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "race-0201",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "result": {
+            "kept": true
+          }
+        }
+      }
+    },
+    {
+      "step": "the duplicate replays the kept receipt",
+      "result": {
+        "result": {
+          "kept": true
+        },
+        "ran": 0
+      },
+      "files": {
+        "gateway/command-receipts/HwAD60OpJRezKrD_8qbwUuiCA3YfKg4ByeOKkODEgeE.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "race-0201",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "result": {
+            "kept": true
+          }
+        }
+      }
+    }
+  ]
+}

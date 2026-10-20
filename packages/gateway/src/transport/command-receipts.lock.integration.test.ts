@@ -248,3 +248,86 @@ it("command-receipt-concurrency: bounds, rebuild windows and lane lifetimes", as
   await store.dispose();
   await log.finish();
 });
+
+/**
+ * The three lane windows a concurrent prune or rebuild can land in, each opened
+ * deterministically: the async mutex admits in call order, a mutex call takes the
+ * lock synchronously when it is free, and an inventory pass waits for file-system
+ * I/O, so work queued from a route callback or a few microtasks later is ordered
+ * behind it. Only a broken lane makes an outcome timing-sensitive; correct code
+ * reaches the same outcome every run.
+ */
+it("command-receipt-races: lane lifetime, prune and rebuild inside a duplicate's lane", async () => {
+  const log = await storePathLock({ module: "gateway/transport", name: "command-receipt-races", testFileUrl: import.meta.url, owned: "gateway/command-receipts" });
+  const phone = "device:lock-phone";
+  const directory = join(log.home, "gateway", "command-receipts");
+  let calls = 0;
+  const run = (result: unknown) => async () => { calls += 1; return result as never; };
+  const counted = async (work: () => Promise<unknown>) => { const before = calls; const result = await work(); return { result, ran: calls - before }; };
+  const outcome = async (work: () => Promise<unknown>) => {
+    try { return { result: await work() }; } catch (error) { return { refused: (error as Error).message, code: (error as GatewayError).code ?? null }; }
+  };
+
+  // A lane stays registered while any duplicate holds it. The first command fails
+  // definitively while a duplicate waits on its lane; the duplicate then runs, and a
+  // third copy sent during its operation must queue behind it and replay, never open
+  // a second lane that reads the duplicate's pending receipt as an uncertain fence.
+  let store = new CommandReceiptStore(log.home);
+  await log.step("a copy sent while the lane's second holder runs waits for it and replays", async () => {
+    let third: Promise<unknown> | undefined;
+    let thirdSettledDuringOperation: boolean | undefined;
+    const first = outcome(() => store.execute(phone, "session.rename", "race-0001", async () => {
+      calls += 1;
+      throw new GatewayError("not_found", "no such session");
+    }));
+    const second = counted(() => store.execute(phone, "session.rename", "race-0001", async () => {
+      calls += 1;
+      third = outcome(() => counted(() => store.execute(phone, "session.rename", "race-0001", run({ third: true }))));
+      // Correct code cannot settle the third copy before this operation returns.
+      thirdSettledDuringOperation = await Promise.race([third.then(() => true),
+        new Promise<boolean>((resolve) => { setTimeout(() => resolve(false), 300); })]);
+      return { second: true };
+    }));
+    return { first: await first, second: await second, thirdSettledDuringOperation, third: await third };
+  });
+  await store.dispose();
+
+  // A lane that never wrote does not preserve the receipt it replays: a prune that
+  // holds the inventory when the duplicate arrives still expires that receipt, so the
+  // duplicate runs again instead of replaying it.
+  await rm(directory, { recursive: true, force: true });
+  store = new CommandReceiptStore(log.home);
+  await log.step("a receipt to expire", () => counted(() => store.execute(phone, "session.rename", "race-0101", run({ first: true }))), "result");
+  log.advance(1_000);
+  await log.step("a prune holding the inventory when a duplicate arrives expires its receipt", async () => {
+    const prune = store.prune(0);
+    const duplicate = counted(() => store.execute(phone, "session.rename", "race-0101", run({ again: true })));
+    await prune;
+    return duplicate;
+  });
+  await store.dispose();
+
+  // A rebuild counts a receipt whose lane has not written: a replaying duplicate's
+  // lane, registered while another command's admission rebuilds the inventory, must
+  // not hide the receipt it replays. One entry fits, and the kept receipt fills it.
+  await rm(directory, { recursive: true, force: true });
+  store = new CommandReceiptStore(log.home);
+  await log.step("a receipt to replay", () => counted(() => store.execute(phone, "session.rename", "race-0201", run({ kept: true }))), "result");
+  await store.dispose();
+  store = new CommandReceiptStore(log.home, undefined, { maximumEntries: 1 });
+  let duplicate: Promise<unknown> | undefined;
+  await log.step("a rebuild while a replaying duplicate holds its lane counts its receipt, so the store is full", () =>
+    store.execute(phone, "session.rename", "race-0202", run({ admitted: true }), {
+      resolveBinding: () => {
+        // Registered after this command's rebuild is queued, before that rebuild reads the directory.
+        duplicate = (async () => {
+          for (let hop = 0; hop < 20; hop += 1) await Promise.resolve();
+          return counted(() => store.execute(phone, "session.rename", "race-0201", run({ replayed: false })));
+        })();
+        return { homeId: "home-1", bindingRevision: 1, physicalSessionId: "chapter-1" };
+      },
+    }), "refused");
+  await log.step("the duplicate replays the kept receipt", () => duplicate, "result");
+  await store.dispose();
+  await log.finish();
+});

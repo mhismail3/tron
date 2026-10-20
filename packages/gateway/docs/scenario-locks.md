@@ -138,7 +138,10 @@ that a later write waits for it.
 Command receipts also have `command-receipt-concurrency`: capacity bounds, an
 inventory rebuild opened from inside the receipt writer during another command's
 pending or completed write, and an early prompt response whose lane a duplicate
-must still find. `scripts/tron mutate` measures what they catch.
+must still find. `command-receipt-races` opens the lane windows a prune or
+rebuild can land in (a lane outliving one of two holders, a prune or rebuild
+while a replaying duplicate holds its lane) through the mutex's call order and a
+route callback, with no production hook. `scripts/tron mutate` measures what they catch.
 
 Not yet locked:
 - **Operational:** `gateway.json`, `update-config.json`, `lan-endpoint/`,
