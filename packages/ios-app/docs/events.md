@@ -1,504 +1,198 @@
-# Gateway events
+# Gateway connection and events
 
-## Protocol v7 chat semantics
+The cross-module contract for how the iPhone holds a Gateway connection and turns its events into
+presentation. Transport lives in [Core](../Core/README.md), lifecycle and reduction in
+[State](../Sources/State/README.md), rendering in the feature modules. The Gateway side is
+[connection resilience](../../gateway/docs/connection-resilience.md); record contents are owned by
+[observability](../../gateway/docs/observability.md).
 
-Session configuration uses the Gateway's required `configurationBlocker` field
-and sequenced `session.configuration` updates, not foreground phase alone.
-`null` means ready; `running`, `queued`, `settling`, `mutation`, `interaction`
-and `unavailable` keep model, thinking and context controls locked with an
-explanation. Readiness changes do not increment canonical revision, preserving
-context-window optimistic concurrency. The existing exact event cursor and
-snapshot/rebaseline admission reject stale readiness. An acknowledged Stop can
-still be settling, while independently running children do not block safe
-parent configuration. The originating model/runtime and installed subscription
-are rechecked in each actual send closure after transport waits; accepted
-outcomes remain receipt-owned. Model/thinking commands carry the original
-runtime and nullable model expectation to the Gateway mutation lane. Configuration
-success receipts carry the exact applied revision. While a choice is pending,
-Manage Session observes authoritative revision as well as its narrow semantic
-projection: confirmed intents retire at that revision even when a newer client
-has selected a different value. Before that point the pending display remains
-request-owned; unrelated or earlier acknowledgements cannot unlock it. Controls
-also require the existing synchronized-session command admission during reconnect.
+## Principles
 
+- Events are invalidation or live-presentation hints. They are not a durable journal, are never
+  replayed into a local database, and correctness never depends on receiving every event while
+  disconnected. The authoritative snapshot and canonical Pi JSONL decide transcript order and
+  lifecycle truth.
+- One Gateway runtime is the sole mutable owner of a canonical session; clients attach to it.
+  Disconnecting or backgrounding never aborts an accepted run, and an interrupted prompt is never
+  replayed automatically.
+- Every asynchronous boundary rechecks the exact profile, lifecycle generation, connection epoch,
+  presentation activity and latest request it captured; stale work is discarded, not published.
 
-Session events are live invalidation hints; the authoritative snapshot and
-canonical Pi JSONL determine transcript order and lifecycle truth. Typed chat
-metadata separates direction, context effect, provenance, visibility, delivery,
-semantic kind, and causal invocation/operation IDs. Inbound model context is
-right aligned; assistant output and agent-requested tools remain left aligned;
-non-context status is centered; hidden internal state has no chat row. Compact semantic
-chrome has one cross-extension palette: user input stays emerald, commands are indigo,
-tools are emerald, attributed extension context is violet, informational notifications are
-blue, unknown context is slate, warnings are amber, and failures are red. Producer and
-category remain explicit text so color is never the only signal.
+## Transport epochs
 
-Every compact command/context/tool/notification pill is payload-free: it shows the trusted
-producer when available, the command or semantic category, and lifecycle/status only.
-Arguments, notification bodies, context text, objectives, and arbitrary values live in the
-tappable detail sheet and may wrap there without expanding transcript rows. A command row a fork
-inherited from its origin shows the origin's settled lifecycle, with a "Settled in: Original session"
-metadata row in that sheet (`settledInOriginSession`).
+`GatewayClient` owns one authenticated WebSocket per connection epoch: socket, receive and liveness
+tasks, pending requests, overflow state and handshake projection. Connect and close invalidate older
+attempts; late callbacks can only detach or publish for their captured epoch, and every event
+delivery carries that local epoch identity, so buffered frames from a retired profile cannot reach
+its replacement. Application RPCs are definitely unsent until hello admission and event activation.
 
-`custom_message` is model context regardless of whether it triggers a turn or is
-producer-visible. Producer-hidden messages remain hidden in ordinary chat.
-`custom`/`appendEntry` is context-free extension state and is hidden unless a
-trusted typed adapter promotes it to a centered status. Extension `ui.notify`
-callbacks are canonical bounded centered status receipts, never app toasts; their compact
-row shows producer, **Notification**, and severity while the exact message stays in its
-detail sheet. App notices remain reserved for product/system events. No generic extension message/state
-is rendered as a ToolCard. Invocation receipts are bounded
-canonical records used to reconcile accepted commands and resource prompts after
-restart; uncertain side effects are never replayed automatically.
+- **Deadlines.** Socket open 5 s, then hello and authentication 15 s; URL-loading inactivity 60 s.
+  Intentional close sends `goingAway`, waits one second, then hard-invalidates.
+- **Liveness.** While foregrounded, every socket (focused and pooled) pings on one shared ten-second
+  grid (`MonotonicClock` `gridOrigin`), so the radio wakes once. A missing pong after eight seconds
+  with no fully delivered inbound frame since the ping retires the epoch. This keeps
+  Tailscale/iOS idle paths alive; the Gateway pings only a client that has gone quiet.
+- **Admission.** Decoded frames above the Gateway's 1 MiB ceiling retire the epoch
+  (`frame_too_large`, after `permessage-deflate` inflation). Dynamic `JSONValue` is capped at depth
+  64, 32,768 nodes, 8,192 members, 1 MiB per string and 4 MiB aggregate. The ordered event hub
+  admits the Gateway's 1,024-event quarantine under a 2 MiB byte ceiling; overflow retires the epoch
+  and rebaselines rather than dropping sequence.
+- **Decoding.** One discriminated `JSONDecoder` entry point per frame; typed views decode from the
+  original container without reserialization, and large DTOs are prepared on the client actor so
+  the MainActor installs `Sendable` values. Coders are fresh per operation. Typed decode failures
+  become bounded `invalid_response` errors naming only method, category and coding path. Unknown
+  frame kinds are ignored; malformed known event data is a reducer no-op, never a transport failure.
 
-Tron events are transient presentation and invalidation signals delivered by
-`GatewayClient`. They are not a durable journal and are not reconstructed into a
-local database. Each delivery carries the local connection-epoch identity; `AppModel`
-admits only the identity installed before receive activation, so buffered frames from a
-retired profile cannot mutate its replacement. Backgrounding is an explicit transport boundary:
-`GatewayLifecycleCoordinator` retires the socket epoch and clears queued deliveries while retaining
-last-good session projections; foreground creates a new epoch and authoritative session baseline.
-`GatewayClient` decodes every inbound response/event frame through one discriminator and prepares large session DTOs on its
-actor before crossing into `AppModel`. Transport admission is atomic: count, byte-budget, and individually oversized
-rejections carry bounded queue age/progress/high-water evidence, with fixed pressure-threshold accounting and no payload
-logging. Coalescing is scoped to one connection epoch and rejected replacements leave the prior byte accounting intact.
-A monotonic retirement fence rejects late predecessor frames before touching capacity or evidence. New-epoch admission
-removes only superseded queued projections before checking capacity; the exact retirement owner atomically publishes
-its final control notification without reopening ordinary frame admission. Accepted Gateway work is unaffected.
-The event consumer retains bounded category/phase aggregates rather than per-event traces; session event intake places suffixes in the synchronization quarantine synchronously and hands open/sync work to one owned task, so a slow mounted read cannot block unrelated lifecycle, catalog, auth, or terminal delivery. Optional notification inbox
-refreshes are one in-flight pass plus one pending invalidation per profile, so a stalled read cannot hold the serial event
-drain. Successful connection refresh and foreground reconciliation schedule a bounded selected-profile inbox refresh
-even without `notification.inbox.changed`; the inbox coordinator owns that optional work, and foreground readiness never
-awaits its RPC. Exact profile, generation, and connection checks still reject stale pages.
-Diagnostic timestamps are parsed as instants (including fractional seconds and offsets); local occurrence times and copied
-range endpoints retain millisecond precision. Reconnect lifecycle loop IDs
-are carried into handshake, liveness, and retirement records so chronology and incident identity do not depend on wall-clock text. `GatewayEvent` uses one topic dispatcher for network `Decoder` payloads and local
-`JSONValue` fixtures; the adapters share identical topic admission and malformed-event behavior, while the network adapter
-continues decoding directly from the original decoder without JSON reserialization. The raw event remains beside that typed preparation; transport admission only stamps frame size and never reparses the
-already prepared payload. Local incident records are an explicitly production-composed, bounded projection retained for
-ordinary relaunch only; test clients remain memory-only, and persistence failures cannot affect transport or presentation. The production app composes this sink explicitly; it retains only structurally admitted iOS incident records under a fixed count, byte and age cap, while test-created `AppModel` instances have no sink by default. Offline Logs publish local rows before any remote profile fetch and preserve failed-source status; the Logs surface also fences publication and cleanup to its captured presentation activity and request generation. Export Diagnostics combines the bounded iOS AppLog records, the last retained Gateway log tail, app build identity, and OS version as JSONL provenance data; these are bounded projections rather than canonical state, and `AppDiagnostics` owns that collection and export operation. What each record stream contains, at which level, and where it lives is owned by [observability](../../gateway/docs/observability.md). When connected to a Gateway advertising `diagnostic-export.v1`, the existing `system.logs.export` RPC saves the bundle in the Gateway's private device-export store and returns its path; the app copies the path in the same action. Offline or failed uploads open the native activity sheet immediately with a bounded device-local artifact, without a second preparation/share tap. The Export gesture captures its stable profile/lifecycle destination before app-log preparation. A retired destination cannot dispatch to its replacement, even after returning to the same profile; an unsubmitted retired intent is silently abandoned without local fallback. The dispatch uses the existing exact socket admission at send time, not a socket captured before preparation, so same-authority foreground recovery preserves intent. An already dispatched export continues if its presenting Logs surface retires, while stale or replacement-destination presentation work cannot copy the path, show the sheet, or publish success/error; rejected local artifacts use the existing discard owner. Raw export receipt recovery and uncertain-upload fallback remain unqualified; this destination correction does not establish accepted-receipt settlement. Persisted invalid-response incidents retain only the typed event code at the storage boundary. Gateway heartbeat/close diagnostics include bounded inbound/write-progress ages and outbound queue counters without payloads. Reconnect scheduling/attempt/failure, foreground/background transitions, and coarse Network.framework path changes are recorded as bounded lifecycle incidents independently of event-consumer delivery; successful ping/pong and socket writes update progress evidence, while unknown-before-success remains distinct. A connection attempt that races the paired Mac's advertised LAN lane against the saved Tailscale endpoint (E-3c) stamps `transport=lan|tailscale` on the winning hello's record and on each losing lane's own failure record, so a fallback is attributable from one connection record: the lane that did not carry the attempt appears with the stage it stopped at (`transport-open` when its socket never opened, `hello-receive` after a completed socket) and a reason that separates a LAN that is not reachable (`lan_unreachable`), a certificate the profile's pin refuses (`lan_pin_mismatch`), a denied Local Network permission (`lan_denied`, recorded once per launch from the app's path monitor or from a pinned dial iOS failed as not connected while the saved lane reached the same Mac), and a saved endpoint that answered an upgrade failure. A lane the race retired because another lane won records nothing, so the surviving lane's record is the whole attempt.
-unknown frame discriminators are ignored, valid unknown sequenced session topics still
-advance their cursor, and malformed known session payloads fail closed to authoritative
-catch-up instead of disconnecting the transport or consuming their cursor. A quarantined event that cannot
-advance the reducer cursor rejects the suffix before baseline publication and triggers the
-bounded authoritative retry path.
+## Lifecycle and reconnect
 
-Provider and MCP authentication are deliberate exceptions to ordinary transport-scoped presentation work.
-`auth.event` and `auth.prompt` remain bounded disposable projections, but the Gateway operation belongs
-to the authenticated device identity. MCP auth events additionally target `{ kind: "mcp", sessionId, server }`;
-provider events retain their provider target. A socket loss clears the presented prompt and foreground
-`auth.resume` rebinds delivery without starting a second Pi login; `auth.completed` may therefore be
-replayed from a bounded Gateway tombstone. An `auth_url` can also carry a Gateway-derived
-`callbackCapture` descriptor containing only an opaque callback ID and exact loopback host/port/path.
-The authorization code/state remain in the iOS listener's memory and travel either as the existing
-Pi manual-code response or as the query-only `auth.callback` relay; they never enter snapshots, caches,
-logs, or durable events. MCP callback relay is accepted only for the active session-bound `/mcp login`
-operation and only to the loopback listener named by Pi's authorization URL.
+`GatewayLifecycleCoordinator` is the sole owner of enrollment, the focused profile, connection
+state, reconnect, foreground reconciliation, serial retire/close transitions and teardown.
+`DashboardGatewayConnectionPool` holds one lightweight catalog client per other eligible paired Mac
+(one per verified physical-machine group), each with an independent failure boundary.
 
-`models.catalogChanged` is a global, payload-free invalidation broadcast after the Gateway's live
-release-date catalog changes. The provider-auth coordinator reloads each already materialized
-provider model catalog through `model.list`; it never treats the event as catalog data.
+- **Identity.** Pairing responses, hellos and `system.info` must assert a `stable` or `dev` channel
+  matching the saved endpoint; mismatches fail closed. Hellos carry the private-LAN lanes
+  (`lanEndpoints`) and certificate pin (`lanPin`), replaced on every hello and never read from an
+  unauthenticated route. An epoch the LAN lane carried routes that connection's authenticated HTTP
+  (live view, media, uploads) through the same pinned endpoint.
+- **Schedule.** Each executor owns one `GatewayReconnectSchedule`. The focused profile starts at
+  2 s, grows ×1.7 to 15 s with independent 80–120% jitter. A pool entry follows the same curve
+  without jitter, then after three consecutive failures grows ×4 to a five-minute cap and shows
+  **Offline**; its failure count and last-connected time survive background retirement.
+- **Triggers.** Foreground, a real network-path change and explicit Retry cancel one pending delay;
+  a path change also restarts the curve. An unsatisfied path parks recovery visibly
+  (`reconnect.parked`) and probes again at 30 s; every refusing guard logs `reconnect.skipped`.
+- **Stops.** Only unauthenticated, forbidden, protocol-mismatch and identity-mismatch failures stop
+  automatic recovery until explicit Retry. Two consecutive failed opens that never opened a socket
+  read **Mac unreachable** (with the interface when known). Retry Connection is a client transport
+  action, never a Gateway restart or command replay.
+- **Attempt boundary.** An attempt ends at authenticated handshake plus event activation, which
+  publishes Connected. Mounted restoration, terminal reattachment and catalog, provider, settings
+  and device reads run beneath that socket and are cancelled by its loss; a slow restoration never
+  relabels a live socket or delays the next attempt.
+- **Background.** Scene backgrounding cancels disposable reconciliation, preserves routes and
+  last-good projections, and retires the socket epoch before suspension. Foreground creates one
+  fresh epoch and authoritative baselines. Accepted Gateway work continues on the Mac.
+- **Profile switch.** Synchronously revokes admission and presentation intake, awaits the exact
+  transport close, then changes profile. The previous and target catalogs stay as bounded stale
+  dashboard buckets until replaced.
+- **Restart drain.** `system.stopping` starts `Restarting` with a 90-second watchdog; the
+  replacement handshake returns to Connected. Drain phase and counts are diagnostic presentation
+  only. A device install emits no lifecycle event; its sheet polls `device.install.status`.
 
-`AppModel.handle(_:)` owns cross-domain routing; `SessionPresentationStore` exclusively
-admits and reduces mounted-session topics:
+## Requests and receipts
 
-- `session.summary` enters `SessionCatalogCoordinator`'s ID-indexed monotonic
-  phase/name/count projection, so runs started by terminal or another mobile client update
-  known dashboard rows synchronously without subscribing every device to every transcript or
-  issuing a list request. A summary makes only that row live before full catalog completion;
-  unknown summaries request discovery without fabricating a row. The same row projection carries
-  Gateway-canonical completion/read-through attention. Additive `foregroundPhase` and
-  `hasActiveSubagents` facts distinguish a settled parent response with delegated work still active;
-  the dashboard maps that live combination to its subagent orb and treats omitted legacy facts as
-  ordinary active foreground work. Additive `waitingForUser` is independent of phase and takes row-icon priority only on a live catalog projection; it shows an amber question bubble while an authoritative semantic interaction is pending, defaults false for older Gateways, and stale cached rows continue to use reconnecting activity rather than claiming current input authority. Its additive `activeSince` remains fixed for one
-  continuous active period, so live `updatedAt` progress and heartbeat updates refresh row content
-  without repeatedly reordering concurrent work; older Gateways fall back to stable profile-qualified
-  identity for active-row ties. A final prompt response becomes unread only
-  at truthful settlement. Once an exact synchronized chat is mounted on the active presentation lineage in an
-  active scene, `SessionPresentationStore` publishes and renews a token-bound, revision-ordered
-  `session.presentation.set` lease without waiting for scroll positioning or a first-ready-frame delay.
-  Descendant tool, command, and detail sheets retain that lineage; an unrelated covering branch, inactivity, route retirement, subscription replacement, or
-  connection retirement revokes it. Gateway uses the completion entry's one latched lease disposition
-  for both canonical read-through and automatic completion-alert suppression. Opening still
-  acknowledges only the completion revision installed by that exact presentation/connection owner,
-  mounted unread summary revisions converge through the same absolute read operation, transient
-  retries retain that revision, and explicit Mark Read/Unread mutations use command receipts and apply
-  the returned monotonic attention projection immediately, including for a cold row with no live summary.
-  Cached rows may show stale offline attention but never own it, while foreground and background
-  profile event streams converge every dashboard; Gateway invalidates the catalog when it cannot
-  broadcast a full summary rather than fabricating an unknown row. `session.listChanged` marks
-  the shared traversal dirty instead of cancel/restarting it. Home status is invalidated by these
-  two events: a `session.summary` for Home's current `sessionId`, or for the chapter it opens
-  (`openSessionId`, the sealed predecessor during a rollover), triggers one immediate
-  `home.status` read, and every `session.listChanged` does too, because a chapter rollover or
-  designation changes the Home projection without changing the row a summary names. Neither event
-  is a Home status payload; both only request the same fenced read the mounted surface runs. User-scoped 500-row pagination
-  has named page/item/cursor bounds and publishes atomically. A traversal whose connection already published a catalog projection
-  token re-reads it conditionally: the first page names that token and the Gateway answers `notModified` with no rows, so the
-  retained rows, selection, and scroll stay untouched and the traversal still counts as authoritative. The token spans the whole
-  projection — the Gateway runtime epoch, the structural revision and every mutable row overlay — so a replacement connection
-  revalidates the rows it already holds instead of reloading them, and a restarted Gateway whose revisions begin again at zero
-  can never confirm a pre-restart token. Mixed page revisions
-  and expired continuation leases restart once from a nil cursor and then retain the previous catalog silently; a current connection retries failed catalog reads with the shared reconnect backoff and shows “Session list unavailable” after three consecutive failures without stopping retries. Invalidations coalesce with the current traversal. This expected
-  optimistic invalidation no longer creates the intrusive “Sessions changed while loading the
-  dashboard” in-app notification or another routine synchronization notice;
-- `automation.changed` is a global, coalescible invalidation containing only the Gateway catalog revision and an optional opaque automation ID. It carries no name, prompt, notification text, target content, or run error. The typed client admits the payload bounds but does not create a local automation journal; the Automations sheet pages `automation.list` under one exact revision and fetches full action content only through authenticated `automation.get`.
-- `notification.inbox.changed` carries the Gateway's committed `{revision, unreadCount}`. The count projects onto the bell immediately; the profile's first pages of both server windows (`all` and `unread`) are refetched only when the revision differs from the projection's, and the Unread list is the server's own unread page rather than a client filter of `all`. On connect, each selected or admitted background profile requests the first page of both windows; older pages are requested only when the mounted history scroll reaches its paging sentinel, whose identity carries its `(profile, filter, cursor)` keyset position so it re-arms after each page. Every page stays on its captured connection, the coordinator bounds retained rows and rejects duplicate identities, and a refresh merges both windows in place so loaded older pages and their cursors survive. Profile buckets aggregate newest-first, while Gateway command receipts own mark-one/mark-all read settlement; a mark-all cut is each profile's newest shown row, so newer arrivals stay unread. A synchronized chat's fresh visible-presentation transition separately acknowledges that session's existing inbox rows; background/technical opens and ordinary visibility renewals do not. The Gateway persists and retries the exact captured notification IDs independently of navigation, then broadcasts the same invalidation. APNs taps may use their bounded request ID to mark the exact canonical row read, but that best-effort mutation never delays exact machine/session navigation;
-- session snapshot/change topics enter the store's composed synchronization quarantine and
-  update only the currently subscribed mounted or synchronizing authority. Baseline plus the
-  contiguous suffix reduce before snapshot/token publication in one MainActor turn. Full snapshots
-  install only at the exact next cursor for
-  the same runtime; duplicate/stale cursors are no-ops, gaps/runtime replacement/missing
-  baselines request authoritative synchronization, and missing authority or route/payload
-  mismatch is discarded without creating or caching state. Synchronous intake revocation rejects all
-  later sequenced topics before cursor reduction or cross-domain effects. Extension input leases are tri-state: an omitted
-  `inputLease` leaves the prior lease unchanged, an explicit JSON `null` clears it, and a value replaces it only when it
-  identifies an admitted surface revision; malformed values fail closed without publishing a partial mutation. Explicit acknowledged open/sync remains the only
-  path allowed to replace a cursor or runtime baseline. The same snapshot carries the full
-  bounded queue projection (at most 32 authoritative items, including total attachment count and optional photo/file counts)
-  and queue revision; queue updates therefore replace the visible
-  queued-message cards atomically rather than applying per-row mobile deltas. Protocol v7 requires
-  both rich fields; iOS admits Edit/Remove only for that authoritative pair. A mutation response
-  never rewrites queue projection locally: clear,
-  edit, reorder, and remove keep controls inert until a strictly newer sequenced queue revision
-  installs from the Gateway. While that mutation is pending, its exact changed/removed operation IDs
-  cannot claim queue-to-canonical continuity. If a canonical snapshot would settle one of those IDs,
-  iOS keeps the installed queue visible and coalesces only the newest complete conflicting capture until
-  the command resolves: success retires and excludes the matching handoff before installation, while
-  failure restores exact settlement before installation. A newer queue revision that races ahead of the
-  response cannot clear mutation ownership or exclusions until that outcome is known. Presentation
-  retirement wakes suspended projection installers and target/generation-gates late command completion.
-  The installed queue revision/items and capability authority own the
-  card controls; unrelated transcript projection work does not make an installed queue card flicker
-  read-only. An explicit user-admitted earlier-page request owns one exact local token through
-  paging, projection installation, and anchored prepend settlement (or unanchored installation),
-  while reducer/scroll loading only corroborates that transaction and never supplies another label.
-- `compactionQueued` is a bounded snapshot field owned by the Gateway's
-  single pending maintenance slot. iOS renders it as explicit runtime feedback and never
-  inserts a transcript entry or retries the mutation. The row is replaced by existing
-  compacting feedback when the Gateway picks up the work, then by the canonical JSONL
-  compaction entry. Current Gateways publish one immediate contiguous authoritative snapshot
-  at `compaction_end`; it contains the fitted current tail/leaf (including hook-appended suffix)
-  and truthful restored prompt/automatic-idle operation state; manual marker cleanup remains compacting
-  until durable settlement. The typed `session.compaction` delta must identify one exact
-  canonical compaction item; an inexact delta requests rebaseline.
-  Stop includes the projected abort kind as advisory metadata and the authoritative operation
-  ID as its safety fence. Gateway rejects a delayed tap if a newer operation has replaced it,
-  preventing a stale control from aborting its successor, but never lets a stale kind narrow
-  the escape hatch: every foreground cancellation controller and exact built-in bash process
-  owner is invoked, and success is returned only after the fenced foreground work settles.
-  `pendingPrompt` is the companion transient admission for a prompt
-  whose canonical user entry is still being prepared, including automatic compaction
-  during prompt preflight. The snapshot's `acceptsQueuedPrompts` fact comes directly
-  from live Pi streaming state, or is true while the Gateway queues compaction-time input,
-  and is distinct from broad session phase and queue CRUD capability. Without it a prompt remains semantically ordinary (never a fabricated
-  `queuedItem`) and uses the shared
-  emerald queue-card visual with “Message” / “After compaction” until its
-  canonical user entry arrives. Gateway binds that entry's
-  bounded `presentationId` to the prompt operation ID, which iOS consumes before legacy text
-  matching. Once the operation ID is known, text/attachment equivalence is never accepted as causal settlement. `session.operationFailed` surfaces a sequenced operation failure. For prompt admission, it identifies an exact operation proven unable to produce canonical input; only that matching ID retires and restores the admission. Automatic-compaction failures instead carry their separate compaction operation ID, never the prompt ID, and show a failure notice without restoring the prompt. Exhausted overflow recovery can fail without a new compaction start; its notice has no operation ID and cannot settle an admission. Cancellation is not a failure notice. Receipt, binding, and runtime failures after queue or user-message disposition remain non-settling `session.diagnostic` events. A queued Pi call that rejects before either disposition is definitive RPC failure and releases its exact admission. Submission transport ownership is profile/session scoped across route generations, so leaving and reopening projects the same sending/accepted row without replaying the RPC. If the authoritative runtime generation changes before an accepted operation reaches canonical delivery, the coordinator retires any remaining optimistic row, restores its draft for review, and posts an outcome-unknown notice; Tron never automatically replays that prompt. One bounded local handoff preserves the same recovery after exact queue evidence has already retired the optimistic row. One unified physical row namespace spans committed, live/runtime, lifecycle, and queue content: Gateway projection binds the compaction operation ID to its canonical compaction entry, so the spinner and canonical pill update under one operation-based physical ID even when transcript bounds move from inexact to exact. The canonical entry ID remains its semantic identity. An exact operation-bound canonical handoff may likewise reuse the prior lifecycle's physical ID while retaining its canonical semantic ID. Skill, prompt-template, and extension selection travels as bounded typed `resourceInvocations` rather than editor command text (#311). Picking a skill or prompt appends a chip (a staged resource is not added twice; each chip is removed alone); an extension command is exclusive: it replaces every chip and the next skill or prompt replaces it. The message text follows every expansion once; per-chip arguments are not offered. The Gateway validates exact live `(source,name)` identity and extension precedence, retains the ordered list and typed text in pending/queue projections, and projects the canonical row as the typed text with its resources. Canonical binding receipts restore every chip after reconnect without exposing skill contents or private paths. Picker metadata comes from the bounded catalog; opening one resource detail performs a separate exact `session.commandDetail` read for that current `source:name`, bounded source body, and truncation facts. `session.resourcesChanged` revokes command-catalog readiness and starts one generation-gated reload for the exact mounted subscription before retained resource state can reconcile. An active upload for the exact presentation closes send admission synchronously; stale UI actions retain the draft, attachments, and selected resource until upload completion. Its initial role-aware entrance remains one-shot; composer collapse and the outgoing graft share one pre-mutation viewport generation. Every outgoing prompt is installed at full natural height using the canonical user row's full-width proposal and final horizontal alignment, then the complete text/resource/attachment row receives only a 20-point, 280 ms vertical translation and fade. Long text therefore keeps identical wrapping through canonical replacement. There is no source/destination measurement, row-height interpolation, overlay bridge, or handoff wait. Canonical authority may replace the payload atomically beneath the exact aliased physical row's retained transform owner without truncating or replaying the entrance. All sends use the same revision-current composer-height owner instead of a frame-count settlement guess. Optimistic composer settlement consumes every
-  authoritative session-reducer publication directly rather than waiting for delayed transcript formatting. Lifecycle/queue-to-canonical header, status, attachment, resource, and container payloads install atomically and without prompt-container animation in the persistent physical host. Unrelated transcript updates do not inherit that transaction. New pinned rows and outgoing prompts settle through the native size-change anchor without an app-issued row-target command. For queued steering/follow-up, the returned prompt operation ID is also the Gateway's
-  stable queue-item ID, so a concurrent same-text item cannot settle the wrong optimistic admission. That exact
-operation identity may coalesce the optimistic queue-kind row with its newly admitted authoritative queue card; baseline
-operation IDs are never reused for aliasing, and aliases retire when authoritative queue items disappear. The queue row
-never borrows an identity from pre-existing or unrelated items. Behavior is normalized before first render,
-unknown values stay neutral, and each newly admitted prompt uses its role-aware entrance animation exactly once.
+Each request moves through queued, sending and sent. Cancellation before send is definitive;
+anything after send begins yields a local, non-Codable possibly-sent error a Gateway response cannot
+forge. `ConfirmedMutationExecutor` is the single lifecycle-bound receipt owner for every mutation
+domain: after an uncertain outcome it waits for reconnect and polls the command receipt, reuses
+completed results, retries only confirmed-missing commands with the same ID, and never replays
+pending or cancelled ones. Before first transmission it may wait up to eight seconds for a
+same-generation reconnect and retry one definitely-unsent attempt; that is admission delay, not
+replay. Receipt reconciliation may cross a same-profile reconnect; profile replacement forbids it.
 
-Resource invocation is one typed contract across composer, pending, queue, and canonical rows: the
-source/name identity is captured once, arguments are the exact visible composer text (bounded to
-5,000 UTF-8 bytes), and empty
-arguments are valid for no-argument resources. Extension arguments are opaque and passed exactly;
-Tron never lowercases or otherwise rewrites case-sensitive command syntax. Leading manually typed extension and skill resources
-use Pi's literal ASCII-space delimiter; prompt templates use Pi's whitespace delimiter after extension
-precedence. Embedded slash text remains ordinary prose. The
-Gateway owns UTF-8 byte/control validation and rejects mismatched display/execution text. Canonical
-invocation start receipts own immutable resource identity, binding receipts contain only the canonical
-user target, and a binding persistence diagnostic never retires a successful operation. Queue edits
-terminalize the prior immutable invocation and append a replacement under the stable queue operation
-identity; explicit removal is an interrupted terminal outcome. Reconnect never replays an unresolved invocation.
-Every pending, queued, optimistic, and canonical resource chip uses its composer resource theme
-(cyan/blue for skills, violet for prompts, and indigo for extension commands), leads with the friendly resource
-name, and shows the smaller resource kind second. The
-entire chip is a tool-chip-style detail action; it reconstructs the exact catalog `source:name` and
-opens the same bounded `session.commandDetail` sheet as the selected chip above the composer.
-Queue admission and canonical handoff receipts suppress every later entrance; pending/queued-to-canonical replacement preserves canonical semantic IDs while one bounded one-to-one causal alias retains physical row identity. Compatibility matching includes exact optional resource invocation plus typed attachment facts, and exact attachment descriptors retain upload-derived chip identity across ordering changes; repeated text, unrelated resources, unrelated rows, and alias collisions fail closed. Replacement installs directly visible with an atomic authoritative payload; it has no hidden mount, height animation, or whole-container interpolation state. Exact off-main-prepared file
-previews map through upload blob identity, and prepared image previews transfer by order only when complete count/MIME facts
-agree; settlement performs no decode, while ambiguity uses normal media loading. Attachment-only canonical settlement uses an exact attachment metadata multiset even when Pi
-  persists synthesized envelope text. `automaticCompactionEnabled` reports runtime truth rather than a mobile inference.
-  Transcript projection captures the authoritative snapshot and composer handoff
-  as one immutable commit; pending/outgoing rows render only from installed
-  handoff state, while canonical reconciliation installs handoff `none`.
-  Pending and queued input DTOs retain optional semantic metadata: explicit
-  `direction=hiddenInternal` is excluded at pending-handoff admission and the
-  displayed-queue projection, never from the authoritative pending/queue state.
-  This applies before canonical binding as well as after it; ordinary maintainer
-  prompts remain visible. A
-  frame gate retains the previous complete commit until the replacement is ready;
-- provider, package, settings, trust, and custom-model mutation invalidations
-  advance owner revisions across connected clients; each visible surface reloads
-  its explicit global or project scope instead of sharing a wrong-scope payload;
-- authentication prompts drive the generic secure prompt sheet;
-- `session.extensionPresentation` v3 remains the leased transport for semantic updates and native select/confirm/input/editor sheets plus one bounded atomic form sheet. Closing an interaction sheet is local presentation intent, never a cancellation response: the pending Gateway interaction continues waiting, and a bounded device-local draft keyed by session/interaction/epoch/revision restores selections, text, Other activation, and form page across navigation or app restart. Successful response or authoritative retirement removes that draft. The mounted chat route waits for its first ready transcript frame before presenting a pending interaction and remains the sole sheet owner, preventing sheet coverage from cancelling session opening or creating presentation loops; the ready frame settles the opening, so answering and dismissing the sheet leaves the mounted transcript in place. The managed item-sheet identity carries the exact session, interaction ID, host epoch, and presentation revision, so a same-ID successor retires the old presentation token before replacement; accepted responses continue under the mutation owner while stale presentation callbacks are suppressed. Post-await effects use the shared token authority and fail closed when a coordinator is present without a token; only standalone sheets fall back to ambient activity. A dismissed pending Tron-owned or explicitly admitted compatibility `ask_user` form reopens through that route from its operation/owner-matched tool chip, while canonical completed tool-result details reconstruct the same questions and submitted answers read-only without retaining a second interaction mirror. Tron-owned `ask_user` uses the release source `tron:ask-user.v1`; the audited foreign source remains historical compatibility rendering only. Read-only statuses, widgets, and service activity create no ambient transcript or composer content and no Manage Session surface; retained string widgets, bounded read-only widget frames, and owner-attributed keyed statuses are reachable only through the single user-opened **Activity** sheet alongside admitted native process rows. The compact composer control selects active subagents, presentable non-subagent content, then recent subagents. Widget/status `owner.kind` and frame `provenance.kind` carry the same Gateway-admitted provider classification; only `subagent` retained state is excluded from the generic list, with absent/unknown kinds remaining visible. Native consumers never parse package source strings. Discrete context messages remain inbound pills. A retained status is presentable on its own, so state that outlives its widget (a paused goal clears its widget and keeps only its status) stays inspectable instead of disappearing. Interactive prompts and editor ownership are unchanged. In particular, there is no Pi Subagents composer pill or generic extension summary route. Normal canonical `subagent` calls remain ordinary transcript tool chips, while the process orb/native Activity **Running subagents** section owns above-composer progress. Supervisor progress (`subagent_supervisor_request`, reason `progress_update`) and per-child notes (`subagent-incremental-child-notify`) render with the existing subagent compact pill and details. A receipt-bound subagent wake preserves canonical user-role input for the model and projects as `semantic.kind=prompt` with a `subagent` origin and hiddenInternal/hidden (no new semantic kind, so released protocol-7 clients decode it too), so it has no transcript row, pill or user bubble; the delivering subagent message alone shows triggered-turn details; classified subagent messages cannot fall through to Unknown source/Context received. Unknown future semantic kinds decode conservatively as unknown, and absent semantic metadata preserves ordinary prompt presentation;
-- the snapshot `processOverview` authority with its optional nonempty `processActivities` rows and compact `session.processActivity` events drive the current/recent projection only for admitted synchronous/asynchronous subagents; assistant commands remain ordinary transcript/tool activity. A delta carries an optional exact process upsert, bounded explicit removals, and one same-revision shallow overview. `SessionPresentationStore` applies that replacement atomically and resynchronizes instead of installing an overview around a stale or rejected row; it never rebuilds transcript projection or moves chat scroll state. Terminal lifecycle is latched; delayed full frames cannot resurrect or erase newer process evidence. The Gateway emits a replacement at the exact five-minute expiry even without another chat event. A mounted read-only sheet follows a replaced aggregate only when exactly one admitted row retains the same tool-call and root-run correlation; ambiguous replacements fail closed. The composer sheet reads mounted rows only, while `SessionProcessHistoryStore` loads canonical pages from `session.processHistory.list/get` for the exact presentation/history generation;
-- `session.processTranscript.changed` is a lease-scoped invalidation, not a parent session-cursor event. `GatewayProtocol` dispatches it before the generic `session.*` envelope path. A mounted `ReadOnlySubagentSessionStore` accepts only its exact lease and newer revision, refreshes the newest page through that same lease, and retains already loaded earlier pages when canonical overlap proves append-only continuity. `session.processTranscript.abort` is a confirmed, capability-gated mutation for an active viewer only: it carries the exact lease rather than trusting a child ID from iOS, and Gateway revalidates the bound parent/process/run plus file identity before using the parent runtime's ordinary settled abort for synchronous work or the trusted subagent controller's exact root-run/child-producer stop for asynchronous work. The open response advertises per-lease `canAbort`; synchronous leases additionally fence the mutation to the foreground operation ID captured at open. Branch replacement or an unbridgeable gap falls back to the new canonical tail rather than fabricating adjacency. `open/page/close` responses preserve page range, canonical boundary, unique ID, and generation checks; transient current tool/output remains outside canonical transcript rows;
-- producer-visible `custom_message` entries enter the ordered timeline as right-aligned inbound context, whether stored for a later model turn or triggering work immediately. Home worker result messages (`tron.home-task-result.v1`) show **Worker · task title** (or **Worker** when older deliveries omit the title), with **Reported** / **No report** when the structured result reference is available; the shared pill truncates long titles. Tool chips show the tool name without a producer prefix; provenance remains in technical details. Other messages’ compact row is **Producer · Context** when producer evidence exists, or simply **Context** when it does not, plus one status from Tron's finite lifecycle vocabulary (or **Received**); unknown/ad-hoc status strings are not promoted. It never includes custom type, message text, objective, or another payload value. Those values remain in the detail sheet. Gateway-authored context-delivery receipts preserve exact producer attribution and delivery mode after reconnect; unknown provenance stays neutral and is never guessed from custom type, text, or details. Producer-hidden custom messages remain absent from ordinary chat, while `custom`/`appendEntry` state never becomes a tool or message row;
-- chat rendering joins canonical calls, live progress, and canonical results by
-  `toolCallId` into one ordered timeline. At finalized assistant `message_end`, the
-  Gateway publishes complete contiguous declaration groups before their tool starts.
-  Runtime-only `groupId`, `groupIndex`, `groupCount`, and `groupFinalized` facts derive
-  from the stable assistant presentation identity and first projected content ordinal;
-  they describe declaration membership, never inferred parallel execution, and are not
-  persisted to Pi JSONL. Provisional streaming calls remain hidden until that boundary.
-  When finalized metadata arrives after a running chip mounted, one unambiguous prior call/group owner may retain the physical host; producer group and call IDs remain semantic authority. Tool status retargets icon/text/time inside one capsule with a lifecycle-stable glass surface rather than replacing the chip.
-  Each call still carries a Gateway-issued monotonic execution ordinal and progress
-  sequence so equal wall-clock timestamps cannot regress output. A display run keeps
-  its first finalized group identity from invocation through completion, reconnect,
-  and canonical settlement so final assistant text cannot jump ahead of or reinsert it.
-  Gateway snapshots require a still-owned live presentation identity before projecting Pi's
-  streaming message; canonical settlement cannot rotate a stale SDK frame into a duplicate group.
-  Exact call membership also lets canonical projection suppress that one transient handoff frame
-  if presentation binding and persistence are observed in opposite order. Gateway-owned `toolSegmentId`
-  identifies one exact active conversation turn across live execution, canonical tool-only messages,
-  and foreground catch-up. Equal nonempty segment IDs authorize consecutive producer groups to share
-  one display run under its first finalized group ID; missing or different IDs fail closed to separate
-  rows. Every call and source group remains independently indexed for detail, payload, and canonical-
-  result ownership. Visible thinking, text, user input, notifications, and other transcript barriers
-  flush the run in exact order even inside one segment. The Gateway retires runtime segment membership
-  at agent settlement and deterministically reconstructs canonical segment boundaries on cold reopen,
-  so continuous delivery and catch-up assemble the same bounded physical rows without cross-turn merges.
-  `SessionSnapshot.activeToolSegmentId` is present only for an exact running-phase streaming agent segment,
-  never retry, compaction, settlement, or idle ownership. User, visible assistant/custom, and canonical
-  compaction barriers rotate that authority; a provisional no-match generation is published before any
-  subsequent tool progress and is replaced by the next assistant's stable presentation identity. iOS combines it with the exact
-  `acceptsQueuedPrompts` streaming fact: an unresolved declaration outside that segment, any declaration in
-  retry/compaction, or any unresolved declaration when streaming is authoritatively false is terminally
-  interrupted rather than being reactivated by a later prompt's broad active phase. Older compatible snapshots
-  without active segment authority use the streaming-capability fallback when present; snapshots omitting both
-  ownership facts retain the existing broad active-phase behavior.
-  The Gateway supplies monotonic duration samples while a call is running and the
-  authoritative final call-to-return duration when it completes. Visible running chips
-  rebase each sample onto device uptime and advance locally between progress events;
-  producer output cadence never acts as the clock. Declared invocations do not accrue
-  execution time before the Gateway starts them. Terminal reduction and canonical handoff
-  preserve the greatest accepted monotonic sample, so settlement cannot replace a longer
-  execution with a near-zero late callback. The runtime-only
-  tail overlay admits every authoritative execution without canonical or streaming placement. iOS
-  preserves this ownership through projection: runtime-only and streaming rows stay in
-  `ChatLiveRegion` and never become `ChatCommittedLedger` rows; canonical terminal results dominate
-  any stale running runtime descriptor. Terminal unanchored executions
-  remain visible until exact canonical transfer or authoritative operation retirement; they appear only through their
-  canonical or streaming transcript position, while anchored terminal calls remain visible. Group counts never imply
-  liveness: the chip spinner is driven only by an actually running descriptor. Structure-change notifications with
-  `branchChanged: false` preserve an installed earlier-message prefix until an authoritative snapshot proves its overlap;
-  only branch replacement retires that prefix.
-  Older Gateways without live duration samples use the same bounded local monotonic clock
-  from the execution start timestamp. Direct `session.bash` canonical rows from the current
-  Gateway also carry optional exact start, completion, and duration metadata and render the
-  same terminal elapsed treatment; older Bash history remains valid without timing. The open detail
-  sheet continues to consume the newest immutable call presentation, showing status and all bounded readable
-  latest bounded live-output frame. Each newer nonempty frame replaces the displayed frame in place rather than
-  accumulating repeated status snapshots; an empty advisory frame preserves the last readable output so an open
-  sheet never flashes blank. A terminal live projection whose output/result was intentionally stripped after canonical settlement enriches status and timing only; it cannot erase the canonical tool-result text used by detail sheets. The terminal nonempty result remains authoritative. Gateway and iOS apply the same
-  replacement rule so reconnect or projection replacement cannot resurrect discarded frames or erase readable output. Explicit output-truncation state appears only when the runtime flag or
-  structured truncation contract says `truncated: true`, and the age of the most recent
-  runtime update without automatic scrolling. One mounted tool chip hierarchy presents the
-  trusted producer plus tool name for a single invocation and **N tools** for an aggregate;
-  extension provenance never substitutes **Extension activity**. Structural chip targets
-  exclude duration and payload churn, coalesce for one display frame, and use a monotonic
-  latest-target token for local interruptible animation while transcript and scroll
-  projection transactions remain stable while the transcript boundary scopes suppression to installed-projection identity changes, preserving both the discrete Liquid Glass touch-down and its continuous drag transactions. The physical row host installs no second content transition around the chip; only the chip's shallow value owner animates, preventing overlapping snapshots of rapid parallel-group updates. Measured row entrance clips keep one clipping node at every progress — removing it after admission switched the row's view structure — whose settled rect covers the row's whole drawable extent, so the stable transcript chip retains its unconstrained native press-and-drag region and a display card is never trimmed while its host animates. The one stable chip surface retains semantic tint as its value changes: running is amber, failure is red, and successful completion uses the emerald tool role. Legacy and consolidated transcript tool chips use native interactive Liquid Glass as their sole press-and-drag owner. Aggregate tool detail sheets instead use lazy full-width static summary rows, each with one accessible tap target. Transcript chip surfaces handle taps directly and expose explicit button accessibility semantics; they are not wrapped in a second native `Button` press phase, preserving the system drag morph without an immediate stacked zoom or custom scale/opacity effect. Multi-tool run chips show accumulated time as the sum of their
-  invocation durations. Aggregate row summaries and individual detail routes install atomically for one projection tag,
-  and rows remain in reverse canonical invocation order rather than switching when optional
-  timing metadata arrives. Aggregate rows center status with the title, place command/path
-  content below its label at full width, and show only bounded semantic context plus the
-  newest two readable output lines. A bottom edge fade discloses more primary content and a
-  top edge fade discloses earlier result content; no separate bounded-output warning line is
-  rendered. Rows do not accumulate output frames. Raw protocol tool names drive built-in kind and icon
-  selection while optional registered labels remain user-facing. Known built-ins derive only a
-  semantic primary summary from exact request/result keys. Generic tool details (including
-  subagents) show primary text without a leading icon; bounded primary-preview captions
-  sit inside the same glass container below the text. Compact protocol
-  identifiers, timing, and progress remain first in Technical details, followed directly by
-  complete Request JSON and Result JSON in that order. Result JSON prefers the response, then
-  content-only output, then only a fallback distinct from Request. Exact current-runtime
-  monotonic start-to-end durations are authoritative when available; older canonical history derives only
-  an observed call-to-result interval because Pi JSONL does not persist tool execution timing;
-- transcript structure has one explicit animation boundary: only rows with positive
-  semantic-novelty evidence reserve their measured layout and reveal once after
-  exact current-generation geometry admission, with one two-frame visual-only fail-open when an exact targeted zero-height child emits no frame. A page-bounded semantic ledger preserves
-  displayed identities, suppresses duplicate entrances, and cannot evict currently visible
-  rows. Pinned lazy insertion leases only its exact physical row target until fresh semantic
-  geometry proves the requested row mounted; anchored/offscreen entrances are consumed by
-  direct interaction or catch-up rather than a wall-clock reveal race. Installed-row
-  updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
-  inherit no stack-wide animation. Already-mounted streaming assistant rows instead own one bounded local height transition for ordinary new thinking/response lines, while newly admitted tool and content rows keep their one-shot measured entrance even when lazy geometry admission precedes child mounting. The stable transcript transaction runs only when the installed projection identity changes and still admits explicit entrance/tool-chip markers; native-control touch-down and drag transactions do not cross that projection-only transform. Thinking height/tail motion is row-local downstream of that boundary. Authority-only changes whose bounded transcript/stream/tool/queue/runtime layout identity is unchanged take a synchronous metadata path and cannot arm settlement. The sole composer inset exposes one bottom-aligned measured height; a generation captured before structural mutation keeps pinned tail coupling nonanimated, preserves a detached semantic locus with zero tail commands, coalesces retargets, and yields immediately to direct interaction. Reduce Motion removes spatial transitions. Tool status text
-  updates inside its stable row. Ordinary pinned growth and shrink remain coupled by one
-  mode-qualified native bottom size-change anchor. New pinned rows and outgoing prompts remain under the native size-change anchor; payload, progress, completion,
-  and canonical settlement do not create a row-target command stream. Native
-  bottom distance is bounded for display only: a visible rect beyond the physical content edge is
-  not tail settlement. A deliberately detached reader retains the same viewport authority;
-- structure/context/resource invalidations reload an already-presented History,
-  Manage Session, Agent Instructions, or Project Resources surface from the runtime. Context,
-  tree, and resource reads each carry a subscription-scoped request generation, so an older
-  overlapping completion cannot overwrite newer evidence. Manage Session and its Workspace
-  sheet read `workspace-inspector.v1` through the open session, so Gateway derives the root
-  from the authoritative runtime `cwd`; no mobile path or cached branch can replace it.
-  Filesystem/Git state has no canonical session event stream. Visible uncovered sheets perform
-  bounded four-second reconciliation without publishing progress accessories into already-presented
-  rows, retain the last useful projection through transient failure, and stop on coverage, background,
-  or dismissal. Equal revisions do not republish, working-tree-only changes do not restart History, and
-  Files metadata refreshes only while that tab is visible or on entry. A branch/tip identity change resets
-  the prepared bounded History projection before a replacement page is admitted, rather than mixing generations.
-  `workspace-history-diff.v1` admits a selected commit/file pair only through that same subscribed
-  session and returns one bounded immutable patch for the nested shared diff sheet;
-- terminal output/exit payloads decode into typed `Sendable` preparations from the original
-  event frame before MainActor routing; malformed known payloads remain inert rather than failing
-  the transport. Terminal output is admitted only for a current presentation lease, sequence-checked,
-  and deduplicated; frames arriving during attach or gap recovery are held in a bounded
-  local quarantine and joined contiguously to `terminal.attach(afterSequence:)` replay. Replay responses
-  admit only a strictly contiguous prefix (reset responses may begin at a retained sequence); duplicates,
-  reordering, and missing middles never become canonical output and schedule a bounded follow-up.
-  A remaining gap schedules at most three immediate recovery attempts before waiting for
-  later lifecycle reconciliation; replay reset advances native renderer
-  identity, and detach/revocation rejects buffered output and exit frames. Multiple
-  presentations share the connection subscription until the final lease closes;
-- stopping/restart topics enter the single `GatewayLifecycleCoordinator` reconnect loop with
-  the exact delivered local connection identity. A scheduled administrative drain stays connected;
-  only `system.stopping` starts `Restarting` and its monotonic 90-second replacement watchdog.
-  An authenticated replacement handshake plus event activation returns the connection to `Connected`
-  immediately; session, terminal, settings, provider, device, and mounted-presentation reconciliation
-  remains subordinate and cannot strand a usable replacement in `Restarting`. Connection Settings
-  polls file-authoritative update progress under one exact command identity, ignores an older command
-  marker until the acknowledged helper publishes its own first state, and keeps that observer alive
-  across the planned socket replacement. Its bounded drain aggregate never declares success,
-  disconnects transport, or starts reconnect.
-  Duplicate transport signals cannot replace the lifecycle owner or revive work after profile teardown. A supervised iOS device install intentionally emits no transport lifecycle event: receipt acknowledgement means only that the detached Mac helper was admitted, while the focused authorized-device sheet polls bounded `device.install.status` for its exact paired-device owner and stops at terminal state, focus replacement, backgrounding, or dismissal. The app overwrite may replace the socket and process; the next app launch performs an authoritative status read rather than replaying the install mutation. Its
-  nominal 2-second, ×1.7 backoff is independently jittered within a bounded 80–120%
-  window and never exceeds 15 seconds; foreground activation accelerates a pending delay
-  once without replacing an active handshake.
+## Session synchronization
 
-A newly navigated chat opens exactly once and replaces any disposable cached or
-previously expanded projection with a fresh bounded authoritative latest tail. A mounted chat
-foreground reconciliation likewise installs the authoritative aggregate as one suppressed-entrance
-projection: content that arrived while iOS was backgrounded is shown in place, not replayed as a
-burst of row animations or automatic scroll writes. Its monotonic reconciliation
-generation is carried through delayed projection work and consumed once at installation,
-so a fast network completion cannot reclassify the same suspended rows as fresh later.
-After the authoritative two-phase handshake completes, the exact-origin projection remains behind
-the opaque opening surface for one covered display frame, then enters its cosmetic reveal. Opening
-issues no tail-positioning command and waits for no physical-tail marker, settlement deadline, or
-correction loop. The current opening epoch, viewport activation, active scene, presentation activity,
-and mounted runtime authority are revalidated across each asynchronous boundary. The composer
-remains visible throughout opening, while sending, interaction, paging, extension routes, and live
-projection intake stay gated until a current first-ready frame; only then is the transcript
-interactive. Automatic live projection intake remains coalesced through that opening transaction,
-then submits only the newest desired cut. Ordinary pinned growth, shrink, streaming, existing-row
-settlement, and new-row insertion remain owned by native size-change anchoring. Catch-up, semantic restore, prepend, and retained resume remain distinct command owners; opening is presentation-owned and issues no scroll command. After those commands release, pinned mode
-keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream. Ordinary pinned growth and shrink need no estimate-based correction command.
-Short-content alignment remains bottom-owned by the native anchor; blank space stays above the tail. Editor-only composer height changes install atomically;
-attachment, selected-skill, and resource-result identity changes use one value-scoped 240 ms smooth
-host-height transition, disabled under Reduce Motion. Direct user movement away from the tail and
-anchored mode select top retention and remain target-free. A pinned bottom rubber band remains pinned only within a bounded physical overscroll tolerance;
-extreme past-bottom geometry cannot preserve automatic ownership, and catch-up appears after valid
-direct geometry moves beyond the tail boundary.
-Session subscription ownership is token-scoped end to end. The open response remains
-provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
-credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its
-already-drained contiguous event suffix then publish in one MainActor turn. The fitted tail mounts immediately regardless of its display-bearing count; earlier-page reads begin only from the mounted presentation and cannot make the conversation unavailable. A stale or failed
-attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Protocol-v7
-peers always provide explicit subscription ownership. If a reconnect installs a new runtime generation for the same canonical session,
-iOS clears context/tree/resource/command projections, invalidates their in-flight request generations,
-and advances all three public reload revisions before publishing the replacement. Secondary read successes
-and failures both require the exact captured subscription token and latest request generation, so a retired
-runtime cannot repopulate data or surface a stale error. A reconnect while that same chat remains mounted instead receives
-complete current runtime state and preserves compatible explicitly paged history
-and the reader's follow/detached mode. The session snapshot remains the sole whole-session
-authority. Transcript presentation retains only an exact, contiguous prefix strictly before
-that snapshot's Gateway tail in `MountedTranscriptWindow`; visible ranges and Load earlier
-facts are derived from the same coverage. Runtime, structure-revision, total decreases, range,
-gaps, and ID conflicts fail closed; leaf changes and total growth are admitted only through exact
-canonical overlap, while tail expansion trims prefix overlap only by exact indices and IDs. A later
-navigation presentation begins again from the bounded latest page; this cold-presentation
-rule is distinct from in-place reconnect. History paging is owned by the session presentation reducer,
-not scroll geometry: the bounded authoritative tail publishes immediately even when it is sparse or empty, and a mounted Load earlier request starts without requiring a semantic anchor. Optional history reads never extend the open/sync replay barrier or determine conversation availability. Page admission validates the projected cursor, echoed next projected
-entry, runtime, branch leaf, range, total, and IDs; it never mistakes raw parent links through filtered canonical entries for visible-row adjacency.
-Tail/keyboard settlement never discards loaded transcript coverage. Snapshot cache files retain only session summaries; legacy snapshot-bearing files decode safely but their snapshots are ignored.
-Phase, operation, tool ordering, and canonical paging cursors remain authoritative. A rolling-upgrade
-client also normalizes the impossible legacy combination of an idle phase and retained running-tool
-overlay to an interrupted chip; it does not expose a fake Stop action for extension-owned detached
-work. The composer Stop control is scoped to the current run and says so: it never claims to pause an
-extension workflow whose own scheduling may start another run, and an extension detects a user stop
-from the run's aborted terminal state rather than from any Tron-side continuation flag. Current Gateways project that background work through `ExtensionPresentationState`. Tron
-decodes the versioned, bounded projection: one host epoch and aggregate revision cover semantic state,
-authoritative interactions, generic full-frame surfaces, capabilities/diagnostics, and the optional input
-lease. Presentation collections reject their DTO-specific limit during decoding before retaining another
-member. Only the exact next revision for the installed epoch mutates state; equal duplicates are inert, while
-gaps, lower/reordered revisions, malformed payloads, and epoch mismatch trigger authoritative catch-up.
-Fitted snapshots retain bounded omitted surface ID/revision baselines and lease continuity so exact-next
-full-frame deltas converge; complete session snapshots replace the projection. Surface clearing is explicit
-by ID, so malformed upserts cannot erase valid content;
-unknown kinds retain sanitized `plainText`. Notifications travel in a mutation but are never retained or
-replayed. Generic status pills, semantic string widgets, and admitted read-only widget surfaces render in
-composer-owned slots with no package, command, or opaque-key special treatment; custom/overlay and
-interactive surfaces remain deferred. Actionable responses carry the interaction's admission epoch/revision, and offline cache
-strips all interactions, surfaces, focus/lease, capabilities/diagnostics, and ephemeral semantic state. Native
-composer synchronization is scoped to the exact mounted presentation, suppresses its operation-ID echo,
-and never retries a stale base revision as an unconditional overwrite. The run
-continues on the Mac and the app catches up without presenting transport errors as modal alerts; recoverable failures use scoped in-app notifications instead.
-Interaction sheets, working state (ambient bottom
-activity for the ordinary default and explicit rows for custom/retry detail), editor updates, typed generic
-notices, and durable extension transcript entries remain active. The canonical session name remains the
-primary navigation identity; an extension title is retained only as a presentation hint and cannot replace it. Backgrounding gates and
-cancels disposable catalog/foreground reconciliation, never the route or accepted work, but it retires
-the shared socket epoch and clears queued live deliveries before suspension. Foreground activation waits
-for that retirement, creates one fresh epoch, coalesces to one responsiveness pass, then runs catalog
-convergence and mounted-session restoration; terminals reattach only after the mounted session's exact
-subscription is installed on that connection. Catalog retention or failure alone does not discard the
-last-good mounted projection. The owned foreground slot releases on success, failure, cancellation, or
-lifecycle replacement. Switch, forget, current-device revoke, and final
-teardown invalidate that reconciliation, reconnect/debounce tasks, profile-scoped reads, and
-presentation intake before entering the serial retire/close chain; a late old-profile completion is
-discarded and no newer handshake can start ahead of an older close. Possibly-sent mutation
-reconciliation uses generation-only lifecycle admission so same-profile reconnect may resolve it, but
-replacement-profile polling or replay is forbidden. A terminal-open result resolved after a
-same-lifecycle connection replacement attaches on the current connection before publishing replay;
-a profile-generation replacement discards it. Ordinary scene backgrounding is a transport retirement,
-not a session teardown; accepted runtime work continues on the Mac and the next active scene enters the
-ordinary reconnect loop. Compatible reconnect requests share one typed result instead of polling mutable
-tokens. Fresh
-presentation and reconnect intents arbitrate serially, and at most three immediate authoritative
-attempts are retained for a continuous gap/overflow burst before the bounded catch-up state wins.
-A temporary catch-up notice is deduplicated, removed on successful synchronization and presentation navigation/close, and automatically expires after a bounded interval if a terminal retry path cannot converge. It never outlives its presentation owner. Transport recovery has a separate episode-scoped two-second presentation grace driven by the owning injected clock: it preserves the mounted Chat projection and never grants command authority or Send admission. The timer is fenced and clears its stored task on cancellation or stale completion. Only successful mounted reconciliation clears its Retry/Logs warning; a provisional hello or path hint cannot clear a warning while synchronization remains unusable. Session event reduction is synchronous at intake; a bounded coordinator quarantine is claimed before any owned synchronization task starts, and no extra admitted-event queue may bypass event-hub pressure. Satisfied path hints are fanned to admitted secondary profiles, where each entry/generation fence decides whether a parked recovery can accelerate; planned secondary stopping uses its own 90-second maintenance intent without debiting ordinary recovery. Optional provider/settings/device/catalog reads are disposable owner work and cannot delay the mounted baseline or accepted-command receipt owner. Auth completion commits its exact operation/presentation outcome synchronously; any resulting provider catalog convergence runs in the provider owner task and cannot block global control-event intake. Catalog failure admission rejects repeated invalidations/manual refresh after the bounded application-failure allowance until the scoped owner is rearmed.
-Earlier canonical entries are fetched through `session.transcript` pages when requested. Each page
-is capped at 600 KB and 512 items, carries exact `start`/`end`/`total` bounds, and installs only when
-`end` equals the requested boundary, `total` still equals the captured canonical total, and
-`end - start` equals the decoded item count. Duplicate IDs,
-gaps, stale anchors, and mismatched presentation/runtime/subscription leases are discarded rather
-than concatenated into plausible history. Event-buffer
-overflow closes the connection and forces global/session/terminal reconciliation;
-correctness must not depend on receiving every event while disconnected. A silent
-long-running tool publishes no session event; transport pings prove the connection
-is live without manufacturing tool output. Event-driven desired
-projection advancement does not replace the exact installation currently on screen: pending row geometry
-remains tagged to that displayed installation until an actual installed transition occurs. Unanchored runtime
-tool ordering is status-independent, and only rendered IDs retained by the next installed output preserve a
-one-shot discrete-follow entitlement.
+`SessionPresentationStore` is the sole MainActor owner of the mounted session: immutable target,
+revocation, live snapshot, subscription lease, synchronization and quarantine, cursor reducer,
+transcript paging and session-keyed context/tree/resources/commands.
+
+- **Open.** `session.open` returns a snapshot and sync token that stay provisional until
+  `session.sync` succeeds and the exact route intent revalidates. Both tokens are nonempty,
+  printable UTF-8 of at most 200 bytes; a stale open closes only its provisional token. The same
+  token then owns the subscription and `session.close` releases only a matching token.
+- **Quarantine.** During an attempt the session's events are quarantined, those the baseline covers
+  dropped, contiguity validated, and baseline plus drained suffix published in one MainActor turn.
+  One intent-keyed coordinator owns the outcome; reconnect callers await it, and one bounded
+  three-attempt loop replaces recursive resynchronization.
+- **Cursor.** Outside an explicit install a full snapshot hint needs the current subscription, the
+  same runtime and exactly the next sequence. Duplicates are no-ops; gaps, runtime replacement and
+  missing baselines resynchronize; route or payload mismatch is discarded. Unknown sequenced topics
+  still advance the cursor. Revocation synchronously rejects every later sequenced topic.
+- **Rebaseline.** Quarantine overflow, or a Gateway outbound queue that superseded unsent state,
+  arrives as `session.rebaseline`, installed as a fresh baseline without another open. Snapshots
+  must not regress the authority or live-activity revisions; malformed frames, tails over 512 items
+  or queue projections over 32 items fail into the same bounded path.
+- **Paging.** Snapshot tails are bounded to 800 KB / 512 items; `session.transcript` pages to
+  600 KB / 512 items with exact `start`/`end`/`total` and an echoed projected neighbor. Raw
+  `parentId` links are never display adjacency. A reconnect while mounted keeps compatible
+  explicitly loaded history; a new navigation always starts from a fresh latest page.
+- **Runtime replacement.** A reconnect that installs a new runtime for the same session clears
+  context, tree, resource and command projections and rejects their stale completions and errors.
+- **Visibility.** Once the synchronized chat is mounted on the active lineage in an active scene,
+  the store renews a token-bound `session.presentation.set` lease (45 s, renewed on the ping grid).
+  The Gateway uses it to commit completion read-through and suppress the completion alert.
+
+## Global topics
+
+`AppModel.handle(_:)` routes cross-domain topics; feature owners consume them:
+
+- `session.summary` updates `SessionCatalogCoordinator`'s monotonic row projection synchronously
+  (phase, name, counts, attention, `activeSince`, `foregroundPhase`, `hasActiveSubagents`,
+  `waitingForUser`). An unknown summary requests discovery and never fabricates a row.
+  `session.listChanged` marks the shared catalog traversal dirty; a traversal may revalidate its
+  previous projection token and receive `notModified`.
+- Home status is re-read (never carried) on a summary for Home's current or open chapter and on
+  every `session.listChanged`.
+- `automation.changed`, `knowledge.changed`, `notification.inbox.changed`, `devices.changed`,
+  `providers.changed`, `models.catalogChanged`, settings, package, trust and custom-model hints
+  advance owner invalidation revisions. Successful reads never advance them, so a visible
+  `.task(id:)` reads once per actual invalidation. Only visible owners reload, in their own scope.
+- `auth.event`, `auth.prompt` and `auth.completed` belong to the device identity, not the socket:
+  socket loss clears the prompt and foreground `auth.resume` rebinds it without a second login.
+  Callback codes stay in the iOS listener's memory ([Auth](../Sources/Auth/README.md)).
+
+## Session topics
+
+- **Configuration.** `configurationBlocker` and sequenced `session.configuration` decide whether
+  model, thinking and context controls are usable (`null` ready; `running`, `queued`, `settling`,
+  `mutation`, `interaction`, `unavailable` locked with an explanation). Readiness never changes the
+  canonical revision. Pending choices retire only at the receipt's applied revision.
+- **Prompts and queue.** `pendingPrompt` is transient admission; `acceptsQueuedPrompts` alone
+  decides whether a draft can steer. The snapshot carries the whole queue (at most 32 items) and its
+  revision, replaced atomically; mutation responses never rewrite it locally. The prompt operation
+  ID is the queue-item ID and the canonical row's presentation identity; once known, text matching
+  is never causal settlement. `session.operationFailed` restores only its exact admission.
+  `compactionQueued` is Gateway-owned pending maintenance, never a fabricated entry.
+- **Stop.** Carries the authoritative operation ID as its fence; the Gateway rejects a stale tap
+  and acknowledges only after every foreground controller and owned bash process settles.
+- **Resources.** Skills, prompt templates and extension commands travel as typed
+  `resourceInvocations` (#311); arguments are the exact visible text (≤ 5,000 UTF-8 bytes) and are
+  never rewritten. `session.resourcesChanged` revokes command-catalog readiness and reloads it.
+- **Tools.** Calls, progress and results join by `toolCallId`. Finalized declaration groups
+  (`groupId`, `groupIndex`, `groupCount`) describe membership, never parallel execution or
+  liveness. `toolSegmentId` scopes one visible conversation segment; only equal nonempty segments
+  share a display run, and `activeToolSegmentId` decides which unresolved calls are still live.
+  Monotonic duration samples are authoritative and never regress.
+- **Context messages.** `custom_message` is model context, right aligned, labeled from producer
+  evidence only; `custom`/`appendEntry` is hidden state; `ui.notify` is a canonical centered status,
+  never a toast. Hidden internal input (`direction=hiddenInternal`) has no row. Invocation receipts
+  reconcile accepted commands after restart without replaying side effects.
+- **Extension presentation.** `session.extensionPresentation` mutates only at the exact next
+  revision of the installed host epoch; gaps, reordering, malformed payloads or epoch mismatch
+  resynchronize. Surface removal is explicit by ID; unknown kinds keep plain text. Closing an
+  interaction sheet is local intent, never a cancellation.
+- **Processes.** `processOverview`, `processActivities` and `session.processActivity` drive the
+  subagent projection; lifecycle is latched and the Gateway owns the five-minute recent boundary.
+  `session.processTranscript.changed` is lease-scoped, dispatched before the generic session path.
+- **Terminals.** Output is admitted only for a current presentation lease, sequence-checked and
+  deduplicated; frames arriving during attach or gap recovery are quarantined and joined to
+  `terminal.attach(afterSequence:)` replay. A gap gets at most three immediate recovery attempts.
+- **Workspace.** Filesystem and Git have no event stream; visible sheets reconcile on a bounded
+  cadence ([Chat](../Sources/UI/Chat/README.md)).
+
+## Diagnostics
+
+Signposts carry only result codes and counts. `GatewayClient` emits `gateway.rpc` for
+`session.list`; `AppModel` emits `gateway.catalog` decisions; reconnect, foreground/background and
+coarse path changes are bounded lifecycle incidents with loop IDs. A LAN/Tailscale race stamps
+`transport=lan|tailscale` and the losing lane's stage and reason (`lan_unreachable`,
+`lan_pin_mismatch`, `lan_denied`). Nothing records content, paths, credentials or payloads.
+`AppDiagnostics` owns the client ring and Export Diagnostics (`system.logs.export` with
+`diagnostic-export.v1`, else a local artifact); the export captures its profile/lifecycle
+destination before preparation and never dispatches to a replacement.
 
 ## Covered presentation surfaces
 
-Surface coverage pauses only disposable presentation work. Gateway intake,
-sequence admission, canonical reduction, accepted mutations, drafts, receipts,
-and notifications continue unchanged. Ancestors of the topmost surface continue only the bounded data publication needed so a visible descendant tool or command sheet receives live output and terminal status; their own loads, polls, automatic presentation effects, continuous animation, native scroll callbacks, and viewport observation remain paused. Tool payload-only revisions use the indexed projection fast path and the worker remains serial/latest-wins. The covered chat retains one pre-cover viewport baseline and rebases once against the newest complete installation when uncovered instead of processing every hidden update. Covered branches outside that active lineage
-retain their last complete installation and do not replay intermediate events.
-When uncovered, the owning presentation store derives one latest aggregate and
-installs it through the existing generation and frame-admission rules. Chat
-retires an in-flight disposable projection only when it leaves the active lineage, retains its last
-complete installation, and suppresses accumulated row entrances on the first
-replacement. If coverage interrupts initial chat opening, uncover waits for the
-retiring opening lease and starts one new exact opening only when still needed.
-Dashboard summaries continue updating their indexed authority but publish one
-rows/activity cut only after the dashboard becomes active again. Disposable
-view loads, media preparation, and polls cancel on cover and restart from their
-latest source identity on uncover; accepted mutations and transport operations
-do not move into that lifecycle. A genuine cursor gap still uses normal
-authoritative synchronization.
+Coverage pauses only disposable presentation work; the rules are in
+[Presentation activity](presentation-parity.md#presentation-activity).

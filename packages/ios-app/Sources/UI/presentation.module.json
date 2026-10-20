@@ -2,6 +2,7 @@
   "layer": "L4",
   "owns": [
     "Components/**",
+    "README.md",
     "Theme/**",
     "presentation.module.json"
   ],
