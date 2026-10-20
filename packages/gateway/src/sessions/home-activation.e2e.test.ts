@@ -364,8 +364,6 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
   return f;
 }
 
-/** Dispose the Gateway and open a new one over the same installation: the same
- * thing a Gateway restart does. */
 /** The refusals the seam reported for this fixture's Home, oldest first. */
 function refusalRecords(f: Fixture): Array<Extract<HomeRequestRecord, { event: "refused" }>> {
   return f.requestRecords.filter((record): record is Extract<HomeRequestRecord, { event: "refused" }> => record.event === "refused");
@@ -374,6 +372,9 @@ const refusedReasons = (f: Fixture): string[] => refusalRecords(f).map(record =>
 /** Whether Home's activation is open, as `home.context` reports it. */
 const activationOpen = (f: Fixture): boolean => { const context = f.registry.homeOwner().contextStatus(); return context.available && context.activationOpen; };
 
+/** Dispose the Gateway and open a new one over the same installation, as a restart does, then
+ * wait for its own startup reconcile: its durable catalog document can predate the newest row,
+ * and a case that rewrites that session's file must not race the pass that publishes it. */
 async function restart(f: Fixture): Promise<void> {
   f.service.dispose();
   await f.receipts.dispose();
@@ -382,10 +383,9 @@ async function restart(f: Fixture): Promise<void> {
   if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
   openRegistry(f);
   await f.registry.initialize();
-  // A restarted Gateway has to read its catalog before it can resolve a session
-  // that no live runtime holds.
-  const cut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
-  await waitUntil(() => cut(), 20_000);
+  const catalog = (f.registry as unknown as { sessionCatalog: { whenReconciled(): Promise<void>; hasCompleteCut(): boolean } }).sessionCatalog;
+  await catalog.whenReconciled();
+  await waitUntil(() => catalog.hasCompleteCut(), 20_000);
   await f.registry.catalog("all");
 }
 
