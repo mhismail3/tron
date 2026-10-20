@@ -122,6 +122,64 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         app.switches.matching(NSPredicate(format: "label == %@", "Always include codemode")).firstMatch
     }
 
+    /// Mac Codemode off: Always include codemode is inactive and shown Off,
+    /// tapping it writes nothing, Value & Source names the kept `+codemode` and
+    /// why; turning Codemode back on in Extensions shows the saved value again.
+    @MainActor
+    func testDefaultToolsInactiveWhileBuiltinExtensionOff() {
+        continueAfterFailure = false
+        let app = launchDefaultTools()
+        defer { app.terminate() }
+        openTools(app)
+        let toggle = codemodeDefault(app)
+        reveal(toggle, in: app)
+        XCTAssertFalse(toggle.isEnabled, "Codemode is off in Extensions: \(app.debugDescription)")
+        XCTAssertEqual(toggle.value as? String, "0")
+        XCTAssertTrue(app.switches["Always include tool search"].isEnabled, "Tool search still loads")
+        toggle.tap()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0", "An inactive switch writes nothing")
+        XCTAssertEqual(app.staticTexts["fixture.tools-write"].label, "none")
+
+        let source = app.buttons["settings-row-tools.active-source"]
+        reveal(source, in: app)
+        source.tap()
+        let note = app.descendants(matching: .any)["settings-provenance-inactive"]
+        XCTAssertTrue(note.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(note.label.contains("Codemode is off in Extensions") && note.label.contains("+codemode"), note.label)
+        closeTopSheet(app)
+        closeTopSheet(app)
+
+        let extensions = app.buttons["settings-link-Extensions"]
+        reveal(extensions, in: app)
+        extensions.tap()
+        let codemode = app.switches["Codemode"]
+        XCTAssertTrue(codemode.waitForExistence(timeout: 10), app.debugDescription)
+        codemode.tap()
+        XCTAssertTrue(waitForValue(codemode, "1"), app.debugDescription)
+        closeTopSheet(app)
+        openTools(app)
+        reveal(toggle, in: app)
+        XCTAssertTrue(toggle.isEnabled, app.debugDescription)
+        XCTAssertEqual(toggle.value as? String, "1", "The kept +codemode shows again")
+        XCTAssertEqual(app.staticTexts["fixture.tools-write"].label, "none", "tools.active was never rewritten")
+    }
+
+    /// A project inherits the Mac's off Codemode: its Tools Value & Source
+    /// explains why the project's saved `+codemode` has no effect.
+    @MainActor
+    func testProjectToolsExplainInheritedBuiltinExtensionOff() {
+        continueAfterFailure = false
+        let app = launchDefaultTools(project: true)
+        defer { app.terminate() }
+        let source = app.buttons["settings-row-tools.active-source"]
+        reveal(source, in: app)
+        source.tap()
+        let note = app.descendants(matching: .any)["settings-provenance-inactive"]
+        XCTAssertTrue(note.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(note.label.contains("Codemode is off in Extensions"), note.label)
+    }
+
     /// Light and dark at standard text: Mac Tools with Codemode off, its
     /// Value & Source, then Tools after Codemode is turned back on; and a
     /// project's view-only Tools inheriting the Mac's off Codemode.
