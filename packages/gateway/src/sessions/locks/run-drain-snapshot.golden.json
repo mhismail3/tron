@@ -1919,6 +1919,38 @@
         "revision": "<n>",
         "suspectProjectionCount": 0
       },
+      "begun": {
+        "blockerCount": 2,
+        "blockerCounts": {
+          "foreground-agent-operation": 1,
+          "queued-mutation": 1
+        },
+        "blockers": [
+          {
+            "admittedAt": "<timestamp>",
+            "ageMs": "<duration>",
+            "category": "foreground-agent-operation",
+            "id": "<id>",
+            "progressAt": "<timestamp>",
+            "sessionId": "<session:running>",
+            "state": "active"
+          },
+          {
+            "admittedAt": "<timestamp>",
+            "ageMs": "<duration>",
+            "category": "queued-mutation",
+            "id": "<id>",
+            "progressAt": "<timestamp>",
+            "sessionId": "<session:running>",
+            "state": "active"
+          }
+        ],
+        "drainId": "<id>",
+        "omittedCount": 0,
+        "phase": "preparing",
+        "revision": "<n>",
+        "suspectProjectionCount": 0
+      },
       "waiting": {
         "blockerCount": 2,
         "blockerCounts": {

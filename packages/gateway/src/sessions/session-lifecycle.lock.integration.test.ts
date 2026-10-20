@@ -174,7 +174,9 @@ describe("session lifecycle kernel locks", () => {
     await rpcSettled();
     const statusRunning = await phone.request("gateway.drain.status", {});
 
-    // The restart and stop drains run exactly this (gateway-main runRestartDrain/runStopDrain).
+    // gateway.restart and gateway.stop begin the drain in their RPC turn and answer
+    // with this snapshot; gateway-main's runRestartDrain/runStopDrain then wait.
+    const begun = gateway.registry.beginAdministrativeDrain();
     const drained = gateway.registry.waitUntilIdle();
     await waitFor(() => gateway.registry.administrativeDrainSnapshot().phase === "waiting", "the drain to wait on the live run");
     await rpcSettled();
@@ -196,7 +198,7 @@ describe("session lifecycle kernel locks", () => {
       observed: {
         completed,
         drain: {
-          idle: label(statusIdle), running: label(statusRunning), waiting: label(statusWaiting), complete: label(statusComplete),
+          idle: label(statusIdle), running: label(statusRunning), begun: labelled(begun, roles, gateway), waiting: label(statusWaiting), complete: label(statusComplete),
         },
         refused: { prompt: label(refusedPrompt), create: label(refusedCreate) },
       },
@@ -208,6 +210,7 @@ describe("session lifecycle kernel locks", () => {
         expect(queued.ok, JSON.stringify(queued)).toBe(true);
         expect(JSON.stringify(trace.canonicalJsonl)).toContain("Queued follow-up answered.");
         expect(statusIdle.result.phase).toBe("idle");
+        expect(begun.phase).toBe("preparing");
         expect(statusWaiting.result.phase).toBe("waiting");
         expect(statusWaiting.result.blockerCount).toBeGreaterThan(0);
         expect(JSON.stringify(trace.observed.drain.waiting)).toContain("<session:running>");
