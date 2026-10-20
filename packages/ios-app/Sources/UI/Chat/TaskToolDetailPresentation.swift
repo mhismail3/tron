@@ -137,9 +137,10 @@ extension HomeToolDetailPresentation {
         case .active: .success
         case .terminal: outcome == .final ? .success : outcome == .interrupted ? .neutral : .failure
         }
-        let header = Header(icon: icon, title: HomeTaskPresentation.title(title: task.title, briefText: task.intent.text, project: task.project),
+        let stateLabel = task.lifecycle == .active ? "Running" : task.lifecycle == .pending ? "Starting" : outcome == .final ? "Finished" : outcome == .interrupted ? "Stopped" : "Needs attention"
+        let header = Header(icon: icon, title: task.title ?? task.taskId,
                             subtitle: [task.project, task.taskId].compactMap { $0 }.joined(separator: " · "),
-                            pill: HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: outcome), tone: tone)
+                            pill: stateLabel, tone: tone)
         var state: [Row] = []
         if let terminal = task.terminalEvidence {
             state.append(Row(icon: "flag.checkered", title: "Result", value: "\(terminal.outcome.rawValue.capitalized) · \(terminal.reason)"))
@@ -150,7 +151,7 @@ extension HomeToolDetailPresentation {
         if let operation = task.operationId { state.append(Row(icon: "gearshape.2", title: "Operation", value: operation)) }
         var worker: [Row] = []
         for checkin in task.checkins ?? [] {
-            worker.append(Row(icon: "text.bubble", title: relativeTaskTime(checkin.at), value: HomeTaskPresentation.checkinText(checkin)))
+            worker.append(Row(icon: "text.bubble", title: "Check-in", value: HomeTaskPresentation.checkinText(checkin)))
         }
         if let model = task.workerModel { worker.append(Row(icon: "cpu", title: "Model", value: model.displayName)) }
         if let spend = task.spend {

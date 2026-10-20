@@ -125,7 +125,7 @@ struct HostedToolSheetsPolishFixture: View {
             details = ["sessionId": "worker-session", "operationId": "worker-operation",
                        "worker": ["model": "openai/gpt-6.1-sol", "thinking": "high", "modelSource": "explicit: iOS UI work needing careful ownership and presentation judgment.", "thinkingSource": "explicit: iOS UI work needing careful ownership and presentation judgment."],
                        "subagentModels": [["model": "anthropic/claude-haiku-5-5", "available": false, "reason": "Weekly usage 97%"], ["model": "openai/gpt-6-luna", "available": true], ["model": "opencode-go/deepseek-v4.1-flash", "available": false, "reason": "Monthly usage 100%"]]]
-        case "task-list", "task-status", "task-report", "task-steer", "task-fallback":
+        case "task-list", "task-status", "task-report", "task-steer", "task-interrupt", "task-resume", "task-stop", "task-rename", "task-fallback", "task-malformed", "task-refused":
             name = "task"
             let fixture = HostedTaskToolSheetFixture.result(scenario)
             request = fixture.request
@@ -163,8 +163,8 @@ struct HostedToolSheetsPolishFixture: View {
         let result = try! JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: details))
         // No live extensionOrigin: this is the canonical reloaded-call shape.
         return ChatToolPresentation(id: "review-\(name)", title: name, toolName: name, subtitle: "Completed", request: args,
-                                    response: result, content: scenario == "delegate" ? "Delegated photo-readiness to worker-session using explicit model and thinking admission." : "Completed", fallbackContent: nil, details: result,
-                                    error: false, startedAt: "2026-10-18T02:00:00Z", completedAt: "2026-10-18T02:04:06Z", durationMs: 246000,
+                                    response: result, content: scenario == "task-refused" ? "task steer: photo-readiness is settled, so steer does not apply. Use resume to continue it in place." : scenario == "delegate" ? "Delegated photo-readiness to worker-session using explicit model and thinking admission." : "Completed", fallbackContent: nil, details: result,
+                                    error: scenario == "task-refused", startedAt: "2026-10-18T02:00:00Z", completedAt: "2026-10-18T02:04:06Z", durationMs: 246000,
                                     lastProgressAt: nil, progressSequence: nil)
     }
 }

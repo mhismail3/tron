@@ -36,9 +36,20 @@ enum HostedTaskToolSheetFixture {
             let report = ["resultId": "photo-preview-checkpoint", "outcome": "needs-input", "text": HostedToolSheetsPolishFixture.brief]
             let data = try! JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
             return (["action": "report", "taskId": id], ["taskId": id, "offset": 0, "bytes": data.count, "text": String(decoding: data, as: UTF8.self), "nextOffset": NSNull()])
-        case "task-steer":
-            return (["action": "steer", "taskId": id, "text": HostedToolSheetsPolishFixture.brief],
-                    ["accepted": true, "action": "steer", "taskId": id, "sessionId": "worker-session", "operationId": "worker-operation"])
+        case "task-steer", "task-interrupt", "task-resume", "task-stop", "task-rename":
+            let action = String(scenario.dropFirst(5))
+            var request: [String: Any] = ["action": action, "taskId": id]
+            if ["steer", "resume", "interrupt"].contains(action) { request["text"] = HostedToolSheetsPolishFixture.brief }
+            if action == "rename" { request["title"] = "Photo preparation: ready for review" }
+            var receipt: [String: Any] = ["accepted": true, "action": action, "taskId": id, "sessionId": "worker-session", "operationId": "worker-operation"]
+            if action == "resume" { receipt["taskId"] = "photo-readiness-2"; receipt["resumes"] = id }
+            if action == "interrupt" { receipt["interrupted"] = true }
+            if action == "rename" { receipt["title"] = request["title"]; receipt["state"] = "running" }
+            return (request, receipt)
+        case "task-malformed":
+            return (["action": "list"], ["tasks": [["taskId": "incomplete-row"]], "counts": ["active": 1, "finished": 0], "more": false])
+        case "task-refused":
+            return (["action": "steer", "taskId": id, "text": "Please capture the composer."], [:])
         default:
             return (["action": "future-action", "taskId": id], ["unrecognized": "Result preserved in the generic sheet"])
         }
