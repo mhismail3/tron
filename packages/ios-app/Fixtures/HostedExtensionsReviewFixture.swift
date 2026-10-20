@@ -42,7 +42,9 @@ enum HostedExtensionsReview {
     /// A key's layers: `own` at the fixture scope's layer, `mac` beneath a project.
     static func layers(own: JSONValue?, mac: JSONValue? = nil) -> [JSONValue] {
         func layer(_ id: String, _ value: JSONValue?) -> JSONValue {
-            .object(["layer": .string(id)].merging(value.map { ["value": $0] } ?? [:]) { $1 })
+            // A layer holding a value also serves its display, as the Gateway does.
+            .object(["layer": .string(id)].merging(value.map { ["value": $0,
+                "display": .string($0.arrayValue?.compactMap(\.stringValue).joined(separator: ", ") ?? "")] } ?? [:]) { $1 })
         }
         return project ? [layer("project", own), layer("mac", mac)] : [layer("mac", own)]
     }

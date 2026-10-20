@@ -469,7 +469,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             key("context.images.block", group: "context", value: .bool(blockImages), display: blockImages ? "On" : "Off",
                 presentation: presentation("Block images", "Images are not sent to the model.", 10, "essential", "toggle")),
             key("tools.active", group: "tools", value: .array(activeTools.map(JSONValue.string)), display: activeTools.joined(separator: ", "),
-                layer: "mac", presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
+                layer: HostedExtensionsReview.project ? "project" : "mac", presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
                     extra: ["optionsSource": .object(["name": .string("catalog.tools"), "dependsOn": .array([])])])),
             key("run.retry.maxRetries", group: "run", subgroup: "Retry", value: .number(Double(retries)), display: "\(retries) retries",
                 layer: "mac", presentation: presentation("Retries", "How many times a failed request is retried.", 10, "essential", "number",
@@ -611,7 +611,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string(layer), "applied": .bool(true),
             "layers": .array(ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") && id == "tools.active"
                 ? HostedExtensionsReview.layers(own: value ?? .null) : [.object(["layer": .string("mac")])]),
-            "badges": .array([.object(["kind": .string("layer"), "label": .string(layer == "mac" ? "Set on Mac" : "Tron default")])] + badges),
+            "badges": .array([.object(["kind": .string("layer"), "label": .string(layer == "mac" ? "Set on Mac" : layer == "project" ? "Set in repository" : "Tron default")])] + badges),
             "presentation": presentation,
         ]
         if let subgroup { object["subgroup"] = .string(subgroup) }
