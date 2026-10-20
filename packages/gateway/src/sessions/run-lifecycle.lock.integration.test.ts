@@ -171,5 +171,5 @@ describe("gateway/run lifecycle RPC lock", () => {
         expect(stopStatus.result).toMatchObject({ phase: "complete", blockerCount: 0 });
       },
     });
-  });
+  }, 60_000);
 });

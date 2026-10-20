@@ -63,7 +63,7 @@ the `computer` module registers only on darwin.
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 
-The lifecycle lock runs with harness option `lifecycleRequests` (the real terminal
+The `gateway/run` locks of #1554 bound each scenario at 60 s, as the Home lock does: they run many steps, and a loaded host stretches each. The lifecycle lock runs with harness option `lifecycleRequests` (the real terminal
 owner; `gateway-main`'s exit requests and the restart's auth cancellation are recorded,
 and the lock runs the drain itself). It blinds the answers' `restarting`/`stopping`,
 which count the RPC's own work as a blocker and so are never true (#1559).

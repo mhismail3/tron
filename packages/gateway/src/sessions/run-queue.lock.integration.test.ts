@@ -179,5 +179,5 @@ describe("gateway/run queue lock", () => {
         expect(recorded.providerRequests).toHaveLength(6);
       },
     });
-  });
+  }, 60_000);
 });

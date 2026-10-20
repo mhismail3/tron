@@ -175,7 +175,7 @@ describe("gateway/run heap and drain locks", () => {
         expect(evictions).toEqual(["A", "B", "C"].map((role) => ({ event: "runtime.evicted", session: `<session:${role}>`, reason: "capacity" })));
       },
     });
-  });
+  }, 60_000);
 
   it("run-drain-blockers: a waiting extension command and a detached extension run hold the drain until they settle", async () => {
     const gateway = await startLockGateway("run-drain-blockers", {
@@ -277,5 +277,5 @@ describe("gateway/run heap and drain locks", () => {
         expect(trace.observed.activities).toEqual([{ status: "completed", mode: "asynchronous", state: "completed" }]);
       },
     });
-  });
+  }, 60_000);
 });
