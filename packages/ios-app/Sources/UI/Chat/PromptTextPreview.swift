@@ -6,6 +6,7 @@ import UIKit
 struct PromptTextPreview: View {
     let text: String
     var tone: UserPromptTextTone = .user
+    var onOpen: (() -> Void)?
     @State private var fullHeight: CGFloat = 0 // view-local: measured text overflow
     @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -18,7 +19,7 @@ struct PromptTextPreview: View {
         return (font.lineHeight + 4) * CGFloat(TronLongContentPolicy.promptVisibleLines)
     }
     private var overflowing: Bool { fullHeight > maximumHeight + 1 }
-    private var canOpen: Bool { overflowing && sheetRoutes != nil }
+    private var canOpen: Bool { overflowing && (onOpen != nil || sheetRoutes != nil) }
 
     var body: some View {
         UserPromptText(text: text, tone: tone)
@@ -39,7 +40,8 @@ struct PromptTextPreview: View {
             .contentShape(Rectangle())
             .gesture(TapGesture().onEnded {
                 guard canOpen else { return }
-                sheetRoutes?.present(.prompt(HomeTextReading(id: UUID().uuidString, title: "Prompt", text: text)))
+                if let onOpen { onOpen() }
+                else { sheetRoutes?.present(.prompt(HomeTextReading(id: UUID().uuidString, title: "Prompt", text: text))) }
             }, including: canOpen ? .all : .none)
             .accessibilityAddTraits(canOpen ? .isButton : [])
             .accessibilityHint(canOpen ? "Shows the full prompt" : "")

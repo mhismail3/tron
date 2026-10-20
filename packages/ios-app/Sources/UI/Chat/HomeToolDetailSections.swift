@@ -45,6 +45,22 @@ struct HomeToolDetailSections: View {
 
     @ViewBuilder private func sectionView(_ section: HomeToolDetailPresentation.Section) -> some View {
         switch section {
+        case .tasks(let summary, let footer, let rows):
+            TronSettingsGroup("Tasks", detail: summary, accent: accent) {
+                VStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        if index > 0 { TronSettingsDivider(accent: accent) }
+                        TronSettingsRow(icon: "checklist", title: row.title, subtitle: row.subtitle,
+                                        subtitleLineLimit: nil, accent: accent) {
+                            TronStatusPill(text: row.state, accent: Self.color(row.tone, accent: accent))
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("task-tool-row-\(row.id)")
+                    }
+                    if rows.isEmpty { TronSettingsRow(icon: "checklist", title: "No tasks", accent: accent) }
+                }
+            }
+            if let footer { TronSettingsCaption(footer, inset: 0) }
         case .failure(let title, let message, let issues):
             TronSettingsGroup(title, accent: .tronError) {
                 VStack(spacing: 0) {
@@ -63,6 +79,8 @@ struct HomeToolDetailSections: View {
             rowsGroup(title: title, detail: detail, rows: rows)
         case .text(let id, let title, let text, let detail):
             textGroup(id: id, title: title, text: text, detail: detail)
+        case .prompt(let id, let title, let text, let detail):
+            textGroup(id: id, title: title, text: text, detail: detail, prompt: true)
         case .lines(let id, let title, let detail, let lines):
             TronSettingsGroup(title, detail: detail, accent: accent) {
                 VStack(spacing: 0) {
@@ -108,16 +126,24 @@ struct HomeToolDetailSections: View {
     }
 
     /// Markdown text, its opening lines previewed; a long text opens whole from View All.
-    private func textGroup(id: String, title: String, text: String, detail: String?) -> some View {
+    private func textGroup(id: String, title: String, text: String, detail: String?, prompt: Bool = false) -> some View {
         let preview = ToolTextHeadPreview.make(text)
         return TronSettingsGroup(title, inlineDetail: detail, accent: accent) {
             VStack(alignment: .leading, spacing: 0) {
-                TronMarkdownView(text: preview.isTruncated ? preview.text : text, streaming: false)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("home-tool-text-\(id)")
+                Group {
+                    if prompt {
+                        PromptTextPreview(text: text, tone: .automation) {
+                            open(HomeTextReading(id: id, title: title, text: text))
+                        }
+                    } else {
+                        TronMarkdownView(text: preview.isTruncated ? preview.text : text, streaming: false)
+                    }
+                }
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("home-tool-text-\(id)")
                 if preview.isTruncated {
                     TronSettingsDivider(accent: accent)
                     Button { open(HomeTextReading(id: id, title: title, text: text)) } label: {

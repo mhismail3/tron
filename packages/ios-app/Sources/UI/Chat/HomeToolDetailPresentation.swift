@@ -36,12 +36,22 @@ struct HomeToolDetailPresentation: Hashable, Sendable {
         let full: String
     }
 
+    struct TaskRow: Hashable, Sendable, Identifiable {
+        let id: String
+        let title: String
+        let subtitle: String?
+        let state: String
+        let tone: Tone
+    }
+
     enum Section: Hashable, Sendable {
+        case tasks(summary: String, footer: String?, rows: [TaskRow])
         /// An error or refusal, shown first in the error tint.
         case failure(title: String, message: String, issues: [String])
         case rows(title: String?, detail: String?, rows: [Row])
         /// Markdown text, previewed and opened whole from View All when long.
         case text(id: String, title: String, text: String, detail: String? = nil)
+        case prompt(id: String, title: String, text: String, detail: String? = nil)
         case lines(id: String, title: String, detail: String?, lines: [Line])
     }
 
@@ -145,260 +155,6 @@ extension HomeToolDetailPresentation {
 
     static func bytes(_ value: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file)
-    }
-}
-
-// MARK: - delegate
-
-extension HomeToolDetailPresentation {
-    private static func delegate(_ call: Call) -> HomeToolDetailPresentation? {
-        guard let taskID = call.string("taskId"), let intent = call.string("intent") else { return nil }
-        let target = call.string("target")
-        let title = call.string("title") ?? HomeChapterPresentation.topicPreview(intent, limit: 80)
-        let subtitle = [target.map(basename), taskID].compactMap { $0 }.joined(separator: " · ")
-        let queue = call.details?["queuePosition"]?.intValue
-        let header: Header
-        if call.running { header = runningHeader(icon: "paperplane", title: title, subtitle: subtitle) }
-        else if call.error { header = Header(icon: "paperplane", title: title, subtitle: subtitle, pill: "Refused", tone: .failure) }
-        else if let queue { header = Header(icon: "paperplane", title: title, subtitle: subtitle, pill: "Queued #\(queue)", tone: .pending) }
-        else { header = Header(icon: "paperplane", title: title, subtitle: subtitle, pill: "Admitted", tone: .success) }
-
-        var sections: [Section] = []
-        if let failure = call.failure { sections.append(failure) }
-        var task: [Row] = []
-        if let target { task.append(Row(icon: "folder", title: "Project", value: target)) }
-        if let queue { task.append(Row(icon: "list.number", title: "Queue position", value: "\(queue) · starts when a worker slot frees")) }
-        if let session = call.detail("sessionId") { task.append(Row(icon: "bubble.left.and.text.bubble.right", title: "Worker session", value: session)) }
-        if let operation = call.detail("operationId") { task.append(Row(icon: "gearshape.2", title: "Operation", value: operation)) }
-        if !task.isEmpty { sections.append(.rows(title: "Task", detail: nil, rows: task)) }
-
-        let worker = call.details?["worker"]?.objectValue
-        let requestedModel = call.arguments["model"]?.objectValue.flatMap { object -> String? in
-            guard let provider = object["provider"]?.stringValue, let id = object["id"]?.stringValue else { return nil }
-            return "\(provider)/\(id)"
-        }
-        let requestedThinking = call.string("thinking")
-        var workerRows: [Row] = []
-        if let model = worker?["model"]?.stringValue ?? requestedModel {
-            let source = (worker?["modelSource"]?.stringValue ?? (requestedModel == nil ? nil : "explicit"))?.components(separatedBy: ":").first
-            workerRows.append(Row(icon: "cpu", title: "Model", value: [modelName(model), source].compactMap { $0 }.joined(separator: " · ")))
-        } else if worker == nil, !call.error {
-            workerRows.append(Row(icon: "cpu", title: "Model", value: "Home's worker profile"))
-        }
-        if let thinking = worker?["thinking"]?.stringValue ?? requestedThinking {
-            let source = (worker?["thinkingSource"]?.stringValue ?? (requestedThinking == nil ? nil : "explicit"))?.components(separatedBy: ":").first
-            workerRows.append(Row(icon: "brain.head.profile", title: "Thinking", value: [thinking.capitalized, source].compactMap { $0 }.joined(separator: " · ")))
-        }
-        if let note = worker?["note"]?.stringValue { workerRows.append(Row(icon: "info.circle", title: "Note", value: note)) }
-        if let reason = call.string("reason") { workerRows.append(Row(icon: "text.quote", title: "Reason", value: reason)) }
-        if !workerRows.isEmpty { sections.append(.rows(title: "Worker", detail: nil, rows: workerRows)) }
-        let subagents = (call.details?["subagentModels"]?.arrayValue ?? []).compactMap { value -> Row? in
-            guard let item = value.objectValue,
-                  let model = item["model"]?.stringValue,
-                  let available = item["available"]?.boolValue else { return nil }
-            let status = available ? "Available" : "Skipped"
-            let reason = item["reason"]?.stringValue
-            return Row(icon: available ? "checkmark.circle" : "minus.circle",
-                       title: modelName(model),
-                       value: [status, available ? nil : reason].compactMap { $0 }.joined(separator: " · "))
-        }
-        if !subagents.isEmpty { sections.append(.rows(title: "Subagent models", detail: nil, rows: subagents)) }
-        sections.append(.text(id: "brief", title: "Brief", text: intent))
-        return HomeToolDetailPresentation(header: header, sections: sections)
-    }
-}
-
-// MARK: - task
-
-extension HomeToolDetailPresentation {
-    private static func task(_ call: Call) -> HomeToolDetailPresentation? {
-        let action = call.string("action")
-        let taskID = call.string("taskId")
-        let (icon, title): (String, String) = switch action {
-        case "status": ("list.bullet.clipboard", "Task status")
-        case "report": ("doc.text", "Task report")
-        case "steer": ("arrow.turn.down.right", "Steer task")
-        case "stop": ("stop.circle", "Stop task")
-        case "resume": ("play.circle", "Resume task")
-        default: ("checklist", "Task")
-        }
-        var sections: [Section] = []
-        if let failure = call.failure { sections.append(failure) }
-        var identity: [Row] = []
-        if let operation = call.string("operationId") {
-            identity.append(Row(icon: "gearshape.2", title: "Operation", value: operation))
-        }
-
-        if call.running {
-            if !identity.isEmpty { sections.append(.rows(title: nil, detail: nil, rows: identity)) }
-            if let text = call.string("text") { sections.append(.text(id: "message", title: action == "resume" ? "Instruction" : "Message", text: text)) }
-            return HomeToolDetailPresentation(header: runningHeader(icon: icon, title: title, subtitle: taskID), sections: sections)
-        }
-        if call.error {
-            if !identity.isEmpty { sections.append(.rows(title: "Request", detail: nil, rows: identity)) }
-            if let text = call.string("text") { sections.append(.text(id: "message", title: action == "resume" ? "Instruction" : "Message", text: text)) }
-            let rejected = call.text.hasPrefix("Validation failed")
-            return HomeToolDetailPresentation(header: Header(icon: icon, title: title, subtitle: taskID,
-                                                             pill: rejected ? "Rejected" : "Refused", tone: .failure), sections: sections)
-        }
-
-        switch action {
-        case "status":
-            guard let taskID, let details = call.details,
-                  let status = try? HomeTaskDTO.decode(.object(details), taskID: taskID) else { return nil }
-            return taskStatus(status, details: details, icon: icon)
-        case "report":
-            guard let details = call.details, let page = details["text"]?.stringValue,
-                  let offset = details["offset"]?.intValue, let total = details["bytes"]?.intValue else { return nil }
-            return taskReport(page: page, offset: offset, total: total, next: details["nextOffset"]?.intValue,
-                              identity: identity, icon: icon, taskID: taskID)
-        case "steer", "stop", "resume":
-            guard call.details?["accepted"]?.boolValue == true else { return nil }
-            if action == "resume" {
-                if let next = call.detail("taskId"), next != taskID { identity.append(Row(icon: "arrow.forward.circle", title: "Continues as task", value: next)) }
-                if let session = call.detail("sessionId") { identity.append(Row(icon: "bubble.left.and.text.bubble.right", title: "Worker session", value: session)) }
-                if let operation = call.detail("operationId") { identity.append(Row(icon: "gearshape.2", title: "New operation", value: operation)) }
-            }
-            let effect = switch action {
-            case "steer": "Delivered to the worker's running operation."
-            case "stop": "Stop recorded for this exact operation."
-            default: "The task continues in place in its worker session."
-            }
-            if !identity.isEmpty { sections.append(.rows(title: nil, detail: nil, rows: identity)) }
-            if let text = call.string("text") {
-                sections.append(.text(id: "message", title: action == "resume" ? "Instruction" : "Message", text: text, detail: effect))
-            } else {
-                // Stop may have no message; retain its effect without an empty identity card.
-                sections.append(.rows(title: nil, detail: effect, rows: []))
-            }
-            return HomeToolDetailPresentation(header: Header(icon: icon, title: title, subtitle: taskID, pill: "Accepted", tone: .success),
-                                              sections: sections)
-        default:
-            return nil
-        }
-    }
-
-    private static func taskStatus(_ task: HomeTaskDTO, details: [String: JSONValue], icon: String) -> HomeToolDetailPresentation {
-        let outcome = task.terminalEvidence?.outcome
-        let tone: Tone = switch task.lifecycle {
-        case .pending: .pending
-        case .active: .success
-        case .terminal: outcome == .final ? .success : outcome == .interrupted ? .neutral : .failure
-        }
-        let header = Header(icon: icon, title: HomeTaskPresentation.title(title: task.title, briefText: task.intent.text, project: task.project),
-                            subtitle: [task.project, task.taskId].compactMap { $0 }.joined(separator: " · "),
-                            pill: HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: outcome), tone: tone)
-        var state: [Row] = []
-        if let terminal = task.terminalEvidence {
-            state.append(Row(icon: "flag.checkered", title: "Result", value: "\(terminal.outcome.rawValue.capitalized) · \(terminal.reason)"))
-        }
-        let duration = max(0, task.updatedAt - task.createdAt)
-        state.append(Row(icon: "timer", title: task.lifecycle == .terminal ? "Duration" : "Running for", value: ToolTiming.format(milliseconds: duration)))
-        if let queue = details["queuePosition"]?.intValue { state.append(Row(icon: "list.number", title: "Queue position", value: "\(queue)")) }
-        if let operation = task.operationId { state.append(Row(icon: "gearshape.2", title: "Operation", value: operation)) }
-        var worker: [Row] = []
-        if let checkin = task.checkins?.last {
-            worker.append(Row(icon: "text.bubble", title: "Latest check-in", value: HomeTaskPresentation.checkinText(checkin)))
-        }
-        if let model = task.workerModel { worker.append(Row(icon: "cpu", title: "Model", value: model.displayName)) }
-        if let spend = task.spend {
-            worker.append(Row(icon: "gauge.with.dots.needle.33percent", title: "Tokens",
-                              value: HomeTaskPresentation.spendText(spend)))
-        }
-        if let subagents = task.subagents {
-            let started = "\(subagents.started.formatted()) started"
-            worker.append(Row(icon: "person.2", title: "Subagents",
-                              value: subagents.stoppedAtEnd.map { "\(started) · \($0.formatted()) stopped at end" } ?? started))
-        }
-        if let runs = task.subagentRuns, runs.total > 0 {
-            worker.append(Row(icon: "person.crop.circle.badge.clock", title: "Live runs",
-                              value: runs.runs.map { "\($0.agent) (\($0.state))" }.joined(separator: ", ") + (runs.total > runs.runs.count ? " and \(runs.total - runs.runs.count) more" : "")))
-        }
-        if let session = task.workerSessionId { worker.append(Row(icon: "bubble.left.and.text.bubble.right", title: "Worker session", value: session)) }
-        var sections: [Section] = [.rows(title: "State", detail: nil, rows: state)]
-        if !worker.isEmpty { sections.append(.rows(title: "Worker", detail: nil, rows: worker)) }
-        sections.append(.text(id: "brief", title: "Brief", text: task.intent.text))
-        return HomeToolDetailPresentation(header: header, sections: sections)
-    }
-
-    /// One byte page of the task's immutable report. The Gateway pages the report's
-    /// JSON, so the page's `text` value is decoded as far as this page carries it.
-    private static func taskReport(page: String, offset: Int, total: Int, next: Int?, identity: [Row], icon: String,
-                                   taskID: String?) -> HomeToolDetailPresentation {
-        let end = next ?? total
-        let report = TaskReportPage(page: page, offset: offset)
-        var rows = identity
-        rows.append(Row(icon: "doc.plaintext", title: "Page", value: "Bytes \(offset.formatted())–\(end.formatted()) of \(total.formatted())"))
-        if let outcome = report.outcome { rows.append(Row(icon: "flag.checkered", title: "Outcome", value: outcome.capitalized)) }
-        if let result = report.resultID { rows.append(Row(icon: "seal", title: "Result ID", value: result)) }
-        let detail = next.map { "Home reads the rest from byte \($0.formatted())." }
-        var sections: [Section] = [.rows(title: nil, detail: detail, rows: rows)]
-        if let text = report.text, !text.isEmpty {
-            sections.append(.text(id: "report", title: report.complete ? "Report" : "Report (this page)", text: text))
-        } else {
-            sections.append(.text(id: "report", title: "Page", text: "```\n\(page)\n```"))
-        }
-        let pill = report.outcome?.capitalized ?? (next == nil ? "Last page" : "Page")
-        return HomeToolDetailPresentation(header: Header(icon: icon, title: "Task report", subtitle: taskID, pill: pill, tone: .neutral),
-                                          sections: sections)
-    }
-}
-
-/// The report fields one byte page of a report's JSON carries. A whole report
-/// parses as JSON; a partial page decodes the `text` string as far as it goes.
-struct TaskReportPage: Hashable, Sendable {
-    let outcome: String?
-    let resultID: String?
-    let text: String?
-    let complete: Bool
-
-    init(page: String, offset: Int) {
-        if offset == 0, let data = page.data(using: .utf8),
-           let object = try? JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue {
-            outcome = object["outcome"]?.stringValue
-            resultID = object["resultId"]?.stringValue
-            text = object["text"]?.stringValue
-            complete = true
-            return
-        }
-        outcome = offset == 0 ? Self.field("outcome", in: page) : nil
-        resultID = offset == 0 ? Self.field("resultId", in: page) : nil
-        complete = false
-        if let start = page.range(of: "\"text\":\"") {
-            text = Self.decodeString(page[start.upperBound...])
-        } else if offset > 0 {
-            // A later page usually continues the text value.
-            text = Self.decodeString(page[...])
-        } else {
-            text = nil
-        }
-    }
-
-    private static func field(_ name: String, in page: String) -> String? {
-        guard let start = page.range(of: "\"\(name)\":\"") else { return nil }
-        return decodeString(page[start.upperBound...])
-    }
-
-    /// Decodes JSON string escapes up to the closing quote or the end of the page.
-    private static func decodeString(_ source: Substring) -> String {
-        var result = ""
-        var iterator = source.makeIterator()
-        while let character = iterator.next() {
-            if character == "\"" { break }
-            guard character == "\\" else { result.append(character); continue }
-            guard let escaped = iterator.next() else { break }
-            switch escaped {
-            case "n": result.append("\n")
-            case "t": result.append("\t")
-            case "r": break
-            case "u":
-                var hex = ""
-                for _ in 0..<4 { if let digit = iterator.next() { hex.append(digit) } }
-                if let value = UInt32(hex, radix: 16), let scalar = Unicode.Scalar(value) { result.append(Character(scalar)) }
-            default: result.append(escaped)
-            }
-        }
-        return result
     }
 }
 

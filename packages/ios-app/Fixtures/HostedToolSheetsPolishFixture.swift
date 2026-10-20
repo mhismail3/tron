@@ -125,6 +125,11 @@ struct HostedToolSheetsPolishFixture: View {
             details = ["sessionId": "worker-session", "operationId": "worker-operation",
                        "worker": ["model": "openai/gpt-6.1-sol", "thinking": "high", "modelSource": "explicit: iOS UI work needing careful ownership and presentation judgment.", "thinkingSource": "explicit: iOS UI work needing careful ownership and presentation judgment."],
                        "subagentModels": [["model": "anthropic/claude-haiku-5-5", "available": false, "reason": "Weekly usage 97%"], ["model": "openai/gpt-6-luna", "available": true], ["model": "opencode-go/deepseek-v4.1-flash", "available": false, "reason": "Monthly usage 100%"]]]
+        case "task-list", "task-status", "task-report", "task-steer", "task-fallback":
+            name = "task"
+            let fixture = HostedTaskToolSheetFixture.result(scenario)
+            request = fixture.request
+            details = fixture.details
         case "task-message", "task-resume-message", "task-stop-message", "task-stop-empty":
             name = "task"
             let action = scenario.contains("resume") ? "resume" : scenario.contains("stop") ? "stop" : "steer"

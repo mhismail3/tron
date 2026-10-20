@@ -78,7 +78,11 @@ Session, session history and subagent activity.
   Changes sheet; `ToolDiffCountChip` counts belong to that diff. Codemode shows Script, Result
   and Calls; Home's tools use `HomeToolDetailPresentation`; display artifacts follow
   [display artifacts](../../../docs/display-artifacts.md). Technical details hold Request and
-  Result JSON.
+  Result JSON. `TaskToolDetailPresentation` reads the recorded action: catalog rows with
+  state pills/check-ins and counts, task status, paged reports, or control receipts. Unknown
+  actions/shapes stay generic. Reports and control messages reuse `PromptTextPreview` and
+  the shared full reader. Catalog results contain no worker model; status contains no thinking;
+  report/control results without titles use the task ID rather than a live lookup.
 - **Thinking and context.** Thinking shows at most four measured lines, opening the full trace on
   tap. Compaction, branch, configuration and extension status share one notification-pill language;
   command pills never show arguments. `custom_message` is right-aligned context; worker results
