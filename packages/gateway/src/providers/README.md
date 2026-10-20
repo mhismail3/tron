@@ -63,7 +63,7 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
   errors are non-retryable; max-concurrency with explicit guidance gets one bounded
   retry; transient overload stays retryable.
 - Context windows, recents and release dates:
-  [runtime configuration](../../docs/wire-runtime-configuration.md#model-context-windows).
+  [runtime configuration](../admin/runtime-configuration.md#context-windows).
   Model fallback queues: [settings contract](../../docs/settings-contract.md).
 
 ## Invariants

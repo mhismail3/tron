@@ -27,42 +27,6 @@
       "budget": "doc",
       "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
-    },
-    {
-      "path": "wire-host-control.md",
-      "budget": "doc",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Decomposed into module docs (plan Phase 1)"
-    },
-    {
-      "path": "wire-profiling.md",
-      "budget": "doc",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Decomposed into module docs (plan Phase 1)"
-    },
-    {
-      "path": "wire-runtime-configuration.md",
-      "budget": "doc",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Decomposed into module docs (plan Phase 1)"
-    },
-    {
-      "path": "wire-session-execution.md",
-      "budget": "doc",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Decomposed into module docs (plan Phase 1)"
-    },
-    {
-      "path": "wire-session-inspection.md",
-      "budget": "doc",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Decomposed into module docs (plan Phase 1)"
-    },
-    {
-      "path": "wire-transport.md",
-      "budget": "doc",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Decomposed into module docs (plan Phase 1)"
     }
   ]
 }

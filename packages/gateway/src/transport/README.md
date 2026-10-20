@@ -17,24 +17,14 @@ and diagnostic exports.
 
 ## Contract
 
-Wire contracts are owned by operation family:
-
-- [Connection and request protocol](../../docs/wire-transport.md): HTTP/LAN/device
-  admission, hello, cancellation, receipts, ordered writes and liveness.
-- [Media and live viewing](../../docs/wire-media.md): display, browser observation,
-  uploads/blobs, exports and prompt image bounds.
-- [Session execution and presentation](../../docs/wire-session-execution.md): live
-  projections, extension forms, queues, Stop/compaction and session-bound tools.
-- [Session discovery and inspection](../../docs/wire-session-inspection.md): catalog,
-  acquisition, attention/archive, history and resource reads.
-- [Runtime configuration and administration](../../docs/wire-runtime-configuration.md):
-  models and context windows, compaction settings, provider auth and packages.
-- [Supervised host control](../../docs/wire-host-control.md): Gateway/Mac/device
-  control, drain and exit proof, payload health.
-- [Delegated activity and extension history](../../docs/delegated-activity.md):
-  producer attribution, lifecycle and read-only child ownership.
-- [Connection resilience](../../docs/connection-resilience.md): reconnect, protocol
-  mismatch and liveness across the phone and Gateway.
+Wire contracts by owner (method list: `scripts/tron docs rpc`):
+[protocol](protocol.md) (admission, hello, cancellation, receipts, ordered writes,
+liveness), [execution](../sessions/execution.md), [catalog](../sessions/catalog.md),
+[display](../display/README.md), [uploads](../machine/uploads.md),
+[runtime configuration](../admin/runtime-configuration.md),
+[host control](../admin/host-control.md),
+[delegated activity](../../docs/delegated-activity.md) and
+[connection resilience](../../docs/connection-resilience.md).
 
 **Protocol versions.** One protocol range is projected from the repository manifest
 into Gateway payload, Mac app and iOS metadata; validators require one exact range.

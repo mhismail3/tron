@@ -133,4 +133,4 @@ real-window capture remain manual qualification.
 ## Not here
 
 Trust decisions: `TrustService` ([admin](../admin/README.md)). Live-view routes:
-[media](../../docs/wire-media.md). Mac-side Native Host: `packages/mac-app`.
+[display](../display/README.md); uploads: [uploads](uploads.md). Mac-side Native Host: `packages/mac-app`.

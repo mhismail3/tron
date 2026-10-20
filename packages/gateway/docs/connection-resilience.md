@@ -416,7 +416,7 @@ for a Gateway that is not bound to loopback; `--lan-endpoint off` or
 R-4 reviews. The Mac-supervised Gateway takes the variable through its launchd
 session instead — `launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off` and a restart
 the user performs, because the wrapper's plist arguments and environment are
-fixed ([transport](wire-transport.md#transport)).
+fixed ([protocol](../src/transport/protocol.md#lan-listener)).
 
 - **Gateway records.** One `connection.inbound-silent` (warning) per silence
   episode per socket, written at the first heartbeat tick (every 25 s) that

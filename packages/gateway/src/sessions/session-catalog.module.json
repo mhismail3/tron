@@ -4,6 +4,7 @@
     "agent-runtime-lock.ts",
     "blob-store.ts",
     "browser-fork-receipts.integration.test.ts",
+    "catalog.md",
     "catalog-discovery.ts",
     "catalog-jsonl.integration.test.ts",
     "catalog-jsonl.ts",

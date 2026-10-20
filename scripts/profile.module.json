@@ -6,6 +6,7 @@
     "tron-profile",
     "tron-profile-device",
     "tron-profile-gateway",
+    "tron-profile-gateway.md",
     "tron-profile-gateway-driver.mjs",
     "tron-profile-gateway-extension.ts",
     "tron-profile-gateway-probe.mjs",

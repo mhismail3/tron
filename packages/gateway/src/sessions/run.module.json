@@ -10,6 +10,7 @@
     "context-edit.integration.test.ts",
     "direct-bash-process-owner.integration.test.ts",
     "direct-bash-process-owner.ts",
+    "execution.md",
     "fixtures/**",
     "gateway-work-registry.ts",
     "home-activation.e2e.test.ts",

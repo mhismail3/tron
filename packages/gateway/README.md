@@ -114,9 +114,10 @@ See [notifications](src/notifications/README.md).
 ## Transport
 
 Wire families and the subscription barrier: [transport](src/transport/README.md#contract).
-Browser live viewing and prompt attachments: [media](docs/wire-media.md). Model
-context windows, recents and release dates:
-[runtime configuration](docs/wire-runtime-configuration.md#model-context-windows).
+Display and live viewing: [display](src/display/README.md); uploads and exports:
+[uploads](src/machine/uploads.md). Models, context windows and provider login:
+[runtime configuration](src/admin/runtime-configuration.md); update, drain and exit:
+[host control](src/admin/host-control.md).
 
 ## Session invariants
 
@@ -176,7 +177,7 @@ joins only with zero findings, and a disable needs a reason after `--`.
 `no-unused-vars` wait on #1227.
 
 Wire-traffic profiling and multi-session qualification:
-[wire profiling](docs/wire-profiling.md).
+[Gateway profile](../../scripts/tron-profile-gateway.md).
 
 ## Session subagent activity
 
