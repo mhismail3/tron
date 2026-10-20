@@ -67,10 +67,9 @@ lock_owner="$repo_root/scripts/ios-test-lock.py"
 
 die() { echo "error: $*" >&2; exit 1; }
 
-# The real-UI journeys `run-ui` owns. A selector that names anything else - a
-# class, a suite, or a UI test of another lane - would otherwise run here and be
-# reported as a real-UI journey with an evidence bundle, so the parse admits only
-# these. Each receives its own fresh fixture and pairing code, because a pairing
+# The real-UI journeys `run-ui` owns. Any other selector (a class, a suite, another
+# lane's UI test) would run here and be reported as a real-UI journey with evidence,
+# so the parse admits only these. Each gets a fresh fixture and pairing code: an
 # invitation is one-use.
 ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers"
