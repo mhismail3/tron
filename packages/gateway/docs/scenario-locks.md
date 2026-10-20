@@ -155,10 +155,14 @@ Knowledge lock.
 Mutation-path locks (`test-support/store-path-lock.ts`) drive one store's
 writes on a fresh home under a fixed clock and pin each step's result or refusal
 and the exact files after it: session attention (`gateway/projection`), session
-archive (`gateway/session-catalog`), command receipts (`gateway/transport`), run
+archive, the blob store behind `gateway/blobs/` and `gateway/exports/`, and the
+cold-catalog metadata index `gateway/catalog-metadata-v2.json`
+(`gateway/session-catalog`), command receipts (`gateway/transport`), run
 markers (`gateway/run`), settings approvals (`gateway/admin`), Home tasks and their
 authority (`gateway/home`), and the workspace-state markers (`gateway/workspace`).
-Generated ids come from the same counted `randomUUID` as corpus recording. The
+Generated ids come from the same counted `randomUUID` as corpus recording. A value
+the host file system assigns (the index's device and inode identity) is named by a
+stable alias, and the index lock sets each transcript's modification time itself. The
 run-marker lock holds a queued write in the store's own file-system option to pin
 that a later write waits for it.
 Command receipts also have `command-receipt-concurrency`: capacity bounds, an
@@ -171,8 +175,8 @@ route callback, with no production hook. `scripts/tron mutate` measures what the
 
 Not yet locked:
 - **Operational:** `gateway.json`, `update-config.json`, `lan-endpoint/`,
-  `mac-terminal/`, `ios-device-installs/`, `payloads/`, logs, `exports/`,
-  `blobs/`, `stop-completed.json`.
+  `mac-terminal/`, `ios-device-installs/`, `payloads/`, logs,
+  `stop-completed.json`.
 
 These are follow-ups, not exemptions.
 
