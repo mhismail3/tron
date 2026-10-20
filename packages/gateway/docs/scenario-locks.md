@@ -109,7 +109,12 @@ Knowledge lock.
 Mutation-path locks (`test-support/store-path-lock.ts`) drive one store's
 writes on a fresh home under a fixed clock and pin each step's result or refusal
 and the exact files after it: session attention (`gateway/projection`), session
-archive (`gateway/session-catalog`) and command receipts (`gateway/transport`).
+archive (`gateway/session-catalog`), command receipts (`gateway/transport`), run
+markers (`gateway/run`), settings approvals (`gateway/admin`), Home tasks and their
+authority (`gateway/home`), and the workspace-state markers (`gateway/workspace`).
+Generated ids come from the same counted `randomUUID` as corpus recording. The
+run-marker lock holds a queued write in the store's own file-system option to pin
+that a later write waits for it.
 Command receipts also have `command-receipt-concurrency`: capacity bounds, an
 inventory rebuild opened from inside the receipt writer during another command's
 pending or completed write, and an early prompt response whose lane a duplicate
@@ -169,3 +174,6 @@ automation status read broken, and a field added to a response. Derived stores
 (#1484): a search derivation-version bump, a shorter projected usage skip, a
 projection skip read at its expiry, the release-date alias read skipping fetched
 dates, and a shorter settings approval lifetime (caught by re-recording).
+Write paths (#1493): an approved change left untold, a run-marker bound of 17,
+a session lane dropped while a queued write holds it, Home task spend allowed to
+drop its cache split, and a feature marker admitted with extra keys.
