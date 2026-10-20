@@ -28,7 +28,11 @@ slice changed behavior.
   records each request with its normalized response, every event topic with
   the union of its payload structure (in-flight subtrees pruned), each provider
   request (tools, prompt sections, prompt hash, messages), canonical JSONL,
-  named store files, and notifications enqueued at the relay boundary.
+  named store files, and notifications enqueued at the relay boundary. Its
+  `home` option wires Tron Home as `gateway-main` does (standalone Home trust
+  directory, the Gateway model runtime, `home.*` RPCs, task recovery after
+  listen) with a fixed memory summarizer, so compactor calls never interleave
+  with scripted requests.
 
 A lock's golden lives beside its test in `locks/<name>.golden.json`, owned by
 the test's module. Goldens are darwin-specific, as for the SDK boundary trace:
@@ -47,6 +51,7 @@ the `computer` module registers only on darwin.
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Mac layer: resolution, a live chat, history, files, notifications |
 | `gateway/notifications` | `notifications-push` | a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat; a presented chat's are suppressed; a Home task worker's end pushes nothing |
 | `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged |
+| `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report and the result wake |
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 
@@ -58,7 +63,11 @@ transport only projects. It runs in the nested serial pass. The push lock runs t
 production `NotificationService` (harness option `notifications`) with only the relay's
 HTTP fetcher replaced, and records each relay request's envelope and every receipt. The
 automation lock wires the production store, scheduler, executor and service (harness option
-`automations`) and records every command receipt's contents.
+`automations`) and records every command receipt's contents. The Home lock
+keeps Home's and the worker's provider requests as two ordered streams (they
+interleave by host timing), adds each runtime's loaded extensions, tool schema
+digests and stream options, and records event shapes only for topics the
+outbound queue never drops; a settled reopen snapshot stands in for the rest.
 
 ## Persisted stores (V4)
 
@@ -182,4 +191,8 @@ projection skip read at its expiry, the release-date alias read skipping fetched
 dates, and a shorter settings approval lifetime (caught by re-recording).
 Write paths (#1493): an approved change left untold, a run-marker bound of 17,
 a session lane dropped while a queued write holds it, Home task spend allowed to
-drop its cache split, and a feature marker admitted with extra keys.
+drop its cache split, and a feature marker admitted with extra keys. Home
+(#1536): swapped Home tools, one prompt word, a wake that delivers nothing, the
+result notice reworded, `operationId` dropped from `delegate`'s details,
+`logicalSessionId` dropped from `home.prompt`, Home modules reordered or one
+dropped, short cache retention, and a reworded `delegate` description.
