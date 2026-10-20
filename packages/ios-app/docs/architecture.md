@@ -3046,11 +3046,8 @@ and identities once per admitted resource revision, then reuses that projection
 while scrolling; large resource groups use the static scroll surface. Reload is owned by that sheet and publishes visible progress; the canonical
 `session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
 Extensions starts with resource scope and inventory counts (Project Trust is its sibling Settings row, not repeated inside),
-then the Installed container, the one package list: every configured package plus the provider Tron bundles
-(`packages.list` appends the managed `tron:` subagents source, which is never in the `packages` setting), labelled
-"Bundled with Tron" with no Update/Remove menu because the Gateway refuses both. One card follows with the Install Package
-action and the schema's npm command row, then the read-only Tron Modules container (the shared built-in module names,
-purposes, and tools), then the schema's Search paths; there is no separate Sources package summary.
+then the Installed container, the one package list (configured packages plus the managed `tron:` subagents provider `packages.list` appends, labelled "Bundled with Tron" without Update/Remove, which the Gateway refuses), one card with Install Package and the schema's npm command row,
+the read-only Tron Modules container (the shared built-in module names, purposes, and tools), and the schema's Search paths; no separate Sources package summary.
 MCP servers are managed separately through Pi's MCP configuration and do not appear as
 ConnectionOwner modules. Resolved extensions are not duplicated beneath the installed list, and
 resolved skills and prompts left this sheet for Manage Session → Project Resources.
