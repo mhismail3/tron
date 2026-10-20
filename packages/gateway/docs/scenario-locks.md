@@ -74,6 +74,10 @@ restart is a new `NotificationService` over the same Tron home, the push store b
 persistence authority, not a whole-process restart. Dedupe keys and relay request ids are
 digests of per-run session ids, relabelled by first appearance. The waiting lock prompts
 again only once the previous turn's terminal work has left the drain's blockers (#1567).
+`home-contention-restart` restarts by disposing the first Gateway (its registry aborts
+the worker's turn, as a `restartNow` shutdown does; not a crash) and starting another
+over the same root; it records the task still non-terminal at that boundary, and blinds
+the refused write's `internal` message (the raw file-system error `publicError` forwards).
 The `gateway/run` locks of #1554 bound each scenario at 60 s, as the Home lock does: they run many steps, and a loaded host stretches each. The lifecycle lock runs with harness option `lifecycleRequests` (the real terminal
 owner; `gateway-main`'s exit requests and the restart's auth cancellation are recorded,
 and the lock runs the drain itself). It blinds the answers' `restarting`/`stopping`,
@@ -235,4 +239,9 @@ an unsaved draft or an open session evictable, and a detached or running extensi
 not counted as a blocker. Push delivery (#1555): waiting-episode dedupe dropped, one
 background task not waiting, the episode never remembered, a retryable attempt final,
 retryable targets not drained, the retry delay one step late, a removed registration's
-push kept, its inbox row left queued, and revocations never drained.
+push kept, its inbox row left queued, and revocations never drained. Home and
+`projectDir` (#1556): a busy Home prompt without behavior admitted, `home.disable`
+admitted mid-activation, a refused ledger write treated as uncertain publication, an
+abandoned task not reconciled at startup, its cold reason changed, Home's wake drain
+never run; the package owner's settings or package manager, or the session-free loader's
+`projectDir`, taken from the subdirectory.
