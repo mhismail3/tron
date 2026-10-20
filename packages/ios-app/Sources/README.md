@@ -9,7 +9,7 @@ background checkpoints and bundled resources.
 
 `App/TronMobileApp.swift`, `App/ProductionSceneRoot.swift`, `App/AppBackgroundCheckpointCoordinator.swift`,
 `Assets.xcassets`, `Info.plist`, `PrivacyInfo.xcprivacy`, `Resources/` (fonts, third-party notices,
-`tron-notification.caf`). The hosted `App/Hosted*Fixture.swift` files belong to the hosted-fixtures
+`tron-notification.caf`). The hosted `Hosted*Fixture.swift` files live in `../Fixtures/`, the hosted-fixtures
 module.
 
 ## Contract
