@@ -97,6 +97,29 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     const base = await lines("system-line", `\n${JSON.stringify({ type: "message", message: { role: "system", content: "context" } })}\n`);
     return reported(() => index.append(base));
   });
+  await log.step("an append accumulates counts, first message, name and activity time from each entry kind", async () => {
+    const path = await session("metadata", header("metadata"));
+    const base = (await index.entryFromSummary({ ...summary("metadata", path), firstMessage: "(no messages)", messageCount: 0 }))!;
+    const at = (minute: number) => Date.parse(time) + minute * 60_000;
+    const entries = [
+      { type: "custom", data: 1 },
+      { type: "message" },
+      { type: "message", message: { role: "tool", content: "tool output" } },
+      { type: "message", message: { role: "user" } },
+      { type: "message", message: { role: "user", content: [null, ["x"], { type: "image" }, { type: "text", text: "first" }, { type: "text", text: "part" }], timestamp: at(5) } },
+      { type: "message", timestamp: new Date(at(10)).toISOString(), message: { role: "assistant", content: "later" } },
+      { type: "message", message: { role: "user", content: "older", timestamp: at(1) } },
+      { type: "message", timestamp: at(20), message: { role: "assistant", content: "numbered" } },
+      { type: "message", message: { role: "assistant", content: "zero", timestamp: 0 } },
+      { type: "session_info", name: "  Titled  " },
+    ];
+    await appendFile(path, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
+    await stamp(path);
+    const named = (await index.append(base))!;
+    await appendFile(path, `${JSON.stringify({ type: "session_info", name: null })}\n`);
+    await stamp(path);
+    return { named, cleared: (await index.append(named))! };
+  }, "result");
   await log.step("an append of a missing file reports its failure", () => reported(() => index.append({ ...grown, path: join(root, "missing.jsonl") })));
 
   const two = await session("two", header("s2") + message("user", "second", 1));

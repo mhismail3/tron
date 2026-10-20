@@ -717,6 +717,62 @@
       }
     },
     {
+      "step": "an append accumulates counts, first message, name and activity time from each entry kind",
+      "result": {
+        "named": {
+          "id": "metadata",
+          "path": "<tmp>/home/sessions/metadata.jsonl",
+          "cwd": "/work",
+          "firstMessage": "first part",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:20:00.000Z",
+          "messageCount": 8,
+          "fileIdentity": "<fileIdentity#3 n:n>",
+          "size": 850,
+          "mtimeMs": 1767225615000,
+          "eofOffset": 850,
+          "tailBoundaryHash": "EZE8sF8Ml8D7dnqLF2IcigyHcLBhKUHOLyqKP_B6Tnk",
+          "name": "Titled"
+        },
+        "cleared": {
+          "id": "metadata",
+          "path": "<tmp>/home/sessions/metadata.jsonl",
+          "cwd": "/work",
+          "firstMessage": "first part",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:20:00.000Z",
+          "messageCount": 8,
+          "fileIdentity": "<fileIdentity#3 n:n>",
+          "size": 886,
+          "mtimeMs": 1767225616000,
+          "eofOffset": 886,
+          "tailBoundaryHash": "3DViKZrSlxvYqld-rwNyWUQ2mXikj6eQGL_-jHANxL8"
+        }
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1 n:n>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
       "step": "an append of a missing file reports its failure",
       "result": {
         "value": null,
@@ -762,7 +818,7 @@
               "messageCount": 1,
               "fileIdentity": "<fileIdentity#1 n:n>",
               "size": 183,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             },
@@ -774,9 +830,9 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 1,
-              "fileIdentity": "<fileIdentity#3 n:n>",
+              "fileIdentity": "<fileIdentity#4 n:n>",
               "size": 183,
-              "mtimeMs": 1767225616000,
+              "mtimeMs": 1767225619000,
               "eofOffset": 183,
               "tailBoundaryHash": "55ZojGed4cr608aWDF5W6LfuGKmNYe_lqHtDLLPYV4E"
             }
@@ -809,7 +865,7 @@
               "messageCount": 1,
               "fileIdentity": "<fileIdentity#1 n:n>",
               "size": 183,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             },
@@ -821,9 +877,9 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 7,
-              "fileIdentity": "<fileIdentity#4 n:n>",
+              "fileIdentity": "<fileIdentity#5 n:n>",
               "size": 184,
-              "mtimeMs": 1767225614000,
+              "mtimeMs": 1767225617000,
               "eofOffset": 184,
               "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
             }
@@ -844,9 +900,9 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:02:00.000Z",
               "messageCount": 8,
-              "fileIdentity": "<fileIdentity#4 n:n>",
+              "fileIdentity": "<fileIdentity#5 n:n>",
               "size": 278,
-              "mtimeMs": 1767225618000,
+              "mtimeMs": 1767225621000,
               "eofOffset": 278,
               "tailBoundaryHash": "tsQ05_K6612aZrprQNotjfv5vlmml67zxir82zWJ8N0"
             }
@@ -870,7 +926,7 @@
               "messageCount": 1,
               "fileIdentity": "<fileIdentity#1 n:n>",
               "size": 183,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             },
@@ -882,9 +938,9 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 7,
-              "fileIdentity": "<fileIdentity#4 n:n>",
+              "fileIdentity": "<fileIdentity#5 n:n>",
               "size": 184,
-              "mtimeMs": 1767225614000,
+              "mtimeMs": 1767225617000,
               "eofOffset": 184,
               "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
             }
@@ -905,9 +961,9 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 1,
-              "fileIdentity": "<fileIdentity#4 n:n>",
+              "fileIdentity": "<fileIdentity#5 n:n>",
               "size": 186,
-              "mtimeMs": 1767225619000,
+              "mtimeMs": 1767225622000,
               "eofOffset": 186,
               "tailBoundaryHash": "r44hzeWEZKxuC4JuseTRFgLzBGRJvQZoFzHqZ-VnT1Q"
             }
@@ -933,7 +989,7 @@
               "messageCount": 1,
               "fileIdentity": "<fileIdentity#1 n:n>",
               "size": 183,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             },
@@ -945,9 +1001,9 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 7,
-              "fileIdentity": "<fileIdentity#4 n:n>",
+              "fileIdentity": "<fileIdentity#5 n:n>",
               "size": 184,
-              "mtimeMs": 1767225614000,
+              "mtimeMs": 1767225617000,
               "eofOffset": 184,
               "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
             }
@@ -986,7 +1042,7 @@
               "messageCount": 1,
               "fileIdentity": "<fileIdentity#1 n:n>",
               "size": 183,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             },
@@ -998,9 +1054,9 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 7,
-              "fileIdentity": "<fileIdentity#4 n:n>",
+              "fileIdentity": "<fileIdentity#5 n:n>",
               "size": 184,
-              "mtimeMs": 1767225614000,
+              "mtimeMs": 1767225617000,
               "eofOffset": 184,
               "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
             }
@@ -1034,7 +1090,7 @@
               "messageCount": 1,
               "fileIdentity": "<fileIdentity#1 n:n>",
               "size": 183,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             },
@@ -1046,9 +1102,9 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 7,
-              "fileIdentity": "<fileIdentity#4 n:n>",
+              "fileIdentity": "<fileIdentity#5 n:n>",
               "size": 184,
-              "mtimeMs": 1767225614000,
+              "mtimeMs": 1767225617000,
               "eofOffset": 184,
               "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
             }
@@ -1087,7 +1143,7 @@
               "messageCount": 1,
               "fileIdentity": "<fileIdentity#1 n:n>",
               "size": 183,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             },
@@ -1099,9 +1155,9 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 7,
-              "fileIdentity": "<fileIdentity#4 n:n>",
+              "fileIdentity": "<fileIdentity#5 n:n>",
               "size": 184,
-              "mtimeMs": 1767225614000,
+              "mtimeMs": 1767225617000,
               "eofOffset": 184,
               "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
             }
@@ -1436,7 +1492,7 @@
               "messageCount": 1,
               "fileIdentity": "<fileIdentity#1 n:n>",
               "size": 183,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             }
