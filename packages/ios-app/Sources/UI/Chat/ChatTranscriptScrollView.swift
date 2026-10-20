@@ -321,7 +321,6 @@ private extension ChatTranscriptRenderItem {
 private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     let row: ChatPhysicalTranscriptRow
     let reduceMotion: Bool
-    let hostedRecorder: (any ChatTranscriptHostedRecording)?
     let onPromptEntranceConsumed: (String) -> Void
     let onPromptContentReplacement: (String) -> Void
     let onPromptEntranceSettled: (String) -> Void
@@ -346,7 +345,6 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         row: ChatPhysicalTranscriptRow,
         reduceMotion: Bool,
         promptEntrance: ChatPhysicalPromptEntrance?,
-        hostedRecorder: (any ChatTranscriptHostedRecording)? = nil,
         onPromptEntranceConsumed: @escaping (String) -> Void,
         onPromptContentReplacement: @escaping (String) -> Void,
         onPromptEntranceSettled: @escaping (String) -> Void,
@@ -354,7 +352,6 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     ) {
         self.row = row
         self.reduceMotion = reduceMotion
-        self.hostedRecorder = hostedRecorder
         self.onPromptEntranceConsumed = onPromptEntranceConsumed
         self.onPromptContentReplacement = onPromptContentReplacement
         self.onPromptEntranceSettled = onPromptEntranceSettled
@@ -918,7 +915,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             row: row,
             reduceMotion: reduceMotion,
             promptEntrance: entrance,
-            hostedRecorder: hostedRecorder,
             onPromptEntranceConsumed: { lifecycleID in
                 transcriptPresentation.consumeLifecycleEntrance(id: lifecycleID)
             },
