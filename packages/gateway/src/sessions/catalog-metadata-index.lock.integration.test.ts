@@ -168,6 +168,8 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     const locked = await session("locked", header("s6") + message("user", "locked", 1));
     await index.save(root, [row, (await index.entryFromSummary(summary("s6", locked)))!]);
     const listed = await candidate("s6", locked);
+    // Mode 000 is unreadable only to an unprivileged user; root would read it, so refuse loudly instead of pinning another trace.
+    if (process.getuid?.() === 0) throw new Error("This lock runs as an unprivileged user");
     await chmod(locked, 0o000);
     rebuilt.length = 0;
     try { return await reported(async () => ({ result: await index.reconcile(root, [listed], rebuild), rebuilt: [...rebuilt].sort() })); }
