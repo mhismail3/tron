@@ -26,8 +26,13 @@ const MODULE = "gateway/run";
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
-/** Eviction orders by the registry's millisecond touch clock: keep touches apart. */
-const tick = () => new Promise<void>((resolve) => { setTimeout(resolve, 5); });
+/** Eviction orders by the registry's millisecond touch clock (`Date.now()`):
+ * return only once that clock has moved past every touch made so far, so each
+ * later touch is strictly newer. The lock also checks the recorded touch order. */
+async function tick(): Promise<void> {
+  const last = Date.now();
+  while (Date.now() <= last) await new Promise<void>((resolve) => { setImmediate(resolve); });
+}
 
 interface Opened { readonly sessionId: string; readonly subscriptionToken: string }
 
@@ -113,6 +118,11 @@ describe("gateway/run heap and drain locks", () => {
     expect((await phone.request("session.close", { sessionId: a, subscriptionToken: reopened.subscriptionToken })).ok).toBe(true);
     await tick();
     const liveFull = live();
+    // The touch clock the eviction sorts by, read without acquiring (which touches).
+    const slots = (gateway.registry as unknown as { slots: Map<string, { touchedAt: number }> }).slots;
+    const touchOrder = [...slots].sort(([, left], [, right]) => left.touchedAt - right.touchedAt)
+      .map(([id]) => roles.get(id));
+    const touchesDistinct = new Set([...slots.values()].map((slot) => slot.touchedAt)).size === slots.size;
 
     // D needs a slot: B goes. D stays open, so E's slot comes from C, the next oldest.
     const d = await createAndOpen(gateway, phone);
@@ -147,6 +157,8 @@ describe("gateway/run heap and drain locks", () => {
       module: MODULE, ...lockPaths(import.meta.url, trace.lock), trace, update: lockUpdateRequested(MODULE),
       validate: () => {
         expect(liveFull).toEqual(["A", "B", "C"]);
+        expect(touchesDistinct).toBe(true);
+        expect(touchOrder).toEqual(["B", "C", "A"]);
         expect(liveAfterD).toEqual(["A", "C", "D-draft"]);
         expect(liveAfterE).toEqual(["A", "D-draft", "E-open"]);
         expect(liveAfterF).toEqual(["D-draft", "E-open", "F-open"]);
