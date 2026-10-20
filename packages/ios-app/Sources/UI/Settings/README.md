@@ -39,7 +39,8 @@ services, paired Macs and devices, notifications and logs.
   `settings.options`, re-requested when a `dependsOn` key changes; catalog pages fence every
   completion and stop on repeated cursors. Choices open picker sheets of `TronCatalogOptionRow`
   (native menus fail inside nested sheets, #877); numbers and ordered choices use the shared
-  anchored slider with Gateway-served bounds. `chatInline` metadata owns section placement.
+  anchored slider with Gateway-served bounds; a tap anywhere outside it closes and saves it, even
+  below a short embedded section. `chatInline` metadata owns section placement.
 - **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
   `confirm` text asks before sending. Secret drafts start empty and clear on dismissal; list and
   numeric-map drafts write only on Save; unknown fields stay read-only. Source badges may carry

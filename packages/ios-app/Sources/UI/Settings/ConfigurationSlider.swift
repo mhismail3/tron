@@ -199,7 +199,9 @@ struct ConfigurationSliderContainer<Content: View>: View {
             admitsInput: { admitsPresentation && presentation.admitsInput(anchor.session) }, dismiss: close, focus: $sliderFocused
         )
         ZStack(alignment: .topLeading) {
-            Color.clear.ignoresSafeArea().contentShape(Rectangle())
+            // An embedded section's host is only that section's frame (#1573):
+            // catch outside taps across the whole surface, not only the host.
+            Color.clear.ignoresSafeArea().contentShape(Rectangle().inset(by: -10_000))
                 .onTapGesture { close() }.accessibilityHidden(true)
             ConfigurationSliderSurface(
                 source: source, target: target, fraction: expanded ? 1 : 0,
