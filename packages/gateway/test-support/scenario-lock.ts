@@ -148,6 +148,8 @@ const FILE_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z/g;
 const DIGEST_SEGMENT = /([/\\])[0-9a-f]{64}(?=[/\\])/g;
 /** A truncated digest of a per-run path, as extension identities carry. */
 const SHORT_DIGEST = /^sha256:[0-9a-f]{16}$/;
+/** An extension owner identity: a base64url digest of the extension's per-run path. */
+const EXTENSION_OWNER = /^extension:[A-Za-z0-9_-]{43}$/;
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const DATA_URL = /data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,[A-Za-z0-9+/=]+/gi;
 const EPOCH_NUMBER = /(?<![.\d])\b\d{13,}\b/g;
@@ -189,6 +191,7 @@ function normalizeTraceString(value: string, normalization: TraceNormalization):
   if (FAUX_API.test(value)) return "<api>";
   if (BASE64_PAYLOAD.test(value)) return `<base64:${value.length}>`;
   if (SHORT_DIGEST.test(value)) return "sha256:<digest>";
+  if (EXTENSION_OWNER.test(value)) return "extension:<digest>";
   let text = value;
   // Longest first: a realpath (`/private/var/…`) contains the raw temp root
   // (`/var/…`), and replacing the shorter one first would leave `/private<tmp>`.

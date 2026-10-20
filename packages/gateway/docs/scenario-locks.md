@@ -50,6 +50,10 @@ the `computer` module registers only on darwin.
 | `gateway/run` | `run-extension-ui` | an extension tool's `select` waits for `extension.respond` |
 | `gateway/run` | `run-cold-load-eviction` | under a one-runtime cap an open session is never reclaimed; once closed, a settled session is evicted for capacity, stays listed with its unread attention, and `session.open` cold-loads it with its JSONL and context |
 | `gateway/run` | `run-drain-snapshot` | the administrative drain (`waitUntilIdle`) through `gateway.drain.status`: a live run and its queued follow-up block it, new work is refused, it completes after both |
+| `gateway/run` | `run-queue-control` | three follow-ups queue behind a held run and a retried `commandId` replays; `session.queue.replace` refuses a stale revision and an unknown item, then reorders and drops; `session.abort` refuses a stale operation; `session.clearQueue` clears queued follow-ups; a steer queued at Stop becomes the next turn |
+| `gateway/run` | `run-lifecycle-rpcs` | `gateway.restart`/`gateway.stop` refused unsupervised or malformed; `session.reloadResources` while idle and refused mid-run; a restart over a live run drains it (second restart, stop and new work refused; `restartNow` asks again) and completes after it; an idle stop |
+| `gateway/run` | `run-eviction-choice` | under a three-runtime cap each capacity eviction takes the least recently used closed, saved session, never an open one or an unsaved draft |
+| `gateway/run` | `run-drain-blockers` | the drain waits on blockers that are not a live run: an extension command awaiting its select (its prompt's preflight work) and a detached extension run, until the answer and the run's terminal artifact |
 | `gateway/transport` | `transport-reconnect-snapshot` | a client drops mid-run and reopens to the live run, then the settled one; the prompt runs once |
 | `gateway/session-catalog` | `project-root-trust` | a chat in a subdirectory of an untrusted Git project: trust resolves to the root and refuses creation, a client's decision is saved for the root, and the chat keeps its cwd while the root's settings, compaction budgets, skill and extension (not the subdirectory's) load; revoking the decision reloads it without them |
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Mac layer: resolution, a live chat, history, files, notifications |
@@ -59,6 +63,10 @@ the `computer` module registers only on darwin.
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 
+The lifecycle lock runs with harness option `lifecycleRequests` (the real terminal
+owner; `gateway-main`'s exit requests and the restart's auth cancellation are recorded,
+and the lock runs the drain itself). It blinds the answers' `restarting`/`stopping`,
+which count the RPC's own work as a blocker and so are never true (#1559).
 The reconnect lock records the two reopen snapshots in full but no event
 shapes: which coalesced snapshot a socket that drops mid-run receives before
 it closes is host timing. The subagent lock enters at `RuntimeRegistry`: the delegation kernel's

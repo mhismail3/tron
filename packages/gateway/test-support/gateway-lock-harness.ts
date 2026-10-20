@@ -15,6 +15,7 @@ import { OutsideChanges } from "../src/admin/settings-outside.js";
 import { MacTerminalKeys } from "../src/security/mac-terminal.js";
 import { DeviceStore } from "../src/security/device-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
+import { TerminalService } from "../src/machine/terminal-service.js";
 import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../src/sessions/runtime-registry.js";
 import type { NotificationService } from "../src/notifications/notification-service.js";
 import { GatewayAutomationExecutor } from "../src/automations/automation-executor.js";
@@ -81,7 +82,14 @@ export interface LockGatewayOptions {
   readonly home?: { readonly memorySummarizer: () => EpisodicSummarizer };
   /** The registry's live-runtime cap; unset, as in production, there is none. */
   readonly maximumLiveRuntimes?: number;
+  /** Serve `gateway.restart` and `gateway.stop` as a supervised `gateway-main`
+   * does, with the real terminal owner and the restart's auth cancellation, but
+   * record each process exit request instead of exiting; the lock runs the drain. */
+  readonly lifecycleRequests?: boolean;
 }
+
+/** One process exit request `gateway-main` would act on, or the auth cancellation a restart makes. */
+export type LockLifecycleRequest = { readonly kind: "restart"; readonly restartNow: boolean } | { readonly kind: "stop" | "auth.cancelWaitingForRestart" };
 
 export interface LockConnectOptions {
   /** `mobile` is the phone's presentation role: it may publish chat visibility. */
@@ -131,15 +139,18 @@ export interface LockGateway {
   readonly notifications: ReadonlyArray<TraceValue>;
   /** Every runtime load and eviction the registry recorded, in order. */
   readonly runtimeLifecycle: ReadonlyArray<RuntimeLifecycleRecord>;
+  /** Process exit requests, when `lifecycleRequests` is set. */
+  readonly lifecycleRequests: ReadonlyArray<LockLifecycleRequest>;
   /** The recorded client and provider facts, normalized. */
   record(): { exchanges: TraceValue[]; events: TraceValue[]; providerRequests: ProviderRequestRecord[] };
   dispose(): Promise<void>;
 }
 
 /** An owner the scenario must never reach: reaching it fails the lock loudly. */
-function unreachable(name: string): unknown {
-  return new Proxy({}, { get: (_target, property) => {
+function unreachable(name: string, provided: Record<string, unknown> = {}): unknown {
+  return new Proxy(provided, { get: (target, property) => {
     if (property === "then") return undefined;
+    if (typeof property === "string" && Object.hasOwn(target, property)) return target[property];
     throw new Error(`Lock scenario reached the ${name} owner (${String(property)}), which this harness does not provide`);
   } });
 }
@@ -269,6 +280,8 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     automations = new AutomationService(store, scheduler, registry);
     scheduleTool = new GatewayScheduleToolOperations(automations, receipts);
   }
+  const lifecycleRequests: LockLifecycleRequest[] = [];
+  const terminals = options.lifecycleRequests ? new TerminalService(64_000, () => {}) : undefined;
   // The real upload owner: a prompt materializes its (empty) attachment list through it.
   const uploads = new UploadStore(tronHome, 1_048_576);
   const service = new GatewayService({
@@ -282,11 +295,21 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
     logger: { log: () => {} },
     sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
-    requestRestart: () => { throw new Error("Lock scenario requested a restart"); },
-    requestStop: () => { throw new Error("Lock scenario requested a stop"); },
-    uploads, terminals: { belongsToSession: () => false },
+    ...(options.lifecycleRequests ? {
+      requestRestart: (restartNow?: boolean) => { lifecycleRequests.push({ kind: "restart", restartNow: restartNow === true }); },
+      requestStop: () => { lifecycleRequests.push({ kind: "stop" }); },
+      terminals,
+    } : {
+      requestRestart: () => { throw new Error("Lock scenario requested a restart"); },
+      requestStop: () => { throw new Error("Lock scenario requested a stop"); },
+      terminals: { belongsToSession: () => false },
+    }),
+    uploads,
     filesystem: unreachable("filesystem"), modelConfig: unreachable("modelConfig"), packages: unreachable("packages"),
-    hookResources: unreachable("hookResources"), auth: unreachable("auth"),
+    hookResources: unreachable("hookResources"),
+    auth: options.lifecycleRequests
+      ? unreachable("auth", { cancelWaitingForRestart: () => { lifecycleRequests.push({ kind: "auth.cancelWaitingForRestart" }); } })
+      : unreachable("auth"),
   } as unknown as GatewayServiceDependencies);
   server = new GatewayServer({
     host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576, devices, sessions: registry, service,
@@ -307,7 +330,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   let frameCounter = 0;
 
   const gateway: LockGateway = {
-    root, agentDir, tronHome, cwd, registry, normalization, notifications, runtimeLifecycle,
+    root, agentDir, tronHome, cwd, registry, normalization, notifications, runtimeLifecycle, lifecycleRequests,
     socketUrl: `ws://127.0.0.1:${port}/v1/socket`, token: paired.token,
     script(steps) {
       // An unscripted request is itself a delta: it is recorded rather than crashing
@@ -396,6 +419,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       await automations?.dispose();
       await registry.dispose().catch(() => {});
       await receipts.dispose();
+      terminals?.dispose();
       await outside.dispose();
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

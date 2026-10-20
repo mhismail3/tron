@@ -33,8 +33,10 @@
     "recency-deadlines.ts",
     "recent-model-usage.integration.test.ts",
     "restart-drain.ts",
+    "run-lifecycle.lock.integration.test.ts",
     "run-markers.lock.integration.test.ts",
     "run-markers.ts",
+    "run-queue.lock.integration.test.ts",
     "run.lock.integration.test.ts",
     "run.module.json",
     "run.store.lock.integration.test.ts",
@@ -47,6 +49,7 @@
     "runtime-terminal-notifications.integration.test.ts",
     "runtime-tool-loadout.integration.test.ts",
     "semantic-ui-broker.ts",
+    "session-heap.lock.integration.test.ts",
     "session-lifecycle.lock.integration.test.ts",
     "summary-text.ts",
     "tron-modules.integration.test.ts"
