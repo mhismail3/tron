@@ -23,7 +23,9 @@ extension RealGatewayPairAndChatUITests {
         for folder in [added, seeded, nested] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         // A saved decision the Gateway reads from its own trust store.
         let trustStore = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).appendingPathComponent("trust.json")
-        let parentPath = parent.resolvingSymlinksInPath().path
+        // The fixture workspace is already canonical (realpath), as the Gateway records
+        // projects; Foundation's symlink resolution would drop /private and miss it.
+        let parentPath = parent.path
         try JSONSerialization.data(withJSONObject: [seeded.resolvingSymlinksInPath().path: true, parentPath: false])
             .write(to: trustStore)
         func stored(_ name: String) -> Bool? {
@@ -115,7 +117,7 @@ extension RealGatewayPairAndChatUITests {
     func testProjectSettingsTrustRowTrustsABlockedProject() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let workspace = URL(fileURLWithPath: fixture.workspace).resolvingSymlinksInPath().path
+        let workspace = fixture.workspace
         let trustStore = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).appendingPathComponent("trust.json")
         try JSONSerialization.data(withJSONObject: [workspace: false]).write(to: trustStore)
         func stored() -> Bool? {
