@@ -849,7 +849,7 @@ export class RuntimeRegistry {
         serializeSessionMutation: (sessionId, commit) => this.serializeSessionMutation(sessionId, commit),
         beginHomePublicationReconciliation: () => { this.homePublicationUncertain = true; },
         retireHomeRuntimes: (reloaded) => this.retireUncertainHomeRuntimes(reloaded),
-        wakeHome: async (sessionId) => (await this.acquire(sessionId)).admitHomeWake(),
+        wakeHome: async (sessionId) => { if (this.home.reservedChapter(sessionId)) { await this.materializeReservedHome(sessionId); await this.assertReservedHomeAttempt(sessionId); } return (await this.acquire(sessionId)).admitHomeWake(); }, // A post-rollover wake materializes the successor as home.prompt does (#1518).
       },
       ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
       workspace: this.workspace,

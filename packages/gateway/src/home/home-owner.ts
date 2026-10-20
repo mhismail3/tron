@@ -603,8 +603,8 @@ export class HomeOwner {
     const sessionId = homeSessionId(record);
     if (!(await this.inbox.pendingTasks(record.homeId)).length) { this.lastWakeDelivered = false; return "done"; }
     // An attempt runs after recovery, so the task namespace and the session catalog are settled here.
-    // A Home that never wrote its conversation has no session to run.
-    const refusal = !(await this.options.sessions.sessionPresent(sessionId)) ? "unavailable" : await this.homeRefusal(record);
+    // A Home that never wrote its conversation has no session to run; a wake materializes a reserved successor (#1518).
+    const refusal = this.reservedChapter(sessionId) === undefined && !(await this.options.sessions.sessionPresent(sessionId)) ? "unavailable" : await this.homeRefusal(record);
     if (refusal) {
       this.lastWakeDelivered = false;
       this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: refusal });

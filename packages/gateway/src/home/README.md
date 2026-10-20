@@ -37,7 +37,7 @@ unaffected by every rule here.
   active chapter and reserves a successor; before a `home.prompt` receipt binds, the hard limit
   (200 MiB or 100,000 entries) does the same. Every physical prompt rechecks the hard limit in
   its slot lane and refuses without redirecting. A running activation crossing it is stopped
-  with reason `chapter-limit`. Only the next `home.prompt` materializes a reserved chapter.
+  with reason `chapter-limit`. The next `home.prompt` or result wake materializes a reserved chapter.
 - **Sealed chapters** refuse every mutation (`conflict` `sealed-chapter`); a bound slot
   refuses identity replacement (`home-identity-replacement`).
 - **Materialization** claims one attempt per reserved chapter, strictly scans candidate JSONL
