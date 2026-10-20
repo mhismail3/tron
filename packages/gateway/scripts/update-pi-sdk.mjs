@@ -24,7 +24,14 @@ export function exactVersion(value) {
 export function updateCommand(version, patchedArtifact) {
   if (!exactVersion(version)) throw new Error(`Pi SDK version must be one exact semver (received ${version ?? "missing"})`);
   const spec = (name) => (patchedArtifact && name === CODING_AGENT ? `./${patchedArtifact}` : `${name}@${version}`);
-  return ["install", "--save-exact", "--engine-strict", ...REGISTRY_ARGS, ...DIRECT_PI_PACKAGES.map(spec)];
+  return ["install", "--package-lock-only", "--save-exact", "--engine-strict", ...REGISTRY_ARGS, ...DIRECT_PI_PACKAGES.map(spec)];
+}
+
+// `npm install <specs>` never runs the root lifecycle scripts, so the tree it
+// reifies keeps node-pty's spawn-helper non-executable (#1505). The updater only
+// resolves the lock with it; `npm ci` is the one install, and it runs postinstall.
+export function installCommand() {
+  return ["ci", "--engine-strict", ...REGISTRY_ARGS];
 }
 
 export function auditCommand() {
@@ -233,7 +240,7 @@ function restoreOwnedState(root, original, npmBin, spawn) {
   } catch (error) {
     manifestError = error instanceof Error ? error.message : String(error);
   }
-  const recovery = spawn(npmBin, ["ci", "--engine-strict", ...REGISTRY_ARGS], {
+  const recovery = spawn(npmBin, installCommand(), {
     cwd: root, stdio: "inherit", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1", npm_config_offline: "false", npm_config_engine_strict: "true" }
   });
   const recoveryError = recovery.status === 0 ? undefined : commandFailure("npm ci recovery", recovery);
@@ -276,8 +283,11 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
     installStarted = true;
     writeFileSync(baselinePath, `${JSON.stringify({ schema: 1, rollbackVersion: current.version, ...(knownOneWayDeltas.length > 0 ? { knownOneWayDeltas } : {}) }, null, 2)}\n`);
     const command = updateCommand(version, patch.value?.artifact.path);
-    const install = spawn(npmBin, command, { cwd: root, stdio: "inherit", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1", npm_config_offline: "false", npm_config_engine_strict: "true" } });
-    if (install.status !== 0) throw new Error(commandFailure("npm install", install));
+    const npmEnv = { ...process.env, PYTHONDONTWRITEBYTECODE: "1", npm_config_offline: "false", npm_config_engine_strict: "true" };
+    const resolution = spawn(npmBin, command, { cwd: root, stdio: "inherit", env: npmEnv });
+    if (resolution.status !== 0) throw new Error(commandFailure("npm install", resolution));
+    const install = spawn(npmBin, installCommand(), { cwd: root, stdio: "inherit", env: npmEnv });
+    if (install.status !== 0) throw new Error(commandFailure("npm ci", install));
     const report = validatePiSdk({ gatewayDir: root });
     if (!report.ok) throw new Error(formatPiSdkReport(report));
     compareLockIntegrities(root, metadata, patch.value !== undefined);

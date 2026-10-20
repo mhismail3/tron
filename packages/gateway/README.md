@@ -366,8 +366,10 @@ journeys; hosted CI runs neither.
 A maintainer updates the family only with `npm run update:pi-sdk -- <exact-version>`
 from a clean `package.json`/`package-lock.json`. The helper preflights every
 family package through the current npm and prints bounded preflight evidence for
-version, source revision, integrity, and the registry-declared Node engine; it updates all four direct pins
-in one native `npm install --save-exact --engine-strict` operation, validates the
+version, source revision, integrity, and the registry-declared Node engine; it resolves all four direct pins
+in one `npm install --package-lock-only --save-exact --engine-strict` operation,
+installs that lock with `npm ci` (an argument-bearing `npm install` skips the
+repository postinstall that keeps node-pty's `spawn-helper` executable), validates the
 resulting lockfile, runs `npm audit signatures`, and restores its owned
 manifests plus the disposable installed tree with `npm ci` on failure. On
 success it also extracts the released `CHANGELOG.md` sections between the current
