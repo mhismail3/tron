@@ -103,6 +103,7 @@ import {
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { HomeOwner } from "../home/home-owner.js";
+import { HomeGlobalResources } from "../home/home-global-resources.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
 import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
@@ -626,17 +627,16 @@ export class RuntimeRegistry {
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, PendingColdLoad>();
   private reservedSlotStarts = 0;
-  /** Heap the byte budget has charged to session starts that are not published
-   * yet, keyed by the session being opened. The byte pass counts them in the
-   * projected total, so two concurrent opens each see the room the other has
-   * taken; a session's own reservation is left out of its own projected total,
-   * which is the charge it is opening with. */
+  private readonly homeResources: HomeGlobalResources;
+  /** Heap the byte budget has charged to session starts that are not published yet, keyed by
+   * the session being opened. The byte pass counts them in the projected total, so two concurrent
+   * opens each see the room the other has taken; a session's own reservation is left out of its
+   * own projected total, which is the charge it is opening with. */
   private readonly reservedRuntimeBytes = new Map<string, number>();
-  /** Heap the byte budget charges each published runtime, written synchronously
-   * where the runtime is published, refreshed by the byte pass from the stat it
-   * read, and cleared where it leaves `slots`. It is the live charge the load
-   * record's `overBudget` compares against the budget, and the size an eviction
-   * records. */
+  /** Heap the byte budget charges each published runtime, written synchronously where the
+   * runtime is published, refreshed by the byte pass from the stat it read, and cleared where it
+   * leaves `slots`. It is the live charge the load record's `overBudget` compares against the
+   * budget, and the size an eviction records. */
   private readonly publishedRuntimeBytes = new Map<string, PublishedRuntimeBytes>();
   private readonly readHeapSample: () => HeapSample;
   private evictionTimer?: NodeJS.Timeout;
@@ -793,6 +793,8 @@ export class RuntimeRegistry {
       projectionPath: modelQueueProjectionPath(options.tronHome),
       ...(options.modelQueueDiagnostic ? { log: options.modelQueueDiagnostic } : {}),
     }) : undefined;
+    this.homeResources = new HomeGlobalResources({ agentDir: options.agentDir, diagnostic: record => this.options.homeDiagnostic?.(record),
+      homeSlot: () => { try { return this.slots.get(this.home.routeBinding().physicalSessionId); } catch { return undefined; } } });
     this.home = new HomeOwner({
       tronHome: options.tronHome,
       trust: options.trust,
@@ -1129,21 +1131,19 @@ export class RuntimeRegistry {
   }
 
   async initialize(onPhase?: (phase: "catalog-warming" | "attention-recovery") => void): Promise<void> {
-    // The designation is read before any runtime can be built, so no session
-    // ever opens with the wrong profile because the record loaded late.
+    // The designation is read before any runtime is built, so no session opens with a late profile.
     await this.home.initialize();
     await this.workspace.initialize();
-    // Load the durable recovery inputs before capturing catalog membership, as
-    // before this optimization. The later evidence cut therefore cannot omit a
-    // marker that was already admitted to this reconciliation pass.
+    // Load the durable recovery inputs before capturing catalog membership, as before this
+    // optimization. The later evidence cut therefore cannot omit a marker already admitted to this pass.
     await this.attention.initialize();
     await this.archive.initialize();
     await this.recentModels.initialize();
-    // The catalog owner loads its durable rows, reconciles once, and watches
-    // the folder for external writers; the periodic pass is the backstop for
-    // any event the watcher could not see (G-9 moves both into the scheduler).
-    // A reader joins that first cut rather than walking the folder itself.
+    // The catalog owner loads its durable rows, reconciles once, and watches the folder for external
+    // writers; the periodic pass is the backstop for any event the watcher could not see (G-9 moves
+    // both into the scheduler). A reader joins that first cut rather than walking the folder itself.
     this.sessionCatalog.start();
+    this.homeResources.start();
     const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
     // readiness on those full reads; recover them once the Gateway is serving.
@@ -1872,7 +1872,7 @@ export class RuntimeRegistry {
       homeInboxAdmission: (sessionId: string, operationId: string, delivery: import("../home/home-wake-inbox.js").HomeWakeDelivery, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => this.home.admitTaskResults(sessionId, operationId, delivery, append, envelope),
       homeInboxRelease: (taskId: string, operationId: string, eventId: string) => this.home.releaseWakeTrigger(taskId, operationId, eventId),
       homeInboxSettlement: (sessionId: string, operationId: string) => this.home.settleTaskResults(sessionId, operationId),
-      homeIdle: (sessionId: string, by: "user" | "wake") => this.home.noteHomeIdle(sessionId, by),
+      homeIdle: (sessionId: string, by: "user" | "wake") => { this.home.noteHomeIdle(sessionId, by); this.homeResources.idle(sessionId); },
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
       homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
@@ -4839,12 +4839,12 @@ export class RuntimeRegistry {
     if (this.shutdownState === "disposed") return;
     if (this.disposalPromise) return this.disposalPromise;
 
-    // Close admission synchronously before waiting for any in-flight critical
-    // section. The mutex snapshot then includes every slot whose insertion had
-    // already begun and excludes every later create/acquire/import attempt.
+    // Close admission synchronously before waiting for any in-flight critical section. The mutex
+    // snapshot then includes every slot whose insertion had begun and excludes every later attempt.
     this.shutdownState = "shuttingDown";
     if (this.evictionTimer) clearInterval(this.evictionTimer);
     if (this.artifactDiscoveryTimer) clearInterval(this.artifactDiscoveryTimer);
+    this.homeResources.close();
     const operation = this.performDispose();
     this.disposalPromise = operation;
     try {
