@@ -1,5 +1,5 @@
-import { Type } from "@earendil-works/pi-ai";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { Type } from "../../kernel/pi/ai.js";
+import type { ExtensionFactory } from "../../kernel/pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
 import type { JsonValue } from "../../protocol/types.js";
 import { readSwiftAppSourceFile, type SwiftAppStore } from "./swift-app-store.js";

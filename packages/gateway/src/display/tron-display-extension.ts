@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Type } from "@earendil-works/pi-ai";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { Type } from "../kernel/pi/ai.js";
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { DISPLAY_SCHEMA, boundedString, eligibleDisplaySurfaces, normalizePublicDisplayURL, type DisplayInlineTapAction, type DisplayKind, type DisplayProjection, type DisplaySurface } from "./display-contract.js";
 import type { DisplayArtifactStore } from "./display-artifact-store.js";
 import { GatewayError } from "../errors.js";

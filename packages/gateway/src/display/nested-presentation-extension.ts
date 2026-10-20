@@ -1,4 +1,4 @@
-import type { ExtensionFactory, ToolResultEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory, ToolResultEvent } from "../kernel/pi/coding-agent.js";
 import { admitToolDisplayProjection } from "./display-contract.js";
 import { admitBrowserToolReference, sealBrowserToolReference } from "./browser-tool-reference.js";
 

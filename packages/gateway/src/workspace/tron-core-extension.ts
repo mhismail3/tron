@@ -1,5 +1,5 @@
-import { Type } from "@earendil-works/pi-ai";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { Type } from "../kernel/pi/ai.js";
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import type { TronWorkspace, TronWorkspaceDescriptor } from "./tron-workspace.js";
 import { KNOWLEDGE_TOOL_PARAMETERS, type KnowledgeService, type KnowledgeToolParameters } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";

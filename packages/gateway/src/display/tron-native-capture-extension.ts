@@ -1,5 +1,5 @@
-import { Type } from "@earendil-works/pi-ai";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { Type } from "../kernel/pi/ai.js";
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import type { BrowserLiveViewRegistry } from "./browser-live-view.js";
 
 const parameters = Type.Object({

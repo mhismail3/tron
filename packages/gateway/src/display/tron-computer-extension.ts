@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Type } from "@earendil-works/pi-ai";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { Type } from "../kernel/pi/ai.js";
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { CuaComputerClient } from "../machine/cua-client.js";
 
 /** Pi retains accepted tool awaits and awaits session_shutdown handlers before

@@ -5,7 +5,7 @@ import {
   rename, rm, stat, statfs,
 } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import type { ImageContent } from "../kernel/pi/ai.js";
 import { GatewayError } from "../errors.js";
 import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
 import { readJson } from "../util/json.js";

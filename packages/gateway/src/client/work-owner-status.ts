@@ -18,7 +18,7 @@ import { readdir } from "node:fs/promises";
 import { isIP } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join, resolve } from "node:path";
-import { SettingsManager } from "@earendil-works/pi-coding-agent";
+import { SettingsManager } from "../kernel/pi/coding-agent.js";
 import { resolveBindHost } from "../config.js";
 import type { JsonValue } from "../protocol/types.js";
 import { resolveTronHome } from "../tron-home.js";

@@ -1,4 +1,4 @@
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory } from "../pi/coding-agent.js";
 import type { JsonValue } from "../../protocol/types.js";
 
 /** One log line from a module, in the Gateway logger's shape. */

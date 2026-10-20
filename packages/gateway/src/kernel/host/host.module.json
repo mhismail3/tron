@@ -4,6 +4,7 @@
     "**"
   ],
   "dependsOn": [
+    "gateway/pi",
     "gateway/protocol"
   ],
   "riskClass": [

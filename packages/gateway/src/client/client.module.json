@@ -3,6 +3,9 @@
   "owns": [
     "**"
   ],
+  "dependsOn": [
+    "gateway/pi"
+  ],
   "exceptions": [
     {
       "path": "terminal-chat.ts",
