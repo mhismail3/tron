@@ -41,11 +41,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "test-results" / "verify-cli"
-COPIED = ["scripts/tron", "scripts/check-documentation-policy.py", "scripts/personal-info-guard.sh",
+COPIED = ["scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
           "scripts/ios-test-build-identity.py", ".github/work.json",
-          *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/budgets", "tools/metrics", "tools/layers", "tools/work")
+          *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/budgets", "tools/metrics", "tools/layers", "tools/work", "tools/docs")
             for p in (ROOT / d).glob("*.py")]]
 PASSING = "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\nunittest.main()\n"
+AGENTS = "# Charter\n\nNever SIGSTOP Gateway-owned work.\n"
 FAILING = "import unittest\nclass T(unittest.TestCase):\n    def test_broken(self):\n        self.assertEqual(1, 2)\nunittest.main()\n"
 
 
@@ -65,13 +66,19 @@ class Repo:
             shutil.copy2(ROOT / relative, self.path / relative)
         self.write(".gitignore", "test-results/\n")
         self.write("README.md", "# Fixture\n")
-        self.write("AGENTS.md", "# Charter\n")
+        self.write("AGENTS.md", AGENTS)
+        # The least guidance the real agent policy accepts: a catalog naming the iOS skill it reads.
+        self.write(".agents/README.md", "# Guidance\n\n[tron-ios](skills/tron-ios/SKILL.md)\n")
+        self.write(".agents/skills/NOTICE.md", "# Notice\n")
+        self.write(".agents/skills/tron-ios/SKILL.md", "---\nname: tron-ios\ndescription: iOS work.\n---\n\n"
+                   "Tron Device on LocalDevice. Never install Release or DevicePerformance; signed artifacts are evidence.\n")
         # The copied tools keep the over-budget exceptions they carry in the real repository.
         oversized = [relative for relative in COPIED if relative.endswith(".py")
                      and len((ROOT / relative).read_text().splitlines()) > 500]
         self.write("tooling.module.json", json.dumps({"layer": "L5", "owns": [
-            "scripts/tron", "scripts/check-documentation-policy.py", "scripts/personal-info-guard.sh",
-            "scripts/ios-test-build-identity.py", ".github/**", "tools/**", "README.md", "AGENTS.md", ".gitignore", "tooling.module.json"],
+            "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
+            "scripts/ios-test-build-identity.py", ".github/**", ".agents/**", "tools/**", "README.md", "AGENTS.md", ".gitignore",
+            "tooling.module.json"],
             "exceptions": [{"path": path, "budget": "lines", "reason": "copied tool", "exit": "real repository"} for path in oversized]}))
         for name, layer in (("alpha", "L3"), ("beta", "L3"), ("core", "L1"), ("docs", "L5")):
             self.write(f"mods/{name}/{name}.module.json", json.dumps({"layer": layer, "owns": ["**"]}))
@@ -130,8 +137,9 @@ class SelectionTests(VerifyCase):
         self.assertEqual(report["selection"]["modules"], ["repo/alpha"])
         self.assertEqual(report["selection"]["tests"], ["mods/alpha/test-alpha.py"])
         self.assertEqual(report["verdict"], "passed")
-        self.assertEqual([step["name"] for step in report["steps"]][:5],
-                         ["ownership", "budgets", "documentation policy", "privacy guard", "git diff --check"])
+        self.assertEqual([step["name"] for step in report["steps"]][:7],
+                         ["ownership", "budgets", "documentation policy", "generated docs", "agent policy", "privacy guard",
+                          "git diff --check"])
         self.assertIn("[1/", passed.stdout)
         moved = next(step for step in report["steps"] if step["name"] == "moved-lines (advisory)")
         self.assertEqual(moved["status"], "ok")
@@ -176,6 +184,65 @@ class SelectionTests(VerifyCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("zero tests ran: an empty selection is not evidence", result.stdout)
         self.assertEqual(r.report()["verdict"], "failed")
+
+
+class FastPathTests(VerifyCase):
+    """A change runs the checks that can catch a regression in it, and still fails when it breaks one."""
+
+    def test_markdown_selects_no_test_and_a_docs_only_change_passes_on_the_documentation_checks(self) -> None:
+        r = self.repo
+        r.write("mods/core/README.md", "# Core\n\nThe kernel module.\n")  # an L1 module: code here would widen
+        r.write("AGENTS.md", AGENTS + "\nA new rule.\n")
+        r.commit("docs")
+        passed = r.verify("--changed")
+        self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+        report = r.report()
+        self.assertEqual((report["selection"]["tests"], report["selection"]["modules"], report["passingTests"]), ([], [], 0))
+        self.assertIn("Markdown-only change", report["message"])
+        self.assertEqual({step["name"]: step["status"] for step in report["steps"]}["agent policy"], "ok")
+        # Known-bad: prose that breaks a documentation rule fails the run.
+        r.write("AGENTS.md", "# Charter\n")
+        r.commit("drop the stop rule")
+        failed = r.verify("--changed")
+        self.assertEqual(failed.returncode, 1, failed.stdout)
+        self.assertIn("agent policy FAILED", failed.stdout)
+        # Markdown beside code selects only the code's module.
+        r.git("reset", "-q", "--hard", "base")
+        r.write("mods/core/README.md", "# Core\n")
+        r.write("mods/alpha/alpha.py", "VALUE = 'changed'\n")
+        r.commit("docs and code")
+        mixed = r.verify("--changed")
+        self.assertEqual(mixed.returncode, 0, mixed.stdout)
+        self.assertEqual(r.report()["selection"]["tests"], ["mods/alpha/test-alpha.py"])
+
+    def test_a_change_to_only_tests_or_goldens_runs_those_tests_and_the_goldens_locks(self) -> None:
+        r = self.repo
+        r.write("mods/core/test-core-other.py", PASSING)
+        r.write("mods/core/locks/state.golden.json", "{}\n")
+        r.commit("more core tests")
+        r.git("branch", "-f", "base")
+        # A test-only change in a kernel module runs that test, not every lock.
+        r.write("mods/core/test-core-other.py", PASSING + "# reworded\n")
+        r.commit("core test")
+        only = r.verify("--changed")
+        self.assertEqual(only.returncode, 0, only.stdout)
+        self.assertEqual(r.report()["selection"]["tests"], ["mods/core/test-core-other.py"])
+        # A golden runs its module's locks; a broken lock still fails.
+        r.write("mods/core/locks/state.golden.json", "{\"recorded\": true}\n")
+        r.write("mods/core/test-core.lock.py", FAILING)
+        r.commit("golden and its lock")
+        failed = r.verify("--changed")
+        self.assertEqual(failed.returncode, 1, failed.stdout)
+        self.assertEqual(r.report()["selection"]["tests"], ["mods/core/test-core-other.py", "mods/core/test-core.lock.py"])
+        self.assertIn("AssertionError: 1 != 2", failed.stdout)
+        # Known-bad: code beside the tests selects as before, here widening to every lock.
+        r.git("reset", "-q", "--hard", "base")
+        r.write("mods/core/test-core-other.py", PASSING + "# reworded\n")
+        r.write("mods/core/core.py", "VALUE = 'kernel change'\n")
+        r.commit("core code and test")
+        widened = r.verify("--changed", "--plan")
+        self.assertIn("widened to every lock", widened.stdout)
+        self.assertIn("repo/core: owns a changed path; its 2 owned test file(s)", widened.stdout)
 
 
 class ContractTests(VerifyCase):

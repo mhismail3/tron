@@ -64,6 +64,16 @@ def is_test(path: str) -> bool:
     return bool(re.search(r"\.test\.(ts|mjs)$", name)) or bool(re.match(r"test-.*\.(py|sh)$", name))
 
 
+def is_doc(path: str) -> bool:
+    """Markdown is prose: the documentation checks are its evidence, and no test reads it."""
+    return path.endswith(".md")
+
+
+def is_golden(path: str) -> bool:
+    """Recorded lock output, read only by its module's locks."""
+    return ".golden." in path.rsplit("/", 1)[-1] or "/Goldens/" in path
+
+
 def nested_files() -> tuple[set, set]:
     def listed(config: str, name: str) -> set:
         path = ROOT / GATEWAY / config
@@ -177,37 +187,57 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             touched = sorted(paths)
         if not touched:
             raise VerifyError(f"no change between {base} and HEAD; use --module or --all")
-        chosen = {owner[path] for path in touched if path in owner}
-        unowned = [path for path in touched if path not in owner and path in tracked]
+        docs = [path for path in touched if is_doc(path)]
+        if docs:
+            reasons.append(f"{len(docs)} Markdown file(s): the documentation checks cover them; they select no test")
+        code = [path for path in touched if not is_doc(path)]
+        unowned = [path for path in code if path not in owner and path in tracked]
         # A deleted or renamed-away path is owned as of the base revision.
-        gone = [path for path in touched if path not in tracked]
+        gone = [path for path in code if path not in tracked]
         if gone:
             base_modules = ownership.check(base)[0]["modules"]
-            base_owner = {path: key for key, module in base_modules.items() for path in module["owned"]}
-            chosen |= {base_owner[path] for path in gone if path in base_owner}
-            unowned += [path for path in gone if path not in base_owner]
+            owner = {**{path: key for key, module in base_modules.items() for path in module["owned"]}, **owner}
+            unowned += [path for path in gone if path not in owner]
+        changes: dict[str, list[str]] = {}
+        for path in code:
+            if path in owner:
+                changes.setdefault(owner[path], []).append(path)
+        chosen = set(changes)
+        # A module whose change is only its own tests and goldens runs those tests and, for a golden, its
+        # locks: no other code reads a test file or a golden, so nothing depending on the module changed.
+        narrow = {key for key, paths in changes.items() if all(is_test(path) or is_golden(path) for path in paths)
+                  and (not any(is_golden(path) for path in paths) or any(is_lock(path) for path in modules.get(key, {"owned": []})["owned"]))}
         for key in sorted(chosen):
             owned = [path for path in modules.get(key, {"owned": []})["owned"] if is_test(path)]
+            if key in narrow:
+                goldens = any(is_golden(path) for path in changes[key])
+                owned = [path for path in owned if path in changes[key] or (goldens and is_lock(path))]
+                reasons.append(f"{key}: changes only its tests{' and goldens' if goldens else ''}; those {len(owned)} test file(s)")
+            else:
+                reasons.append(f"{key}: owns a changed path; its {len(owned)} owned test file(s)")
             selected |= set(owned)
-            reasons.append(f"{key}: owns a changed path; its {len(owned)} owned test file(s)")
         # Reverse closure: modules that declare a dependency or a dynamic edge on a selected one.
-        frontier = set(chosen)
+        reached = frontier = chosen - narrow
         while frontier:
-            dependents = {key for key, module in modules.items() if key not in chosen
+            dependents = {key for key, module in modules.items() if key not in reached
                           and (set(module.get("dependsOn", [])) | set(module.get("dynamicTargets", []))) & frontier}
             for key in sorted(dependents):
                 dependent_locks = [path for path in modules[key]["owned"] if is_test(path) and is_lock(path)]
                 selected |= set(dependent_locks)
                 reasons.append(f"{key}: depends on a selected module; its {len(dependent_locks)} lock file(s)")
-            chosen |= dependents
-            frontier = dependents
-        widening = sorted(key for key in chosen if key in modules and (modules[key]["layer"] in WIDENING_LAYERS or key in WIDENING_MODULES))
+            reached, frontier = reached | dependents, dependents
+        chosen |= reached
+        widening = sorted(key for key in reached if key in modules
+                          and (modules[key]["layer"] in WIDENING_LAYERS or key in WIDENING_MODULES))
         if widening or unowned:
             selected |= set(locks)
             why = ", ".join([f"{key} ({modules[key]['layer']})" for key in widening] + [f"unowned {path}" for path in unowned][:5])
             reasons.append(f"widened to every lock ({len(locks)} files): {why}")
+    docs_only = mode == "changed" and all(is_doc(path) for path in touched)
+    # Generated doc blocks are built from Markdown, manifests and Gateway sources (tools/docs/README.md).
+    doc_inputs = mode == "all" or any(is_doc(path) or path.endswith(".module.json") for path in touched)
     return {"mode": mode, "base": base, "modules": sorted(chosen), "touched": len(touched), "reasons": reasons,
-            "tests": sorted(selected)}
+            "tests": sorted(selected), "docsOnly": docs_only, "docInputs": doc_inputs}
 
 
 # ---------------------------------------------------------------------------- steps
@@ -337,7 +367,8 @@ def main(argv: list[str]) -> int:
         print(f"  why: {reason}", flush=True)
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
-    plan_steps = ["ownership", "budgets", "documentation policy", "privacy guard", "git diff --check", "ledger (advisory)", "moved-lines (advisory)"] \
+    plan_steps = ["ownership", "budgets", "documentation policy", "generated docs", "agent policy", "privacy guard", "git diff --check",
+                  "ledger (advisory)", "moved-lines (advisory)"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios build"] if ios_lane else []) + ["layers ios"] \
         + [f"tests: {group}" for group in sorted(groups)]
@@ -366,13 +397,17 @@ def main(argv: list[str]) -> int:
         ("ownership", [tron, "ownership"], {}),
         ("budgets", [tron, "budgets", "HEAD", "--base", base], {}),
         ("documentation policy", ["python3", "scripts/check-documentation-policy.py"], {}),
+        ("generated docs", [tron, "docs", "check"] if selection["docInputs"] or gateway_touched else None, {}),
+        ("agent policy", ["bash", "scripts/check-agent-policy.sh"], {}),
         ("privacy guard", f"git diff {base}..HEAD | scripts/personal-info-guard.sh --stdin", {}),
         ("git diff --check", ["git", "diff", "--check", f"{base}..HEAD"], {}),
         ("ledger (advisory)", [tron, "work", "ledger"], {"advisory": True}),
         ("moved-lines (advisory)", [tron, "measure", base, sha], {"advisory": True}),
     ]
     for label, command, options in checks:
-        if run.step(label, command, **options)["status"] == "failed":
+        if command is None:
+            run.skipped(label, "the change touches no Markdown, manifest or Gateway source a generated block reads")
+        elif run.step(label, command, **options)["status"] == "failed":
             return finish("failed", f"{label} failed")
     if gateway_touched:
         for label, command in (("gateway typecheck", node + ["npm", "run", "check"]), ("gateway lint", node + ["npm", "run", "lint"])):
@@ -448,6 +483,8 @@ def main(argv: list[str]) -> int:
     passing = sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))
     if not_run:
         return finish("incomplete", f"selected tests were not run: {', '.join(not_run)} (pass --skip to accept explicitly)")
+    if passing == 0 and selection["docsOnly"]:
+        return finish("passed", "Markdown-only change: the documentation checks are its evidence; no test reads it")
     if passing == 0:
         return finish("failed", "zero tests ran: an empty selection is not evidence")
     groups_run = len([step for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"])

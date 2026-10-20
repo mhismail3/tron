@@ -28,7 +28,8 @@ the build that stamped it).
 
 1. `scripts/tron ownership`
 2. `scripts/tron budgets HEAD --base <base>`
-3. documentation policy
+3. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check`
+   when Markdown, a manifest or the Gateway (its generated blocks' sources) changed
 4. the privacy guard over `git diff <base>..HEAD`
 5. `git diff --check`
 6. `scripts/tron work ledger`, which is **advisory**: issue state is shared
@@ -40,9 +41,8 @@ the build that stamped it).
    below). A selection without the iOS lane runs it only when a fresh index
    exists; otherwise it is reported as skipped, never as passed.
 
-V10 also runs `scripts/tron measure <base> HEAD` as an advisory step, writing
-per-file moved/rewrite counts to `test-results/measure/`. Neither counts nor
-measurement errors fail verify; errors remain visible in its step status/log.
+V10 also runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file
+moved/rewrite counts to `test-results/measure/`; its counts and errors never fail verify.
 
 ## Selection
 
@@ -55,6 +55,16 @@ base). Each module contributes its owned tests:
 
 Recorders under `test-fixtures/` are never run. Modules whose `dependsOn` or
 `dynamicEdges` reach a selected module add their locks, transitively.
+
+Small changes run only what can catch a regression in them:
+- **Markdown** selects no module: no test reads it, so the documentation
+  checks are its evidence. A Markdown-only change passes on the static checks.
+- A module whose change is **only its own tests and goldens** (`*.golden.*`,
+  `Goldens/`) runs those tests, plus its locks when a golden changed. Nothing
+  else reads them, so it neither widens nor adds dependents' locks. Code
+  beside them selects the module as usual.
+
+A Swift or Gateway string edit is code: its tests and locks run (locks compare labels).
 
 The run widens to **every lock** when the change touches a module at layer
 L0–L2 (platform, contracts, kernel), `gateway/package` (toolchain),
@@ -130,16 +140,11 @@ known-kill probe proves its vitest runner activates mutants with the pinned vite
 ## Verify
 
 `scripts/tron test tooling scripts/test-tron-verify.py` drives verify in
-disposable repositories whose modules own real Python tests. It covers
-one-module selection and a loud failure, kernel/unowned widening, the
-zero-test failure (structured verdict, runner exit and count, including unittest's
-exit 5 on Python 3.14+ and exit 0 with zero tests on older Python), the uncommitted
-refusal, and identical result digests. Its iOS lane case uses a stand-in
-`scripts/tron-ios-test` that keeps the real contract: `build` compiles a real index
-store with `swiftc` and writes the real stamp, and `run` writes an XCTest-style
-`summary.json`. The case checks that a change selects only the UI locks, the build
-runs once and is reused with an identical digest, the real `layers ios` runs on it,
-and failing or empty summaries fail. Over a fake Gateway runner it also covers
-`mutate`: a hanging mutant stopped at its timeout with its process group, and an
-interrupted run that restores the source and keeps its finished mutants.
-Output is kept in `test-results/verify-cli/`.
+disposable repositories whose modules own real Python tests: selection, widening,
+the small-change paths with a known-bad case each, loud and zero-test failures,
+the uncommitted refusal and identical digests. A stand-in `scripts/tron-ios-test`
+keeps the real contract (`build` compiles a real index store with `swiftc` and
+writes the real stamp; `run` writes an XCTest-style `summary.json`) for the iOS
+lane: locks-only selection, one reused build, the real `layers ios`, failing or
+empty summaries, and extension files. Over a fake Gateway runner it covers
+`mutate`'s timeout and interrupt. Output is kept in `test-results/verify-cli/`.

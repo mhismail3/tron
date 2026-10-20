@@ -101,7 +101,8 @@ Workers run relevant tests directly. No hosted check, gate, queue, admission, re
 post-merge checker or auto-revert; none without measured benefit and maintainer approval.
 
 1. Commit in your own worktree (`git config rerere.enabled true`); `git fetch origin &&
-   git rebase origin/main` (or merge); run the touching tests (`scripts/tron test …`).
+   git rebase origin/main` (or merge); run `scripts/tron verify --changed`: it selects only
+   the checks the change can break ([tools/verify](tools/verify/README.md)), so never whole suites.
 2. `git push origin HEAD:main`; on non-fast-forward repeat step 1, rerunning tests only if
    integration changed their dependencies. Never force-push main.
 3. Close the issue with the change, actual commands and results, and residual risk;
@@ -128,8 +129,7 @@ post-merge checker or auto-revert; none without measured benefit and maintainer 
   owner module, files announced in its module issue first; one change type per commit,
   never move and change together.
 - **Lock before touch:** refactors need the module's behavior locks passing on base;
-  every new or changed golden needs maintainer review. Once `scripts/tron verify`
-  lands, `verify --changed` is mandatory here: local, never a queue, cache or receipt.
+  every new or changed golden needs maintainer review; `verify --changed` is mandatory.
   **Ratchets only tighten** (layers, files > 500 lines, doc budgets, unowned files).
 - **Feature pause for every worker:** no new features in `RuntimeSlot`, `RuntimeRegistry`,
   `GatewayService`, `GatewayServer`, `gateway-main`, `protocol/types.ts`, `projection.ts`,
