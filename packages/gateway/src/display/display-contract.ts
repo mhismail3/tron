@@ -14,7 +14,6 @@ export { BROWSER_LIVE_VIEW_CAPABILITY as DISPLAY_LIVE_VIEW_CAPABILITY } from "./
 
 export const DISPLAY_SCHEMA = "tron.display.v1";
 export const DISPLAY_CAPABILITY = "display-artifacts.v1";
-export { DISPLAY_MAXIMUM_ARTIFACT_BYTES };
 const DISPLAY_EMBEDDED_MEDIA_MAXIMUM_BYTES = 50 * 1_024 * 1_024;
 
 export type DisplaySurface = "sheet" | "inline" | "floating";

@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { KEYS, keyForHome, builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, keyForHome, builtinValue, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
@@ -474,5 +474,3 @@ export function targetLayers(target: SettingsTarget, options: { home?: boolean; 
       : options.project === false ? ["chat", "mac", "builtin"] : ["chat", "project", "mac", "builtin"];
   }
 }
-
-export { floorFor };

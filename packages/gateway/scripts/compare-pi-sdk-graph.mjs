@@ -69,10 +69,6 @@ export function piGraphDocument(packageJson, lockJson) {
   return stable({ direct, resolved, unresolved });
 }
 
-export function piGraphChanged(packageJsonA, lockJsonA, packageJsonB, lockJsonB) {
-  return JSON.stringify(piGraphDocument(packageJsonA, lockJsonA)) !== JSON.stringify(piGraphDocument(packageJsonB, lockJsonB));
-}
-
 function gitFile(repoDir, revision, path) {
   try {
     const bytes = execFileSync("git", ["-C", repoDir, "show", `${revision}:${path}`], { maxBuffer: GRAPH_MAX_BYTES });
