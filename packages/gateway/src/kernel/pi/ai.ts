@@ -1,0 +1,38 @@
+// The pi-ai half of the Pi seam (K-0 §4): every name the Gateway uses from
+// `@earendil-works/pi-ai`. No patched API.
+export {
+  clampThinkingLevel,
+  getCurrentSystemMessage,
+  getCurrentTools,
+  getSupportedThinkingLevels,
+  isRetryableAssistantError,
+  lazyStream,
+  normalizeContext,
+  StringEnum,
+  Type,
+} from "@earendil-works/pi-ai";
+export type {
+  AnyModel,
+  Api,
+  AssistantMessage,
+  AssistantMessageEvent,
+  AssistantMessageEventStream,
+  AuthEvent,
+  AuthInteraction,
+  AuthPrompt,
+  AuthType,
+  ClassifierContext,
+  Context,
+  Credential,
+  FetchFunction,
+  ImageContent,
+  Message,
+  Model,
+  ModelThinkingLevel,
+  Provider,
+  SimpleStreamOptions,
+  Static,
+  ThinkingLevel,
+  TSchema,
+  Usage,
+} from "@earendil-works/pi-ai";
