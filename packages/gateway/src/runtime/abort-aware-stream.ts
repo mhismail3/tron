@@ -1,5 +1,5 @@
-import type { StreamFn } from "@earendil-works/pi-agent-core";
-import { lazyStream, type AssistantMessageEvent, type AssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type { StreamFn } from "../kernel/pi/agent-core.js";
+import { lazyStream, type AssistantMessageEvent, type AssistantMessageEventStream } from "../kernel/pi/ai.js";
 
 async function* abortAwareEvents(
   source: AssistantMessageEventStream,

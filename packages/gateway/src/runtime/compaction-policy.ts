@@ -1,6 +1,6 @@
-import { clampThinkingLevel, normalizeContext, type AssistantMessage } from "@earendil-works/pi-ai";
-import type { StreamFn } from "@earendil-works/pi-agent-core";
-import { SettingsManager, type AgentSession, type ExtensionFactory, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
+import { clampThinkingLevel, normalizeContext, type AssistantMessage } from "../kernel/pi/ai.js";
+import type { StreamFn } from "../kernel/pi/agent-core.js";
+import { SettingsManager, type AgentSession, type ExtensionFactory, type SessionBeforeCompactEvent } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { CompactionConfiguration, CompactionPolicyProjection, ResolvedCompactionConfiguration } from "../protocol/types.js";
 
