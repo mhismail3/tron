@@ -1,4 +1,5 @@
 import type { EpisodicSessionSource } from "../src/episodic/episodic-contract.js";
+import { episodicDigest } from "../src/episodic/episodic-source.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "../src/episodic/home-source.js";
 
 /**
@@ -13,4 +14,20 @@ export function singleChapterSource(sessionId: string, sessionFile: string): Epi
     read: (cursor, limits) => readCanonicalHomeDeltas(snapshot, cursor, limits),
     branchAtCursor: (cursor, limits) => readCanonicalHomeIndex(snapshot, cursor, limits),
   };
+}
+
+/**
+ * Episodic memory's cursor pins the source file's device, inode and times, and its
+ * aggregate prefix digest hashes those chapter cursors, so two recordings differ only
+ * there. The corpus's reproducibility check names those values in `state.json` and
+ * keeps the aggregate digest's contract: it must still be the digest of its chapters.
+ */
+export function episodicHostAssigned(path: string, text: string): string {
+  if (!path.endsWith("/state.json")) return text;
+  const state = JSON.parse(text) as { cursor?: { completePrefixDigest: string; home: { chapters: Array<Record<string, unknown>> } } };
+  const cursor = state.cursor;
+  if (!cursor) return text;
+  if (cursor.completePrefixDigest === episodicDigest(JSON.stringify(cursor.home.chapters))) cursor.completePrefixDigest = "<digest of the chapter cursors>";
+  for (const chapter of cursor.home.chapters) for (const key of ["dev", "ino", "mtimeMs", "ctimeMs"]) chapter[key] = `<host ${key}>`;
+  return `${JSON.stringify(state, null, 2)}\n`;
 }

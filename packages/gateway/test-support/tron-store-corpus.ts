@@ -137,19 +137,29 @@ export async function runStoreLock(name: string, testFileUrl: string): Promise<v
   }
 }
 
-/** Record the store again into a fresh home: its owned files must be the committed bytes. */
+/** Record the store again into a fresh home: its owned files must be the committed bytes,
+ * once a store's own function has named the values its host file system assigns. */
 async function expectReproducible(spec: StoreSpec): Promise<void> {
   const fresh = await freshHome();
+  const named = spec.reproducible === true ? undefined : spec.reproducible;
   const owned = (digests: Record<string, string>) => Object.fromEntries(Object.entries(digests)
     .filter(([path]) => spec.paths.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))));
+  const content = async (home: string) => {
+    const files = owned(await fileDigests(home));
+    if (!named) return files;
+    for (const path of Object.keys(files)) {
+      files[path] = createHash("sha256").update(named(path, await readFile(join(home, path), "utf8"))).digest("hex");
+    }
+    return files;
+  };
   try {
     await prepareHome(fresh.home);
     await recordFixed(() => spec.record(fresh.home));
     // Every file, so a sidecar (a SQLite journal) left beside an owned file also fails.
     expect(Object.keys(await fileDigests(fresh.home)).filter((path) => !path.startsWith("gateway/workspace-state/")
       && Object.keys(owned({ [path]: "" })).length === 0), "recording writes only the store's own files").toEqual([]);
-    expect(owned(await fileDigests(fresh.home)), "recording the store again writes the committed bytes")
-      .toEqual(owned(await fileDigests(TRON_CORPUS_HOME)));
+    expect(await content(fresh.home), "recording the store again writes the committed bytes")
+      .toEqual(await content(TRON_CORPUS_HOME));
   } finally {
     await fresh.dispose();
   }

@@ -17,7 +17,7 @@ import { EpisodicMemory } from "../src/episodic/episodic-memory.js";
 import { EpisodicStore } from "../src/episodic/episodic-store.js";
 import { KnowledgeService } from "../src/knowledge/knowledge-service.js";
 import type { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
-import { singleChapterSource } from "./episodic-chapter-source.js";
+import { episodicHostAssigned, singleChapterSource } from "./episodic-chapter-source.js";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { KnowledgeStore } from "../src/knowledge/knowledge-store.js";
@@ -66,8 +66,8 @@ export interface StoreSpec {
    * only time-bounded operational state qualifies, never user data. */
   readonly renewed?: readonly string[];
   /** Recording it again (`recordFixed`) writes the committed bytes; its lock proves that.
-   * Not episodic memory: its cursor pins the source file's device, inode and ctime. */
-  readonly reproducible?: true;
+   * A function first names the values the host file system assigns in a file's text. */
+  readonly reproducible?: true | ((path: string, text: string) => string);
   /** Write representative data with the real owner (recording only). */
   record(home: string): Promise<void>;
   /** Open the store with the current owner and return its public projection. */
@@ -401,10 +401,11 @@ export const STORES: readonly StoreSpec[] = [
   {
     module: "gateway/episodic", name: "store-episodic",
     paths: ["workspace/state/episodic", "gateway/workspace-state/episodic-initialized.json"],
+    reproducible: episodicHostAssigned,
     record: (home) => withWorkspace(home, async (workspace) => {
       const root = await mkdtemp(join(tmpdir(), "tron-corpus-episodic-"));
       try {
-        const manager = SessionManager.create(join(root, "project"), join(root, "sessions"));
+        const manager = SessionManager.create("/corpus/project", join(root, "sessions"), { id: CORPUS_IDS.session });
         for (let index = 0; index < 6; index += 1) {
           manager.appendMessage({ role: "user", content: `Corpus question ${index}: ${"q".repeat(400)}`, timestamp: 1_767_225_600_000 + index } satisfies Message);
           manager.appendMessage(fauxAssistantMessage([{ type: "text", text: `Corpus answer ${index}: ${"a".repeat(400)}` }]));
