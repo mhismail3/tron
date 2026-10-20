@@ -107,7 +107,7 @@ post-merge checker or auto-revert; none without measured benefit and maintainer 
 3. Close the issue with the change, actual commands and results, and residual risk;
    link long logs (`test-results/`, internal workspace). `scripts/tron work land` is
    optional fetch/merge/push. Incidents also name the one-step diagnosing signal, added
-   with a test and a row in `packages/gateway/docs/observability.md`.
+   with a test and a row in its module README Signals (`packages/gateway/docs/observability.md`).
 
 ## Work tracking
 
