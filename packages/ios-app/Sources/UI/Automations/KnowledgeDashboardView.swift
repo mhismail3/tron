@@ -866,6 +866,9 @@ struct KnowledgeSheet: View {
 struct KnowledgeCoverageSheetHost: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
+    /// Opened from Connected Services: the opening group's accent.
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronKnowledge }
     private var identity: KnowledgePresentationIdentity { model.knowledgePresentationIdentity }
     @State private var store = KnowledgeCoveragePresentationStore()
     let onOpenSession: (KnowledgeObservationCoverage) -> Void
@@ -898,18 +901,18 @@ struct KnowledgeCoverageSheetHost: View {
                     )
                 } else if let statusError {
                     TronPlaceholderState(title: "Needs attention unavailable", detail: statusError,
-                                         icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
+                                         icon: "externaldrive.badge.xmark", accent: accent,
                                          actionTitle: "Retry", action: { requestGeneration &+= 1 })
                 } else {
-                    TronSheetLoadingState(label: "Loading attention…", accent: .tronKnowledge)
+                    TronSheetLoadingState(label: "Loading attention…", accent: accent)
                 }
             }
-            .tronNavigationTitle("Observation coverage", accent: .tronKnowledge)
+            .tronNavigationTitle("Observation coverage", accent: accent)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronKnowledge)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -918,7 +921,7 @@ struct KnowledgeCoverageSheetHost: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .tronSettingsVisualTheme(accent: accent)
         .tronPresentation()
         .task(id: "\(requestGeneration)/\(activity.allowsPresentationPublication)/\(identity.profileID ?? "none")/\(identity.lifecycleGeneration ?? -1)/\(identity.connectionID ?? -1)") {
             await load()
@@ -2380,6 +2383,9 @@ struct KnowledgeConfigurationView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.dismiss) private var dismiss
+    /// Opened from Connected Services: the opening group's accent.
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronKnowledge }
     @PresentationState private var config: KnowledgeConfig?
     @PresentationState private var interestsText = ""
     @PresentationState private var mutation: KnowledgeMutation?
@@ -2388,11 +2394,11 @@ struct KnowledgeConfigurationView: View {
     @PresentationState private var destination: KnowledgeDestinationIdentity?
 
     var body: some View {
-        KnowledgeFormSheet(title: "Current interests", isWorking: saving, actionDisabled: config == nil, onAction: save) {
+        KnowledgeFormSheet(title: "Current interests", accent: accent, isWorking: saving, actionDisabled: config == nil, onAction: save) {
             if config == nil && error == nil {
-                TronSheetLoadingState(label: "Loading configuration…", accent: .tronKnowledge)
+                TronSheetLoadingState(label: "Loading configuration…", accent: accent)
             } else {
-                TronSettingsGroup("Current interests", accent: .tronKnowledge, surfaceStyle: .uncontained) {
+                TronSettingsGroup("Current interests", accent: accent, surfaceStyle: .uncontained) {
                     TextEditor(text: $interestsText).frame(minHeight: 120).tronTextEditor()
                         .accessibilityLabel("Current interests")
                 }
