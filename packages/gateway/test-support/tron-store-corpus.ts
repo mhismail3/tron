@@ -145,6 +145,9 @@ async function expectReproducible(spec: StoreSpec): Promise<void> {
   try {
     await prepareHome(fresh.home);
     await recordFixed(() => spec.record(fresh.home));
+    // Every file, so a sidecar (a SQLite journal) left beside an owned file also fails.
+    expect(Object.keys(await fileDigests(fresh.home)).filter((path) => !path.startsWith("gateway/workspace-state/")
+      && Object.keys(owned({ [path]: "" })).length === 0), "recording writes only the store's own files").toEqual([]);
     expect(owned(await fileDigests(fresh.home)), "recording the store again writes the committed bytes")
       .toEqual(owned(await fileDigests(TRON_CORPUS_HOME)));
   } finally {

@@ -66,7 +66,8 @@ the same bytes. A store marked `reproducible` (settings and the derived stores)
 was recorded that way, and its lock records it once more into a fresh home and
 requires the committed bytes, which pins its write path too. The other committed
 stores still hold their original wall-clock recording until a change re-records
-them. Episodic memory cannot be reproducible: its cursor pins the source session
+them. The search index's SQLite header names the writing library version, so a
+Node upgrade that bumps SQLite re-records `store-session-search`. Episodic memory cannot be reproducible: its cursor pins the source session
 file's device, inode and ctime, which only the filesystem assigns.
 Each store lock (`*.store.lock.integration.test.ts` beside its module):
 1. stages a copy with the owner-only modes the Gateway creates;

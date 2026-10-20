@@ -4,7 +4,7 @@
 Milestone lock sensitivity (plan §3 M1, §6.6; maintainer decision 2026-10-19 on #1345, from
 the #1465 evaluation): each sampled mutant flips one operator in the file, the *locks*
 `scripts/tron verify` would select for a change to that file run, and a failing run kills
-the mutant. M1 measures what locks catch, so module journeys are not part of the run. It measures and never gates: the exit status is non-zero only for usage errors.
+the mutant. M1 measures what locks catch, so module journeys are not part of the run. It measures and never gates: it exits non-zero only for usage errors, unmutated locks that do not pass, or harness errors.
 A mutant whose locks outlive `--timeout` (an infinite loop starves vitest's own timers) is
 stopped with its whole process group and counted as detected. The source file is restored
 after every mutant, including on interrupt or SIGTERM, and the report is rewritten after
@@ -76,9 +76,12 @@ def main(argv: list[str]) -> int:
         except subprocess.TimeoutExpired:
             return "timeout"
         finally:
-            if process.poll() is None:
+            # Also after a clean exit: a worker vitest left behind still belongs to the group.
+            try:
                 os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+            except ProcessLookupError:
+                pass
+            process.wait()
         try:
             return json.loads(report_path.read_text())
         except (OSError, ValueError):
@@ -93,7 +96,7 @@ def main(argv: list[str]) -> int:
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
     # A broken harness would otherwise count every mutant as killed.
-    baseline = run_locks(None)
+    baseline = run_locks(args.timeout)
     if not isinstance(baseline, dict) or baseline.get("numFailedTests", 1) or baseline.get("numFailedTestSuites", 1) or not baseline.get("numPassedTests"):
         print("mutate: the unmutated locks do not pass cleanly; no mutant was run", file=sys.stderr)
         return 1
