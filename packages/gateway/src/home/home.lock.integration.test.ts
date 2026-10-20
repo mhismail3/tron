@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, hashPromptText, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { NotificationGrantStore } from "../notifications/grant-store.js";
+import { NotificationService } from "../notifications/notification-service.js";
+import { PushRelayClient } from "../notifications/relay-client.js";
 
 /**
  * `gateway/home` scenario lock (restructure E0a, docs/restructure/k0-kernel.md §7):
@@ -18,19 +21,22 @@ import { waitFor } from "../../test-support/wait-for.js";
  * reopen snapshot of the settled chapter among them), the payload structure of
  * every event topic the outbound queue never drops, each provider request split
  * into Home's and the worker's (tools in order, prompt sections and hash,
- * messages; Home's own `## ` headings, stream options), each runtime's tool schema digests and
- * loaded extensions (paths, tools, handlers, commands, in load order), the
- * `home.context` section names, both canonical JSONL files and the Home store's files.
- * Home's and the worker's requests interleave by host timing, so each stream is
- * kept in its own order; everything else is ordered by the scenario.
+ * messages, stream options; Home's own `## ` headings), each runtime's tool
+ * schema digests and loaded extensions (paths, tools, handlers, commands, in
+ * load order), the `home.context` section names, every push at the relay
+ * boundary (the production push owner, as in the push lock), both canonical
+ * JSONL files and the Home store's files. Home's and the worker's requests
+ * interleave by host timing, so each stream keeps its own order; everything
+ * else is ordered by the scenario.
  */
 
 const MODULE = "gateway/home";
 const LOCK = "home-activation-wake";
 const WORKER_MARKER = "This is a finite Home task.";
 const TASK_ID = "lock-task";
-const gateways: LockGateway[] = [];
-afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
+const RELAY_ORIGIN = "https://relay.lock.invalid";
+const owned: Array<() => Promise<void>> = [];
+afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });
 
 interface HomeLockTrace {
   readonly lock: string;
@@ -43,6 +49,7 @@ interface HomeLockTrace {
   readonly toolSchemas: { readonly home: TraceValue; readonly worker: TraceValue };
   readonly extensions: { readonly home: TraceValue; readonly worker: TraceValue };
   readonly canonicalJsonl: { readonly home: readonly TraceValue[]; readonly worker: readonly TraceValue[] };
+  readonly pushes: readonly TraceValue[];
   readonly homeStore: { readonly files: readonly string[]; readonly designation: TraceValue; readonly task: TraceValue };
 }
 
@@ -114,8 +121,25 @@ function callerOf(context: TranscriptContext): Caller {
 
 describe("gateway/home scenario lock", () => {
   it("home-activation-wake: designation, first runtime, an activation that delegates, the worker's report and the wake", async () => {
-    const gateway = await startLockGateway(LOCK, { home: { memorySummarizer: () => async () => fauxAssistantMessage("Lock memory summary.") } });
-    gateways.push(gateway);
+    // The production push owner, as in the push lock: only the relay's HTTP fetcher is replaced.
+    const relayRequests: Array<{ method: string; path: string; envelope: unknown }> = [];
+    let notifications!: NotificationService;
+    let gateway!: LockGateway;
+    gateway = await startLockGateway(LOCK, {
+      home: { memorySummarizer: () => async () => fauxAssistantMessage("Lock memory summary.") },
+      notifications: async (tronHome) => {
+        const relay = new PushRelayClient(RELAY_ORIGIN, async (url, init) => {
+          relayRequests.push({ method: String(init.method), path: new URL(url).pathname, envelope: init.body ? JSON.parse(String(init.body)) : null });
+          return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
+        });
+        notifications = new NotificationService(new NotificationGrantStore(tronHome), relay, Date.now, () => {}, () => {}, () => {},
+          (sessionId) => gateway?.registry.homeOwner().chapterStateFor(sessionId).homeId !== undefined);
+        await notifications.initialize();
+        return notifications;
+      },
+    });
+    owned.push(() => gateway.dispose());
+    owned.push(async () => notifications.dispose());
     const settings = JSON.parse(await readFile(join(gateway.agentDir, "settings.json"), "utf8")) as { defaultProvider: string; defaultModel: string };
     const model = { provider: settings.defaultProvider, id: settings.defaultModel };
 
@@ -159,7 +183,13 @@ describe("gateway/home scenario lock", () => {
     };
     gateway.script(Array.from({ length: 8 }, () => route));
 
-    const phone = await gateway.connect("phone");
+    const phone = await gateway.connect("phone", { clientRole: "mobile" });
+    const registered = await phone.request("push.registration.upsert", {
+      commandId: gateway.commandId(), installationId: "lock-installation", grantId: "lock-grant-0001",
+      secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: RELAY_ORIGIN,
+      notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true,
+    });
+    expect(registered.ok, JSON.stringify(registered)).toBe(true);
     const undesignated = await phone.request("home.status", {});
     expect(undesignated.ok, JSON.stringify(undesignated)).toBe(true);
     const designated = await phone.request("home.designate", { commandId: gateway.commandId(), model });
@@ -196,6 +226,8 @@ describe("gateway/home scenario lock", () => {
     expect(context.ok, JSON.stringify(context)).toBe(true);
     expect((await phone.request("session.transcript", { sessionId: homeSessionId })).ok).toBe(true);
 
+    // Each Home activation's end pushes "finished" (the phone does not present the chapter); the worker's end pushes nothing.
+    await waitFor(() => relayRequests.length >= 2, "both Home activations' finished pushes to reach the relay");
     // A second device opens the settled chapter: the snapshot every dropped frame converges to.
     const reopen = await gateway.connect("reopen");
     const reopened = await reopen.request("session.open", { sessionId: homeSessionId });
@@ -224,6 +256,7 @@ describe("gateway/home scenario lock", () => {
       toolSchemas: { home: toolSchemas.home ?? null, worker: toolSchemas.worker ?? null },
       extensions: { home: await loadedExtensions(gateway, homeSessionId), worker: await loadedExtensions(gateway, workerSessionId) },
       canonicalJsonl: { home: await gateway.canonical(homeSessionId), worker: await gateway.canonical(workerSessionId) },
+      pushes: normalizeTraceValue(relayRequests, gateway.normalization) as TraceValue[],
       homeStore: {
         files: await gateway.tree(homeRoot),
         designation: await gateway.file(join(homeRoot, "home.json")),
@@ -239,6 +272,7 @@ describe("gateway/home scenario lock", () => {
       expect(JSON.stringify(actual.canonicalJsonl.home)).toContain("tron.home-task-result.v1");
       expect(JSON.stringify(actual.canonicalJsonl.worker)).toContain("lock-result");
       expect(actual.homeStore.task).not.toBeNull();
+      expect(actual.pushes).toHaveLength(2);
     } });
   }, 60_000);
 });
