@@ -15,6 +15,11 @@ One file per Pi package, each an explicit export list of the names the Gateway u
   given to delegated providers, the bundled CLI for MCP administration, the `pi` CLI
   for session export, the alias table that loads the managed `pi-subagents` closure
   against the Gateway's own SDK modules, and the payload's `pi-coding-agent` directory.
+- `adapters.ts`: one named adapter per Pi internal the Gateway adapts, owning only the
+  Pi side (which member, in which order): `guardCanonicalAppend` (the private
+  `SessionManager._appendEntry`, one owner per manager), `wrapModelRuntimeStream`
+  (`ModelRuntime.streamSimple`), `installAgentPipeline` (the `Agent` request pipeline),
+  and `bindRuntimeSession` (`setBeforeSessionInvalidate`/`setRebindSession`).
 - `version.ts`: `PI_VERSION`, the one exact, coherent Pi release `package.json`
   declares (Tron's patched tarball counts as its release); a malformed declaration
   throws when the module loads.
@@ -39,6 +44,11 @@ One file per Pi package, each an explicit export list of the names the Gateway u
 
 ## Invariants
 
+- **Pipeline order.** `installAgentPipeline` captures Pi's provider stream first, then
+  installs message conversion, request preparation and the stream chain (so a
+  stream-side guard is innermost), then the outer context transform and outermost
+  preparation, then the turn boundary. Callers pass stages, never reorder them.
+
 - Imports nothing from the Gateway: only `@earendil-works/*` and Node built-ins.
 - Resolution runs from this package, so it finds the same `node_modules` as the
   Gateway's own imports.
@@ -47,7 +57,7 @@ One file per Pi package, each an explicit export list of the names the Gateway u
 
 ## Entry points
 
-`coding-agent.ts`, `ai.ts`, `agent-core.ts`, `tui.ts`, `packages.ts`, `version.ts`
+`coding-agent.ts`, `ai.ts`, `agent-core.ts`, `tui.ts`, `packages.ts`, `adapters.ts`, `version.ts`
 (`PI_VERSION`, reported by `system.info`;
 `scripts/ios-gateway-e2e-test` reads it from `dist/kernel/pi/version.js`).
 

@@ -28,6 +28,7 @@ import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { type ImageContent, type Model } from "../kernel/pi/ai.js";
+import { bindRuntimeSession, guardCanonicalAppend, installAgentPipeline, wrapModelRuntimeStream } from "../kernel/pi/adapters.js";
 import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
@@ -183,7 +184,6 @@ import { KEYS, hasCompactionApplier, schemaKey } from "../admin/settings-schema.
 // named `lifecycleProjection` is presentation data until this private marker is
 // attached, so tool results cannot nominate a fresh child-session owner.
 const EMBEDDED_LIFECYCLE_ARTIFACT = Symbol("embedded-lifecycle-artifact");
-const canonicalAppendOwner = Symbol("canonical-append-owner");
 type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE_ARTIFACT]?: true };
 // Disposable exact child subscriptions travel with the admitted read, never
 // with canonical activity data or a separate slot-wide child registry.
@@ -1008,26 +1008,18 @@ export class RuntimeSlot {
   }
 
   private installCanonicalWriteGuard(sessionManager: SessionManager): void {
-    const manager = sessionManager as unknown as {
-      _appendEntry: ((entry: FileEntry) => void) & { [canonicalAppendOwner]?: RuntimeSlot };
-    };
     // The guarded method belongs to the manager, not a runtime rebuild. Its
     // immutable owner also rejects sharing one writer instance across slots.
-    const owner = manager._appendEntry[canonicalAppendOwner];
-    if (owner === this) return;
-    if (owner) throw new GatewayError("conflict", "Canonical session manager already has a runtime owner");
-    const appendEntry = manager._appendEntry.bind(manager);
-    const guardedAppend = (entry: FileEntry) => {
+    const guarded = guardCanonicalAppend(sessionManager, this, (append) => {
       if (this.isHomeProfile(sessionManager)) {
         const path = sessionManager.getSessionFile();
         const fileExists = path ? existsSync(path) : false;
         if (this.activeOperationId !== undefined || fileExists) this.assertChapterWritable(sessionManager);
       }
-      appendEntry(entry);
+      append();
       if (sessionManager === this.sessionManager) this.observeHomeChapterGrowth();
-    };
-    Object.defineProperty(guardedAppend, canonicalAppendOwner, { value: this });
-    manager._appendEntry = guardedAppend;
+    });
+    if (!guarded) throw new GatewayError("conflict", "Canonical session manager already has a runtime owner");
   }
 
   private createSemanticBroker(): SemanticUIBroker {
@@ -2230,8 +2222,7 @@ export class RuntimeSlot {
       // Ordinary runtimes and Home's borrowed *view* are session-owned; unrelated
       // memory/extension calls outside this stream retain their explicit options.
       const requestSettings = new AsyncLocalStorage<ReturnType<SettingsManager["getSettings"]>>();
-      const streamSimple = modelRuntime.streamSimple.bind(modelRuntime);
-      modelRuntime.streamSimple = (model, context, options) => {
+      wrapModelRuntimeStream(modelRuntime, (streamSimple) => (model, context, options) => {
         const settings = requestSettings.getStore();
         if (!settings) return streamSimple(model, context, options);
         const { timeoutMs: _timeout, maxRetries: _retries, websocketConnectTimeoutMs: _connect, ...rest } = options ?? {};
@@ -2247,7 +2238,7 @@ export class RuntimeSlot {
           ...(settings.retry?.provider?.maxRetries === undefined ? {} : { maxRetries: settings.retry.provider.maxRetries }),
           ...(connect === undefined ? {} : { websocketConnectTimeoutMs: connect }),
         });
-      };
+      });
       // Only the ModelRuntime owner installs filters. Home's borrowed view reads
       // the Gateway's installation without wrapping its providers on rebuild.
       const detachOpenAIEligibility = binding.ownership === "owned"
@@ -2512,93 +2503,89 @@ export class RuntimeSlot {
       const compactionSession = created.session;
       compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir,
         home ? { disabled: true } : { chat: () => readChatSettings(compactionSession.sessionManager.getBranch()) });
-      const providerStream = created.session.agent.streamFunction;
       let admittedSettings: ReturnType<SettingsManager["getSettings"]> | undefined;
-      const baseStream: StreamFn = (model, context, options) => {
-        const settings = admittedSettings;
-        if (!settings) return providerStream(model, context, options);
-        return requestSettings.run(settings, () => providerStream(model, context, {
-          ...options,
-          ...(settings.transport === undefined ? {} : { transport: settings.transport }),
-          ...(settings.retry?.provider?.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: settings.retry.provider.maxRetryDelayMs }),
-        }));
-      };
-      const convertToLlm = created.session.agent.convertToLlm;
-      created.session.agent.convertToLlm = async messages => {
-        // Image filtering happens during SDK message conversion, before
-        // prepareRequest. Resolve here too, so a tool's narrowing applies to
-        // the very next request rather than leaking one request of images.
-        await this.applyLiveRunSettings(created.session);
-        return convertToLlm(messages);
-      };
-      const prepareRequest = created.session.agent.prepareRequest;
-      created.session.agent.prepareRequest = async (request, signal) => {
-        if (signal?.aborted) throw new Error("Request cancelled before settings resolution");
-        admittedSettings = await this.applyLiveRunSettings(created.session);
-        if (signal?.aborted) throw new Error("Request cancelled during settings resolution");
-        if (this.dependencies.settings()) {
-          this.emit("session.diagnostic", safeJson({
-            code: "settings-run-applied", retry: created.session.settingsManager.getRetrySettings(),
-            imagesBlocked: created.session.settingsManager.getBlockImages(),
-            transport: created.session.agent.transport,
-            steeringMode: created.session.agent.steeringMode, followUpMode: created.session.agent.followUpMode,
-          }));
-        }
-        return (await prepareRequest?.(request, signal)) ?? undefined;
-      };
-      // The guard is INNERMOST, so it validates the exact request the
-      // provider-facing base stream receives: after `abortAwareStream` and after
-      // the compaction policy's summary-focus rewrite. Installed outermost, it
-      // would run before both and never see them.
-      created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(
-        homeRequestPolicy ? homeRequestPolicy.wrapStreamFunction(baseStream) : baseStream,
-      ));
-      if (homeRequestPolicy) {
-        // Outermost on both: the request is cut after the SDK's own projection,
-        // and the digest expectation is recorded after every SDK context stage.
-        created.session.agent.transformContext = homeRequestPolicy.wrapTransformContext(
-          created.session.agent.transformContext,
-          created.session.agent.convertToLlm,
-        );
-        created.session.agent.prepareRequest = homeRequestPolicy.wrapPrepareRequest(
-          created.session,
-          created.session.agent.prepareRequest,
-        );
-      }
-      if (this.taskWorker) {
-        // A sealed report ends the task at its turn boundary, after the SDK's own
-        // boundary handling, so no further model request starts. Steering queued
-        // before the seal would be stranded by a quiet end, so it takes the task's
-        // exact stop, which retires queued input as not delivered.
-        const taskWorker = this.taskWorker;
-        const finishTurn = created.session.agent.finishTurn;
-        created.session.agent.finishTurn = async (turn, signal): Promise<AgentTurnDecision | undefined> => {
-          const decision = await finishTurn?.(turn, signal);
-          // A task that reached its budget ends here the same way (settings-model.md 6.1).
-          const ending = taskWorker.reportSealed || await taskWorker.exceedsBudget(this.canonicalSessionEntries());
-          if (!ending) {
-            // A plain reply is not an immutable task result. Repair that omission
-            // once inside the same invocation, before any terminal receipt. Live
-            // children/queued input retain their own continuation and Stop wins.
-            if (!decision && turn.message.stopReason === "stop" && !signal?.aborted
-              && !created.session.agent.hasQueuedMessages() && !this.hasDetachedDashboardWork()
-              && taskWorker.takeReportReminder()) {
-              await created.session.sendCustomMessage({ customType: "tron.home-task-report-reminder.v1",
-                content: "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report.",
-                display: false }, { triggerTurn: true });
-              this.dependencies.homeTaskDiagnostic?.({ event: "home.task.report-reminder",
-                taskHash: createHash("sha256").update(taskWorker.identity.taskId).digest("hex").slice(0, 16),
-                operationHash: createHash("sha256").update(taskWorker.identity.operationId).digest("hex").slice(0, 16) });
-              return { action: "continue" };
+      const taskWorker = this.taskWorker;
+      installAgentPipeline(created.session.agent, {
+        convertToLlm: (convertToLlm) => async messages => {
+          // Image filtering happens during SDK message conversion, before
+          // prepareRequest. Resolve here too, so a tool's narrowing applies to
+          // the very next request rather than leaking one request of images.
+          await this.applyLiveRunSettings(created.session);
+          return convertToLlm(messages);
+        },
+        prepareRequest: (prepareRequest) => async (request, signal) => {
+          if (signal?.aborted) throw new Error("Request cancelled before settings resolution");
+          admittedSettings = await this.applyLiveRunSettings(created.session);
+          if (signal?.aborted) throw new Error("Request cancelled during settings resolution");
+          if (this.dependencies.settings()) {
+            this.emit("session.diagnostic", safeJson({
+              code: "settings-run-applied", retry: created.session.settingsManager.getRetrySettings(),
+              imagesBlocked: created.session.settingsManager.getBlockImages(),
+              transport: created.session.agent.transport,
+              steeringMode: created.session.agent.steeringMode, followUpMode: created.session.agent.followUpMode,
+            }));
+          }
+          return (await prepareRequest?.(request, signal)) ?? undefined;
+        },
+        // The guard is INNERMOST, so it validates the exact request the
+        // provider-facing base stream receives: after `abortAwareStream` and after
+        // the compaction policy's summary-focus rewrite. Installed outermost, it
+        // would run before both and never see them.
+        streamFunction: (providerStream) => {
+          const baseStream: StreamFn = (model, context, options) => {
+            const settings = admittedSettings;
+            if (!settings) return providerStream(model, context, options);
+            return requestSettings.run(settings, () => providerStream(model, context, {
+              ...options,
+              ...(settings.transport === undefined ? {} : { transport: settings.transport }),
+              ...(settings.retry?.provider?.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: settings.retry.provider.maxRetryDelayMs }),
+            }));
+          };
+          return compactionPolicy.wrap(abortAwareStream(
+            homeRequestPolicy ? homeRequestPolicy.wrapStreamFunction(baseStream) : baseStream,
+          ));
+        },
+        ...(homeRequestPolicy ? {
+          // Outermost on both: the request is cut after the SDK's own projection,
+          // and the digest expectation is recorded after every SDK context stage.
+          outer: {
+            transformContext: (transformContext, convertToLlm) => homeRequestPolicy.wrapTransformContext(transformContext, convertToLlm),
+            prepareRequest: (prepareRequest) => homeRequestPolicy.wrapPrepareRequest(created.session, prepareRequest),
+          },
+        } : {}),
+        ...(taskWorker ? {
+          // A sealed report ends the task at its turn boundary, after the SDK's own
+          // boundary handling, so no further model request starts. Steering queued
+          // before the seal would be stranded by a quiet end, so it takes the task's
+          // exact stop, which retires queued input as not delivered.
+          finishTurn: (finishTurn) => async (turn, signal): Promise<AgentTurnDecision | undefined> => {
+            const decision = await finishTurn?.(turn, signal);
+            // A task that reached its budget ends here the same way (settings-model.md 6.1).
+            const ending = taskWorker.reportSealed || await taskWorker.exceedsBudget(this.canonicalSessionEntries());
+            if (!ending) {
+              // A plain reply is not an immutable task result. Repair that omission
+              // once inside the same invocation, before any terminal receipt. Live
+              // children/queued input retain their own continuation and Stop wins.
+              if (!decision && turn.message.stopReason === "stop" && !signal?.aborted
+                && !created.session.agent.hasQueuedMessages() && !this.hasDetachedDashboardWork()
+                && taskWorker.takeReportReminder()) {
+                await created.session.sendCustomMessage({ customType: "tron.home-task-report-reminder.v1",
+                  content: "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report.",
+                  display: false }, { triggerTurn: true });
+                this.dependencies.homeTaskDiagnostic?.({ event: "home.task.report-reminder",
+                  taskHash: createHash("sha256").update(taskWorker.identity.taskId).digest("hex").slice(0, 16),
+                  operationHash: createHash("sha256").update(taskWorker.identity.operationId).digest("hex").slice(0, 16) });
+                return { action: "continue" };
+              }
+              return decision ?? undefined;
             }
-            return decision ?? undefined;
-          }
-          if (this.queuedMessages.length > 0) {
-            taskWorker.requestStop(() => this.abort("agent", taskWorker.identity.operationId, taskWorker.reportSealed ? "task-report" : "task-budget"));
-          }
-          return { action: "end" };
-        };
-      }
+            if (this.queuedMessages.length > 0) {
+              taskWorker.requestStop(() => this.abort("agent", taskWorker.identity.operationId, taskWorker.reportSealed ? "task-report" : "task-budget"));
+            }
+            return { action: "end" };
+          },
+        } : {}),
+      });
       this.compactionPolicies.set(created.session, compactionPolicy);
       contextPolicy = new SessionContextWindowPolicy(created.session);
       this.contextPolicies.set(created.session, contextPolicy);
@@ -2768,11 +2755,13 @@ export class RuntimeSlot {
 
   /** Pi's replacement hooks for each runtime this slot constructs. */
   private installRuntimeHooks(): void {
-    this.runtime.setBeforeSessionInvalidate(() => {
-      this.handOffReplacedCommand();
-      this.dependencies.browserLiveViews?.retireSession(this.id);
+    bindRuntimeSession(this.runtime, {
+      beforeInvalidate: () => {
+        this.handOffReplacedCommand();
+        this.dependencies.browserLiveViews?.retireSession(this.id);
+      },
+      rebind: async () => this.bindSession(),
     });
-    this.runtime.setRebindSession(async () => this.bindSession());
   }
 
   /** A command that replaces its own session ends in that session. Pi commits
