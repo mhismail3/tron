@@ -1,5 +1,5 @@
-import type { AnyModel } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { AnyModel } from "../kernel/pi/ai.js";
+import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { JEV_CLASSIFIER } from "../knowledge/jev-client.js";
 
 function withJevEstimate(model: AnyModel): AnyModel {

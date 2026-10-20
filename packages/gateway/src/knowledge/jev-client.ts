@@ -1,5 +1,5 @@
-import type { ClassifierContext } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { ClassifierContext } from "../kernel/pi/ai.js";
+import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 
 /** Tron pins the model identity to Pi's catalog, but retains a qualified cost
  * because TypeSafe's catalog currently reports zero rather than billable price. */

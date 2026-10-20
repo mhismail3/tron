@@ -1,4 +1,4 @@
-import type { Api, AssistantMessage, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model, SimpleStreamOptions } from "../kernel/pi/ai.js";
 
 export interface KnowledgeModelOutputDiagnostics {
   modelId: string;

@@ -2,7 +2,7 @@ import { HOME_MAX_CHAPTERS } from "../home/home-chapter-state.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
 import { maximumPromptLineBytes } from "../machine/upload-store.js";
 import { PROMPT_TEXT_MAX_BYTES } from "../sessions/resource-invocation.js";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "../kernel/pi/ai.js";
 /*
  * The episodic memory is the projected-summary tree of the OptChat recipe: a
  * binary tree of one-line summaries over one source session, a soft-budgeted

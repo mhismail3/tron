@@ -1,5 +1,5 @@
-import type { FetchFunction, Model } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { FetchFunction, Model } from "../kernel/pi/ai.js";
+import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 
 /**
  * Moonshot accounts reserve the requested completion budget against TPM, even

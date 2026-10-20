@@ -1,5 +1,5 @@
-import { Type, type Static } from "@earendil-works/pi-ai";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { Type, type Static } from "../kernel/pi/ai.js";
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { JevDecisionClient, type JevDecisionRequest } from "./jev-client.js";
 
 const parameters = Type.Object({

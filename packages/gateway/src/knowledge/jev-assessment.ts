@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { SourceAssessment } from "./knowledge-contract.js";
 import type { SourceAssessmentModel, SourceAssessmentModelInput, SourceAssessmentDispatchContext } from "./source-capture.js";
 import { JevDecisionClient, JEV_DEFAULT_MODEL, JEV_MAX_ESTIMATED_CHARGE_CENTS, JEV_MAX_BODY_BYTES, JEV_MAX_STATE_BYTES, JEV_MAX_STATE_QUESTION_BYTES, type JevChoiceAnswer, type JevScoreAnswer, type JevQuestion } from "./jev-client.js";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 
 const JEV_PROFILE_VERSION = "tron-source-profile-v2";
 const JEV_RUBRIC_VERSION = "tron-source-rubric-v3";

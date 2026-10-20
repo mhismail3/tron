@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Api, Credential, Model, Provider } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { Api, Credential, Model, Provider } from "../kernel/pi/ai.js";
+import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { providerUsageLentTo } from "./provider-usage.js";
 

@@ -1,5 +1,5 @@
-import type { Api, AssistantMessage, Context, Message, Model, ModelThinkingLevel, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai";
-import { clampThinkingLevel, isRetryableAssistantError } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Message, Model, ModelThinkingLevel, SimpleStreamOptions, Usage } from "../kernel/pi/ai.js";
+import { clampThinkingLevel, isRetryableAssistantError } from "../kernel/pi/ai.js";
 import { ModelQueueExhausted, type ModelQueueOwner } from "../providers/model-queue.js";
 import { isUsageLimitError } from "../providers/model-queue-extension.js";
 import type { EpisodicCompactorRequest, EpisodicSummarizer } from "./episodic-contract.js";

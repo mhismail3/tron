@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import type { HomeMemoryEvidence, HomeMemoryView } from "../protocol/types.js";
 import { HOME_MEMORY_PAGE_BYTES, encodeHomeMemoryCursor, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "../home/home-memory-browser.js";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "../kernel/pi/ai.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
   EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT,

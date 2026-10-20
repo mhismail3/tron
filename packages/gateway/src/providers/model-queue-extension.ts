@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 
 /**
  * The in-session half of the model fallback queues (settings-model.md 6.3,

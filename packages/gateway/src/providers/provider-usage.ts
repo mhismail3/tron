@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 
 export const PROVIDER_USAGE_CAPABILITY = "provider-usage.v1";
 const MAX_PROVIDERS = 16;

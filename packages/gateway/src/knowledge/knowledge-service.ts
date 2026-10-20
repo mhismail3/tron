@@ -1,5 +1,5 @@
-import { Type, type Static } from "@earendil-works/pi-ai";
-import type { Context } from "@earendil-works/pi-ai";
+import { Type, type Static } from "../kernel/pi/ai.js";
+import type { Context } from "../kernel/pi/ai.js";
 import type {
   KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeRaindropReadRequest,
   KnowledgeCurationCode, KnowledgeCurationJobRequest, KnowledgeCurationJobResponse, KnowledgeCurationOutcome,

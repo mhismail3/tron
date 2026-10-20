@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import type { Model } from "@earendil-works/pi-ai";
-import { estimateTokens, type AgentSession, type ExtensionFactory, type ModelRuntime, type SessionEntry, type SessionManager } from "@earendil-works/pi-coding-agent";
+import type { Model } from "../kernel/pi/ai.js";
+import { estimateTokens, type AgentSession, type ExtensionFactory, type ModelRuntime, type SessionEntry, type SessionManager } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { ContextWindowLimits, ContextWindowPolicy, ModelRef } from "../protocol/types.js";
 
