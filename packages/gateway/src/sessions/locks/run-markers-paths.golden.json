@@ -1,0 +1,4059 @@
+{
+  "store": "run-markers-paths",
+  "module": "gateway/run",
+  "steps": [
+    {
+      "step": "evidence and interrupted ids before the directory exists",
+      "result": {
+        "evidence": {},
+        "interrupted": []
+      },
+      "files": {}
+    },
+    {
+      "step": "evidence for an unknown session",
+      "result": [],
+      "files": {}
+    },
+    {
+      "step": "mark s1 op-1",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "mark s1 op-1 again is unchanged",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "mark s1 op-2",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "complete s1 op-2",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "complete s1 op-2 again is unchanged",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "complete s1 op-2 at another time conflicts",
+      "refused": "Run marker operation already owns a different assistant completion",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "complete s1 op-2 with another completion conflicts",
+      "refused": "Run marker operation already owns a different assistant completion",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "complete an unmarked operation is refused",
+      "refused": "Run marker ownership changed before assistant completion admission",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "an oversized operation id is refused",
+      "refused": "Run marker completion evidence exceeds its bound",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "an oversized completion id is refused",
+      "refused": "Run marker completion evidence exceeds its bound",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "an oversized completion time is refused",
+      "refused": "Run marker completion evidence exceeds its bound",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "an empty completion id is refused",
+      "refused": "Run marker completion evidence exceeds its bound",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reassert s1 op-1 stamps its completion",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reassert s1 op-1 again is unchanged",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reassert s1 op-1 with another completion conflicts",
+      "refused": "Run marker operation already owns a different assistant completion",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reassert with an oversized completion time is refused",
+      "refused": "Run marker completion evidence exceeds its bound",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reassert an unmarked s2 operation recreates it",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "mark an oversized operation id is refused",
+      "refused": "Run marker operation identifier exceeds its bound",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "mark an empty operation id is refused",
+      "refused": "Run marker operation identifier exceeds its bound",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "s3 holds fifteen operations",
+      "result": 15,
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s3.json": {
+          "version": 2,
+          "sessionId": "s3",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reassert a sixteenth s3 operation",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s3.json": {
+          "version": 2,
+          "sessionId": "s3",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-16",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "mark a seventeenth s3 operation is refused",
+      "refused": "Run marker operation bound reached before durable admission",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s3.json": {
+          "version": 2,
+          "sessionId": "s3",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-16",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reassert a seventeenth s3 operation is refused",
+      "refused": "Run marker operation bound reached before terminal ownership reassertion",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s3.json": {
+          "version": 2,
+          "sessionId": "s3",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-16",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reassert a held s3 operation at the bound",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s3.json": {
+          "version": 2,
+          "sessionId": "s3",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-16",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "evidence and interrupted ids",
+      "result": {
+        "evidence": {
+          "s1": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ],
+          "s2": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ],
+          "s3": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-16",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            }
+          ]
+        },
+        "interrupted": [
+          "s1",
+          "s2",
+          "s3"
+        ]
+      },
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s3.json": {
+          "version": 2,
+          "sessionId": "s3",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-16",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "clear an unknown s1 operation is unchanged",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:00.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:03:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s3.json": {
+          "version": 2,
+          "sessionId": "s3",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-16",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "clear s1 op-1 keeps op-2",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s1.json": {
+          "version": 2,
+          "sessionId": "s1",
+          "operations": [
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:01.000Z",
+              "assistantCompletionId": "c-2",
+              "assistantCompletedAt": "2026-01-01T00:01:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s3.json": {
+          "version": 2,
+          "sessionId": "s3",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-16",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "clear s1 op-2 removes the marker",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s3.json": {
+          "version": 2,
+          "sessionId": "s3",
+          "operations": [
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-1",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-16",
+              "assistantCompletedAt": "2026-01-01T00:05:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "clear all of s3",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "clear all of an unknown session",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "evidence and interrupted ids after clearing",
+      "result": {
+        "evidence": {
+          "s2": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "interrupted": [
+          "s2"
+        ]
+      },
+      "files": {
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "write hand-made markers",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/current-complete.json": {
+          "version": 2,
+          "sessionId": "current-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "c-a",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            },
+            {
+              "operationId": "b",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-duplicate.json": {
+          "version": 2,
+          "sessionId": "current-duplicate",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty-time.json": {
+          "version": 2,
+          "sessionId": "current-empty-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": ""
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty.json": {
+          "version": 2,
+          "sessionId": "current-empty",
+          "operations": []
+        },
+        "gateway/runtime-markers/current-half-complete.json": {
+          "version": 2,
+          "sessionId": "current-half-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-list-id.json": {
+          "version": 2,
+          "sessionId": "current-list-id",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": [
+                "b"
+              ],
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-null-operation.json": {
+          "version": 2,
+          "sessionId": "current-null-operation",
+          "operations": [
+            null
+          ]
+        },
+        "gateway/runtime-markers/current-object-operations.json": {
+          "version": 2,
+          "sessionId": "current-object-operations",
+          "operations": {
+            "length": 1
+          }
+        },
+        "gateway/runtime-markers/current-other-session.json": {
+          "version": 2,
+          "sessionId": "someone-else",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-completion.json": {
+          "version": 2,
+          "sessionId": "current-oversized-completion",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-time.json": {
+          "version": 2,
+          "sessionId": "current-oversized-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-seventeen.json": {
+          "version": 2,
+          "sessionId": "current-seventeen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-sixteen.json": {
+          "version": 2,
+          "sessionId": "current-sixteen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-string-operations.json": {
+          "version": 2,
+          "sessionId": "current-string-operations",
+          "operations": "abc"
+        },
+        "gateway/runtime-markers/legacy-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-complete",
+          "assistantCompletionId": "c-l",
+          "assistantCompletedAt": "2026-01-01T00:08:00.000Z"
+        },
+        "gateway/runtime-markers/legacy-half-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-half-complete",
+          "assistantCompletionId": "c-l"
+        },
+        "gateway/runtime-markers/legacy-open.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-open"
+        },
+        "gateway/runtime-markers/legacy-other-session.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "someone-else"
+        },
+        "gateway/runtime-markers/legacy-version-3.json": {
+          "version": 3,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-version-3"
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "each hand-made marker's admitted evidence",
+      "result": {
+        "legacy-complete": [
+          {
+            "operationId": "legacy-op",
+            "acceptedAt": "2026-01-01T00:07:00.000Z",
+            "assistantCompletionId": "c-l",
+            "assistantCompletedAt": "2026-01-01T00:08:00.000Z"
+          }
+        ],
+        "legacy-open": [
+          {
+            "operationId": "legacy-op",
+            "acceptedAt": "2026-01-01T00:07:00.000Z"
+          }
+        ],
+        "legacy-other-session": [],
+        "legacy-half-complete": [],
+        "legacy-version-3": [],
+        "current-other-session": [],
+        "current-empty": [],
+        "current-object-operations": [],
+        "current-string-operations": [],
+        "current-seventeen": [],
+        "current-sixteen": [
+          {
+            "operationId": "op-0",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-1",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-2",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-3",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-4",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-5",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-6",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-7",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-8",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-9",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-10",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-11",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-12",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-13",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-14",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          },
+          {
+            "operationId": "op-15",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          }
+        ],
+        "current-duplicate": [],
+        "current-null-operation": [],
+        "current-list-id": [],
+        "current-empty-time": [],
+        "current-oversized-time": [],
+        "current-half-complete": [],
+        "current-oversized-completion": [],
+        "current-complete": [
+          {
+            "operationId": "a",
+            "acceptedAt": "2026-01-01T00:06:00.000Z",
+            "assistantCompletionId": "c-a",
+            "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+          },
+          {
+            "operationId": "b",
+            "acceptedAt": "2026-01-01T00:06:00.000Z"
+          }
+        ]
+      },
+      "files": {
+        "gateway/runtime-markers/current-complete.json": {
+          "version": 2,
+          "sessionId": "current-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "c-a",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            },
+            {
+              "operationId": "b",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-duplicate.json": {
+          "version": 2,
+          "sessionId": "current-duplicate",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty-time.json": {
+          "version": 2,
+          "sessionId": "current-empty-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": ""
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty.json": {
+          "version": 2,
+          "sessionId": "current-empty",
+          "operations": []
+        },
+        "gateway/runtime-markers/current-half-complete.json": {
+          "version": 2,
+          "sessionId": "current-half-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-list-id.json": {
+          "version": 2,
+          "sessionId": "current-list-id",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": [
+                "b"
+              ],
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-null-operation.json": {
+          "version": 2,
+          "sessionId": "current-null-operation",
+          "operations": [
+            null
+          ]
+        },
+        "gateway/runtime-markers/current-object-operations.json": {
+          "version": 2,
+          "sessionId": "current-object-operations",
+          "operations": {
+            "length": 1
+          }
+        },
+        "gateway/runtime-markers/current-other-session.json": {
+          "version": 2,
+          "sessionId": "someone-else",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-completion.json": {
+          "version": 2,
+          "sessionId": "current-oversized-completion",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-time.json": {
+          "version": 2,
+          "sessionId": "current-oversized-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-seventeen.json": {
+          "version": 2,
+          "sessionId": "current-seventeen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-sixteen.json": {
+          "version": 2,
+          "sessionId": "current-sixteen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-string-operations.json": {
+          "version": 2,
+          "sessionId": "current-string-operations",
+          "operations": "abc"
+        },
+        "gateway/runtime-markers/legacy-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-complete",
+          "assistantCompletionId": "c-l",
+          "assistantCompletedAt": "2026-01-01T00:08:00.000Z"
+        },
+        "gateway/runtime-markers/legacy-half-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-half-complete",
+          "assistantCompletionId": "c-l"
+        },
+        "gateway/runtime-markers/legacy-open.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-open"
+        },
+        "gateway/runtime-markers/legacy-other-session.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "someone-else"
+        },
+        "gateway/runtime-markers/legacy-version-3.json": {
+          "version": 3,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-version-3"
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "evidence and interrupted ids over hand-made markers",
+      "result": {
+        "evidence": {
+          "current-complete": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "c-a",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            },
+            {
+              "operationId": "b",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ],
+          "current-sixteen": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ],
+          "legacy-complete": [
+            {
+              "operationId": "legacy-op",
+              "acceptedAt": "2026-01-01T00:07:00.000Z",
+              "assistantCompletionId": "c-l",
+              "assistantCompletedAt": "2026-01-01T00:08:00.000Z"
+            }
+          ],
+          "legacy-open": [
+            {
+              "operationId": "legacy-op",
+              "acceptedAt": "2026-01-01T00:07:00.000Z"
+            }
+          ],
+          "s2": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "interrupted": [
+          "current-complete",
+          "current-duplicate",
+          "current-empty",
+          "current-empty-time",
+          "current-half-complete",
+          "current-list-id",
+          "current-null-operation",
+          "current-object-operations",
+          "current-other-session",
+          "current-oversized-completion",
+          "current-oversized-time",
+          "current-seventeen",
+          "current-sixteen",
+          "current-string-operations",
+          "legacy-complete",
+          "legacy-half-complete",
+          "legacy-open",
+          "legacy-other-session",
+          "legacy-version-3",
+          "s2"
+        ]
+      },
+      "files": {
+        "gateway/runtime-markers/current-complete.json": {
+          "version": 2,
+          "sessionId": "current-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "c-a",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            },
+            {
+              "operationId": "b",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-duplicate.json": {
+          "version": 2,
+          "sessionId": "current-duplicate",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty-time.json": {
+          "version": 2,
+          "sessionId": "current-empty-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": ""
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty.json": {
+          "version": 2,
+          "sessionId": "current-empty",
+          "operations": []
+        },
+        "gateway/runtime-markers/current-half-complete.json": {
+          "version": 2,
+          "sessionId": "current-half-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-list-id.json": {
+          "version": 2,
+          "sessionId": "current-list-id",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": [
+                "b"
+              ],
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-null-operation.json": {
+          "version": 2,
+          "sessionId": "current-null-operation",
+          "operations": [
+            null
+          ]
+        },
+        "gateway/runtime-markers/current-object-operations.json": {
+          "version": 2,
+          "sessionId": "current-object-operations",
+          "operations": {
+            "length": 1
+          }
+        },
+        "gateway/runtime-markers/current-other-session.json": {
+          "version": 2,
+          "sessionId": "someone-else",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-completion.json": {
+          "version": 2,
+          "sessionId": "current-oversized-completion",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-time.json": {
+          "version": 2,
+          "sessionId": "current-oversized-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-seventeen.json": {
+          "version": 2,
+          "sessionId": "current-seventeen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-sixteen.json": {
+          "version": 2,
+          "sessionId": "current-sixteen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-string-operations.json": {
+          "version": 2,
+          "sessionId": "current-string-operations",
+          "operations": "abc"
+        },
+        "gateway/runtime-markers/legacy-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-complete",
+          "assistantCompletionId": "c-l",
+          "assistantCompletedAt": "2026-01-01T00:08:00.000Z"
+        },
+        "gateway/runtime-markers/legacy-half-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-half-complete",
+          "assistantCompletionId": "c-l"
+        },
+        "gateway/runtime-markers/legacy-open.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-open"
+        },
+        "gateway/runtime-markers/legacy-other-session.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "someone-else"
+        },
+        "gateway/runtime-markers/legacy-version-3.json": {
+          "version": 3,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-version-3"
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "complete the legacy marker rewrites it as current",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/current-complete.json": {
+          "version": 2,
+          "sessionId": "current-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "c-a",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            },
+            {
+              "operationId": "b",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-duplicate.json": {
+          "version": 2,
+          "sessionId": "current-duplicate",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty-time.json": {
+          "version": 2,
+          "sessionId": "current-empty-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": ""
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty.json": {
+          "version": 2,
+          "sessionId": "current-empty",
+          "operations": []
+        },
+        "gateway/runtime-markers/current-half-complete.json": {
+          "version": 2,
+          "sessionId": "current-half-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-list-id.json": {
+          "version": 2,
+          "sessionId": "current-list-id",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": [
+                "b"
+              ],
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-null-operation.json": {
+          "version": 2,
+          "sessionId": "current-null-operation",
+          "operations": [
+            null
+          ]
+        },
+        "gateway/runtime-markers/current-object-operations.json": {
+          "version": 2,
+          "sessionId": "current-object-operations",
+          "operations": {
+            "length": 1
+          }
+        },
+        "gateway/runtime-markers/current-other-session.json": {
+          "version": 2,
+          "sessionId": "someone-else",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-completion.json": {
+          "version": 2,
+          "sessionId": "current-oversized-completion",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-time.json": {
+          "version": 2,
+          "sessionId": "current-oversized-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-seventeen.json": {
+          "version": 2,
+          "sessionId": "current-seventeen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-sixteen.json": {
+          "version": 2,
+          "sessionId": "current-sixteen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-string-operations.json": {
+          "version": 2,
+          "sessionId": "current-string-operations",
+          "operations": "abc"
+        },
+        "gateway/runtime-markers/legacy-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-complete",
+          "assistantCompletionId": "c-l",
+          "assistantCompletedAt": "2026-01-01T00:08:00.000Z"
+        },
+        "gateway/runtime-markers/legacy-half-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-half-complete",
+          "assistantCompletionId": "c-l"
+        },
+        "gateway/runtime-markers/legacy-open.json": {
+          "version": 2,
+          "sessionId": "legacy-open",
+          "operations": [
+            {
+              "operationId": "legacy-op",
+              "acceptedAt": "2026-01-01T00:07:00.000Z",
+              "assistantCompletionId": "c-l",
+              "assistantCompletedAt": "2026-01-01T00:10:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/legacy-other-session.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "someone-else"
+        },
+        "gateway/runtime-markers/legacy-version-3.json": {
+          "version": 3,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-version-3"
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "mark over an unreadable marker replaces it",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/current-complete.json": {
+          "version": 2,
+          "sessionId": "current-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "c-a",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            },
+            {
+              "operationId": "b",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-duplicate.json": {
+          "version": 2,
+          "sessionId": "current-duplicate",
+          "operations": [
+            {
+              "operationId": "fresh",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty-time.json": {
+          "version": 2,
+          "sessionId": "current-empty-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": ""
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty.json": {
+          "version": 2,
+          "sessionId": "current-empty",
+          "operations": []
+        },
+        "gateway/runtime-markers/current-half-complete.json": {
+          "version": 2,
+          "sessionId": "current-half-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-list-id.json": {
+          "version": 2,
+          "sessionId": "current-list-id",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": [
+                "b"
+              ],
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-null-operation.json": {
+          "version": 2,
+          "sessionId": "current-null-operation",
+          "operations": [
+            null
+          ]
+        },
+        "gateway/runtime-markers/current-object-operations.json": {
+          "version": 2,
+          "sessionId": "current-object-operations",
+          "operations": {
+            "length": 1
+          }
+        },
+        "gateway/runtime-markers/current-other-session.json": {
+          "version": 2,
+          "sessionId": "someone-else",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-completion.json": {
+          "version": 2,
+          "sessionId": "current-oversized-completion",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-time.json": {
+          "version": 2,
+          "sessionId": "current-oversized-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-seventeen.json": {
+          "version": 2,
+          "sessionId": "current-seventeen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-sixteen.json": {
+          "version": 2,
+          "sessionId": "current-sixteen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-string-operations.json": {
+          "version": 2,
+          "sessionId": "current-string-operations",
+          "operations": "abc"
+        },
+        "gateway/runtime-markers/legacy-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-complete",
+          "assistantCompletionId": "c-l",
+          "assistantCompletedAt": "2026-01-01T00:08:00.000Z"
+        },
+        "gateway/runtime-markers/legacy-half-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-half-complete",
+          "assistantCompletionId": "c-l"
+        },
+        "gateway/runtime-markers/legacy-open.json": {
+          "version": 2,
+          "sessionId": "legacy-open",
+          "operations": [
+            {
+              "operationId": "legacy-op",
+              "acceptedAt": "2026-01-01T00:07:00.000Z",
+              "assistantCompletionId": "c-l",
+              "assistantCompletedAt": "2026-01-01T00:10:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/legacy-other-session.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "someone-else"
+        },
+        "gateway/runtime-markers/legacy-version-3.json": {
+          "version": 3,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-version-3"
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "clear one operation of the current marker",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/current-complete.json": {
+          "version": 2,
+          "sessionId": "current-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "c-a",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-duplicate.json": {
+          "version": 2,
+          "sessionId": "current-duplicate",
+          "operations": [
+            {
+              "operationId": "fresh",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty-time.json": {
+          "version": 2,
+          "sessionId": "current-empty-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": ""
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty.json": {
+          "version": 2,
+          "sessionId": "current-empty",
+          "operations": []
+        },
+        "gateway/runtime-markers/current-half-complete.json": {
+          "version": 2,
+          "sessionId": "current-half-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-list-id.json": {
+          "version": 2,
+          "sessionId": "current-list-id",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": [
+                "b"
+              ],
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-null-operation.json": {
+          "version": 2,
+          "sessionId": "current-null-operation",
+          "operations": [
+            null
+          ]
+        },
+        "gateway/runtime-markers/current-object-operations.json": {
+          "version": 2,
+          "sessionId": "current-object-operations",
+          "operations": {
+            "length": 1
+          }
+        },
+        "gateway/runtime-markers/current-other-session.json": {
+          "version": 2,
+          "sessionId": "someone-else",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-completion.json": {
+          "version": 2,
+          "sessionId": "current-oversized-completion",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-time.json": {
+          "version": 2,
+          "sessionId": "current-oversized-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-seventeen.json": {
+          "version": 2,
+          "sessionId": "current-seventeen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-sixteen.json": {
+          "version": 2,
+          "sessionId": "current-sixteen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-string-operations.json": {
+          "version": 2,
+          "sessionId": "current-string-operations",
+          "operations": "abc"
+        },
+        "gateway/runtime-markers/legacy-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-complete",
+          "assistantCompletionId": "c-l",
+          "assistantCompletedAt": "2026-01-01T00:08:00.000Z"
+        },
+        "gateway/runtime-markers/legacy-half-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-half-complete",
+          "assistantCompletionId": "c-l"
+        },
+        "gateway/runtime-markers/legacy-open.json": {
+          "version": 2,
+          "sessionId": "legacy-open",
+          "operations": [
+            {
+              "operationId": "legacy-op",
+              "acceptedAt": "2026-01-01T00:07:00.000Z",
+              "assistantCompletionId": "c-l",
+              "assistantCompletedAt": "2026-01-01T00:10:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/legacy-other-session.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "someone-else"
+        },
+        "gateway/runtime-markers/legacy-version-3.json": {
+          "version": 3,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-version-3"
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "a write whose temporary name is taken keeps the foreign file",
+      "result": {
+        "refusal": "EEXIST",
+        "foreignKept": "foreign"
+      },
+      "files": {
+        "gateway/runtime-markers/current-complete.json": {
+          "version": 2,
+          "sessionId": "current-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "c-a",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-duplicate.json": {
+          "version": 2,
+          "sessionId": "current-duplicate",
+          "operations": [
+            {
+              "operationId": "fresh",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty-time.json": {
+          "version": 2,
+          "sessionId": "current-empty-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": ""
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-empty.json": {
+          "version": 2,
+          "sessionId": "current-empty",
+          "operations": []
+        },
+        "gateway/runtime-markers/current-half-complete.json": {
+          "version": 2,
+          "sessionId": "current-half-complete",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-list-id.json": {
+          "version": 2,
+          "sessionId": "current-list-id",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": [
+                "b"
+              ],
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-null-operation.json": {
+          "version": 2,
+          "sessionId": "current-null-operation",
+          "operations": [
+            null
+          ]
+        },
+        "gateway/runtime-markers/current-object-operations.json": {
+          "version": 2,
+          "sessionId": "current-object-operations",
+          "operations": {
+            "length": 1
+          }
+        },
+        "gateway/runtime-markers/current-other-session.json": {
+          "version": 2,
+          "sessionId": "someone-else",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-completion.json": {
+          "version": 2,
+          "sessionId": "current-oversized-completion",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "2026-01-01T00:06:00.000Z",
+              "assistantCompletionId": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "assistantCompletedAt": "2026-01-01T00:09:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-oversized-time.json": {
+          "version": 2,
+          "sessionId": "current-oversized-time",
+          "operations": [
+            {
+              "operationId": "a",
+              "acceptedAt": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-seventeen.json": {
+          "version": 2,
+          "sessionId": "current-seventeen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-16",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-sixteen.json": {
+          "version": 2,
+          "sessionId": "current-sixteen",
+          "operations": [
+            {
+              "operationId": "op-0",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-1",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-2",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-3",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-4",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-5",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-6",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-7",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-8",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-9",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-10",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-11",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-12",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-13",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-14",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            },
+            {
+              "operationId": "op-15",
+              "acceptedAt": "2026-01-01T00:06:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/current-string-operations.json": {
+          "version": 2,
+          "sessionId": "current-string-operations",
+          "operations": "abc"
+        },
+        "gateway/runtime-markers/legacy-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-complete",
+          "assistantCompletionId": "c-l",
+          "assistantCompletedAt": "2026-01-01T00:08:00.000Z"
+        },
+        "gateway/runtime-markers/legacy-half-complete.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-half-complete",
+          "assistantCompletionId": "c-l"
+        },
+        "gateway/runtime-markers/legacy-open.json": {
+          "version": 2,
+          "sessionId": "legacy-open",
+          "operations": [
+            {
+              "operationId": "legacy-op",
+              "acceptedAt": "2026-01-01T00:07:00.000Z",
+              "assistantCompletionId": "c-l",
+              "assistantCompletedAt": "2026-01-01T00:10:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/legacy-other-session.json": {
+          "version": 1,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "someone-else"
+        },
+        "gateway/runtime-markers/legacy-version-3.json": {
+          "version": 3,
+          "operationId": "legacy-op",
+          "acceptedAt": "2026-01-01T00:07:00.000Z",
+          "sessionId": "legacy-version-3"
+        },
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
