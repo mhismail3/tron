@@ -11,6 +11,7 @@
     "test-support.module.json",
     "test-support/chat-settings-change.ts",
     "test-support/episodic-chapter-source.ts",
+    "test-support/fixed-recording.ts",
     "test-support/fixture-process-owner.mjs",
     "test-support/gateway-lock-harness.ts",
     "test-support/home-ledger-crash-child.ts",
@@ -33,6 +34,7 @@
     "test-support/tron-home-environment-guard.ts",
     "test-support/tron-home-environment-preflight.mjs",
     "test-support/tron-store-corpus.ts",
+    "test-support/tron-store-specs-derived.ts",
     "test-support/tron-store-specs.ts",
     "test-support/wait-for.ts"
   ]
