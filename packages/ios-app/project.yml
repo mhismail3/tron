@@ -165,6 +165,10 @@ targets:
         buildPhase: resources
       - path: Sources/Resources/Sounds/tron-notification.caf
         buildPhase: resources
+      - path: Fixtures
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
     preBuildScripts:
       - name: Validate product push configuration
         basedOnDependencyAnalysis: false
