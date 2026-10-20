@@ -1206,6 +1206,7 @@ dispatch, steering its own tasks, and closing obsolete restructure issues.
 | 0.4 manifest format comparison | #1362 (closed; B′ approved) |
 | 0.5 module areas (operational grouping by the phase that will move them; not an architecture decision) | Gateway kernel #1366 (under #1348) · Gateway modules #1367 (#1349) · iOS #1368 (#1350) · Mac #1369 (#1351) · Relay, protocol and repository #1370 (#1351) |
 | 0.5 module issues (one per manifest; checklists from `scripts/tron work ledger`) | #1371–#1455; ledger slice #1365 (landed `644d57aa0`) |
+| Phase 1 slices (groups A/B/C in #1347) | #1494–#1503, plus #1285 and #797 |
 
 ### Master epic body template (regenerated in full; never appended)
 
