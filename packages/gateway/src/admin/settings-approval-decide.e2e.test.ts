@@ -112,9 +112,16 @@ describe("settings approval decisions", () => {
       refusals.push(String((await refused.catch((error: Error) => error)).message));
     }
     expect((await f.settingsChanges.history({ key: "run.retry.maxRetries" })).entries).toEqual([]);
-    // With the fence it read, the same dry run and change pass.
     const snapshot = slot.snapshot();
     const fence = { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model, revision: snapshot.revision };
+    // A context window applies at the revision it read: a fence without one is refused before the dry run too.
+    const contextWindow = [{ key: "model.contextWindow", layer: "chat", op: "set", value: 100_000, qualifiers: { model: `${f.model.provider}/${f.model.id}` } }];
+    await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, fence: { runtimeGeneration: fence.runtimeGeneration, model: fence.model }, changes: contextWindow, dryRun: true }))
+      .rejects.toMatchObject({ code: "invalid_request", message: expect.stringMatching(/revision/) });
+    // Active tools never needed a fence (the iPhone sends none), so they are still admitted without one.
+    await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, dryRun: true,
+      changes: [{ key: "tools.active", layer: "chat", op: "set", value: ["read"] }] })).resolves.toMatchObject({ dryRun: true, status: "applied" });
+    // With the fence it read, the same dry run and change pass.
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, fence, changes, dryRun: true })).resolves.toMatchObject({ dryRun: true, status: "applied" });
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, fence, changes })).resolves.toMatchObject({ status: "applied" });
     transcript.push({ case: "fence-less Chat change refused at submission", steps: [{ refusals }] });
