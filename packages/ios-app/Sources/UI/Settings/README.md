@@ -135,11 +135,11 @@ scripts/ios-gateway-e2e-test run-ui \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsExposeReadOnlyOverrides
 ```
 
-Hosted values are scripted: they prove routes and receipts, not persistence. The real-UI journeys
-read their key inventory from the fixture Gateway's built schema. Visual reviews
-(`testSettingsScopeVisualReviewInLightAndDark`) only capture; before device sign-off, change values
-rapidly, dismiss while saving and switch profile: no untouched inherited setting may become an
-override.
+Hosted values are scripted, not persistence evidence. Real-UI journeys read their key inventory
+from the fixture Gateway's built schema. The [three-layer design](../../../../gateway/docs/settings-three-layer-design.md)
+has a capture-only `TronSettingsThreeLayerPreviewTests` fixture: synthetic SwiftUI layouts, not the
+implemented settings contract. Before device sign-off, change values rapidly, dismiss while saving
+and switch profile: no untouched inherited setting may become an override.
 
 ## Not here
 

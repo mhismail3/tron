@@ -117,7 +117,10 @@ struct HostedSettingsRendererFixture: View {
         NavigationStack {
             if ready {
                 Group {
-                    if ProcessInfo.processInfo.arguments.contains("-settings-controls-review") {
+                    if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-settings-three-layer-preview"),
+                       ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
+                        HostedSettingsThreeLayerPreview(surface: ProcessInfo.processInfo.arguments[index + 1])
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-controls-review") {
                         controlsReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("context"))
@@ -145,7 +148,8 @@ struct HostedSettingsRendererFixture: View {
                 }
                 .safeAreaInset(edge: .bottom) {
                     if !ProcessInfo.processInfo.arguments.contains("-settings-alignment-review")
-                        && !ProcessInfo.processInfo.arguments.contains("-settings-controls-review") {
+                        && !ProcessInfo.processInfo.arguments.contains("-settings-controls-review")
+                        && !ProcessInfo.processInfo.arguments.contains("-settings-three-layer-preview") {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
                         Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
