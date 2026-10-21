@@ -69,8 +69,7 @@ Session, session history and subagent activity.
   (≤ 364 points) open an editor; long-press reorders or clears. `/` completes commands and
   prompts, `@` skills only (`skill-prompt.v1`). Picker secondary copy uses
   `TronTypography.settingsRowSubtext`, matching Manage Home rows; quote annotations (#899) compose `<annotation>`
-  blocks into the sent text; saving one hands first responder straight to the composer input,
-  so the keyboard stays up (#1597). Camera, photo and file attachments stage locally (10 items, 25 MiB);
+  blocks into the sent text; Save hands the keyboard straight to the composer input (#1597). Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937). The context ring opens Manage Session.
 - **Tools.** Calls and results join by `toolCallId` into one chip; consecutive calls with equal
   nonempty segments form one run chip whose aggregate sheet lists bounded summary rows. Every
