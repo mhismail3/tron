@@ -236,7 +236,6 @@ struct ConnectionsSettingsView: View {
             .presentationContentInteraction(.resizes)
         }
         .task(id: "\(model.profileRevision):\(model.deviceCatalogRevision):\(model.foregroundReconciliationGeneration):\(presentationActivity.allowsPresentationPublication)") {
-            guard presentationActivity.allowsPresentationPublication else { return }
             await reload()
         }
     }
@@ -246,7 +245,7 @@ struct ConnectionsSettingsView: View {
     }
 
     private func reload() async {
-        guard model.admitsForegroundPresentationRead else { return }
+        guard presentationActivity.allowsPresentationPublication, model.admitsForegroundPresentationRead else { return }
         dataLoadGeneration &+= 1
         let generation = dataLoadGeneration
         do {

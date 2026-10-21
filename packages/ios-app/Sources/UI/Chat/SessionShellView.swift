@@ -115,12 +115,10 @@ struct SessionShellView: View {
 
     var body: some View {
         TronPresentationSurface(
-            id: "dashboard",
-            dependencies: [.sessionCatalog],
+            id: "dashboard", dependencies: [.sessionCatalog],
             onMount: { token in
                 homeStatusSurfaceToken = token
                 if let presentationActivityCoordinator {
-                    model.foregroundPresentationActivity = presentationActivityCoordinator
                     model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentationActivityCoordinator)
                 }
             },
@@ -282,8 +280,7 @@ struct SessionShellView: View {
                 dashboardReconcileTask = nil
             }
             // Warm settings only for the visible dashboard; covered reads wait for reveal.
-            .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
-                presentationActive: activity.allowsPresentationPublication && model.connectionState == .connected)) {
+            .task(id: activity.allowsPresentationPublication && model.connectionState == .connected ? model.settingsFreshness : nil) {
                 guard activity.allowsPresentationPublication, model.connectionState == .connected else { return }
                 model.resumeDeferredSessionCatalogRead()
                 try? await model.refreshSettingsSnapshot(for: SettingsTarget.global.gatewayTarget)

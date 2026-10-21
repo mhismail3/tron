@@ -46,6 +46,12 @@ protocol PresentationReadIdentity: Equatable {
 }
 
 extension AppModel {
+    /// Disposable visible reads wait for the replacement transport to settle.
+    /// Accepted operations and session restoration use their own admissions.
+    var admitsForegroundPresentationRead: Bool {
+        admitsSessionPresentationOpen && !isReconcilingForeground
+    }
+
     func restoreForemostPresentationAfterReconnect() async -> Bool {
         if let target = mountedPresentationTarget,
            foregroundPresentationActivity?.requiresSessionRefresh(target.sessionID) == false { return true }

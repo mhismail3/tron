@@ -256,11 +256,7 @@ struct HostedHomeDashboardFixture: View {
                     .background {
                         InAppNoticeWindowInstaller(model: model, colorScheme: .light, presentationActivity: homeActivity)
                             .frame(width: 0, height: 0).allowsHitTesting(false)
-                        if ForegroundSheetProbe.enabled {
-                            ForegroundNativeStackProbe(foreground: { [weak model] in
-                                model?.foregroundReconciliationGeneration ?? -1
-                            }).frame(width: 1, height: 1).allowsHitTesting(false)
-                        }
+                        ForegroundSheetProbeOverlay(model: model)
                     }
                     .tronPresentation()
                     .tronSettingsLayout()
@@ -587,7 +583,6 @@ private actor HostedHomeShellGateway {
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
     func capabilities() -> [String] { foreground.capabilities(capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"]) }
 
-    /// Every Home read a sheet sent, so journeys can prove a return to a sheet re-reads nothing.
     private var homeReads: [String: Int] = [:]
     /// Publishes each count before the read is answered, so the label is current
     /// by the time the sheet shows the content (no poll delay).
