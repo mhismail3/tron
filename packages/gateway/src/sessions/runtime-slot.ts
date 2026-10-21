@@ -309,10 +309,6 @@ const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
  */
 const STREAMING_PROGRESS_FLUSH_MS = 150;
 const DEFAULT_RUNTIME_DISPOSAL_GRACE_MS = 5_000;
-/** Default bound on one durable ownership write's transient-failure retries.
- * Long enough to ride out a brief disk/permission outage, short enough that a
- * permanently broken canonical path cannot hold a session lane, a command
- * response, or the drain indefinitely. */
 const FOREGROUND_ABORT_SETTLEMENT_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_COMPLETION_DISPOSITIONS = 16;

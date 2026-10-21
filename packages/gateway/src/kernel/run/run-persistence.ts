@@ -3,6 +3,10 @@ import { asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../../
 import type { GatewayWorkHandle } from "./gateway-work-registry.js";
 import { RunMarkerCompletionConflictError } from "./run-markers.js";
 
+/** Default bound on one durable ownership write's transient-failure retries.
+ * Long enough to ride out a brief disk/permission outage, short enough that a
+ * permanently broken canonical path cannot hold a session lane, a command
+ * response, or the drain indefinitely. */
 export const DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS = 20_000;
 export class CanonicalCustomEntryConflictError extends Error {}
 

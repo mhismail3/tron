@@ -35,7 +35,7 @@ identical to Pi-backed Gateway execution. Cleanup targets only the owned process
 
 ## Entry points
 
-The session run owner in [`sessions`](../../sessions/README.md) installs these
+`RuntimeSlot` in [`sessions`](../../sessions/README.md) installs these
 primitives. `direct-bash-process-owner.integration.test.ts` exercises real shells,
 detached descendants, timeout, Stop and environment boundaries.
 
@@ -54,4 +54,4 @@ scripts/tron verify --module gateway/run
 ## Not here
 
 Prompt admission, canonical Pi appends, profiles, queue and compaction remain with
-the session run coordinator; delegated worker lifecycle is separate.
+`RuntimeSlot`; delegated worker lifecycle is separate.
