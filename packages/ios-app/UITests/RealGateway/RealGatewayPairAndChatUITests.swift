@@ -1577,12 +1577,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             macSettingsGear.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
-        openMacSettings()
-        // More Settings is one row, under Agent, holding Connection and the approval floors (#1627).
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 1, app.debugDescription)
-        coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["mac"], schema: schema,
-                                                      sectionDestinations: ["workers": "Models", "approvals": "More Settings", "run": "More Settings",
-                                                                            "sources": "Extensions", "setup": "Setup"])
+        openMacSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 1, "one More Settings row (#1627)")
+        coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["mac"], schema: schema, sectionDestinations: [
+            "workers": "Models", "approvals": "More Settings", "run": "More Settings", "sources": "Extensions", "setup": "Setup"])
         openSettingsSection(app, "tools")
         let codeMode = app.buttons["Other tools with codemode"]
         revealBelowNavigationBar(app, codeMode)
