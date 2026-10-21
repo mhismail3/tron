@@ -180,7 +180,13 @@ struct SettingsRendererView: View {
                     Group {
                         // A key with many instances is one row, titled by the key itself.
                         if let many = group.manyInstances {
-                            TronGlassCard { instancesLink(many, count: group.keys.count) }
+                            if groups.count == 1, group.title != section.title {
+                                // A declared section gives a lone instance drill-in its own
+                                // heading; the row still names the governed setting.
+                                TronSettingsGroup(section.title) { instancesLink(many, count: group.keys.count) }
+                            } else {
+                                TronGlassCard { instancesLink(many, count: group.keys.count) }
+                            }
                         } else {
                             TronSettingsGroup(group.title, detail: group.detail ?? (index == 0 ? section.note : nil)) {
                                 VStack(spacing: 0) {

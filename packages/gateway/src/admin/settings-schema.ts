@@ -24,8 +24,10 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "workers", title: "Workers & delegation", description: "Model queues, thinking, and task budget", order: 15, harness: true, chatInline: true },
   { id: "context", title: "Compaction", description: "Automatic summaries and retained context", order: 20, harness: true },
   { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30, harness: true },
-  { id: "run", title: "Connection", description: "Transport, timeouts, and cache warming", order: 50, harness: true },
-  { id: "advanced", title: "Advanced", description: "Model availability, trust, delivery, and retries", order: 55, harness: true },
+  { id: "approvals", title: "Agent changes", description: "Which setting changes need your OK", order: 45, harness: true },
+  { id: "run", title: "Connection", description: "Transport, timeouts, delivery, and retries", order: 50, harness: true },
+  { id: "trust", title: "Trusted Projects", description: "Project trust decisions and default policy", order: 55, harness: true },
+  { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58, harness: false },
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60, harness: false },
   { id: "sources", title: "Sources", description: "Packages and how they install", order: 70, harness: false },
   { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80, harness: false },
@@ -284,13 +286,13 @@ export const KEYS: readonly KeyDeclaration[] = [
     order: 30, importance: "essential", control: "number",
   },
   {
-    id: "model.thinkingBudgets", group: "advanced", type: thinkingBudgetsType(),
+    id: "model.thinkingBudgets", group: "workers", type: thinkingBudgetsType(),
     layers: both(pi("thinkingBudgets")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ANY_ACTOR,
     label: "Thinking budgets", help: "Token budget per thinking level, for models that take one.", order: 60, importance: "advanced",
     control: "list",
   },
   {
-    id: "model.offered", group: "advanced", type: types.stringList(500),
+    id: "model.offered", group: "workers", type: types.stringList(500),
     layers: both(pi("enabledModels")), timing: "live", effect: "next-turn", floor: "quiet", writers: ["ui", "home"],
     label: "Offered models", help: "Models offered in the picker. Empty offers every model.", order: 70,
     importance: "advanced", control: "list",
@@ -404,7 +406,7 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   // Permissions ---------------------------------------------------------
   {
-    id: "permissions.projectTrust", group: "advanced", qualifier: "project", type: types.boolean(["Trusted", "Not trusted"]),
+    id: "permissions.projectTrust", group: "trust", qualifier: "project", type: types.boolean(["Trusted", "Not trusted"]),
     layers: { mac: { store: "trust" } }, timing: "live", effect: "reload", floor: { widen: "approve", narrow: "notify" }, direction: grants,
     writers: ["ui", "home"], label: "Trust for this project", help: "Lets this project's extensions, hooks and settings load.",
     order: 10, importance: "essential", control: "toggle", confirm: "Trusting a project runs its extensions and hooks.",
@@ -413,7 +415,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     // A paired iPhone's Mac Terminal key: its line in ~/.ssh/authorized_keys.
     // Adding one lets that iPhone's Secure Enclave key log in over Tailscale,
     // so it is a credential addition (approve); removing it is a revocation.
-    id: "permissions.macTerminalKey", group: "advanced", subgroup: "Mac Terminal", qualifier: "device",
+    id: "permissions.macTerminalKey", group: "connections", subgroup: "Mac Terminal", qualifier: "device",
     type: {
       kind: "text",
       validate: (value: unknown, label: string) => validateMacTerminalKey(value, label),
@@ -430,7 +432,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     confirm: "This iPhone's key will be added to ~/.ssh/authorized_keys and can log in to your Mac account over Tailscale.",
   },
   {
-    id: "permissions.defaultProjectTrust", group: "advanced",
+    id: "permissions.defaultProjectTrust", group: "trust",
     type: types.choice([
       { value: "ask", label: "Ask", detail: "Asks you the first time a project opens" },
       { value: "always", label: "Always trust", detail: "Loads every project's extensions and hooks" },
@@ -445,10 +447,10 @@ export const KEYS: readonly KeyDeclaration[] = [
     // Lowering a floor widens what agents may do, so it is this key's widen
     // direction and its floor is approve; only the maintainer's tap writes it,
     // and that tap is the approval (doc 4.2, F3). Nothing else is special.
-    id: "permissions.floor", group: "advanced", subgroup: "Floors", qualifier: "key", type: tierType(),
+    id: "permissions.floor", group: "approvals", subgroup: "Floors", qualifier: "key", type: tierType(),
     layers: { mac: { store: "floors" } }, builtinFor: (qualifiers) => codeFloor(qualifiers),
     timing: "live", effect: "next-change", floor: { widen: "approve", narrow: "quiet" }, direction: lowers, writers: ["ui"],
-    label: "Agent approvals", help: "How much of your attention an agent's change to each setting gets: Quiet applies it, Notify also tells you, Approve waits for you.",
+    label: "Agent approvals", help: "Which setting changes need your OK.",
     order: 90, importance: "advanced", control: "choice",
     confirm: "Lowering a floor lets agents make this change with less of your attention.",
   },
@@ -464,42 +466,42 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   // Run -----------------------------------------------------------------
   {
-    id: "run.queue.steeringMode", group: "advanced", subgroup: "Queue", type: types.choice(QUEUE),
+    id: "run.queue.steeringMode", group: "run", subgroup: "Queue", type: types.choice(QUEUE),
     layers: chatPi("steeringMode"), builtin: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
     label: "Steering delivery", help: "How queued steering messages reach a running turn.", order: 10, importance: "advanced", control: "choice",
   },
   {
-    id: "run.queue.followUpMode", group: "advanced", subgroup: "Queue", type: types.choice(QUEUE),
+    id: "run.queue.followUpMode", group: "run", subgroup: "Queue", type: types.choice(QUEUE),
     layers: chatPi("followUpMode"), builtin: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
     label: "Follow-up delivery", help: "How queued follow-up messages are delivered after a turn.", order: 20, importance: "advanced", control: "choice",
   },
   {
-    id: "run.retry.enabled", group: "advanced", subgroup: "Retry", type: types.boolean(),
+    id: "run.retry.enabled", group: "run", subgroup: "Retry", type: types.boolean(),
     layers: chatPi("retry", "enabled"), builtin: true, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Retry", help: "Retry a failed model request.", order: 30, importance: "advanced", control: "toggle",
   },
   {
-    id: "run.retry.maxRetries", group: "advanced", subgroup: "Retry", type: types.integer(0, 20, "retries"),
+    id: "run.retry.maxRetries", group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
     layers: chatPi("retry", "maxRetries"), builtin: 3, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Retries", help: "How many times a failed request is retried.", order: 40, importance: "essential", control: "number",
   },
   {
-    id: "run.retry.baseDelayMs", group: "advanced", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
+    id: "run.retry.baseDelayMs", group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
     layers: chatPi("retry", "baseDelayMs"), builtin: 2_000, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Retry delay", help: "The first delay between retries; later delays grow.", order: 50, importance: "advanced", control: "number",
   },
   {
-    id: "run.retry.provider.timeoutMs", group: "advanced", subgroup: "Retry", type: types.integer(1_000, 3_600_000, "ms"),
+    id: "run.retry.provider.timeoutMs", group: "run", subgroup: "Retry", type: types.integer(1_000, 3_600_000, "ms"),
     layers: chatPi("retry", "provider", "timeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Provider timeout", help: "The provider client's request timeout.", order: 60, importance: "advanced", control: "number",
   },
   {
-    id: "run.retry.provider.maxRetries", group: "advanced", subgroup: "Retry", type: types.integer(0, 20, "retries"),
+    id: "run.retry.provider.maxRetries", group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
     layers: chatPi("retry", "provider", "maxRetries"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Provider retries", help: "Retries inside the provider client.", order: 70, importance: "advanced", control: "number",
   },
   {
-    id: "run.retry.provider.maxRetryDelayMs", group: "advanced", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
+    id: "run.retry.provider.maxRetryDelayMs", group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
     layers: chatPi("retry", "provider", "maxRetryDelayMs"), builtin: 60_000, timing: "live", effect: "next-request", floor: "quiet",
     writers: ANY_ACTOR, label: "Provider retry delay cap", help: "The longest delay the provider client waits.",
     order: 80, importance: "advanced", control: "number",

@@ -29,6 +29,10 @@ services, paired Macs and devices, notifications and logs.
   Compaction, Trusted Projects, More Settings), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
   System (slate: Mac Terminal, Push Notifications, Setup, Logs). The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
+  Models includes thinking budgets and offered models beside worker queues. More Settings starts
+  with Agent changes (Agent approvals), then connection, queue and retry controls; there is no
+  Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
+  groups without duplicating them in More Settings.
   Notifications and Changes sit in the toolbar. Dashboard Settings exposes only global scope.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
   chosen folder as Not trusted through `settings.change`, a folder inside a listed project too
@@ -85,7 +89,10 @@ services, paired Macs and devices, notifications and logs.
   sheet. Device rename (`device-label.v1`), source/install (`ios-device-install.v3`) and Gateway
   update, promote, rollback and **Rebuild from Source** need the focused profile (**Use This
   Server** first). Rebuild is user-initiated only: agents never press it or submit its RPC. Status
-  polling is command-bound and stops at terminal state, reconnect or disappearance.
+  polling is command-bound and stops at terminal state, reconnect or disappearance. Maintenance
+  action containers inherit the sheet theme; Forget Server keeps semantic red. The selected
+  server shows its Gateway-declared Mac Terminal key using the standard renderer and Value & Source;
+  other servers require Use This Server before exposing this control-plane setting.
 - **Logs.** Gateway records are fetched only while Logs is presented, merged with the iOS client
   ring, refreshed every 15 s while visible, and exported through Export Diagnostics.
 - **Reloads.** Visible reads include `foregroundReconciliationGeneration` in their task identity,

@@ -604,6 +604,11 @@ struct GatewayConnectionDetailView: View {
                     gatewayUpdateGroup(config: updateConfig)
                 }
 
+                if currentProfile.id == model.profiles.selected?.id {
+                    SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
+                        presentation: .section("connections"), embedded: true)
+                }
+
                 GatewayMaintenanceActions(
                     lifecycle: lifecycleActions,
                     destructive: GatewayMaintenanceAction(id: "forget", title: "Forget Server") {
@@ -1037,6 +1042,7 @@ struct GatewayMaintenanceActions: View {
     let lifecycle: [GatewayMaintenanceAction]
     let destructive: GatewayMaintenanceAction
     var accent: Color = .tronEmerald
+    @Environment(\.tronSettingsVisualTheme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1045,7 +1051,7 @@ struct GatewayMaintenanceActions: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: 12) {
                     ForEach(row) { action in
-                        button(action, accent: accent)
+                        button(action, accent: theme?.accent ?? accent)
                     }
                 }
             }
