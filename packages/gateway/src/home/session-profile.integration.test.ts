@@ -1,0 +1,58 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
+
+const evidence: unknown[] = [];
+afterEach(async () => { vi.restoreAllMocks(); await disposeFixtures(); });
+afterAll(async () => {
+  await mkdir("test-results/session-profile", { recursive: true });
+  await writeFile("test-results/session-profile/creation-and-append.json", JSON.stringify(evidence, null, 2));
+});
+
+type Tools = { availableTools: { name: string }[] };
+
+it("uses an explicit creation profile once, then reconstructs an unrecorded session as ordinary", async () => {
+  const f = await fixture();
+  const slot = await f.registry.create(f.cwd, "home");
+  expect(f.registry.homeOwner().profileFor(slot.id, slot.cwd)).toBe("unnamed");
+  const first = await slot.context() as unknown as Tools;
+  const firstTools = first.availableTools.map(tool => tool.name);
+  expect(firstTools).toContain("delegate");
+  expect(firstTools).not.toContain("write");
+
+  await slot.replaceRuntimeForProfile(async () => {});
+  expect(f.registry.homeOwner().profileFor(slot.id, slot.cwd)).toBe("unnamed");
+  const second = await slot.context() as unknown as Tools;
+  const secondTools = second.availableTools.map(tool => tool.name);
+  expect(secondTools).toContain("write");
+  expect(secondTools).not.toContain("delegate");
+  evidence.push({ case: "creation-profile-once", firstTools, secondTools });
+});
+
+it("classifies each canonical append from the live record, not its fixed runtime profile", async () => {
+  const f = await fixture();
+  const slot = await f.registry.create(f.cwd, "home");
+  const runtimeTools = (await slot.context() as unknown as Tools).availableTools.map(tool => tool.name);
+  expect(runtimeTools).toContain("delegate");
+  expect(f.registry.homeOwner().profileFor(slot.id, slot.cwd)).toBe("unnamed");
+  slot.sessionManager.appendMessage(fauxAssistantMessage("materialized canonical baseline"));
+  const before = await readFile(slot.sessionFile!, "utf8");
+  const owner = f.registry.homeOwner();
+  const state = owner.chapterStateFor.bind(owner);
+  // A sealed-state producer must not make a stale, fixed Home profile own this
+  // unrecorded session's appends after the creation fallback has been consumed.
+  vi.spyOn(owner, "chapterStateFor").mockImplementation(sessionId => sessionId === slot.id
+    ? { ...state(sessionId), sealed: true } : state(sessionId));
+  expect(owner.chapterStateFor(slot.id).sealed).toBe(true);
+  expect(() => slot.sessionManager.appendCustomEntry("live-profile-boundary", { retained: true })).not.toThrow();
+  const after = await readFile(slot.sessionFile!, "utf8");
+  const entries = after.trimEnd().split("\n").slice(1).map(line => JSON.parse(line));
+  const appended = entries.filter(entry => entry.type === "custom" && entry.customType === "live-profile-boundary");
+  expect(after.startsWith(before)).toBe(true);
+  expect(appended).toHaveLength(1);
+  expect(appended[0].data).toEqual({ retained: true });
+  expect(slot.sessionManager.getBranch()).toEqual(entries);
+  evidence.push({ case: "live-append-classification", runtimeTools, persistedAppends: appended.length,
+    beforeBytes: Buffer.byteLength(before), afterBytes: Buffer.byteLength(after) });
+});
