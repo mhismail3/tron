@@ -61,9 +61,8 @@ import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTas
 import { homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
-import type { SettingsSignal } from "../kernel/settings/tool-contract.js";
+import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
 import type { Actor } from "../admin/settings-record.js";
-import type { SettingsToolAccess, TaskWorkerSettingsState } from "../kernel/settings/tool-contract.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
@@ -178,7 +177,6 @@ import { skillTitle } from "./skill-title.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
 import type { ChatStore } from "../admin/settings-resolver.js";
-import type { FixedSetting } from "../kernel/settings/tool-contract.js";
 import { KEYS, hasCompactionApplier, schemaKey } from "../admin/settings-schema.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-

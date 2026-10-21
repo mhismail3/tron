@@ -1,7 +1,6 @@
-import { type SettingsToolAccess } from "../kernel/settings/tool-contract.js";
+import { type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
 import { StringEnum, Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory, ToolInfo } from "../kernel/pi/coding-agent.js";
-import type { ChangeRequest, ChangeResult } from "../kernel/settings/tool-contract.js";
 
 /**
  * The `settings` tool and the turn's web mark (docs/settings-model.md 5.1, 5.4).

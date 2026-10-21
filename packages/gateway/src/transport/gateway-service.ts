@@ -14,16 +14,14 @@ import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../home/home-memor
 import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { PI_VERSION } from "../kernel/pi/version.js";
 import type { ChangeContext, ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
-import type { ChangeOutcome, ChangeRequest } from "../kernel/settings/tool-contract.js";
+import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { ApprovalRequest } from "../admin/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../admin/settings-record.js";
 import { KEYS, SECTIONS, auditSubject, recordSubject, schemaKey } from "../admin/settings-schema.js";
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, type HomeProfileOp } from "../home/home-profile.js";
 import type { ObservedStore } from "../admin/settings-outside.js";
-import type { SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
 import { maxTier } from "../admin/settings-types.js";
-import { QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";

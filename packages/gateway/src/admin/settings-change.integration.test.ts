@@ -28,7 +28,6 @@ import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { startTestModules } from "../../test-support/gateway-modules.js";
-
 /**
  * The one settings change path at its real boundaries (docs/settings-model.md
  * 5.1-5.3, 5.7, foundation F2): `settings.change`, `settings.undo` and

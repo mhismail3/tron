@@ -1,8 +1,7 @@
-import { type SettingsTarget, type FixedSetting, type Badge, type LayerValue, type ResolvedKey, type Diagnostic, type Resolution } from "../kernel/settings/tool-contract.js";
+import { type SettingsTarget, type FixedSetting, type Badge, type LayerValue, type ResolvedKey, type Diagnostic, type Resolution, type LayerId, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import { dirname } from "node:path";
 import { KEYS, keyForHome, builtinValue, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext } from "./settings-types.js";
-import { type LayerId, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
 

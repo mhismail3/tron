@@ -1,4 +1,4 @@
-import { type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult } from "../kernel/settings/tool-contract.js";
+import { type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type GitResult, type FixedSetting, type Resolution, type SettingsTarget, TIERS, type LayerId, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
 import type { MacTerminalKeys } from "../security/mac-terminal.js";
 import { stage } from "../transport/request-span.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -16,15 +16,12 @@ import { gitHeadState, projectGitState, readProjectDocument, writeProjectSetting
 import { observedInstance, projectStores, type ObservedReaders, type ObservedStore, type OutsideChanges, type PlannedWrite } from "./settings-outside.js";
 import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord, TierBasis } from "./settings-record.js";
-import type { ChangeStatus, GitResult } from "../kernel/settings/tool-contract.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { composedBelow, readBinding, resolveSettings, targetLayers, type ChatStore, type OptionSources, type SettingsStores } from "./settings-resolver.js";
-import { type FixedSetting, type Resolution, type SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, builtinValue, floorFor, floorInstances, hasChatSettingsApplier, hasRuntimeRequestApplier, keyForHome, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { formatProfileValue, profileListItem, type HomeProfileAuthor, type HomeProfileItems, type HomeProfileOp, type HomeProfileSaved, type HomeProfileWrite } from "../home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, maxTier, raiseTier, type FormatContext, type ModelRefValue } from "./settings-types.js";
-import { TIERS, type LayerId, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
 
 /** What a session target contributes: its Chat layer and whether it is Home's chat. */
 export interface SessionSettingsSource {
