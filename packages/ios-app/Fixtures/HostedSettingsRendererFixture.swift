@@ -48,9 +48,11 @@ struct HostedSettingsRendererFixture: View {
                     token: "fixture-token", selecting: false)
             }
         }
-        _model = State(initialValue: AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { [socket] _ in socket }),
+        let model = AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { [socket] _ in socket }),
             profiles: profiles,
-            cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "settings-renderer-fixture"))))
+            cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "settings-renderer-fixture")))
+        model.defaultWorkspace = "/fixture/projects"
+        _model = State(initialValue: model)
     }
 
     var body: some View {
@@ -282,6 +284,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 ])
             }
             result = .object(["models": .array(models), "nextCursor": .null])
+        case "filesystem.list":
+            result = .object(["path": params["path"] ?? .string("/fixture/projects"), "parent": .string("/fixture"), "entries": .array([
+                .object(["name": .string("Example"), "path": .string("/fixture/projects/Example"), "kind": .string("directory"), "hidden": .bool(false)])
+            ])])
         case "model.recent": result = .object(["models": .array([])])
         case "settings.resolve": result = resolution()
         case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", cursor: params["cursor"]?.stringValue)
