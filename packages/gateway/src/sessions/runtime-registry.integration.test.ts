@@ -11220,11 +11220,11 @@ export default function (pi) {
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const internal = slot as unknown as {
       pendingPrompt?: { id: string; createdAt: string; text: string; attachmentCount: number };
-      beginDerivedOperationWork: (operationId: string, kind: "foreground-agent-operation") => unknown;
+      runWork: import("../kernel/run/run-work-owner.js").RunWorkOwner;
       runtime: { session: { readonly isStreaming: boolean } };
       dependencies: { markers: { mark: (sessionId: string, operationId: string) => Promise<void> } };
     };
-    internal.beginDerivedOperationWork("orphaned-operation", "foreground-agent-operation");
+    internal.runWork.beginDerivedOperationWork("orphaned-operation", "foreground-agent-operation");
     internal.pendingPrompt = {
       id: "orphaned-operation",
       createdAt: new Date().toISOString(),
@@ -11269,14 +11269,14 @@ export default function (pi) {
       phase: "idle" | "running";
       activeOperationId?: string;
       operation?: { id?: string; kind: "prompt"; startedAt: string };
-      beginDerivedOperationWork: (operationId: string, kind: "foreground-agent-operation") => unknown;
+      runWork: import("../kernel/run/run-work-owner.js").RunWorkOwner;
       dependencies: { markers: {
         mark: (sessionId: string, operationId: string) => Promise<void>;
         clear: (sessionId: string, operationId?: string) => Promise<void>;
         evidenceFor: (sessionId: string) => Promise<Array<{ operationId: string }>>;
       } };
     };
-    internal.beginDerivedOperationWork("racing-operation", "foreground-agent-operation");
+    internal.runWork.beginDerivedOperationWork("racing-operation", "foreground-agent-operation");
     await internal.dependencies.markers.mark(slot.id, "racing-operation");
     const mark = vi.spyOn(internal.dependencies.markers, "mark");
     const originalClear = internal.dependencies.markers.clear.bind(internal.dependencies.markers);
@@ -11357,7 +11357,7 @@ export default function (pi) {
       pendingPrompt?: {
         id: string; createdAt: string; text: string; attachmentCount: number;
       };
-      settleOperationWork: (operationId: string) => void;
+      runWork: import("../kernel/run/run-work-owner.js").RunWorkOwner;
     };
     internal.pendingPrompt = {
       id: "settled-operation",
@@ -11366,7 +11366,7 @@ export default function (pi) {
       attachmentCount: 0,
     };
 
-    internal.settleOperationWork("settled-operation");
+    internal.runWork.settleOperationWork("settled-operation");
 
     expect(slot.snapshot().pendingPrompt).toBeUndefined();
   });

@@ -56,6 +56,7 @@
     "kernel/run/README.md",
     "kernel/run/request-pipeline.ts",
     "kernel/run/run-persistence.ts",
+    "kernel/run/run-work-owner.ts",
     "kernel/run/locks/run-markers-paths.golden.json"
   ],
   "dependsOn": [

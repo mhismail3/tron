@@ -17,6 +17,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
 - `run-persistence.ts`: sole pending-receipt join and durable-write fence, bounded
   retry/retention and conflict handling; the slot supplies live Pi stop/diagnostic cuts.
 - `gateway-work-registry.ts`: bounded admission/drain tokens and joined settlement.
+- `run-work-owner.ts`: exact per-operation handles, retirement and marker-before-token
+  orphan repair, with live retained-owner rechecks after persistence.
 
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option
   replacement, live conversion/preparation and ordered stream-policy composition.
