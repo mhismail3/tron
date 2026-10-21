@@ -1087,12 +1087,6 @@ extension AppModel {
             && lifecycle.admission?.connectionID != nil
     }
 
-    /// Disposable visible reads wait for the replacement transport to settle.
-    /// Accepted operations and session restoration use their own admissions.
-    var admitsForegroundPresentationRead: Bool {
-        admitsSessionPresentationOpen && !isReconcilingForeground
-    }
-
     /// Whether the selected Mac's missing transport has outlived the recovery
     /// grace. The app-scoped recovery episode is the one owner of that decision;
     /// a mounted chat reads it rather than raw admission, so the reconnect every
@@ -4547,6 +4541,7 @@ extension AppModel {
         activityCoordinator: PresentationActivityCoordinator,
         cadence: HomeStatusPresentationOwner.Cadence
     ) {
+        foregroundPresentationActivity = activityCoordinator
         // The read belongs to the surface, not to a selected profile: a dashboard
         // mounted before pairing reads Home as soon as pairing configures it.
         homeStatus.mountSurface(token: surfaceToken, coordinator: activityCoordinator, cadence: cadence) { [weak self] fence in

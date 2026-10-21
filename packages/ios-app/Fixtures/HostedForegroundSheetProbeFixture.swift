@@ -66,6 +66,18 @@ import UIKit
     }
 }
 
+/// Keep the opt-in observation wiring with its fixture owner.
+struct ForegroundSheetProbeOverlay: View {
+    let model: AppModel
+    var body: some View {
+        if ForegroundSheetProbe.enabled {
+            ForegroundNativeStackProbe(foreground: { [weak model] in
+                model?.foregroundReconciliationGeneration ?? -1
+            }).frame(width: 1, height: 1).allowsHitTesting(false)
+        }
+    }
+}
+
 /// Passive, test-only observation of the actual UIKit presentation chain on
 /// rendered frames. AX reads the live value without causing SwiftUI renders.
 struct ForegroundNativeStackProbe: UIViewRepresentable {

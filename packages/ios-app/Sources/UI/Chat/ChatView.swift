@@ -1444,9 +1444,8 @@ struct ChatView: View {
             presentationGeneration: generation,
             canonicalGeneration: projection.canonical,
             timelineGeneration: projection.timeline,
-            // Do not let the retained projection consume the foreground token
-            // while reconciliation is still in flight. AppModel advances this
-            // generation only after the mounted aggregate succeeds.
+            // Retained frames consume foreground tokens only after the foremost
+            // presentation's required dependencies settle.
             entranceSuppressionGeneration: model.isReconcilingForeground
                 || model.foregroundReconciliationGeneration == 0
                 ? nil
