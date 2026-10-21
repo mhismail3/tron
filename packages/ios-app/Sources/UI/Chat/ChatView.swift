@@ -1830,7 +1830,10 @@ struct ChatView: View {
             && (!retainsDetachedPresentationCut || currentMountedPresentationTarget != nil)
             && (sessionPresentation.needsOpeningResume
                 || transcriptPresentation.installed == nil
-                || model.presentationTarget(for: sessionID) != presentationTarget)
+                || model.presentationTarget(for: sessionID) != presentationTarget
+                // An independent covering sheet can defer reconnect restoration
+                // without changing the mounted target or local ready frame.
+                || presentationTarget.map { !model.hasMountedSessionAuthority($0) } == true)
     }
 
     private var hasSettledOpeningOffset: Bool {

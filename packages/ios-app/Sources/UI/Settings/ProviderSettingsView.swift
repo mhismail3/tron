@@ -217,7 +217,8 @@ struct ProvidersSettingsView: View {
         let profile = model.profileRevision
         let profileID = model.profiles.selected?.id
         let foreground = model.foregroundReconciliationGeneration
-        guard presentationActivity.allowsPresentationPublication, !Task.isCancelled else { return false }
+        guard presentationActivity.allowsPresentationPublication, !Task.isCancelled,
+              model.admitsForegroundPresentationRead else { return false }
         loadGeneration &+= 1
         let generation = loadGeneration
 

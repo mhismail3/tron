@@ -19,6 +19,25 @@ struct HostedForegroundSheetScenario {
         return base + (queueEnabled ? [QueuedMessageManagementPolicy.capability] : [])
     }
 
+    var devices: JSONValue {
+        let changed = connections > 1 && ProcessInfo.processInfo.arguments.contains("-foreground-device-change")
+        return .object(["devices": .array(changed ? [.object([
+            "id": .string("foreground-device"), "name": .string("Foreground device"),
+            "createdAt": .string("2026-01-01T00:00:00Z"),
+        ])] : [])])
+    }
+
+    func providers(_ response: JSONValue) -> JSONValue {
+        guard connections > 1, ProcessInfo.processInfo.arguments.contains("-foreground-provider-change"),
+              var object = response.objectValue, let rows = object["providers"]?.arrayValue else { return response }
+        object["providers"] = .array(rows.map { value in
+            guard var provider = value.objectValue, let name = provider["name"]?.stringValue else { return value }
+            provider["name"] = .string(name + " refreshed")
+            return .object(provider)
+        })
+        return .object(object)
+    }
+
     func settings(_ response: JSONValue) -> JSONValue {
         guard connections > 1, ProcessInfo.processInfo.arguments.contains("-foreground-settings-change"),
               var object = response.objectValue, let keys = object["keys"]?.arrayValue else { return response }

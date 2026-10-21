@@ -293,7 +293,7 @@ struct TronPresentationSurface<Content: View>: View {
             .environment(\.tronPresentationSurfaceToken, token)
             .environment(
                 \.tronPresentationActivity,
-                coordinator?.activity(for: token) ?? .active
+                scenePhase == .active ? (coordinator?.activity(for: token) ?? .active) : .covered
             )
             .task(id: PresentationActivityTaskID(source: dependencyRead?.id,
                 presentationActive: coordinator?.activity(for: token).allowsPresentationPublication == true && scenePhase == .active)) {
