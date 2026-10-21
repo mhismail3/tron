@@ -17,7 +17,7 @@ import pathlib
 import re
 import sys
 
-OWNER = pathlib.PurePosixPath("State/PresentationActivityCoordinator.swift")
+OWNER = pathlib.PurePosixPath("State/ManagedSheetPresentation.swift")
 # The Swift app interpreter replays a displayed app's own `.sheet` modifier inside
 # its managed runner sheet; that is the app's presentation, not a Tron surface.
 INTERPRETED = pathlib.PurePosixPath("UI/SwiftApps/SwiftAppViews.swift")
