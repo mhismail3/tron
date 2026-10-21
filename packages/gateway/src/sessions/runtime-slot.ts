@@ -41,9 +41,11 @@ import {
   SettingsManager,
   type FileEntry,
 } from "../kernel/pi/coding-agent.js";
-import { GatewayError, asUncertainOutcome, isUncertainOutcome } from "../errors.js";
+import { GatewayError, asUncertainOutcome } from "../errors.js";
 import { RunPersistence, CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS } from "../kernel/run/run-persistence.js";
 import { RunWorkOwner } from "../kernel/run/run-work-owner.js";
+import { HeldPromptQueue } from "../kernel/run/held-prompt-queue.js";
+import { MAXIMUM_PROMPT_ATTACHMENTS, type QueueBehavior, type RuntimeQueuedMessage, type HeldPrompt, type PromptQueueDisplay } from "../kernel/run/queue-input.js";
 import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
@@ -205,37 +207,6 @@ function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, 
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
-type QueueBehavior = QueuedMessageState["behavior"];
-
-type RuntimeQueuedMessage = QueuedMessageState & {
-  runtimeText: string;
-  attachmentEnvelope: string;
-  images: ImageContent[];
-  inputSource: "interactive" | "rpc" | "extension";
-  commandId?: string;
-  ordinal: number;
-};
-
-/** A prompt accepted while compaction owns admission. Its RPC has already
- * returned; the Gateway owns its projection, edits and removal until it is
- * admitted through the ordinary prompt path after compaction. `admitting`
- * marks the head entry once that admission has captured its content. */
-type HeldPrompt = RuntimeQueuedMessage & { admitting: boolean };
-
-/** Client-visible prompt content, separate from the Pi runtime text that may
- * carry a resource prefix and attachment envelope. */
-type PromptQueueDisplay = {
-  text: string;
-  resourceInvocations?: ResourceInvocation[];
-  attachmentEnvelope: string;
-  attachmentCount: number;
-  photoCount?: number;
-  fileAttachmentCount?: number;
-  attachments?: QueuedMessageState["attachments"];
-  inputSource?: "interactive" | "rpc" | "extension";
-  commandId?: string;
-};
-
 type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
 
 type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal"> & {
@@ -296,7 +267,6 @@ type PendingExtensionCanonicalEffect =
     };
 
 const MAXIMUM_QUEUED_MESSAGES = 32;
-const MAXIMUM_PROMPT_ATTACHMENTS = 10;
 const MAXIMUM_QUEUED_MESSAGE_BYTES = 64 * 1_024;
 const MAXIMUM_PENDING_PROMPT_BYTES = MAXIMUM_QUEUED_MESSAGE_BYTES;
 const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
@@ -846,12 +816,42 @@ export class RuntimeSlot {
   private queuedMessages: RuntimeQueuedMessage[] = [];
   private pendingQueueAdmission: PendingQueueAdmission | undefined;
   private pendingPrompt: PendingPromptState | undefined;
-  /** Messages sent while compaction owns admission, in delivery order. Pi
-   * rejects input during manual compaction and its own front end keeps the
-   * same "after compaction" queue; here the Gateway is that front end, so every
-   * client sees, edits and removes these through the ordinary queue contract. */
-  private heldPrompts: HeldPrompt[] = [];
-  private heldPromptFlush: Promise<void> | undefined;
+  private readonly heldQueue = new HeldPromptQueue({
+    assertUsable: () => this.assertUsable(),
+    compacting: () => this.phase === "compacting",
+    draining: () => this.lifecycle.isDraining,
+    disposed: () => this.disposed,
+    shuttingDown: () => this.shuttingDown,
+    queueClosed: () => this.stopRecoveryQueueClosed,
+    isMessage: text => {
+      const command = parsePiLiteralCommand(text)?.name;
+      return command === undefined || this.runtime.session.extensionRunner.getCommand(command) === undefined;
+    },
+    reconcileQueuedMessages: () => this.reconcileQueuedMessages(),
+    queued: () => this.queuedMessages,
+    nextOrdinal: () => this.nextQueueOrdinal++,
+    validateQueue: items => RuntimeSlot.validateQueue(items),
+    beginWork: id => this.runWork.beginOperationWork(id, "queued-mutation"),
+    settleWork: id => this.runWork.settleOperationWork(id),
+    markRecovery: id => this.stopRecoveryHoldIDs.add(id),
+    bumpQueueRevision: () => { this.queueRevision += 1; },
+    publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
+    queueRevision: () => this.queueRevision,
+    projectedQueue: () => this.projectedQueue(),
+    editedQueueItem: (previous, item, composed) => this.editedQueueItem(previous, item, composed),
+    assertQueueableResources: items => this.assertQueueableResources(items),
+    admitHeld: entry => this.admitPrompt(entry.runtimeText, entry.images, entry.behavior, {
+          text: entry.text,
+          attachmentEnvelope: entry.attachmentEnvelope,
+          attachmentCount: entry.attachmentCount,
+          ...(entry.photoCount === undefined ? {} : { photoCount: entry.photoCount }),
+          ...(entry.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: entry.fileAttachmentCount }),
+          ...(entry.attachments === undefined ? {} : { attachments: entry.attachments }),
+          ...(entry.resourceInvocations === undefined ? {} : { resourceInvocations: entry.resourceInvocations }),
+        }, undefined, undefined, entry.id, entry),
+    waitForStateChange: () => this.waitForStateChange(),
+    emit: (topic, data) => this.emit(topic, data),
+  });
   /** Exact Pi message object claimed by the foreground pending prompt. */
   private pendingPromptMessage: AgentMessage | undefined;
   /** Canonical user messages produced by queued resource/plain invocations. */
@@ -1667,7 +1667,7 @@ export class RuntimeSlot {
         .filter(([, observation]) => observation.pendingCompletionId !== undefined)
         .map(([operationId]) => operationId),
       ...this.queuedMessages.map((item) => item.id),
-      ...this.heldPrompts.map((item) => item.id),
+      ...this.heldQueue.entries.map((item) => item.id),
       ...this.dequeuedFollowUpOwners,
       ...this.dequeuedSteeringOwners,
       ...this.consumedSteeringOperationIDs,
@@ -1839,7 +1839,7 @@ export class RuntimeSlot {
     const waiters = [...this.stateChangeWaiters];
     this.stateChangeWaiters.clear();
     for (const resolve of waiters) resolve();
-    this.scheduleHeldPromptFlush();
+    this.heldQueue.scheduleHeldPromptFlush();
   }
 
   private get effectivePhase(): SessionPhase {
@@ -7065,7 +7065,7 @@ export class RuntimeSlot {
     const piQueued = new Set(this.queuedMessages.map((item) => item.id));
     return [
       ...this.queuedMessages,
-      ...this.heldPrompts.filter((item) => !piQueued.has(item.id)),
+      ...this.heldQueue.entries.filter((item) => !piQueued.has(item.id)),
     ].map(({
       id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments, resourceInvocations,
     }) => {
@@ -7563,7 +7563,7 @@ export class RuntimeSlot {
    * holds an input; a wake has no input, so it refuses and its results stay pending. */
   private async assertHomeWakeAdmissible(session: AgentSession): Promise<void> {
     if (this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined
-      || this.heldPrompts.length > 0 || this.pendingManualCompaction !== undefined || this.compactionOperation !== undefined
+      || this.heldQueue.entries.length > 0 || this.pendingManualCompaction !== undefined || this.compactionOperation !== undefined
       || this.isAgentAdmissionSettling || session.isStreaming) {
       throw new GatewayError("busy", "Tron Home is busy; finished results wait for its next idle moment", true);
     }
@@ -7675,13 +7675,13 @@ export class RuntimeSlot {
     // Once Stop closes Pi's queue, new client work stays Gateway-owned until
     // the stopped originals are admitted as one serialized continuation.
     if (!ownership && this.stopRecoveryQueueClosed) {
-      return this.holdPrompt(text, images, behavior, queueDisplay, true);
+      return this.heldQueue.holdPrompt(text, images, behavior, queueDisplay, true);
     }
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
     this.assertHomePromptAdmission();
-    if (!ownership && !this.taskWorker && this.holdsPromptsForCompaction(text, queueDisplay)) {
-      const result = this.holdPrompt(text, images, behavior, queueDisplay);
+    if (!ownership && !this.taskWorker && this.heldQueue.holdsPromptsForCompaction(text, queueDisplay)) {
+      const result = this.heldQueue.holdPrompt(text, images, behavior, queueDisplay);
       onAdmitted?.(result);
       return result;
     }
@@ -7689,137 +7689,6 @@ export class RuntimeSlot {
       text, images, behavior, queueDisplay, onAdmitted, ownership,
       ownership?.operationId ?? randomUUID(),
     );
-  }
-
-  private holdsPromptsForCompaction(text: string, queueDisplay: PromptQueueDisplay | undefined): boolean {
-    // Once any message waits, later ones wait behind it to preserve order even
-    // while the flush is admitting the head after compaction ended.
-    if (this.phase !== "compacting" && this.heldPrompts.length === 0) return false;
-    this.assertUsable();
-    // Extension commands execute rather than wait as a message.
-    if (queueDisplay?.resourceInvocations?.[0]?.source === "extension") return false;
-    // Skills and prompts make a message whatever its visible text begins with.
-    if (queueDisplay?.resourceInvocations !== undefined) return true;
-    const command = parsePiLiteralCommand(text)?.name;
-    return command === undefined || this.runtime.session.extensionRunner.getCommand(command) === undefined;
-  }
-
-  private holdPrompt(
-    text: string,
-    images: ImageContent[],
-    behavior: QueueBehavior | undefined,
-    queueDisplay: PromptQueueDisplay | undefined,
-    stopRecovery = false,
-  ): { operationId: string } {
-    this.assertUsable();
-    if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
-    const display = queueDisplay ?? {
-      text,
-      attachmentEnvelope: "",
-      attachmentCount: images.length,
-      ...(images.length > 0 ? { photoCount: images.length, fileAttachmentCount: 0 } : {}),
-    };
-    if (display.attachments !== undefined
-      && (display.attachments.length > MAXIMUM_PROMPT_ATTACHMENTS
-        || display.attachments.length !== display.attachmentCount)) {
-      throw new GatewayError("invalid_request", "Prompt attachment descriptors do not match the bounded attachment count");
-    }
-    this.reconcileQueuedMessages();
-    const entry: HeldPrompt = {
-      id: randomUUID(),
-      // Pi's front end queues compaction-time input as steering by default.
-      behavior: behavior ?? "steer",
-      text: display.text,
-      attachmentCount: display.attachmentCount,
-      ...(display.photoCount === undefined ? {} : { photoCount: display.photoCount }),
-      ...(display.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: display.fileAttachmentCount }),
-      ...(display.attachments === undefined ? {} : { attachments: display.attachments }),
-      ...(display.resourceInvocations === undefined ? {} : { resourceInvocations: display.resourceInvocations }),
-      runtimeText: text,
-      attachmentEnvelope: display.attachmentEnvelope,
-      images,
-      inputSource: display.inputSource ?? "interactive",
-      ...(display.commandId === undefined ? {} : { commandId: display.commandId }),
-      ordinal: this.nextQueueOrdinal++,
-      admitting: false,
-    };
-    RuntimeSlot.validateQueue([...this.queuedMessages, ...this.heldPrompts, entry]);
-    // Accepted queued work: an administrative drain and idle eviction wait for
-    // it exactly as they wait for Pi's queue.
-    this.runWork.beginOperationWork(entry.id, "queued-mutation");
-    this.heldPrompts.push(entry);
-    if (stopRecovery) this.stopRecoveryHoldIDs.add(entry.id);
-    this.queueRevision += 1;
-    this.revision += 1;
-    this.publishSnapshot();
-    return { operationId: entry.id };
-  }
-
-  private scheduleHeldPromptFlush(): void {
-    if (this.heldPromptFlush || this.heldPrompts.length === 0 || this.phase === "compacting"
-      || this.stopRecoveryQueueClosed || this.disposed || this.shuttingDown) return;
-    // Deferred: this runs from snapshot publication, which must finish
-    // broadcasting before admission publishes its own transitions.
-    this.heldPromptFlush = Promise.resolve()
-      .then(() => this.flushHeldPrompts())
-      .catch((error) => this.emit("session.diagnostic", safeJson({
-        code: "held-prompt-flush-failed",
-        message: error instanceof Error ? error.message : String(error),
-      })))
-      .finally(() => {
-        this.heldPromptFlush = undefined;
-        this.scheduleHeldPromptFlush();
-      });
-  }
-
-  /** Admits waiting prompts in order through the ordinary path: the first
-   * starts a run when the session is idle, later ones join Pi's queue with
-   * their requested behavior. A new compaction pauses the flush. */
-  private async flushHeldPrompts(): Promise<void> {
-    while (this.heldPrompts.length > 0 && this.phase !== "compacting" && !this.disposed && !this.shuttingDown) {
-      const entry = this.heldPrompts[0]!;
-      entry.admitting = true;
-      try {
-        await this.admitPrompt(entry.runtimeText, entry.images, entry.behavior, {
-          text: entry.text,
-          attachmentEnvelope: entry.attachmentEnvelope,
-          attachmentCount: entry.attachmentCount,
-          ...(entry.photoCount === undefined ? {} : { photoCount: entry.photoCount }),
-          ...(entry.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: entry.fileAttachmentCount }),
-          ...(entry.attachments === undefined ? {} : { attachments: entry.attachments }),
-          ...(entry.resourceInvocations === undefined ? {} : { resourceInvocations: entry.resourceInvocations }),
-        }, undefined, undefined, entry.id, entry);
-      } catch (error) {
-        if (error instanceof GatewayError && error.code === "busy" && error.retryable
-          && !this.lifecycle.isDraining && !this.disposed) {
-          // A prior response is still committing: accepted work waits for it
-          // rather than failing a message whose RPC already succeeded.
-          entry.admitting = false;
-          await this.waitForStateChange();
-          continue;
-        }
-        this.runWork.settleOperationWork(entry.id);
-        const message = error instanceof Error ? error.message : String(error);
-        // Only a proven non-start lets clients restore the draft.
-        if (isUncertainOutcome(error)) {
-          this.emit("session.diagnostic", safeJson({ code: "held-prompt-outcome-unknown", operationId: entry.id, message }));
-        } else {
-          this.emit("session.operationFailed", { operationId: entry.id, message });
-        }
-      }
-      if (this.removeHeldPrompt(entry.id)) {
-        this.revision += 1;
-        this.publishSnapshot();
-      }
-    }
-  }
-
-  private removeHeldPrompt(id: string): boolean {
-    const index = this.heldPrompts.findIndex((item) => item.id === id);
-    if (index < 0) return false;
-    this.heldPrompts.splice(index, 1);
-    this.queueRevision += 1;
-    return true;
   }
 
   private attentionPendingError(): GatewayError {
@@ -7861,7 +7730,7 @@ export class RuntimeSlot {
       this.assertUsable();
       this.assertHomePromptAdmission();
       if (!ownership && this.stopRecoveryQueueClosed && !held && !redelivery) {
-        const heldAdmission = this.holdPrompt(text, images, behavior, queueDisplay, true);
+        const heldAdmission = this.heldQueue.holdPrompt(text, images, behavior, queueDisplay, true);
         onAdmitted?.(heldAdmission);
         return heldAdmission;
       }
@@ -8141,7 +8010,7 @@ export class RuntimeSlot {
           this.pendingPrompt = ownership?.kind === "homeWake" ? undefined : this.promptDisplay(operationId, text, images, queueDisplay);
           // A waiting message becomes this pending prompt in the same
           // publication, so it is never shown twice or not at all.
-          if (held) this.removeHeldPrompt(held.id);
+          if (held) this.heldQueue.removeHeldPrompt(held.id);
           this.revision += 1;
           // Publish before entering Pi preflight. Automatic compaction can begin
           // inside that call before the RPC receives its admission result.
@@ -8384,7 +8253,7 @@ export class RuntimeSlot {
         this.reconcileQueuedMessages();
         const disposition = await queueDisposition!;
         queuesIntoActiveRun = disposition === "queued";
-        if (disposition === "queued" && held) this.removeHeldPrompt(held.id);
+        if (disposition === "queued" && held) this.heldQueue.removeHeldPrompt(held.id);
         if (disposition === "queued" && preflightStarted) {
           // Queued input has an accepted queue owner, not an active preflight.
           // Releasing this exact owner lets a later Stop-redelivery reuse the
@@ -8787,7 +8656,7 @@ export class RuntimeSlot {
   private async redeliverStoppedSteering(items: RuntimeQueuedMessage[], laneOwned: boolean): Promise<void> {
     const processed = new Set<string>();
     while (true) {
-      const held = this.heldPrompts.filter((item) => this.stopRecoveryHoldIDs.has(item.id));
+      const held = this.heldQueue.entries.filter((item) => this.stopRecoveryHoldIDs.has(item.id));
       const pending = [...items, ...held]
         .filter((item) => !processed.has(item.id)
           && (this.stopSteeringRecoveryIDs.has(item.id) || this.stopRecoveryHoldIDs.has(item.id)))
@@ -8795,7 +8664,7 @@ export class RuntimeSlot {
       if (pending.length === 0) break;
       for (const item of pending) {
         const heldEntry = this.stopRecoveryHoldIDs.has(item.id)
-          ? this.heldPrompts.find((entry) => entry.id === item.id)
+          ? this.heldQueue.entries.find((entry) => entry.id === item.id)
           : undefined;
         const hasAcceptedInvocation = this.invocationForOperation(item.id) !== undefined;
         try {
@@ -8817,7 +8686,7 @@ export class RuntimeSlot {
           const lifecycle = this.invocationForOperation(item.id)?.lifecycle;
           if (lifecycle === "completed" || lifecycle === "failed" || lifecycle === "interrupted") {
             this.consumeStopSteeringRecoveryOwner(item.id);
-            this.removeHeldPrompt(item.id);
+            this.heldQueue.removeHeldPrompt(item.id);
           }
         } catch (error) {
           this.dependencies.stopSteeringDiagnostic?.({
@@ -8854,14 +8723,7 @@ export class RuntimeSlot {
     // Waiting prompts are not admitted yet, so they clear immediately instead
     // of behind the compaction that owns the session lane.
     this.assertUsable();
-    const dropped = this.heldPrompts.filter((item) => !item.admitting);
-    if (dropped.length > 0) {
-      this.heldPrompts = this.heldPrompts.filter((item) => item.admitting);
-      for (const item of dropped) this.runWork.settleOperationWork(item.id);
-      this.queueRevision += 1;
-      this.revision += 1;
-      this.publishSnapshot();
-    }
+    this.heldQueue.clearWaiting();
     this.reconcileQueuedMessages();
     if (this.queuedMessages.length === 0 && !this.pendingQueueAdmission) return;
     return this.lane.run(async () => {
@@ -8957,53 +8819,11 @@ export class RuntimeSlot {
     }
   }
 
-  /** Edits, reorders and removes waiting prompts synchronously: they have no
-   * invocation receipt or Pi queue entry yet, and the lane may belong to the
-   * compaction they are waiting for. The head entry already being admitted is
-   * immutable and stays first. */
-  private replaceHeldPrompts(
-    expectedRevision: number,
-    items: Array<Pick<QueuedMessageState, "id" | "behavior" | "text">>,
-  ): { queueRevision: number; items: QueuedMessageState[] } {
-    if (expectedRevision !== this.queueRevision) {
-      throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
-    }
-    const previousByID = new Map(this.heldPrompts.map((item) => [item.id, item]));
-    const seen = new Set<string>();
-    const next = items.map((item) => {
-      const previous = previousByID.get(item.id);
-      if (!previous || !seen.add(item.id)) {
-        throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
-      }
-      return this.editedQueueItem(previous, item, false);
-    });
-    const admitting = this.heldPrompts.find((item) => item.admitting);
-    if (admitting) {
-      const retained = next[0];
-      if (retained?.id !== admitting.id
-        || retained.text !== admitting.text
-        || retained.behavior !== admitting.behavior) {
-        throw new GatewayError("conflict", "That message is already being sent.", true);
-      }
-    }
-    RuntimeSlot.validateQueue(next);
-    this.assertQueueableResources(next);
-    const retainedIDs = new Set(next.map((item) => item.id));
-    for (const item of this.heldPrompts) {
-      if (!retainedIDs.has(item.id)) this.runWork.settleOperationWork(item.id);
-    }
-    this.heldPrompts = next;
-    this.queueRevision += 1;
-    this.revision += 1;
-    this.publishSnapshot();
-    return { queueRevision: this.queueRevision, items: this.projectedQueue() };
-  }
-
   async replaceQueue(
     expectedRevision: number,
     items: Array<Pick<QueuedMessageState, "id" | "behavior" | "text">>,
   ): Promise<{ queueRevision: number; items: QueuedMessageState[] }> {
-    if (this.heldPrompts.length > 0) {
+    if (this.heldQueue.entries.length > 0) {
       this.assertUsable();
       this.reconcileQueuedMessages();
       // Pi's queue and the held queue have different owners and admission
@@ -9011,7 +8831,7 @@ export class RuntimeSlot {
       if (this.queuedMessages.length > 0 || this.pendingQueueAdmission) {
         throw new GatewayError("conflict", "Messages are still moving into the active queue. Try again in a moment.", true);
       }
-      return this.replaceHeldPrompts(expectedRevision, items);
+      return this.heldQueue.replaceHeldPrompts(expectedRevision, items);
     }
     return this.lane.run(async () => {
       this.assertUsable();
@@ -10221,7 +10041,7 @@ export class RuntimeSlot {
     await this.runPersistence.waitForReceiptWrites();
     this.extensionHost.retire("Session runtime disposed");
     // Waiting prompts are process-local like Pi's own queue.
-    this.heldPrompts = [];
+    this.heldQueue.reset();
     this.runWork.settleAll();
     this.lifecycle.retire();
     this.ui.retire();
@@ -10307,7 +10127,7 @@ export class RuntimeSlot {
       || this.phase === "running" || this.phase === "compacting" || this.phase === "retrying"
       || this.activeOperationId !== undefined) return "running";
     if (this.pendingPrompt || this.pendingQueueAdmission || this.queuedMessages.length > 0
-      || this.heldPrompts.length > 0 || this.pendingManualCompaction || this.queuedManualCompactionInFlight) return "queued";
+      || this.heldQueue.entries.length > 0 || this.pendingManualCompaction || this.queuedManualCompactionInFlight) return "queued";
     if (this.pendingAssistantCompletion || this.completionOwnershipQueue.length > 0) return "settling";
     if (this.pendingExtensionCommand || this.lifecycle.preventsNonRuntimeQuiescence) return "interaction";
     const work = this.dependencies.workRegistry.facts().filter(fact => fact.sessionId === this.id && fact.token !== exceptWorkToken);

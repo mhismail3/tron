@@ -516,7 +516,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
       sessionId: session.id, commandId: "race-late-steer", text: "steer during stop", behavior: "steer",
     });
     expect(late.ok, JSON.stringify(late)).toBe(true);
-    expect((slot as any).heldPrompts.some((item: any) => item.id === late.result.operationId)).toBe(true);
+    expect((slot as any).heldQueue.entries.some((item: any) => item.id === late.result.operationId)).toBe(true);
     releaseAbort();
     const stopped = await stop;
     expect(stopped.ok, JSON.stringify(stopped)).toBe(true);
@@ -529,7 +529,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
       }, "both stop-racing steers admitted and consumed once");
     } catch (error) {
       const snapshot = client.frames.filter((frame: any) => frame.topic === "session.snapshot" && frame.payload?.sessionId === session.id).at(-1)?.payload;
-      throw new Error(`${String(error)}\n${JSON.stringify({snapshot, queued:(slot as any).queuedMessages, held:(slot as any).heldPrompts, recovery:[...(slot as any).stopSteeringRecoveryIDs], closed:(slot as any).stopRecoveryQueueClosed})}`);
+      throw new Error(`${String(error)}\n${JSON.stringify({snapshot, queued:(slot as any).queuedMessages, held:(slot as any).heldQueue.entries, recovery:[...(slot as any).stopSteeringRecoveryIDs], closed:(slot as any).stopRecoveryQueueClosed})}`);
     }
     expect(continuationInputs).toHaveLength(1);
     expect(continuationInputs[0]!.some((text) => text.startsWith("steer before stop"))).toBe(true);

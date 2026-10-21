@@ -20,6 +20,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
 - `run-work-owner.ts`: exact per-operation handles, retirement and marker-before-token
   orphan repair, with live retained-owner rechecks after persistence.
 
+- `held-prompt-queue.ts`: accepted compaction/Stop-time input and its ordered deferred
+  admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types/bounds.
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option
   replacement, live conversion/preparation and ordered stream-policy composition.
 
@@ -55,5 +57,5 @@ scripts/tron verify --module gateway/run
 
 ## Not here
 
-Prompt admission, canonical Pi appends, profiles, queue and compaction remain with
+Prompt admission, canonical Pi appends, profiles, Pi's active queue and compaction remain with
 `RuntimeSlot`; delegated worker lifecycle is separate.
