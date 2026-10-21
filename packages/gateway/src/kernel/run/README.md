@@ -14,6 +14,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
 - `invocation-receipts.ts` and `context-delivery-receipts.ts`: canonical receipt
   parsing, folding and delivery causality; persisted names and bytes remain stable.
 - `run-markers.ts`: durable per-operation crash/interruption evidence.
+- `run-persistence.ts`: sole pending-receipt join and durable-write fence, bounded
+  retry/retention and conflict handling; the slot supplies live Pi stop/diagnostic cuts.
 - `gateway-work-registry.ts`: bounded admission/drain tokens and joined settlement.
 
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option
@@ -51,5 +53,5 @@ scripts/tron verify --module gateway/run
 
 ## Not here
 
-Prompt admission, receipt writes, profiles, queue and compaction remain with the
-session run owner; delegated worker lifecycle is separate.
+Prompt admission, canonical Pi appends, profiles, queue and compaction remain with
+the session run coordinator; delegated worker lifecycle is separate.

@@ -11,7 +11,7 @@ settlement. Other session modules have their own manifests here; projection live
 ## Owns
 
 `runtime-registry.ts` (`RuntimeRegistry`), `runtime-slot.ts` (`RuntimeSlot`),
-[`kernel/run`](../kernel/run/README.md) receipts, markers, work tokens and cancellation;
+[`kernel/run`](../kernel/run/README.md) receipts, markers, work tokens, write fences and cancellation;
 `owned-session-dispatch.ts`, `semantic-ui-broker.ts`, `restart-drain.ts`
 and the rest of `../run.module.json`. State: Gateway-owned
 bounded run markers and command receipts; Pi owns JSONL. Host recipes are fixed per runtime; append policies resolve recorded identity live.
@@ -28,7 +28,7 @@ bounded run markers and command receipts; Pi owns JSONL. Host recipes are fixed 
   authoritative there). The per-operation record owns its start cursor and terminal
   attribution; at transfer the predecessor's exact completion is captured first, so a
   later follow-up failure cannot swallow an earlier success. A canonical successful
-  reply starts its durable attention settlement at once.
+  reply starts its durable attention settlement at once; `RunPersistence` owns its pending-write join and unresolved durable-write fence.
 - **Ordering.** The always-loaded `tron-invocation-settlement` module's awaited
   admission hooks join pending terminal receipt writes before the next operation's
   admitted input, but not attention I/O. SDK between-turn entries (a tool-loadout

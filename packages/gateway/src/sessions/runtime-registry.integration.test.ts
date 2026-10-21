@@ -1,4 +1,5 @@
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import type { RunPersistence } from "../kernel/run/run-persistence.js";
 import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
@@ -4378,7 +4379,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const internal = slot as unknown as {
       runtime: { session: { sessionManager: SessionManager; abort: () => Promise<void> } };
       persistCanonicalCustomEntry: (customType: string, data: unknown, identity: string) => Promise<void>;
-      durableWrites: Map<string, unknown>;
+      runPersistence: RunPersistence;
     };
     const manager = internal.runtime.session.sessionManager;
     const sessionFile = manager.getSessionFile()!;
@@ -4427,7 +4428,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     } finally {
       // Test-only release of the deliberately poisoned fixture for teardown.
       // Production has no bypass: the SDK must supply verified recovery first.
-      internal.durableWrites.clear();
+      internal.runPersistence.durableWrites.clear();
     }
   });
 
@@ -4440,7 +4441,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       claimExtensionReceiptOwnership: (id: string) => GatewayWorkHandle;
       releaseExtensionReceiptOwnership: (id: string, owner: GatewayWorkHandle) => void;
       appendExtensionActivityReceipt: (activity: ExtensionRunActivity) => Promise<void>;
-      durableWrites: Map<string, unknown>;
+      runPersistence: RunPersistence;
     };
     const activity: ExtensionRunActivity = {
       id: "staged-extension", activityId: "staged-extension", toolCallId: "tool-staged-extension",
@@ -4464,7 +4465,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     } finally {
       await rm(file, { recursive: true, force: true });
       await rename(aside, file);
-      internal.durableWrites.clear(); // test-only disposal of the faulted runtime
+      internal.runPersistence.durableWrites.clear(); // test-only disposal of the faulted runtime
       internal.releaseExtensionReceiptOwnership(activity.id, owner);
     }
   });
@@ -4473,8 +4474,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const fixture = await coldFixture(`ownership-write-${failure}`);
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const internal = slot as unknown as {
-      retryDurableWrite: (key: string, operation: () => Promise<void>) => Promise<void>;
-      durableWrites: Map<string, unknown>;
+      runPersistence: RunPersistence;
     };
     let finish!: () => void;
     const stalled = new Promise<void>(resolve => { finish = resolve; });
@@ -4487,7 +4487,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         if (failure === "stalled") return stalled;
         throw new Error("synthetic storage failure");
       };
-      const pending = internal.retryDurableWrite("test:storage-fault", operation);
+      const pending = internal.runPersistence.retryDurableWrite("test:storage-fault", operation);
       const rejected = expect(pending).rejects.toMatchObject({ details: { outcomeUnknown: true } });
       await vi.advanceTimersByTimeAsync(20_000);
       await rejected;
@@ -4502,12 +4502,12 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       await vi.advanceTimersByTimeAsync(1_000);
       // A late physical completion cannot resume the abandoned dependent work.
       expect(slot.isDrainBusy).toBe(true);
-      await expect(internal.retryDurableWrite("test:storage-fault", operation)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      await expect(internal.runPersistence.retryDurableWrite("test:storage-fault", operation)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
     } finally {
       finish();
       clock.mockRestore();
       vi.useRealTimers();
-      internal.durableWrites.clear(); // test-only teardown of synthetic blocked owner
+      internal.runPersistence.durableWrites.clear(); // test-only teardown of synthetic blocked owner
     }
   });
 
@@ -6508,9 +6508,8 @@ export default function (pi) {
   it("does not retry permanent marker completion conflicts", async () => {
     const fixture = await coldFixture("permanent-marker-invariant");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const retry = (slot as unknown as {
-      retryDurableWrite: (key: string, operation: () => Promise<void>) => Promise<void>;
-    }).retryDurableWrite.bind(slot);
+    const persistence = (slot as unknown as { runPersistence: RunPersistence }).runPersistence;
+    const retry = persistence.retryDurableWrite.bind(persistence);
     const operation = vi.fn(async () => {
       throw new RunMarkerCompletionConflictError("injected permanent ownership conflict");
     });
@@ -12471,8 +12470,8 @@ export default function (pi) {
 
     let settleReceipt!: () => void;
     const receipt = new Promise<void>((resolve) => { settleReceipt = resolve; });
-    const internals = slot as unknown as { pendingReceiptWrites: Set<Promise<void>> };
-    internals.pendingReceiptWrites.add(receipt);
+    const internals = slot as unknown as { runPersistence: RunPersistence };
+    internals.runPersistence.pendingReceiptWrites.add(receipt);
 
     const eviction = (registry as unknown as { evictIdle: () => Promise<void> }).evictIdle();
     const outcome = await Promise.race([
@@ -12480,7 +12479,7 @@ export default function (pi) {
       new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 100)),
     ]);
     settleReceipt();
-    internals.pendingReceiptWrites.delete(receipt);
+    internals.runPersistence.pendingReceiptWrites.delete(receipt);
     await eviction;
 
     expect(outcome).toBe("settled");

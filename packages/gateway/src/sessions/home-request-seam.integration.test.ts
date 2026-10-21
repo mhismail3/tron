@@ -1,4 +1,5 @@
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import type { RunPersistence } from "../kernel/run/run-persistence.js";
 /**
  * Tron Home's request seam inside the real Gateway runtime (`RuntimeRegistry` +
  * `RuntimeSlot`), with the pinned Pi SDK, a faux provider and the real episodic
@@ -554,8 +555,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
 
     const runtime = item.slot as unknown as {
       persistCanonicalCustomEntry(type: string, data: Record<string, unknown>, identity: string): Promise<void>;
-      hasBlockedOwnershipWrite: boolean;
-      durableWrites: Map<string, unknown>;
+      runPersistence: RunPersistence;
     };
     sealChapterState(item);
     const manager = item.session.sessionManager;
@@ -571,12 +571,12 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
         code: "conflict",
         details: { reason: "sealed-chapter", sessionId: item.slot.id },
       });
-      expect(runtime.hasBlockedOwnershipWrite).toBe(false);
+      expect(runtime.runPersistence.hasBlockedOwnershipWrite).toBe(false);
       expect(manager.getEntries()).toEqual(originalEntries);
       expect(manager.getLeafId()).toBe(originalLeaf);
       expect(await item.jsonl()).toBe(originalFile);
     } finally {
-      runtime.durableWrites.clear();
+      runtime.runPersistence.durableWrites.clear();
       vi.useRealTimers();
     }
   }, 30_000);
@@ -589,8 +589,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
 
     const runtime = item.slot as unknown as {
       persistCanonicalCustomEntry(type: string, data: Record<string, unknown>, identity: string): Promise<void>;
-      hasBlockedOwnershipWrite: boolean;
-      durableWrites: Map<string, unknown>;
+      runPersistence: RunPersistence;
     };
     const manager = item.session.sessionManager;
     const append = manager.appendCustomEntry.bind(manager);
@@ -604,14 +603,14 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       )).rejects.toMatchObject({ details: { outcomeUnknown: true } });
       expect(appendAttempt).toHaveBeenCalledTimes(1);
       expect(manager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === "test.staged-entry")).toHaveLength(1);
-      expect(runtime.hasBlockedOwnershipWrite).toBe(true);
+      expect(runtime.runPersistence.hasBlockedOwnershipWrite).toBe(true);
       await expect(item.slot.prompt("must remain fenced")).rejects.toMatchObject({ details: { outcomeUnknown: true } });
     } finally {
       appendAttempt.mockRestore();
       // This isolated fixture intentionally poisons one runtime. Remove its
       // unresolved owner only so the test runner can dispose its temporary tree;
       // production recovery remains an authoritative reopen, never this reset.
-      runtime.durableWrites.clear();
+      runtime.runPersistence.durableWrites.clear();
     }
   }, 30_000);
 
