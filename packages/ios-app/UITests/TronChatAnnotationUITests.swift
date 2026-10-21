@@ -68,7 +68,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(first.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.exists)
         XCTAssertTrue(first.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Remove annotation'")).firstMatch.exists)
         XCTAssertEqual(first.frame.midY, chips.element(boundBy: 1).frame.midY, accuracy: 1, "Chips share one strip")
-        if app.keyboards.firstMatch.exists { app.swipeDown() }
         keepScreenshot(app, "899-3-chips")
 
         // The chip opens the standard sheet: quote, editable comment, save.
