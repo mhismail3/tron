@@ -111,10 +111,10 @@ export default function (pi) {
   // Hermetic manual OAuth: no browser endpoint or real credential is used.
   // The real Pi session owns this callback/state across the phone's reconnect.
   pi.registerProvider("tron-e2e-oauth", {
-    name: "Tron OAuth Fixture", api: "openai-completions", baseUrl: "https://example.invalid/v1",
+    name: "Alpha Login Fixture", api: "openai-completions", baseUrl: "https://example.invalid/v1",
     models: [{ id: "oauth-fixture", name: "OAuth Fixture", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 4096, maxTokens: 1024 }],
     oauth: {
-      name: "Tron OAuth Fixture",
+      name: "Alpha Login Fixture",
       async login(callbacks) {
         callbacks.onAuth({ url: "https://example.invalid/authorize?state=fixture-state" });
         const input = await callbacks.onPrompt({ message: "Paste the fixture callback code:", placeholder: "Fixture OAuth code" });

@@ -18,7 +18,7 @@ extension RealGatewayPairAndChatUITests {
         let providers = app.buttons["settings-link-Model Providers"]
         XCTAssertTrue(waitForHittable(providers, timeout: 30), app.debugDescription)
         providers.tap()
-        let connect = app.buttons["Connect Tron Oauth Fixture"]
+        let connect = app.buttons["Connect Alpha Login Fixture"]
         for _ in 0..<12 where !connect.isHittable { app.swipeUp() }
         XCTAssertTrue(waitForHittable(connect, timeout: 30), app.debugDescription)
         connect.tap()
@@ -33,14 +33,16 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertEqual(code.value as? String, "fixture-code#fixture-state")
         keepScreenshot(app, name: "1600-provider-login-after-safari-and-reconnect")
         app.buttons["Save"].tap()
-        let details = app.buttons["Details for Tron Oauth Fixture"]
-        XCTAssertTrue(details.waitForExistence(timeout: 30), "The retained prompt did not complete: \(app.debugDescription)")
+        let details = app.buttons["Details for Alpha Login Fixture"]
+        for _ in 0..<12 where !details.isHittable { app.swipeDown() }
+        XCTAssertTrue(waitForHittable(details, timeout: 30), "The retained prompt did not complete: \(app.debugDescription)")
         details.tap()
         let remove = app.buttons["Clear Login Information"]
         // Reopening reads the real Gateway's persisted configured credential.
         XCTAssertTrue(remove.waitForExistence(timeout: 15), app.debugDescription)
         remove.tap()
-        XCTAssertTrue(connect.waitForExistence(timeout: 30), app.debugDescription)
+        for _ in 0..<12 where !connect.isHittable { app.swipeUp() }
+        XCTAssertTrue(waitForHittable(connect, timeout: 30), app.debugDescription)
         connect.tap()
         XCTAssertTrue(code.waitForExistence(timeout: 30), "Removing fixture credentials must permit a new login")
         XCTAssertEqual(code.value as? String, "Fixture OAuth code", "A successor must not inherit the old code")
@@ -48,7 +50,8 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(code.waitForExistence(timeout: 15))
         code.tap(); code.typeText("fixture-code#fixture-state")
         app.buttons["Save"].tap()
-        XCTAssertTrue(details.waitForExistence(timeout: 30), "Fixture relogin failed")
+        for _ in 0..<12 where !details.isHittable { app.swipeDown() }
+        XCTAssertTrue(waitForHittable(details, timeout: 30), "Fixture relogin failed")
     }
 
 }
