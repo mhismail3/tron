@@ -319,4 +319,3 @@ struct TronPresentationSurface<Content: View>: View {
             }
     }
 }
-
