@@ -175,8 +175,10 @@ private struct TronScrollEdgeChromeModifier: ViewModifier {
             // an opaque cutoff on physical iOS 27 hardware instead of Tron's
             // established translucent blur into navigation chrome.
             .scrollEdgeEffectStyle(.soft, for: .all)
-            .tronTopBlurSurface()
+            // Reveal only the scrolling content. Chrome stays at its final
+            // opacity/position while the loaded cards fade and rise beneath it.
             .modifier(TronSheetContentRevealModifier())
+            .tronTopBlurSurface()
     }
 }
 
