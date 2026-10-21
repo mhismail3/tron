@@ -30,7 +30,7 @@ it("uses an explicit creation profile once, then reconstructs an unrecorded sess
   evidence.push({ case: "creation-profile-once", firstTools, secondTools });
 });
 
-it("classifies each canonical append from the live record, not its fixed runtime profile", async () => {
+it("classifies a canonical append from the live record, not its fixed runtime profile", async () => {
   const f = await fixture();
   const slot = await f.registry.create(f.cwd, "home");
   const runtimeTools = (await slot.context() as unknown as Tools).availableTools.map(tool => tool.name);
@@ -40,8 +40,8 @@ it("classifies each canonical append from the live record, not its fixed runtime
   const before = await readFile(slot.sessionFile!, "utf8");
   const owner = f.registry.homeOwner();
   const state = owner.chapterStateFor.bind(owner);
-  // A sealed-state producer must not make a stale, fixed Home profile own this
-  // unrecorded session's appends after the creation fallback has been consumed.
+  // Fault seam: the real owner never reports an unrecorded id as sealed. This
+  // probe detects a fixed Home profile replacing live append classification.
   vi.spyOn(owner, "chapterStateFor").mockImplementation(sessionId => sessionId === slot.id
     ? { ...state(sessionId), sealed: true } : state(sessionId));
   expect(owner.chapterStateFor(slot.id).sealed).toBe(true);
