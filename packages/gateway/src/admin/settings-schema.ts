@@ -8,12 +8,9 @@ import { type Control, type Direction, type Effect, type Timing, type ValueType,
 import { type LayerId, type QualifierName, type Tier } from "../kernel/settings/tool-contract.js";
 
 /**
- * The settings schema (docs/settings-model.md section 4, foundation F1).
- *
- * Each key is declared once. Its allowed layers, storage bindings, timing,
- * floors, writers and display metadata are data; the resolver, the change path
- * and the iOS renderer read them and hold no per-key code. Adding a key is one
- * entry here.
+ * Canonical setting declarations (docs/settings-contract.md F1): the resolver,
+ * change path and generic iOS renderer share these layers, stores, timing,
+ * floors, writers and display metadata. A new key is one entry here.
  */
 
 /** A section's `description` is the one line a client shows beside its title. */

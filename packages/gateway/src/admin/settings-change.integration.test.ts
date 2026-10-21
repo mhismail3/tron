@@ -1190,9 +1190,8 @@ describe("every key at every allowed layer", () => {
       presentation: { editableLayers: string[]; valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
     const resolve = async (layer: string, key: string) => {
       const resolution = await f.service.invoke(client([slot.id]), "settings.resolve", { target: targets[layer], keys: [key], renderer: { version: 1, controls } }) as unknown as { keys: Served[] };
-      const row = resolution.keys[0];
-      if (key === "permissions.macTerminalKey") expect(row?.group).toBe("connections");
-      return row;
+      if (key === "permissions.macTerminalKey") expect(resolution.keys[0]?.group).toBe("connections");
+      return resolution.keys[0];
     };
     const fence = () => { const snapshot = slot.snapshot(); return { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model, revision: snapshot.revision }; };
     const differs = (left: unknown, right: unknown) => JSON.stringify(left ?? null) !== JSON.stringify(right ?? null);
