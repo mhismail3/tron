@@ -1,0 +1,47 @@
+# Run execution
+
+## Purpose
+
+Gateway-owned execution primitives layered on Pi's session loop.
+
+## Owns
+
+- `bounded-tool-cancellation.ts`: per-call abort controllers, bounded cancellation
+  settlement and rejection of late results.
+- `direct-bash-process-owner.ts`: foreground shell process trees, timeout and abort
+  cleanup, output settlement and private-environment filtering.
+
+## Contract
+
+`RuntimeSlot` installs bounded tool cancellation on its Pi session and owns one
+`DirectBashProcessOwner`. The process owner exposes the existing bash definition,
+active-process state and joined abort operation; it does not own prompt admission.
+Ownership is declared by [`gateway/run`](../../run.module.json).
+
+## Invariants
+
+Abort signals and grace periods, tool text, output and environment filtering remain
+identical to Pi-backed Gateway execution. Cleanup targets only the owned process tree.
+
+## Entry points
+
+The session run owner in [`sessions`](../../sessions/README.md) installs these
+primitives. `direct-bash-process-owner.integration.test.ts` exercises real shells,
+detached descendants, timeout, Stop and environment boundaries.
+
+## Signals
+
+Existing aborted/timed-out command errors and bounded-tool cancellation results;
+no additional logging or persisted state.
+
+## Verify
+
+```bash
+scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts
+scripts/tron verify --module gateway/run
+```
+
+## Not here
+
+Prompt admission, receipts, profiles, queue and compaction remain with the session
+run owner; delegated worker lifecycle is separate.

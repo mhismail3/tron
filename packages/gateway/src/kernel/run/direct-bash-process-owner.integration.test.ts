@@ -6,8 +6,8 @@ import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
-import { configureHomebrewPath } from "../runtime/node-command-environment.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { configureHomebrewPath } from "../../runtime/node-command-environment.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 const roots: string[] = [];
 /** Markers carried by every process a timeout test spawns. Cleanup kills by

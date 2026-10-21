@@ -49,7 +49,7 @@ import {
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
-import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
+import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { HomeRequestPolicyError, type HomeRequestPolicy } from "../home/home-request-policy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
@@ -161,7 +161,7 @@ import type { ToolDisplayProjection } from "../kernel/projection/tool-result.js"
 import { trustedExtensionOriginKind } from "../kernel/projection/extension-origin.js";
 import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
-import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
+import { DirectBashProcessOwner } from "../kernel/run/direct-bash-process-owner.js";
 import type { ModuleHost, SessionContext } from "../kernel/host/module-host.js";
 import { projectHookRegistrations } from "../kernel/projection/hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";

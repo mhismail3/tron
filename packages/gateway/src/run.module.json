@@ -1,0 +1,143 @@
+{
+  "layer": "L2",
+  "owns": [
+    "sessions/README.md",
+    "sessions/administrative-drain-snapshot.integration.test.ts",
+    "kernel/run/bounded-tool-cancellation.ts",
+    "sessions/codemode-classify-cost.integration.test.ts",
+    "sessions/codemode-nested-interactive.integration.test.ts",
+    "sessions/context-delivery-receipts.ts",
+    "sessions/context-edit.integration.test.ts",
+    "kernel/run/direct-bash-process-owner.integration.test.ts",
+    "kernel/run/direct-bash-process-owner.ts",
+    "sessions/execution.md",
+    "sessions/fixtures/**",
+    "sessions/gateway-work-registry.ts",
+    "sessions/home-activation.e2e.test.ts",
+    "sessions/home-cache-layout.e2e.test.ts",
+    "sessions/home-designation.integration.test.ts",
+    "sessions/home-memory-browser-scale.e2e.test.ts",
+    "sessions/home-memory-tools.e2e.test.ts",
+    "sessions/home-profile.integration.test.ts",
+    "sessions/home-provider-runtime.e2e.test.ts",
+    "sessions/home-request-seam.integration.test.ts",
+    "sessions/home-research-tools.integration.test.ts",
+    "sessions/invocation-receipts.ts",
+    "sessions/locks/run-*.golden.json",
+    "sessions/locks/store-run-markers.golden.json",
+    "sessions/model-queue-session.ts",
+    "sessions/multi-resource-message.e2e.test.ts",
+    "sessions/native-tool-settlement.integration.test.ts",
+    "sessions/openai-model-eligibility.integration.test.ts",
+    "sessions/owned-session-dispatch.ts",
+    "sessions/recency-deadlines.ts",
+    "sessions/recent-model-usage.integration.test.ts",
+    "sessions/restart-drain.ts",
+    "sessions/run-lifecycle.lock.integration.test.ts",
+    "sessions/run-markers.lock.integration.test.ts",
+    "sessions/run-markers.ts",
+    "sessions/run-queue.lock.integration.test.ts",
+    "sessions/run.lock.integration.test.ts",
+    "run.module.json",
+    "sessions/run.store.lock.integration.test.ts",
+    "sessions/runtime-compaction.integration.test.ts",
+    "sessions/runtime-context-window.integration.test.ts",
+    "sessions/runtime-registry-notification-read.integration.test.ts",
+    "sessions/runtime-registry.integration.test.ts",
+    "sessions/runtime-registry.ts",
+    "sessions/runtime-slot.ts",
+    "sessions/runtime-terminal-notifications.integration.test.ts",
+    "sessions/runtime-tool-loadout.integration.test.ts",
+    "sessions/semantic-ui-broker.ts",
+    "sessions/session-heap.lock.integration.test.ts",
+    "sessions/session-lifecycle.lock.integration.test.ts",
+    "sessions/summary-text.ts",
+    "sessions/tron-modules.integration.test.ts",
+    "kernel/run/README.md"
+  ],
+  "dependsOn": [
+    "gateway/host",
+    "gateway/pi",
+    "gateway/settings"
+  ],
+  "exceptions": [
+    {
+      "path": "sessions/home-activation.e2e.test.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/home-cache-layout.e2e.test.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/home-designation.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/home-memory-tools.e2e.test.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/home-profile.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/home-request-seam.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/home-research-tools.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/runtime-compaction.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/runtime-registry.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/runtime-registry.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/runtime-slot.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/runtime-terminal-notifications.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "sessions/semantic-ui-broker.ts",
+      "budget": "lines",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
+  ]
+}
