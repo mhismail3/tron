@@ -107,6 +107,48 @@ final class TronChatAnnotationUITests: XCTestCase {
         keepScreenshot(app, "899-6-sent-sheet")
     }
 
+    /// Saving the bubble hands the keyboard straight to the composer input
+    /// (#1597): the chip appears, the keyboard never drops, and the next
+    /// keystrokes land in the composer.
+    @MainActor func testSavingAnnotationKeepsKeyboardInComposer() {
+        continueAfterFailure = false
+        let app = launch(); defer { app.terminate() }
+
+        let paragraph = assistantBlock(app, containing: "exponential backoff")
+        paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.12))
+            .press(forDuration: 1.0, thenDragTo: paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.83, dy: 0.12)))
+        let annotate = menuAction(app, "Annotate")
+        XCTAssertTrue(annotate.waitForExistence(timeout: 5), app.debugDescription)
+        annotate.tap()
+        let bubble = app.otherElements["chat.annotation.bubble"]
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "The comment field takes focus")
+        dismissKeyboardTip(app)
+        app.typeText("Make the cap configurable")
+
+        app.buttons["Save annotation"].firstMatch.tap()
+        // Sample the keyboard from the tap until the chip has settled: a
+        // dismiss-then-refocus flicker would miss at least one sample.
+        let chips = app.otherElements.matching(identifier: "composer.staged-chip")
+        var keyboardSamples: [Bool] = []
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            keyboardSamples.append(keyboard.exists)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertFalse(bubble.exists)
+        XCTAssertEqual(chips.count, 1, "The annotation becomes a staged chip: \(app.debugDescription)")
+        XCTAssertFalse(keyboardSamples.contains(false), "The keyboard stays up through Save: \(keyboardSamples)")
+        let composer = app.textViews["Message input"]
+        XCTAssertEqual(composer.value(forKey: "hasKeyboardFocus") as? Bool, true, "Focus moves to the composer input")
+        keepScreenshot(app, "1597-after-save")
+
+        app.typeText("Keep typing")
+        XCTAssertEqual(composer.value as? String, "Keep typing")
+        XCTAssertEqual(chips.count, 1)
+    }
+
     @MainActor private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-chat-annotation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
