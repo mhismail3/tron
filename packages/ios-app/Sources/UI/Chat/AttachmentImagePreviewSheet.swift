@@ -124,7 +124,7 @@ struct AttachmentImagePreviewSheet: View {
         } else if failed {
             TronInfoCard(
                 icon: "photo.badge.exclamationmark",
-                text: "The photo is no longer available for preview.",
+                text: "The photo could not be loaded for preview.",
                 accent: .tronEmerald
             )
             .padding(AttachmentImagePreviewLayout.viewportInset)

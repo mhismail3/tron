@@ -76,7 +76,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   starting at medium per fresh presentation. Edits show one verified diff inline, otherwise a
   Changes sheet; `ToolDiffCountChip` counts belong to that diff. Codemode shows Script, Result
   and Calls; Home's tools use `HomeToolDetailPresentation`; [display artifacts](../../../docs/display-artifacts.md)
-  owns display. Technical details hold JSON. `TaskToolDetailPresentation` shows catalog rows/counts,
+  owns display, memory-bounded photo previews and honest load-failure fallback. Technical details hold JSON. `TaskToolDetailPresentation` shows catalog rows/counts,
   status, paged reports and receipts; unknown shapes stay generic. Reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
 - **Thinking and context.** Thinking shows at most four measured lines, opening the full trace on
   tap. Compaction, branch, configuration and extension status share one notification-pill language;

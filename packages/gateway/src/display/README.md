@@ -93,6 +93,7 @@ Projection reads the persisted details live and after cold reload.
 
 ```bash
 scripts/tron test gateway src/display/display.store.lock.integration.test.ts \
+  src/display/display-image-lifetime.integration.test.ts \
   src/transport/server-live-view.integration.test.ts \
   src/sessions/codemode-nested-presentation.integration.test.ts
 ```

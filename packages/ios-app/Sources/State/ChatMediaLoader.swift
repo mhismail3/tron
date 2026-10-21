@@ -878,10 +878,27 @@ final class ChatMediaLoader {
         ] as CFDictionary) else {
             throw ChatMediaLoadError.invalidImage
         }
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              width.isFinite, height.isFinite, width > 0, height > 0 else {
+            throw ChatMediaLoadError.invalidImage
+        }
+        let depth = (properties[kCGImagePropertyDepth] as? NSNumber)?.doubleValue ?? 16
+        guard depth.isFinite, depth > 0, depth <= 32 else { throw ChatMediaLoadError.invalidImage }
+        // ImageIO preserves 16-bit PNG components: an edge cap alone can admit
+        // twice the decoded budget. Reserve RGBA bytes and row alignment before
+        // decoding, then retain the actual decoded-byte check below.
+        let edge = min(Double(ChatMediaPolicy.maximumFullPreviewPixelDimension), max(width, height))
+        let scale = edge / max(width, height)
+        let pixelBytes = ceil(width * scale) * ceil(height * scale) * 4 * ceil(depth / 8)
+        let budget = Double(ChatMediaPolicy.maximumDecodedFullPreviewBytes) - 64 * edge
+        let dimension = max(1, Int(floor(edge * min(1, sqrt(budget / pixelBytes)))))
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: ChatMediaPolicy.maximumFullPreviewPixelDimension,
+            kCGImageSourceThumbnailMaxPixelSize: dimension,
+            kCGImageSourceShouldAllowFloat: false,
             kCGImageSourceShouldCacheImmediately: true,
         ]
         guard let image = CGImageSourceCreateThumbnailAtIndex(

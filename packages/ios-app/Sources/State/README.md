@@ -18,7 +18,7 @@ disposable projection or an in-flight command owner.
 | `SessionCatalogCoordinator`, `AutomationDashboardPreferencesOwner` (`DashboardStateOwners`) | Dashboard rows per `(profileID, sessionID)`; Automations sheet preferences. |
 | `ConfirmedMutationExecutor`, `SessionMutationService`, `SessionImportCoordinator` | Receipt policy for every mutation; session command DTOs; file import under one captured lifecycle. |
 | `ComposerDraftCoordinator`, `ComposerDraftStore` | Composer text, staged resources, annotations, attachments, uploads, submission. |
-| `ChatMediaLoader`, `SessionExportArtifactStore` | Transcript media by `(profile, lifecycle, blob)`; export artifacts. |
+| `ChatMediaLoader`, `SessionExportArtifactStore` | Transcript media by `(profile, lifecycle, session, blob)`; photo decoding preflights dimensions/component depth against 64 MiB, then verifies actual bytes; export artifacts. |
 | `TerminalCoordinator`, `TerminalReducer` | Session terminals: wire, presentation intents, attach/replay, resize. |
 | `MacTerminalController`, `MacTerminalEnrollmentStore` | Mac Terminal enrollment and shells ([Terminal](../UI/Terminal/README.md)). |
 | `SettingsTrustCoordinator` | Settings resolve/change/history/approvals and project trust. |
