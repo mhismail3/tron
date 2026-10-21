@@ -2142,7 +2142,7 @@ export class GatewayService {
             throw new GatewayError("invalid_request", "An iPhone can enroll only its own Mac Terminal key");
           }
           const session = target.kind === "session"
-            ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), target.sessionId, params.fence, workToken)
+            ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), params.fence, changes.some(change => change.layer === "chat"), workToken)
             : undefined;
           const homeChapter = target.kind === "home" && params.dryRun !== true ? await this.settingsHomeChapter(workToken) : undefined;
           const result = await this.dependencies.settingsChanges.change(target, changes, {
@@ -2161,7 +2161,7 @@ export class GatewayService {
           const changeId = string(params.changeId, "changeId", { max: 100 });
           const found = await this.dependencies.settingsChanges.record.entry(changeId);
           const session = found?.entry.target.kind === "session"
-            ? await this.settingsSession(await this.slot({ sessionId: found.entry.target.sessionId }), found.entry.target.sessionId, params.fence, workToken)
+            ? await this.settingsSession(await this.slot({ sessionId: found.entry.target.sessionId }), params.fence, found.entry.layer === "chat", workToken)
             : undefined;
           const homeChapter = found?.entry.target.kind === "home" ? await this.settingsHomeChapter(workToken) : undefined;
           const result = await this.dependencies.settingsChanges.undo(changeId, {
@@ -2187,14 +2187,17 @@ export class GatewayService {
       }
       case "settings.decide":
         // The maintainer's decision on a pending change, bound to the exact diff
-        // he saw (docs/settings-model.md 5.5). A Chat-layer change carries the
-        // fence of the chat it applies to, as settings.change does.
-        return this.mutation(client, method, params, async (workToken) => {
-          rejectUnknownFields(params, ["commandId", "requestId", "digest", "approved", "fence"], method);
+        // he saw (docs/settings-model.md 5.5). That digest-bound diff is the
+        // decision's fence: approval re-checks every `before` against the stores
+        // and supersedes on any move. The client reads no chat to decide (the
+        // Changes sheet never opened it), so a Chat-layer change applies through
+        // the Gateway-resolved slot appliers, whose lane guards still hold (#1642).
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "requestId", "digest", "approved"], method);
           const requestId = string(params.requestId, "requestId", { max: 100 });
           const pending = (await this.dependencies.settingsChanges.approvals.get(requestId))?.target;
           const session = pending?.kind === "session" && params.approved === true
-            ? await this.settingsSession(await this.slot({ sessionId: pending.sessionId }), pending.sessionId, params.fence, workToken)
+            ? (await this.slot({ sessionId: pending.sessionId })).taskWorkerSettingsSession()
             : undefined;
           return safeJson(await this.dependencies.settingsChanges.decide(requestId, {
             digest: string(params.digest, "digest", { max: 64 }),
@@ -2493,14 +2496,15 @@ export class GatewayService {
   }
 
   /** A session target's Chat layer and its slot-lane appliers. The fence is the
-   * runtime the client read (and its model or revision); the lane guards stay. */
-  private async settingsSession(slot: RuntimeSlot, sessionId: string, rawFence: unknown, workToken?: string): Promise<SessionSettingsSource & { appliers: ChatAppliers }> {
+   * runtime the client read (and its model or revision); the lane guards stay.
+   * A Chat-layer change without one is refused here, before planning, so a dry
+   * run refuses exactly what the change would (#1642). */
+  private async settingsSession(slot: RuntimeSlot, rawFence: unknown, chatLayer: boolean, workToken?: string): Promise<SessionSettingsSource & { appliers: ChatAppliers }> {
     const fence = rawFence === undefined ? undefined : object(rawFence, "fence");
     if (fence) rejectUnknownFields(fence, ["runtimeGeneration", "model", "revision"], "fence");
-    const expectation = () => {
-      if (!fence) throw new GatewayError("invalid_request", "A Chat-layer change needs the fence it read");
-      return this.configurationExpectation({ expectedRuntimeGeneration: fence.runtimeGeneration, expectedModel: fence.model ?? null });
-    };
+    if (chatLayer && !fence) throw new GatewayError("invalid_request", "A Chat-layer change needs the fence it read");
+    // Only a Chat-layer change reaches these appliers, and it was refused above without a fence.
+    const expectation = () => this.configurationExpectation({ expectedRuntimeGeneration: fence!.runtimeGeneration, expectedModel: fence!.model ?? null });
     return {
       cwd: slot.cwd,
       home: slot.isHomeChapter,

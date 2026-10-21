@@ -182,15 +182,15 @@ final class SettingsTrustCoordinator {
     }
 
     /// The maintainer's decision on one pending change, bound to the exact diff
-    /// he saw by its digest. A Chat-layer change carries the chat's fence.
-    func decideApproval(_ request: SettingsApprovalRequest, approved: Bool, fence: JSONValue?) async throws {
+    /// he saw by its digest. That diff is the decision's whole fence: the Gateway
+    /// re-checks it against the stores, so no chat needs to be open to decide.
+    func decideApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
-        var params: [String: JSONValue] = [
+        let params: [String: JSONValue] = [
             "commandId": .string(commandID), "requestId": .string(request.requestId),
             "digest": .string(request.digest), "approved": .bool(approved),
         ]
-        if let fence { params["fence"] = fence }
         _ = try await mutationExecutor.performValue(method: "settings.decide", commandID: commandID) {
             try await client.requestValue("settings.decide", JSONValue.object(params))
         }
