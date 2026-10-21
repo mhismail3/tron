@@ -227,7 +227,7 @@ const auth = new AuthBroker(
     log: (level, message, event) => logger.log(level, message, { event, source: "auth" }),
   },
 );
-const modules = await startGatewayModules({ tronHome: config.tronHome, log: logger });
+const modules = await startGatewayModules({ tronHome: config.tronHome, log: logger }, () => sessions);
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),
   agentDir: config.agentDir,
@@ -400,7 +400,6 @@ const sessions = new RuntimeRegistry({
   browserLiveViews,
   workRegistry,
   connections,
-  jev: jevClient,
   scheduleToolOperations: {
     execute: (sessionId, toolCallId, request) => automationToolOperations.execute(sessionId, toolCallId, request),
   },

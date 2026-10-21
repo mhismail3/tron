@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
-import { TRON_MODULES } from "../extensions/tron-modules.js";
+import { ORDINARY_MODULE_NAMES } from "../extensions/tron-modules.js";
 
 /** The registered module names of one real session, without the SDK's inline path form. */
 function inlineModuleNames(resources: Record<string, any>): string[] {
@@ -53,7 +53,7 @@ describe("RuntimeSlot Tron module registration", { concurrent: false }, () => {
 
     const slot = await registry.create(cwd);
     const registered = inlineModuleNames(await slot.resources() as Record<string, any>);
-    const definitionNames = TRON_MODULES.map((tronModule) => tronModule.name);
+    const definitionNames = ORDINARY_MODULE_NAMES;
     const undefinedModules = registered.filter((name) => !definitionNames.includes(name));
     // A module the runtime registers but the definition does not is exactly the drift
     // `modules.list` would report wrongly; a name is the whole identity here.

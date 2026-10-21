@@ -1,6 +1,6 @@
-import type { ExtensionFactory, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
+import type { ExtensionFactory, ModelRuntime, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
 import type { SettingsToolAccess } from "../settings/tool-contract.js";
-import type { JsonValue } from "../../protocol/types.js";
+import type { JsonValue, TronModuleSummary } from "../../protocol/types.js";
 
 /** One log line from a module, in the Gateway logger's shape. */
 export interface ModuleLog {
@@ -33,6 +33,8 @@ export interface CompactionPolicyLifecycle {
 export interface SessionContext {
   sessionId(): string;
   cwd(): string;
+  modelRuntime: ModelRuntime;
+  profile(): "ordinary" | "home";
   /** The chat's title as notifications show it. */
   title(): string;
   /** Whether the user is viewing this chat now. */
@@ -177,6 +179,27 @@ export class ModuleHost {
    * is not composed or offers none to that runtime. */
   extension(module: ModuleDescriptor<unknown>, session: SessionContext): ExtensionFactory | undefined {
     return this.find(module)?.instance.extension?.(session);
+  }
+
+  /** Profile order is explicit; optionality stays with each descriptor. */
+  registrations(names: readonly string[], session: SessionContext): { name: string; factory: ExtensionFactory }[] {
+    return names.flatMap(name => {
+      const factory = this.named(name).instance.extension?.(session);
+      return factory ? [{ name, factory }] : [];
+    });
+  }
+
+  summaries(names: readonly string[]): TronModuleSummary[] {
+    return names.map(name => {
+      const { descriptor } = this.named(name);
+      return { name, purpose: descriptor.purpose, tools: [...descriptor.tools], commands: [...descriptor.commands] };
+    });
+  }
+
+  private named(name: string): Started {
+    const entry = this.started.find(candidate => candidate.descriptor.name === name);
+    if (!entry) throw new Error(`Module ${name} is not composed`);
+    return entry;
   }
 
   rpc(method: string): RpcHandler | undefined {

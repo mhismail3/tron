@@ -8,7 +8,7 @@ ownership attribution, semantic forms and the remote extension UI host.
 
 ## Owns
 
-`pi-builtins.ts`, `tron-modules.ts` (`TRON_MODULES`), `compatibility-manifest.ts`,
+`pi-builtins.ts`, `tron-modules.ts` (ordered profile identities), `compatibility-manifest.ts`,
 `owner-attribution.ts`, `managed-producer.ts`, `extension-adapters.ts`,
 `semantic-form.ts`, the `tron-ask-user` extension and `host/` (remote extension host,
 component registry, presentation store, terminal sanitizer).
@@ -25,11 +25,10 @@ component registry, presentation store, terminal sanitizer).
   its stateless extension. The started module is used at the same ordinary and
   Home registration position.
 - **`modules.list`** reports Tron's built-in modules for Settings without a session:
-  one row per `TRON_MODULES` entry (name, purpose, tool and command names), the same
-  definition `RuntimeSlot` registers, so the list cannot disagree with a session.
-  `tron-invocation-settlement` comes first and has no tools or commands. Settlement,
-  context-window and compaction-policy use started descriptors at those same positions;
-  the per-runtime host extends SessionContext rather than exposing concrete policies.
+  the ordinary profile's descriptor rows (name, purpose, tool and command names).
+  `ModuleHost` reads the started descriptors, never adapter metadata; an absent host
+  has no rows. `tron-invocation-settlement` comes first and has no tools or commands.
+  Each runtime supplies only `SessionContext`; capability owners stay in descriptor closures.
 - **Session-free inventory** (served by admin's package and hook services with this
   composition): `hooks.list` (`hooks.v1`) returns the hook fields `session.resources`
   returns for one scope. No `cwd` is the global scope against an untrusted home;
@@ -49,13 +48,13 @@ component registry, presentation store, terminal sanitizer).
 
 ## Invariants
 
-- One definition (`TRON_MODULES`) feeds both registration and `modules.list`.
+- Started descriptors feed registration and `modules.list`; profile lists contain only names.
 - Project extension code loads only under a true canonical trust decision.
 - Reserved tool names (`subagent`, `notify`) belong to their build-bound owners.
 
 ## Entry points
 
-`piBuiltinExtensions`, `TRON_MODULES`, the remote host in `host/`.
+`piBuiltinExtensions`, `tronModuleFactories`, `homeModuleFactories`, the remote host in `host/`.
 
 ## Signals
 

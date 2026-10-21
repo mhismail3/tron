@@ -1,6 +1,6 @@
 import { modelQueueSessionExtension } from "./model-queue-session.js";
 import { HOME_OPERATING_CONTEXT } from "../home/tron-home-extension.js";
-import { HOME_PROFILE_BOUND_BYTES, type HomeProfileChangeAccess } from "../home/home-profile.js";
+import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
 /** Delivery headroom counts the learned profile at its bound: the activation's section is
  * read inside Home's prompt hook, after this estimate, and never exceeds it. */
 const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_BOUND_BYTES + 1_024);
@@ -52,13 +52,12 @@ import { HomeRequestPolicyError, type HomeRequestPolicy } from "../home/home-req
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeHardBoundary } from "../home/home-diagnostic.js";
-import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { openAIModelEligibility, type OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
-import { homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
+import { homeModuleFactories, tronModuleFactories } from "../extensions/tron-modules.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
@@ -158,7 +157,6 @@ import {
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { notifyTronAgentTerminal, type AgentTerminalOutcome } from "../notifications/tron-notify-extension.js";
-import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { tronContext } from "../workspace/tron-core-extension.js";
@@ -167,10 +165,7 @@ import { admitToolDisplayProjection, displayArtifactIDs } from "../display/displ
 import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
-import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import type { ModuleHost } from "../kernel/host/module-host.js";
-import { JevDecisionClient } from "../knowledge/jev-client.js";
-import type { ConnectionOwner } from "../integrations/connection-owner.js";
+import type { ModuleHost, SessionContext } from "../kernel/host/module-host.js";
 import { projectHookRegistrations } from "./hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
 import { skillTitle } from "./skill-title.js";
@@ -519,12 +514,10 @@ type PromptOwnership = AutomationPromptOwnership | HomeWakeOwnership | {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
-  homeTask: (sessionId: string, request: unknown) => Promise<unknown>;
   /** Home's `settings` tool with `taskId`: that task's worker and its live slot (#1336). */
   homeTaskSettings: (sessionId: string, taskId: string, purpose: "resolve" | "change") => Promise<{
     taskId: string; sessionId: string; operationId: string | null; state: string; resolvedFrom?: string; slot: RuntimeSlot;
   }>;
-  homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
@@ -545,20 +538,10 @@ export interface RuntimeSlotDependencies {
   displayArtifacts: DisplayArtifactStore;
   /** Disposable observer registrations; browser state remains provider-owned. */
   browserLiveViews?: BrowserLiveViewRegistry;
-  /** Optional bounded observational memory owner. */
-  knowledge?: KnowledgeService;
   modules: ModuleHost; // started modules whose extensions this runtime registers
-  jev?: JevDecisionClient;
-  /** Session search for Home's research tools, late-bound: the service is
-   * installed on the registry after construction and may be absent. */
-  sessionSearch: () => import("./session-search-service.js").SessionSearchService | undefined;
-  sessionRead: import("../home/home-session-read.js").HomeSessionReader;
   /** The settings model and its one change path, late-bound like session search:
    * installed on the registry after construction (docs/settings-model.md 5.1). */
   settings: () => { model: SettingsModel; changes: SettingsChangePath } | undefined;
-  /** Transport injection for Home's web tools (tests); production omits it. */
-  homeWebTransport?: import("../home/home-research-tools.js").HomeResearchTransport;
-  connections?: ConnectionOwner;
   workspace: TronWorkspace;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
@@ -572,7 +555,6 @@ export interface RuntimeSlotDependencies {
   machineId?: string;
   notifications?: NotificationService;
   extensionArtifactWarning?: (warning: { reason: ExtensionArtifactRejectionReason; owner: string }) => void;
-  scheduleToolOperations?: ScheduleToolOperations;
   /** Extension cleanup is advisory once runtime disposal begins. A handler that
    * never settles must not strand the canonical session behind idle eviction. */
   runtimeDisposalTimedOut?: (graceMs: number) => void;
@@ -623,7 +605,6 @@ export interface RuntimeSlotDependencies {
   /** Tron Home's memory tools for one session id, for the `zoom`, `date` and
    * `memory_search` tools the tron-home module registers. It answers undefined
    * for any session that is not the enabled Home. */
-  homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
   /** One model applied to a live Home session, so the Home record keeps the
    * single source of truth for the model a re-enable restores. */
   homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
@@ -1459,17 +1440,6 @@ export class RuntimeSlot {
     }
   }
 
-  /** Home's `profile` tool reaches the change path as Home (docs/settings-model.md 6.4). */
-  private homeProfileChangeAccess(): HomeProfileChangeAccess | undefined {
-    const owners = this.dependencies.settings();
-    if (!owners || this.liveProfile() !== "home") return undefined;
-    return {
-      change: (ops, input) => owners.changes.changeProfile(ops, {
-        actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId },
-        author: input.author, commandId: input.commandId, web: input.web, ...(input.reason ? { reason: input.reason } : {}),
-      }),
-    };
-  }
 
   /** The tools this chat's selection may name: its registry, less hidden tools
    * (`setTools` refuses those). */
@@ -2260,11 +2230,10 @@ export class RuntimeSlot {
       // One-shot: a brand-new Home session's first runtime carries the explicit
       // profile; every later runtime asks the record.
       this.explicitHomeSessionId = undefined;
-      const tronModuleHost: TronModuleHost = {
+      const sessionContext: SessionContext = {
         sessionId: () => this.id,
         cwd: () => this.cwd,
-        workspace: this.dependencies.workspace,
-        displayArtifacts: this.dependencies.displayArtifacts,
+        modelRuntime, profile: () => this.liveProfile(),
         title: () => this.notificationTitle(),
         // Notify samples automatic alerts' foreground lease at its own admission.
         presented: () => this.dependencies.isSessionPresented(this.id),
@@ -2277,37 +2246,7 @@ export class RuntimeSlot {
           changed: () => { this.revision += 1; this.publishSnapshot(); },
         },
         joinTerminalReceiptWrites: () => this.joinTerminalReceiptWrites(),
-        ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
-        modules: this.dependencies.modules,
-        jev: new JevDecisionClient(modelRuntime),
-        ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
-        ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
-        ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),
-        ...(this.dependencies.scheduleToolOperations ? { scheduleToolOperations: this.dependencies.scheduleToolOperations } : {}),
-        ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
-        // Home's memory tools are answered per call, because the memory a
-        // running Home reads can be reconfigured, blocked or released.
-        homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools(sessionId),
-        homeDelegate: this.dependencies.homeDelegate,
-        homeTask: this.dependencies.homeTask,
-        sessionRead: (request, signal) => this.dependencies.sessionRead(request, signal),
-        sessionSearch: () => {
-          const search = this.dependencies.sessionSearch();
-          return search ? (request, signal) => search.search(request, signal) : undefined;
-        },
-        // Explicit recorded trust only: Home's read_file never follows the
-        // "always" default-trust setting, so an untrusted Mac path cannot be
-        // readable merely because the default is permissive.
-        explicitlyTrustedDirectory: async (path: string) => {
-          try {
-            return (await this.dependencies.trust.inspect(path)).savedDecision === true;
-          } catch {
-            return false;
-          }
-        },
-        ...(this.dependencies.homeWebTransport ? { homeWebTransport: this.dependencies.homeWebTransport } : {}),
         settings: () => this.settingsToolAccess(),
-        homeProfileChanges: () => this.homeProfileChangeAccess(),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
@@ -2320,7 +2259,7 @@ export class RuntimeSlot {
       const managedLoaderOptions = settingsManager ? await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages)) : undefined;
       const extensionFactories = home
-        ? homeModuleFactories(tronModuleHost)
+        ? homeModuleFactories(this.dependencies.modules, sessionContext)
         : [
             ...(managedLoaderOptions?.extensionFactories ?? []),
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
@@ -2334,7 +2273,7 @@ export class RuntimeSlot {
               }
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
-            ...tronModuleFactories(tronModuleHost),
+            ...tronModuleFactories(this.dependencies.modules, sessionContext),
             ...(this.dependencies.modelQueue ? [{ name: "tron-model-queue", factory: modelQueueSessionExtension({
               source: this.dependencies.modelQueue.source(role => this.taskQueueSelection(role)), worker: Boolean(this.taskWorker),
               publishProjection: () => {

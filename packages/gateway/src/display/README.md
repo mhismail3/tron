@@ -15,6 +15,9 @@ settlement](../../docs/native-tool-settlement.md).
 
 ## Contract
 
+**Display descriptors.** `display-modules.ts` owns display/native-capture metadata.
+They close over existing display owners; native capture remains absent without live views.
+
 **Computer descriptor.** `computer-module.ts` owns `tron-computer` metadata and
 its per-session extension. Availability remains Mac-only, sampled when the
 runtime requests its extension; session identity is read at each operation.

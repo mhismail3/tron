@@ -27,7 +27,7 @@ import {
  */
 
 /** The tool names the tron-home extension registers live in `tron-modules.ts`
- * (`TRON_HOME_MODULE.tools`), which must match this factory, and in the
+ * (`createHomeModule` descriptor's tools), which must match this factory, and in the
  * executable allowlist `HOME_TOOL_NAMES` that `home-designation.integration.test.ts`
  * asserts. */
 

@@ -8,23 +8,39 @@ import { askUserModule } from "../extensions/ask-user-module.js";
 import { computerModule } from "../display/computer-module.js";
 import { appsModule } from "../modules/apps/module.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
+import { createCoreModule } from "../workspace/core-module.js";
+import { createDisplayModule, createNativeCaptureModule } from "../display/display-modules.js";
+import { createScheduleModule } from "../automations/schedule-module.js";
+import { createNotifyModule } from "../notifications/notify-module.js";
+import { createHomeModule, createHomeResearchModule } from "../home/home-module.js";
+import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 
-/** The Gateway's module composition (k0-kernel.md §3): one line per module,
- * started in this order and stopped in reverse. */
-export const GATEWAY_MODULES: readonly ModuleDescriptor<unknown>[] = [
-  workspaceModule,
-  settlementModule,
-  contextWindowModule,
-  compactionPolicyModule,
-  settingsModule,
-  askUserModule,
-  appsModule,
-  computerModule,
-];
+type ModuleOwners = Pick<RuntimeRegistry, "coreModuleServices" | "displayModuleServices" | "scheduleModuleOperations" | "notifyModuleServices" | "homeModuleServices">;
 
-/** Starts the composition for one Gateway (gateway-main, before anything loads an
- * extension, and test registries): Pi's process-global theme first, then the modules. */
-export function startGatewayModules(platform: Omit<GatewayHost, "contract">): Promise<ModuleHost> {
+/** One production composition. Callbacks may close over the not-yet-constructed
+ * registry: start only captures them; extension assembly resolves the live owner. */
+export function gatewayModules(registry: () => ModuleOwners): readonly ModuleDescriptor<unknown>[] {
+  return [
+    workspaceModule,
+    settlementModule,
+    contextWindowModule,
+    compactionPolicyModule,
+    createCoreModule(() => registry().coreModuleServices()),
+    settingsModule,
+    askUserModule,
+    createDisplayModule(() => registry().displayModuleServices()),
+    appsModule,
+    createNativeCaptureModule(() => registry().displayModuleServices()),
+    computerModule,
+    createScheduleModule(() => registry().scheduleModuleOperations()),
+    createNotifyModule(() => registry().notifyModuleServices()),
+    createHomeModule(() => registry().homeModuleServices()),
+    createHomeResearchModule(() => registry().homeModuleServices()),
+  ];
+}
+
+/** Pi's process-global theme must precede every extension resource load. */
+export function startGatewayModules(platform: Omit<GatewayHost, "contract">, registry: () => ModuleOwners): Promise<ModuleHost> {
   initTheme();
-  return ModuleHost.start(GATEWAY_MODULES, platform);
+  return ModuleHost.start(gatewayModules(registry), platform);
 }

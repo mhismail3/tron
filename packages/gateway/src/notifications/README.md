@@ -10,7 +10,7 @@ tool and the settings approval push.
 ## Owns
 
 `notification-service.ts` (`NotificationService`), `grant-store.ts`, `relay-client.ts`,
-`tron-notify-extension.ts`. Store: `gateway/notifications.json`, one exact 1 MiB
+`notify-module.ts` (optional-owner descriptor) and `tron-notify-extension.ts`. Store: `gateway/notifications.json`, one exact 1 MiB
 owner-only document holding grants (at most 64 active devices), 256 pending intents,
 512 receipts, 192 revocation tombstones and the 512-row inbox. It never stores raw
 APNs tokens; secrets and message content stay out of RPC projections, logs and JSONL.

@@ -4,6 +4,8 @@
     "**"
   ],
   "dependsOn": [
+    "gateway/host",
+    "gateway/admin",
     "gateway/pi",
     "gateway/settings"
   ],

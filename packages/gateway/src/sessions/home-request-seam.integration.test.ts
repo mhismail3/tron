@@ -151,8 +151,8 @@ interface CapturedDiagnostic {
 async function homeFixture(label: string, options: FixtureOptions = {}) {
   if (options.extension) {
     const original = tronModules.homeModuleFactories;
-    const spy = vi.spyOn(tronModules, "homeModuleFactories").mockImplementation((host) => [
-      ...original(host), { name: "qualification", factory: options.extension! },
+    const spy = vi.spyOn(tronModules, "homeModuleFactories").mockImplementation((modules, session) => [
+      ...original(modules, session), { name: "qualification", factory: options.extension! },
     ]);
     disposals.push(async () => { spy.mockRestore(); });
   }

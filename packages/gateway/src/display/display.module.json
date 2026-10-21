@@ -5,6 +5,7 @@
   ],
   "dependsOn": [
     "gateway/host",
+    "gateway/workspace",
     "gateway/pi"
   ],
   "exceptions": [

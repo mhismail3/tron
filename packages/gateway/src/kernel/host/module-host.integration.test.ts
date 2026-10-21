@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../../admin/trust-service.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
-import { GATEWAY_MODULES } from "../../main/modules.js";
+import { gatewayModules } from "../../main/modules.js";
 import { ModuleHost, type KernelHooks, type ModuleDescriptor, type ModuleInstance } from "./module-host.js";
 
 /**
@@ -95,7 +95,7 @@ describe("kernel/host module host", () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "tron-module-host-")));
     roots.push(root);
     const tronHome = join(root, "tron");
-    const modules = await ModuleHost.start(GATEWAY_MODULES, { tronHome, log });
+    const modules = await ModuleHost.start(gatewayModules(() => registry), { tronHome, log });
     const registry = new RuntimeRegistry({
       modules, agentDir: join(root, "agent"), tronHome, idleRuntimeMs: 60_000, trust: new TrustService(join(root, "agent")),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

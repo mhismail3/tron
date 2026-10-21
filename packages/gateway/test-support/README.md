@@ -56,7 +56,7 @@ and crash fixtures.
 
 `waitFor`, `awaitsWithin`, `initializeRegistry` and `createColdRegistryFixture`
 (`runtime-registry-fixture.ts`), `createTestRegistry` (`gateway-registry.ts`: the production module
-composition a test registry takes), `scenario-lock.ts` ([scenario locks](../docs/scenario-locks.md)).
+composition a test registry takes, with deferred registry-owned module ports), `scenario-lock.ts` ([scenario locks](../docs/scenario-locks.md)).
 
 ## Signals
 

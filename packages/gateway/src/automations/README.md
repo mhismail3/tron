@@ -11,7 +11,7 @@ definition, retry or ledger. iOS and the first-party `schedule` tool are clients
 
 `automation-service.ts`, `automation-scheduler.ts`, `automation-executor.ts`,
 `automation-store.ts`, `automation-timeline.ts`, `schedule.ts`,
-`tron-schedule-extension.ts`. Store: `gateway/automations/`, strict schema-version-2
+`schedule-module.ts` (optional-owner descriptor) and `tron-schedule-extension.ts`. Store: `gateway/automations/`, strict schema-version-2
 owner-only documents, each with one definition, at most one nonterminal run and 64
 retained terminal runs. Older shapes are not admitted, migrated or projected. Writes
 sync the file and its directory before acknowledgement.

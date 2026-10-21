@@ -108,7 +108,7 @@ import { HomeGlobalResources } from "../home/home-global-resources.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
 import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
-import { readHomeSessionEntry, type HomeSessionReadRequest } from "../home/home-session-read.js";
+import { readHomeSessionEntry } from "../home/home-session-read.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic } from "../home/home-memory.js";
 import { ModelQueueExhausted, ModelQueueOwner, modelQueueKey, modelQueueProjectionPath, splitModelRef, type ModelQueueRecord } from "../providers/model-queue.js";
@@ -117,7 +117,7 @@ import { ProviderUsageOwner } from "../providers/provider-usage.js";
 import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { applyHomeCacheRetention, type HomeRequestRecord } from "../home/home-request-policy.js";
-import type { JevDecisionClient } from "../knowledge/jev-client.js";
+import { homeModuleServices } from "../home/home-module.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { SessionSearchForkBoundary } from "./session-search-contract.js";
 import { validateSearchBranch } from "./session-search-text.js";
@@ -730,7 +730,6 @@ export class RuntimeRegistry {
       artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
       extensionArtifactWarning?: (warning: { reason: import("./extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
       scheduleToolOperations?: ScheduleToolOperations;
-      jev?: JevDecisionClient;
       connections?: ConnectionOwner;
       /** One Home designation lifecycle outcome, for the Gateway log. */
       homeDiagnostic?: HomeDiagnostic;
@@ -891,6 +890,18 @@ export class RuntimeRegistry {
   /** The composition's one workspace (`workspaceModule`), shared by capability stores. */
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
   get moduleHost(): ModuleHost { return this.options.modules; }
+  coreModuleServices() { return { knowledge: this.knowledgeService, connections: this.options.connections }; }
+  displayModuleServices() { return { artifacts: this.displayArtifacts, liveViews: this.options.browserLiveViews }; }
+  scheduleModuleOperations() { return this.options.scheduleToolOperations; }
+  notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
+  homeModuleServices() {
+    return homeModuleServices(this.home, this.options, {
+      knowledge: this.knowledgeService, changes: () => this.settingsOwners?.changes,
+      delegate: (sessionId, request, signal) => this.dispatchHomeTask(sessionId, request, signal),
+      search: () => { const owner = this.sessionSearchService; return owner ? (request, signal) => owner.search(request, signal) : undefined; },
+      read: (request, signal) => readHomeSessionEntry(this, request, signal),
+    });
+  }
   setSearchInvalidator(invalidator: (sessionID: string, nextSessionID?: string) => void): void {
     this.searchInvalidator = invalidator;
   }
@@ -1851,15 +1862,8 @@ export class RuntimeRegistry {
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
-      ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
-      ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       modules: this.options.modules,
-      sessionSearch: () => this.sessionSearchService,
-      sessionRead: (request: HomeSessionReadRequest, signal?: AbortSignal) => readHomeSessionEntry(this, request, signal),
       settings: () => this.settingsOwners,
-      ...(this.options.homeWebTransport ? { homeWebTransport: this.options.homeWebTransport } : {}),
-      ...(this.options.jev ? { jev: this.options.jev } : {}),
-      ...(this.options.connections ? { connections: this.options.connections } : {}),
       homeProfile: (sessionId: string, cwd: string) => this.home.profileFor(sessionId, cwd),
       homeModel: (sessionId: string) => this.home.modelFor(sessionId),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
@@ -1870,13 +1874,10 @@ export class RuntimeRegistry {
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
       homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
-      homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
-      homeTask: (sessionId: string, request: unknown) => this.home.taskTool(sessionId, request),
       homeTaskSettings: async (sessionId: string, taskId: string, purpose: "resolve" | "change") => {
         const target = await this.home.taskSettingsTarget(sessionId, taskId, purpose);
         return { ...target, slot: await this.acquire(target.sessionId) };
       },
-      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => this.dispatchHomeTask(sessionId, request, signal),
       validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {

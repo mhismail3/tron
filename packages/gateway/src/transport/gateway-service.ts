@@ -2224,7 +2224,7 @@ export class GatewayService {
         return safeJson(await this.dependencies.packages.list(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
       case "modules.list": {
         rejectUnknownFields(params, [], "Module listing");
-        return safeJson({ modules: tronModuleSummaries() });
+        return safeJson({ modules: tronModuleSummaries(this.dependencies.modules) });
       }
       case "hooks.list":
         rejectUnknownFields(params, ["cwd"], "Hook listing");

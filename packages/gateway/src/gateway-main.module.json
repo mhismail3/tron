@@ -15,7 +15,11 @@
     "gateway/providers",
     "gateway/runtime",
     "gateway/workspace",
-    "gateway/admin"
+    "gateway/admin",
+    "gateway/home",
+    "gateway/automations",
+    "gateway/notifications",
+    "gateway/run"
   ],
   "exceptions": [
     {

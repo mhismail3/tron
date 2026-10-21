@@ -28,6 +28,9 @@ ordinary profile's first extension and joins canonical receipt writes before inp
   carries per-runtime identity, presentation, receipt joining, late-bound settings
   access for the session actor and policy operations;
   concrete policy owners remain outside the host and are resolved at each callback.
+  The session model runtime and live profile are kernel facts, not module services.
+  `registrations(names, session)` keeps each profile's exact order and optionality;
+  `summaries(names)` reads those same descriptors' metadata.
 - **RPC (D5).** A module's `rpc` methods are routed before `GatewayService`'s
   switch. `read` handlers are admitted while the Gateway drains; `mutation`
   handlers run under the command receipt and are refused while draining.
@@ -44,7 +47,9 @@ ordinary profile's first extension and joins canonical receipt writes before inp
 - The host imports no module; modules reach each other only through declared
   contracts.
 - `GatewayHost` carries platform facts and kernel operations, nothing
-  module-specific.
+  module-specific. Composition captures explicit per-module owner resolvers; no
+  resolver runs during `start`, before the registry exists. No service bag enters
+  `SessionContext`, and no registry owner is copied or cached by composition.
 
 ## Entry points
 
