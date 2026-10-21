@@ -343,6 +343,10 @@ struct HomeUsageSummaryCard: View {
             }
         }
         .task(id: PresentationActivityTaskID(
+            source: "home-usage-catalog:\(model.admitsForegroundPresentationRead):\(model.profileRevision):\(model.providerInvalidationGeneration):\(model.foregroundReconciliationGeneration):\(usageController.requestGeneration):\(capabilityAvailable)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) { await loadProviderCatalog() }
+        .task(id: PresentationActivityTaskID(
             source: "home-usage:\(model.connectionState == .connected):\(usageProviders.map(\.id).joined(separator: ",")):\(model.providerInvalidationGeneration):\(model.foregroundReconciliationGeneration):\(model.profileRevision):\(usageController.requestGeneration):\(capabilityAvailable)",
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
@@ -453,18 +457,26 @@ struct HomeUsageSummaryCard: View {
             .homeUsageLayoutProbe(probe)
     }
 
+    private func loadProviderCatalog() async {
+        guard presentationActivity.allowsPresentationPublication, !Task.isCancelled,
+              model.admitsForegroundPresentationRead, capabilityAvailable else { return }
+        let profile = model.profileRevision
+        let foreground = model.foregroundReconciliationGeneration
+        let refreshed = await model.refreshProviders(target: .global)
+        guard !Task.isCancelled, presentationActivity.allowsPresentationPublication,
+              model.admitsForegroundPresentationRead, profile == model.profileRevision,
+              foreground == model.foregroundReconciliationGeneration else { return }
+        catalogReadFailed = !refreshed
+    }
+
     private func load() async {
         // A cold launch mounts before the Gateway connects; the task is keyed on
         // the connection, so it reads again once connected.
         guard presentationActivity.allowsPresentationPublication, !Task.isCancelled,
-              model.connectionState == .connected else { return }
-        // Read the catalog only when none is published; its arrival re-keys this
-        // task (provider ids), which then reads usage.
-        guard model.providerCatalog(for: .global) != nil else {
-            let refreshed = await model.refreshProviders(target: .global)
-            if !Task.isCancelled { catalogReadFailed = !refreshed }
-            return
-        }
+              model.admitsForegroundPresentationRead else { return }
+        // The catalog task owns its refresh independently of provider IDs;
+        // changed IDs re-key this usage task, never a second catalog read.
+        guard model.providerCatalog(for: .global) != nil else { return }
         guard capabilityAvailable, !usageProviders.isEmpty else { return }
         let identity = ProviderUsageReadIdentity(
             target: .global,

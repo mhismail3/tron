@@ -101,8 +101,7 @@ final class TronForegroundCaptureUITests: XCTestCase {
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "settings.resolve", "home.status", "home.taskList"])
         XCTAssertTrue(olderPage.isHittable, "Foreground preserves the current page, not merely a cached first page")
         app.buttons["home-memory-newer-top"].tap()
-        let item = app.descendants(matching: .any)["home-memory-row-32"].firstMatch
-        XCTAssertTrue(item.waitForExistence(timeout: 20), app.debugDescription)
+        let item = app.descendants(matching: .any)["home-memory-row-34"].firstMatch
         reveal(item, in: app)
         try capture(app, name: "memory-viewport-\(dark ? "dark" : "light")", reads: ["home.memory.view": 1],
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "home.status", "home.taskList"])
@@ -173,7 +172,9 @@ final class TronForegroundCaptureUITests: XCTestCase {
             let editor = app.textViews["Queued message"]
             XCTAssertTrue(editor.waitForExistence(timeout: 20), app.debugDescription)
             editor.tap(); editor.typeText(" retained draft")
-            let draft = editor.value as? String
+            XCTAssertTrue(app.keyboards.firstMatch.exists, "The retained-editor stimulus starts with keyboard focus")
+            let draft = try XCTUnwrap(editor.value as? String)
+            let caret = try XCTUnwrap(draft.range(of: " retained draft")?.upperBound)
             try capture(app, name: "queued-\(removed ? "removed" : "retained")-\(dark ? "dark" : "light")",
                         reads: ["session.open": 1, "session.sync": 1], forbidden: ["provider.list", "session.list", "settings.resolve"],
                         retiringTop: removed)
@@ -181,6 +182,13 @@ final class TronForegroundCaptureUITests: XCTestCase {
                 XCTAssertFalse(editor.exists, "The authoritative queue removed this exact message")
             } else {
                 XCTAssertEqual(editor.value as? String, draft, "A newer queue revision must not erase the local draft")
+                XCTAssertTrue(app.keyboards.firstMatch.exists, "The native editor keeps its keyboard across foregrounding")
+                // Type into the application's existing first responder without
+                // tapping/refocusing any element; the exact editor must receive it.
+                app.typeText(" focus survived")
+                var expected = draft
+                expected.insert(contentsOf: " focus survived", at: caret)
+                XCTAssertEqual(editor.value as? String, expected, "The original editor keeps its first responder and insertion point")
                 let title = app.navigationBars.staticTexts["Queued Message"].firstMatch
                 title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                     .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
