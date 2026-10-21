@@ -8,6 +8,43 @@ import XCTest
 final class TronHomeSheetsUITests: XCTestCase {
     private var timings: [String: Double] = [:]
 
+    /// Compare rendered glyph colors, not a test-only accessibility style label.
+    @MainActor func testDisableHomeSubtitleMatchesDestructiveTitle() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+                + (mode == "dark" ? ["-home-dark"] : [])
+            app.launch()
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
+            app.buttons["home-pinned-row"].tap()
+            let ring = app.buttons["session-context-button"]
+            XCTAssertTrue(waitFor(ring, "enabled == true"))
+            open(app, ring, ready: "home-manage-state", name: "manage")
+            expand(app, done: "home-sheet-done-manage")
+            let disable = element(app, "home-manage-disable")
+            for _ in 0..<5 where !disable.isHittable || disable.frame.maxY > app.frame.maxY - 50 {
+                app.swipeUp()
+            }
+            XCTAssertTrue(disable.isHittable)
+            keep("disable-home-subtitle-\(mode)")
+            // Default-size labels occupy separate halves of this two-line row.
+            // Exclude the leading icon so it cannot make a neutral subtitle pass.
+            let title = ink(app, disable, crop: { frame in
+                CGRect(x: frame.minX + 56, y: frame.minY,
+                       width: frame.width - 56, height: frame.height / 2)
+            })
+            let subtitle = ink(app, disable, crop: { frame in
+                CGRect(x: frame.minX + 56, y: frame.midY,
+                       width: frame.width - 56, height: frame.height / 2)
+            })
+            XCTAssertGreaterThan(title[0] - max(title[1], title[2]), 0.3, "Destructive title is red in \(mode)")
+            XCTAssertLessThan(zip(title, subtitle).map { abs($0 - $1) }.max()!, 0.12,
+                              "Disable Home's subtitle matches its destructive title in \(mode): \(subtitle) vs \(title)")
+            app.terminate()
+        }
+    }
+
     @MainActor
     func testHostPressureNormalAndIdleWorkers() {
         checkHostStatus(level: "Normal", workers: "0 workers running", arguments: [])
@@ -950,9 +987,10 @@ final class TronHomeSheetsUITests: XCTestCase {
 
     /// The average color of an element's saturated (inked) pixels: a title's
     /// glyphs or a row's icon, never the sheet material behind them.
-    @MainActor private func ink(_ app: XCUIApplication, _ element: XCUIElement, leading: CGFloat? = nil) -> [Double] {
+    @MainActor private func ink(_ app: XCUIApplication, _ element: XCUIElement, leading: CGFloat? = nil,
+                                crop: (CGRect) -> CGRect = { $0 }) -> [Double] {
         XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
-        var area = element.frame
+        var area = crop(element.frame)
         if let leading { area.size.width = leading }
         let window = app.windows.firstMatch.frame.width
         guard let source = XCUIScreen.main.screenshot().image.cgImage,
