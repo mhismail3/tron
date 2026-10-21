@@ -1,6 +1,8 @@
 #if HOSTED_TEST
 import AVFoundation
 import CoreVideo
+import ImageIO
+import UniformTypeIdentifiers
 import SwiftUI
 import TronMobileCore
 import TronSwiftAppEngine
@@ -196,7 +198,7 @@ private actor ReadonlyAttachmentGateway {
         if !scenario.contains("display-video") {
             displayRows = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
         }
-        image = Self.image(height: 320)
+        image = scenario.contains("16bit") ? Self.highDepthImage() : scenario.contains("invalid-image") ? Data("Not an image".utf8) : Self.image(height: 320)
         poison = Self.image(height: 640)
         file = HostedSwiftAppFixtureSource.file(for: scenario).map { Data($0.source.utf8) }
             ?? Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
@@ -207,6 +209,22 @@ private actor ReadonlyAttachmentGateway {
             UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 160, height: height / 2))
             UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: height / 2, width: 160, height: height / 2))
         }.pngData()!
+    }
+    /// Same dimensions and component depth as the reported contact sheet;
+    /// generated pixels keep private review captures out of the repository.
+    private static func highDepthImage() -> Data {
+        let context = CGContext(data: nil, width: 2400, height: 4000, bitsPerComponent: 16,
+            bytesPerRow: 2400 * 8, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)!
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 2000, width: 2400, height: 2000))
+        context.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 2400, height: 2000))
+        let bytes = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(bytes, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        precondition(CGImageDestinationFinalize(destination))
+        return bytes as Data
     }
     nonisolated func updates() -> AsyncStream<String> {
         AsyncStream { continuation in Task { await self.add(continuation) } }
