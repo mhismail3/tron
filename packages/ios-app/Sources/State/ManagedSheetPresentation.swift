@@ -114,7 +114,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
             // when its presenter mounts (launch, reconnect, rebuild) is silent.
             .onChange(of: isPresented, initial: true) { wasPresented, presented in
                 #if HOSTED_TEST
-                ForegroundSheetProbe.record("binding", "\(identity) \(wasPresented)→\(presented) parent=\(parentStateScope?.path ?? "nil")")
+                HostedPresentationProbe.record?("binding", "\(identity) \(wasPresented)→\(presented) parent=\(parentStateScope?.path ?? "nil")")
                 #endif
                 if presented {
                     registerIfPossible(playHaptic: !wasPresented)
@@ -144,7 +144,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
 
     private func didDismiss() {
         #if HOSTED_TEST
-        ForegroundSheetProbe.record("native-dismiss", "\(identity) presented=\(isPresented) source-attached=\(nativeHost.isAttached)")
+        HostedPresentationProbe.record?("native-dismiss", "\(identity) presented=\(isPresented) source-attached=\(nativeHost.isAttached)")
         #endif
         if lease.dismissingToken == nil, !isPresented { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: isPresented ? identity : nil)
@@ -262,7 +262,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
 
     private func didDismiss() {
         #if HOSTED_TEST
-        ForegroundSheetProbe.record("native-dismiss", "\(item.map(identity) ?? "nil") source-attached=\(nativeHost.isAttached)")
+        HostedPresentationProbe.record?("native-dismiss", "\(item.map(identity) ?? "nil") source-attached=\(nativeHost.isAttached)")
         #endif
         if lease.dismissingToken == nil, item == nil { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: item.map(identity))

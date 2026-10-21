@@ -15,6 +15,12 @@ import UIKit
     private static let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("foreground-sheet-probe.jsonl")
 
+    static func install() {
+        guard enabled else { return }
+        HostedPresentationProbe.record = record
+        HostedPresentationProbe.nativeView = { AnyView(ForegroundSheetNativeProbe(identity: $0)) }
+    }
+
     static func recordHomeRead(_ state: HomeSheetReadOwner.State, owner: HomeSheetReadOwner) {
         let description: String
         switch state {
@@ -69,6 +75,10 @@ import UIKit
 /// Keep the opt-in observation wiring with its fixture owner.
 struct ForegroundSheetProbeOverlay: View {
     let model: AppModel
+    init(model: AppModel) {
+        self.model = model
+        ForegroundSheetProbe.install()
+    }
     var body: some View {
         if ForegroundSheetProbe.enabled {
             ForegroundNativeStackProbe(foreground: { [weak model] in

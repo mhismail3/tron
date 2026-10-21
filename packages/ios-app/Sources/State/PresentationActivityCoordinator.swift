@@ -89,7 +89,7 @@ final class PresentationActivityCoordinator {
               !retiredTokens.contains(token),
               parent.map({ !retiredTokens.contains($0) }) ?? true else { return }
         #if HOSTED_TEST
-        ForegroundSheetProbe.record("register", "\(token.id)#\(token.generation) parent=\(parent?.id ?? "root")")
+        HostedPresentationProbe.record?("register", "\(token.id)#\(token.generation) parent=\(parent?.id ?? "root")")
         #endif
         // Session authority is shared down its lineage; catalog demand belongs
         // only to the surface declaring that it actually consumes the roster.
@@ -102,7 +102,7 @@ final class PresentationActivityCoordinator {
     /// callback from an earlier route cannot affect its replacement.
     func retire(_ token: PresentationSurfaceToken) {
         #if HOSTED_TEST
-        ForegroundSheetProbe.record("retire", "\(token.id)#\(token.generation)")
+        HostedPresentationProbe.record?("retire", "\(token.id)#\(token.generation)")
         #endif
         let descendants = order.filter { candidate in
             candidate == token || isDescendant(candidate, of: token)
@@ -282,12 +282,12 @@ struct TronPresentationSurface<Content: View>: View {
 
     var body: some View {
         #if HOSTED_TEST
-        let _ = ForegroundSheetProbe.record("body", "\(token.id)#\(token.generation)")
+        let _ = HostedPresentationProbe.record?("body", "\(token.id)#\(token.generation)")
         #endif
         content()
             .modifier(TronSheetLoadingHostModifier())
             #if HOSTED_TEST
-            .background { if ForegroundSheetProbe.enabled { ForegroundSheetNativeProbe(identity: token.id) } }
+            .background { HostedPresentationProbe.nativeView?(token.id) }
             #endif
             .environment(\.tronPresentationStateScope, stateScope)
             .environment(\.tronPresentationSurfaceToken, token)
@@ -302,14 +302,14 @@ struct TronPresentationSurface<Content: View>: View {
             }
             .onAppear {
                 #if HOSTED_TEST
-                ForegroundSheetProbe.record("appear", "\(token.id)#\(token.generation)")
+                HostedPresentationProbe.record?("appear", "\(token.id)#\(token.generation)")
                 #endif
                 coordinator?.register(token, parent: explicitParent ?? inheritedParent, dependencies: dependencies)
                 if registersLifecycle { onMount?(token) }
             }
             .onDisappear {
                 #if HOSTED_TEST
-                ForegroundSheetProbe.record("disappear", "\(token.id)#\(token.generation)")
+                HostedPresentationProbe.record?("disappear", "\(token.id)#\(token.generation)")
                 #endif
                 if registersLifecycle {
                     coordinator?.retire(token)
