@@ -2,9 +2,8 @@
 
 ## Purpose
 
-The session shell and everything a chat presents: the Sessions dashboard, the chat route
-(transcript, composer, tool and context details), Manage Session, Home's chat and sheets, New
-Session, session history and subagent activity.
+The session shell, Sessions dashboard, chat route (transcript, composer, tool and context details),
+Manage Session, Home's chat and sheets, New Session, session history and subagent activity.
 
 ## Owns
 
