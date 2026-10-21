@@ -160,7 +160,7 @@ struct ChatView: View {
             }
             // Same usable region as the floating display: the bubble stays
             // above the composer and keyboard without measuring either.
-            .overlay { ChatAnnotationBubbleHost(presenter: annotationPresenter) }
+            .overlay { ChatAnnotationBubbleHost(presenter: annotationPresenter, composer: composerResponder) }
             #if HOSTED_TEST
             .overlay(alignment: .topLeading) {
                 Color.clear

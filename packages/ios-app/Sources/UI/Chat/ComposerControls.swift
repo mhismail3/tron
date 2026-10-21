@@ -23,6 +23,15 @@ final class ChatComposerResponder {
     func resignFirstResponder() -> Bool {
         textView?.resignFirstResponder() ?? false
     }
+
+    /// Takes first responder directly from another field, so UIKit moves the
+    /// keyboard's input target without dismissing it. Must run while the
+    /// previous field is still installed; its delegate mirrors the focus.
+    @discardableResult
+    func becomeFirstResponder() -> Bool {
+        guard let textView, textView.isEditable, textView.window != nil else { return false }
+        return textView.becomeFirstResponder()
+    }
 }
 
 /// UIKit owns selection and the capped editor's internal scroll position. A

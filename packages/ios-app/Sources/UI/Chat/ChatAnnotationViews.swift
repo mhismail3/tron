@@ -238,6 +238,9 @@ struct ChatAnnotationSheet: View {
 /// and controls so it reads as a small composer for one quote.
 struct ChatAnnotationBubbleHost: View {
     let presenter: ChatAnnotationPresenter
+    /// Saving continues in the composer: it takes the keyboard from the
+    /// comment field before the bubble is removed, so it never drops.
+    let composer: ChatComposerResponder
     @State private var comment = ""
     @State private var bubbleHeight: CGFloat = 0
     @State private var region: CGRect = .zero
@@ -277,7 +280,9 @@ struct ChatAnnotationBubbleHost: View {
         .onChange(of: presenter.pending?.id) { _, id in
             comment = ""
             capturedRegionMaxY = id == nil ? nil : region.maxY
-            focused = id != nil
+            // Only claim focus. Clearing it on close would resign whichever
+            // responder holds the keyboard by then, i.e. the composer after Save.
+            if id != nil { focused = true }
         }
     }
 
@@ -311,7 +316,10 @@ struct ChatAnnotationBubbleHost: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Cancel annotation")
-                Button { presenter.save(comment: comment) } label: {
+                Button {
+                    composer.becomeFirstResponder()
+                    presenter.save(comment: comment)
+                } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.sans(size: ComposerControlMetrics.symbolSize, weight: .semibold))
                         .foregroundStyle(accent)
