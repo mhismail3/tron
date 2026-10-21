@@ -757,6 +757,7 @@
         "snapshot.compactionPolicy.next:object",
         "snapshot.compactionPolicy:object",
         "snapshot.compactionQueued:boolean",
+        "snapshot.configurationBlocker:null",
         "snapshot.configurationBlocker:string",
         "snapshot.contextUsage.contextWindow:number",
         "snapshot.contextUsage.percent:number",

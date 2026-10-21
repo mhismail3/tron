@@ -30,6 +30,10 @@ and crash fixtures.
   signals when called), not on `slot.isBusy` or a phase: those turn true at slot
   admission, before the SDK admits the run. Keep streamed faux replies short; the faux
   provider paces each chunk with a timer.
+- **Slow-link locks.** `LockClient.holdWrites()` holds the real server socket's
+  next write while its production outbound queue coalesces. Release in `finally`
+  after the named state transition; closing the client also releases it. No kernel
+  projection or queue is replaced.
 - **Network isolation.** Tests own every remote boundary through injected fetchers,
   resolvers and HTTP stubs. `network-isolation.ts` refuses any non-loopback TCP
   connection from an in-process socket and fails the current test (or file). It does

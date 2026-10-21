@@ -120,6 +120,8 @@ export interface LockClient {
   send(method: string, params: Record<string, unknown>): Promise<{ ok: boolean; result?: any; error?: any }>;
   /** Every event frame this connection received, in arrival order. */
   readonly events: ReadonlyArray<{ topic: string; sessionId?: string; payload: unknown }>;
+  /** Hold real server socket writes until released (also released on close). */
+  holdWrites(): () => void;
   close(): Promise<void>;
 }
 
@@ -387,6 +389,26 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
         send,
         request: send,
         events: received,
+        holdWrites() {
+          const connectionId = frames.find((frame) => frame.type === "hello").connectionId as string;
+          const peer = (server as unknown as { clients: Map<string, { socket: WebSocket }> }).clients.get(connectionId)?.socket;
+          if (!peer) throw new Error(`The ${label} server socket is closed`);
+          const send = peer.send;
+          const held: Parameters<WebSocket["send"]>[] = [];
+          // The real ordered queue admits only one write at a time. Holding its
+          // socket boundary makes supersession independent of compression speed.
+          peer.send = ((...args: Parameters<WebSocket["send"]>) => { held.push(args); }) as WebSocket["send"];
+          let released = false;
+          const release = () => {
+            if (released) return;
+            released = true;
+            peer.send = send;
+            socket.off("close", release);
+            for (const args of held.splice(0)) send.apply(peer, args);
+          };
+          socket.once("close", release);
+          return release;
+        },
         close: async () => {
           if (socket.readyState === WebSocket.CLOSED) return;
           await new Promise<void>((resolve) => { socket.once("close", () => resolve()); socket.close(); });

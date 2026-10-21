@@ -88,7 +88,9 @@ it closes is host timing. The subagent lock enters at `RuntimeRegistry`: the del
 contract is the canonical record and the process activity, which the
 transport only projects. It runs in the nested serial pass. The push lock runs the
 production `NotificationService` (harness option `notifications`) with only the relay's
-HTTP fetcher replaced, and records each relay request's envelope and every receipt. The
+HTTP fetcher replaced, and records each relay request's envelope and every receipt.
+Its failed run holds the phone's real socket write through terminal retirement so the
+idle snapshot deterministically supersedes queued busy state as a rebaseline. The
 automation lock wires the production store, scheduler, executor and service (harness option
 `automations`) and records every command receipt's contents. The Home lock
 keeps Home's and the worker's provider requests as two ordered streams (they

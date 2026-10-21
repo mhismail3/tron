@@ -142,9 +142,31 @@ describe("gateway/notifications push lock", () => {
 
     // 4. Hidden, renamed: a provider error pushes "stopped because of an error", titled by the name.
     expect((await phone.request("session.rename", { commandId: gateway.commandId(), sessionId, name: "Renamed lock chat" })).ok).toBe(true);
-    gateway.script([() => fauxAssistantMessage("partial", { stopReason: "error", errorMessage: "lock provider failure" })]);
-    expect((await prompt("fail this run")).ok).toBe(true);
-    await gateway.settled(sessionId);
+    let failedProviderReached!: () => void;
+    const failedProvider = new Promise<void>((resolve) => { failedProviderReached = resolve; });
+    gateway.script([() => {
+      failedProviderReached();
+      return fauxAssistantMessage("partial", { stopReason: "error", errorMessage: "lock provider failure" });
+    }]);
+    const slot = await gateway.registry.acquire(sessionId);
+    const failureEvents = phone.events.length;
+    // A slow writer must receive the idle snapshot as a rebaseline covering
+    // unsent busy state. Otherwise compression versus receipt I/O decides which
+    // topic carries the null configuration blocker, making the schema lock race.
+    const releaseWrites = phone.holdWrites();
+    try {
+      const failedRun = prompt("fail this run");
+      await awaitsWithin(failedProvider, "the failed provider request");
+      await gateway.settled(sessionId);
+      await waitFor(() => slot.snapshot().configurationBlocker === null, "the failed run's terminal ownership to retire");
+      releaseWrites();
+      expect((await failedRun).ok).toBe(true);
+      await waitFor(() => phone.events.slice(failureEvents).some((event) => event.topic === "session.rebaseline"
+        && (event.payload as { snapshot?: { configurationBlocker?: unknown } }).snapshot?.configurationBlocker === null),
+      "the failed run's idle rebaseline to reach the phone");
+    } finally {
+      releaseWrites();
+    }
     await sent(4, "the failed-run push");
 
     // 5. Hidden: a client abort pushes "was stopped".

@@ -120,7 +120,10 @@ real mobile open/sync/visible journey, writing
 `test-results/home-title-payloads-{preview,redacted}.json`. Behavior locks:
 `notifications.store.lock.integration.test.ts` and `notifications.push.lock.integration.test.ts`
 (terminal and input-required pushes at the relay boundary, presence suppression, the
-task-worker skip).
+task-worker skip). The failed-run step holds the phone's real socket writes through
+terminal ownership retirement, then requires an idle `session.rebaseline`. This
+pins the null configuration blocker on the slow-link path without depending on
+compression completing before receipt I/O.
 
 ## Not here
 
