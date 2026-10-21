@@ -115,8 +115,7 @@ metadata, never JSONL, and never implies parallel execution.
   Chat-layer setters); runtime acquisition and eviction: `RuntimeRegistry`.
 - Owned dispatch for Automations and Home tasks: `OwnedSessionDispatch` (shared
   leases, recovery evidence, terminal acknowledgement, opt-in 24-hour deadline).
-- Notifications plug in through call-time kernel host hooks; the slot keeps presence,
-  waiting episodes and best-effort failure diagnostics. Settings and Home: see Not here.
+- Notifications use call-time kernel hooks; the slot owns presence, waiting episodes and failure diagnostics.
 
 ## Signals
 
