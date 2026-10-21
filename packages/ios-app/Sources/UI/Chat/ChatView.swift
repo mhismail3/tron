@@ -3511,8 +3511,6 @@ struct ChatView: View {
             Task { @MainActor in
                 do {
                     try await model.sendComposer(submission)
-                    // The send's one tap marks the Gateway's acceptance, never
-                    // a rejected or disabled send, and only in the chat that sent it.
                     if presentationTarget == target { TronHaptics.shared.play(.promptSent) }
                     model.chatInteractionTrace.submission(
                         .transportSucceeded,

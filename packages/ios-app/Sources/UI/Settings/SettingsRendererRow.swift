@@ -157,12 +157,6 @@ struct SettingsRendererRow: View {
             .disabled(resetDisabled)
     }
 
-    private func changeToggle(_ next: Bool) {
-        guard next != (setting.value?.boolValue == true) else { return }
-        TronHaptics.shared.play(.toggleChanged)
-        onChange(.bool(next))
-    }
-
     /// An absent optional value is not a second provenance statement.
     private var display: String { setting.value == nil && setting.display == "Not set" && presentation?.redacted != true ? "—" : setting.display }
 
@@ -171,7 +165,7 @@ struct SettingsRendererRow: View {
         switch control {
         case .toggle:
             TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
-                Button { changeToggle(setting.value?.boolValue != true) } label: {
+                Button { TronHaptics.shared.changeToggle(from: setting.value?.boolValue == true) { onChange(.bool($0)) } } label: {
                     TronToggleControl(isOn: setting.value?.boolValue == true, accent: theme?.accent ?? .tronEmerald)
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
@@ -179,7 +173,7 @@ struct SettingsRendererRow: View {
                 .buttonStyle(.plain)
                 .accessibilityRepresentation {
                     Toggle(isOn: Binding(get: { setting.value?.boolValue == true },
-                                         set: { changeToggle($0) })) { Text(title) }
+                                         set: { next in TronHaptics.shared.changeToggle(from: setting.value?.boolValue == true, to: next) { onChange(.bool($0)) } })) { Text(title) }
                         .accessibilityHint(subtitle ?? "")
                 }
             }

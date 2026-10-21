@@ -2169,18 +2169,9 @@ struct TronToggleRow: View {
         _isOn = isOn
     }
 
-    // Only this user-intent binding ticks, never a restored/server value.
-    private var userValue: Binding<Bool> {
-        Binding(get: { isOn }, set: { next in
-            guard isEnabled, next != isOn else { return }
-            TronHaptics.shared.play(.toggleChanged)
-            isOn = next
-        })
-    }
-
     var body: some View {
         let resolvedAccent = settingsTheme?.accent ?? accent
-        Button { userValue.wrappedValue.toggle() } label: {
+        Button { TronHaptics.shared.toggleBinding($isOn, enabled: isEnabled).wrappedValue.toggle() } label: {
             TronValueRow(icon: icon, title: title, detail: detail, accent: resolvedAccent) {
                 TronToggleControl(isOn: isOn, accent: resolvedAccent)
             }
@@ -2189,7 +2180,7 @@ struct TronToggleRow: View {
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.62)
         .accessibilityRepresentation {
-            Toggle(isOn: userValue) { Text(title) }
+            Toggle(isOn: TronHaptics.shared.toggleBinding($isOn, enabled: isEnabled)) { Text(title) }
                 .disabled(!isEnabled)
                 .accessibilityHint(detail ?? "")
         }

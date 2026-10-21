@@ -1,4 +1,5 @@
 import Observation
+import SwiftUI
 import UIKit
 
 /// Semantic intent, not a generator choice at each call site. Selection ticks
@@ -71,6 +72,22 @@ final class TronHaptics {
         default:
             break
         }
+    }
+
+    /// A switch's user-intent seam, shared by touch and accessibility actions.
+    /// Server updates never enter it. A refused/redundant setter stays silent.
+    func changeToggle(from current: Bool, to value: Bool? = nil, apply: (Bool) -> Void) {
+        let next = value ?? !current
+        guard next != current else { return }
+        play(.toggleChanged)
+        apply(next)
+    }
+
+    func toggleBinding(_ binding: Binding<Bool>, enabled: Bool = true) -> Binding<Bool> {
+        Binding(get: { binding.wrappedValue }, set: { next in
+            guard enabled else { return }
+            self.changeToggle(from: binding.wrappedValue, to: next) { binding.wrappedValue = $0 }
+        })
     }
 
     /// One tick per item up to `cascadeLimit`, `cascadeInterval` apart,

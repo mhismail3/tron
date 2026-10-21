@@ -574,10 +574,8 @@ struct ExtensionFormSheet: View {
         let expectedToken = presentationSurfaceToken
         Task { @MainActor in
             do {
-                // Accepted domain mutation remains owned by SessionMutationService
-                // even when this sheet disappears. Only presentation effects are
-                // fenced: the old result must not dismiss or suppress a successor
-                // sheet that reuses the interaction ID with a new scope.
+                // SessionMutationService retains accepted mutations; presentation
+                // effects (including feedback) must not reach a successor sheet.
                 try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: cancelled)
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
