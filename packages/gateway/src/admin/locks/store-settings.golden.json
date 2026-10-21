@@ -252,7 +252,7 @@
             "key": "context.images.block",
             "direction": "widen"
           },
-          "group": "advanced",
+          "group": "approvals",
           "subgroup": "Floors",
           "value": "approve",
           "display": "Approve",
@@ -288,7 +288,7 @@
             "key": "context.images.block",
             "direction": "narrow"
           },
-          "group": "advanced",
+          "group": "approvals",
           "subgroup": "Floors",
           "value": "notify",
           "display": "Notify",
@@ -325,7 +325,7 @@
           "qualifiers": {
             "key": "run.retry.maxRetries"
           },
-          "group": "advanced",
+          "group": "approvals",
           "subgroup": "Floors",
           "value": "approve",
           "display": "Approve",
@@ -359,7 +359,7 @@
         },
         {
           "key": "run.retry.maxRetries",
-          "group": "advanced",
+          "group": "run",
           "subgroup": "Retry",
           "value": 6,
           "display": "6 retries",

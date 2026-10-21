@@ -266,7 +266,7 @@
                 }
               ],
               "display": "4 retries",
-              "group": "advanced",
+              "group": "run",
               "key": "run.retry.maxRetries",
               "layer": "mac",
               "layers": [
@@ -317,10 +317,10 @@
           },
           "sections": [
             {
-              "description": "Model availability, trust, delivery, and retries",
+              "description": "Transport, timeouts, delivery, and retries",
               "id": "<id>",
-              "order": 55,
-              "title": "Advanced"
+              "order": 50,
+              "title": "Connection"
             }
           ],
           "target": {
@@ -394,7 +394,7 @@
                 }
               ],
               "display": "6 retries",
-              "group": "advanced",
+              "group": "run",
               "key": "run.retry.maxRetries",
               "layer": "mac",
               "layers": [
@@ -445,10 +445,10 @@
           },
           "sections": [
             {
-              "description": "Model availability, trust, delivery, and retries",
+              "description": "Transport, timeouts, delivery, and retries",
               "id": "<id>",
-              "order": 55,
-              "title": "Advanced"
+              "order": 50,
+              "title": "Connection"
             }
           ],
           "target": {
@@ -484,7 +484,7 @@
                 }
               ],
               "display": "6 retries",
-              "group": "advanced",
+              "group": "run",
               "key": "run.retry.maxRetries",
               "layer": "mac",
               "layers": [
@@ -545,10 +545,10 @@
           },
           "sections": [
             {
-              "description": "Model availability, trust, delivery, and retries",
+              "description": "Transport, timeouts, delivery, and retries",
               "id": "<id>",
-              "order": 55,
-              "title": "Advanced"
+              "order": 50,
+              "title": "Connection"
             }
           ],
           "target": {
@@ -590,7 +590,7 @@
                 },
                 "label": "Retries",
                 "layer": "Mac",
-                "section": "advanced"
+                "section": "run"
               },
               "reason": "Retry transient provider failures longer",
               "status": "applied",
