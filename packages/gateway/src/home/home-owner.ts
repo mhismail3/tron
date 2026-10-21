@@ -1,5 +1,6 @@
+import type { InputEnvelope, InputDelivery } from "../kernel/host/input-admission.js";
 import type { ImageContent } from "../kernel/pi/ai.js";
-import { isWakeEvidence, WakeInboxOwner, type HomeWakeDelivery, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
+import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { visitCanonicalSessionEntries } from "../episodic/episodic-source.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
@@ -37,7 +38,6 @@ import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js"
 import { admitHomeTaskToolRequest, homeSystemPrompt } from "./tron-home-extension.js";
 import { HOME_TASK_THINKING_LEVELS } from "./home-task-worker-choice.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-
 /** One Gateway installation keeps at most one Home. */
 const VERSION = 2;
 const MAXIMUM_RECORD_BYTES = 16 * 1_024 * 1_024;
@@ -546,7 +546,7 @@ export class HomeOwner {
     return (await this.tasks.recoveryStatus()).available;
   }
 
-  async admitTaskResults(sessionId: string, operationId: string, delivery: HomeWakeDelivery, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("./home-wake-inbox.js").HomeWakeEnvelope>): Promise<HomeWakeTrigger | undefined> {
+  async admitTaskResults(sessionId: string, operationId: string, delivery: InputDelivery, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<InputEnvelope>): Promise<HomeWakeTrigger | undefined> {
     const route = this.wakeRoute(sessionId);
     if (!route?.enabled || !(await this.inboxAvailable())) return undefined;
     await this.inbox.recover(route);

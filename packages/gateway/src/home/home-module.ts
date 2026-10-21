@@ -9,8 +9,10 @@ import { homeAppendGuardHook, type HomeAppendGuardServices } from "./home-append
 import type { HomeDiagnostic } from "./home-diagnostic.js";
 import { HomeRequestPolicyError } from "./home-request-policy.js";
 import type { RequestPolicyHook } from "../kernel/host/request-policy.js";
+import type { InputAdmissionPolicy } from "../kernel/host/input-admission.js";
+import { homeInputAdmission } from "./home-input-admission.js";
 import type { TrustService } from "../admin/trust-service.js";
-import type { HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
+import type { HomeTaskDiagnostic, HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
 import type { HomeSessionReader } from "./home-session-read.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/session-search-contract.js";
@@ -18,6 +20,7 @@ import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/se
 export interface HomeModuleServices {
   runSettled: RunSettledPolicy;
   requestPolicy: RequestPolicyHook;
+  inputAdmission: InputAdmissionPolicy;
   appendGuard: HomeAppendGuardServices;
   memory(sessionId: string): HomeMemoryToolAccess | undefined;
   delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal): Promise<HomeTaskHandle>;
@@ -33,11 +36,12 @@ export interface HomeModuleServices {
 /** Home owns its extension closures; registry supplies only the kernel-side
  * operations and reads of owners installed after registry construction. */
 export function homeModuleServices(owner: HomeOwner,
-  platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport; homeDiagnostic?: HomeDiagnostic },
+  platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport; homeDiagnostic?: HomeDiagnostic; homeTaskDiagnostic?: (record: HomeTaskDiagnostic) => void },
   ports: Pick<HomeModuleServices, "knowledge" | "search" | "read" | "delegate"> & { changes(): SettingsChangePath | undefined; resourcesIdle(sessionId: string): void },
 ): HomeModuleServices {
   return {
     knowledge: ports.knowledge, search: ports.search, read: ports.read, delegate: ports.delegate,
+    inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
     appendGuard: {
       state: sessionId => owner.chapterStateFor(sessionId),
       admission: (sessionId, metrics) => owner.assertChapterAdmission(sessionId, metrics),
@@ -77,7 +81,7 @@ export function createHomeModule(services: () => HomeModuleServices): ModuleDesc
     purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
     tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"], commands: [],
     start: () => ({ hooks: { runSettled: () => services().runSettled, requestPolicy: () => services().requestPolicy,
-      appendGuard: homeAppendGuardHook(() => services().appendGuard) }, extension: session => {
+      inputAdmission: () => services().inputAdmission, appendGuard: homeAppendGuardHook(() => services().appendGuard) }, extension: session => {
       const owners = services();
       return createTronHomeExtension(() => owners.memory(session.sessionId()),
         (request, signal) => owners.delegate(session.sessionId(), request, signal),

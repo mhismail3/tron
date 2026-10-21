@@ -2,11 +2,6 @@ import * as activityProjection from "../kernel/projection/activity.js";
 import * as sessionPages from "../kernel/projection/session-pages.js";
 import { SnapshotProjection } from "../kernel/projection/snapshot.js";
 import { modelQueueSessionExtension } from "./model-queue-session.js";
-import { HOME_OPERATING_CONTEXT } from "../home/tron-home-extension.js";
-import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
-/** Delivery headroom counts the learned profile at its bound: the activation's section is
- * read inside Home's prompt hook, after this estimate, and never exceeds it. */
-const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_BOUND_BYTES + 1_024);
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
@@ -24,7 +19,7 @@ import {
 } from "./delegated-provider.js";
 import type { AgentMessage, AgentTurnDecision, ThinkingLevel } from "../kernel/pi/agent-core.js";
 import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins, readChatFixedSettings, readChatToolChoice } from "./chat-settings.js";
-import { constants, existsSync, lstatSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
+import { constants, existsSync, lstatSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -51,7 +46,7 @@ import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { RequestPolicy } from "../kernel/host/request-policy.js";
-import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, HomeChapterIdentityReplacementError, type HomeChapterState } from "../home/home-chapter-state.js";
+import { HomeChapterIdentityReplacementError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMaterializationAuthority } from "../home/home-append-guard.js";
 import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
@@ -136,7 +131,7 @@ import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "./child-session-a
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../kernel/run/context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection, type InvokedResource } from "../kernel/run/invocation-receipts.js";
-import type { HomeWakeTrigger } from "../home/home-wake-inbox.js";
+import type { InputTrigger } from "../kernel/host/input-admission.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
 import { admitPromptText, admitResourceInvocations, canonicalResourceName, composeResourcePrompt, parsePiLiteralCommand, userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
@@ -207,7 +202,6 @@ function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, 
 }
 
 /** An inbox admission this long holds the Home lane long enough for a person to notice. */
-const HOME_INBOX_ADMISSION_SLOW_MS = 2_000;
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
@@ -560,12 +554,6 @@ export interface RuntimeSlotDependencies {
   /** Recorded chat model for an enabled Home, applied when reconstructing an
    * unloaded runtime instead of restoring the transcript's incidental model. */
   homeModel: (sessionId: string) => { provider: string; id: string } | undefined;
-  /** Admits pending Home results for one activation. A `wake` returns the trigger
-   * result the run starts with, not yet appended; otherwise the results are appended. */
-  homeInboxAdmission: (sessionId: string, operationId: string, delivery: import("../home/home-wake-inbox.js").HomeWakeDelivery, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => Promise<import("../home/home-wake-inbox.js").HomeWakeTrigger | undefined>;
-  /** Returns a wake trigger that never reached the canonical session to pending. */
-  homeInboxRelease: (taskId: string, operationId: string, eventId: string) => Promise<void>;
-  homeInboxSettlement: (sessionId: string, operationId: string) => Promise<void>;
   /** Tron Home's memory tools for one session id, for the `zoom`, `date` and
    * `memory_search` tools the tron-home module registers. It answers undefined
    * for any session that is not the enabled Home. */
@@ -3923,7 +3911,7 @@ export class RuntimeSlot {
       // The terminal receipt is already canonical. A failed settlement leaves its
       // delivery admitted for the next activation to re-prove; it must not strand
       // this operation's work entry or its terminal observers.
-      await this.dependencies.homeInboxSettlement(this.id, receipt.operationId).catch(error => {
+      await this.dependencies.modules.policy("inputAdmission")?.().settle(this.id, receipt.operationId).catch(error => {
         this.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
       });
     }
@@ -7815,7 +7803,7 @@ export class RuntimeSlot {
   }
 
   /** Starts a wake's run with its trigger, or completes an operation with nothing to deliver. */
-  private startHomeWake(session: AgentSession, operationId: string, trigger: HomeWakeTrigger | undefined,
+  private startHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger | undefined,
     accept: (accepted: boolean) => void): Promise<void> {
     accept(true);
     return trigger ? this.sendHomeWake(session, operationId, trigger) : Promise.resolve();
@@ -7824,7 +7812,7 @@ export class RuntimeSlot {
   /** Pi appends the trigger and runs the turn. Refuses to leave an inbox result admitted
    * when the trigger never reached the canonical session: it returns to pending first, so
    * a terminal receipt cannot settle it as outcome-unknown. */
-  private async sendHomeWake(session: AgentSession, operationId: string, trigger: HomeWakeTrigger): Promise<void> {
+  private async sendHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger): Promise<void> {
     const eventId = trigger.message.details.eventId;
     this.inboxAttributedMessages.add(eventId);
     this.homeWakeTrigger = { eventId, taskId: trigger.taskId, operationId };
@@ -7832,7 +7820,7 @@ export class RuntimeSlot {
       await session.sendCustomMessage(trigger.message, { triggerTurn: true });
       if (!this.hasCanonicalCustomMessage(eventId)) throw new GatewayError("conflict", "Home wake trigger was not persisted");
     } catch (error) {
-      if (!this.hasCanonicalCustomMessage(eventId)) await this.dependencies.homeInboxRelease(trigger.taskId, operationId, eventId);
+      if (!this.hasCanonicalCustomMessage(eventId)) await this.dependencies.modules.policy("inputAdmission")?.().release(trigger.taskId, operationId, eventId);
       throw error;
     } finally {
       this.inboxAttributedMessages.delete(eventId);
@@ -8353,7 +8341,7 @@ export class RuntimeSlot {
           };
         }
 
-        let homeWakeTrigger: HomeWakeTrigger | undefined;
+        let homeWakeTrigger: InputTrigger | undefined;
         if (isExactExtensionCommand) {
           this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           // Exact commands run before Pi's preflight callback and can wait on UI
@@ -8391,7 +8379,7 @@ export class RuntimeSlot {
             // for it. A slow one is the first thing to name when Home stops answering (#906).
             const inboxAdmissionStarted = performance.now();
             try {
-            homeWakeTrigger = await this.dependencies.homeInboxAdmission(this.id, operationId, ownership?.kind === "homeWake" ? "wake" : "user", async message => {
+            homeWakeTrigger = await this.dependencies.modules.policy("inputAdmission")?.().admit(this.id, operationId, ownership?.kind === "homeWake" ? "wake" : "user", async message => {
               this.inboxAttributedMessages.add(message.details.eventId);
               try { await session.sendCustomMessage(message, { triggerTurn: false }); }
               finally { this.inboxAttributedMessages.delete(message.details.eventId); }
@@ -8401,20 +8389,12 @@ export class RuntimeSlot {
               await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
                 safeJson(makeContextDeliveryReceipt(entry.id, "stored", { source: "gateway:home-task",
                   owner: { id: message.details.taskId, title: "Home task", source: "gateway:home-task" } })), entry.id);
-            }, async () => {
-              const headroom = await this.homeRequestPolicy!.deliveryHeadroom(session, { role: "user", content: [{ type: "text", text }, ...(images ?? [])], timestamp: Date.now() }, `${session.systemPrompt}\n\n${HOME_OPERATING_CONTEXT}\n\n${HOME_PROFILE_HEADROOM_TEXT}`, ownership?.signal);
-              let chapterBytes = 0;
-              if (this.sessionFile) {
-                try { chapterBytes = statSync(this.sessionFile).size; }
-                catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-              }
-              return { ...headroom, bytes: Math.max(0, HOME_HARD_BYTES - chapterBytes - Buffer.byteLength(JSON.stringify({ text, images })) * 4),
-                entries: Math.max(0, HOME_HARD_ENTRIES - this.canonicalEntryCount) };
-            });
+            }, () => this.dependencies.modules.policy("inputAdmission")!().envelope({
+              session, policy: this.homeRequestPolicy!, text, images, signal: ownership?.signal,
+              sessionFile: () => this.sessionFile, entries: () => this.canonicalEntryCount,
+            }));
             } finally {
-              const durationMs = Math.round(performance.now() - inboxAdmissionStarted);
-              if (durationMs >= HOME_INBOX_ADMISSION_SLOW_MS) this.dependencies.homeTaskDiagnostic?.({
-                event: "home.inbox.admission-slow", delivery: ownership?.kind === "homeWake" ? "wake" : "user", durationMs });
+              this.dependencies.modules.policy("inputAdmission")?.().finished(inboxAdmissionStarted, ownership?.kind === "homeWake" ? "wake" : "user");
             }
           }
         }

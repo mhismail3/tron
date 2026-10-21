@@ -1,3 +1,4 @@
+import type { InputEnvelope, InputDelivery } from "../kernel/host/input-admission.js";
 import { estimateTokens } from "../kernel/pi/coding-agent.js";
 import { createHash } from "node:crypto";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../kernel/run/context-delivery-receipts.js";
@@ -12,7 +13,6 @@ import type { HomeTaskSubagents } from "./home-task-subagents.js";
 
 export { HOME_TASK_RESULT_MESSAGE };
 export const HOME_TASK_PENDING_MESSAGE = "tron.home-task-pending.v1";
-export interface HomeWakeEnvelope { signal: AbortSignal; tokens: number; freshTokens: number; bytes: number; entries: number }
 export interface HomeWakeRoute { homeId: string; routeGeneration: number; generation: number; enabled: boolean; sessionId: string }
 export interface HomeWakeEvent {
   eventId: string;
@@ -33,8 +33,6 @@ export interface HomeWakeMessage {
 }
 /** The result a wake starts with. It is the run's trigger: the SDK appends it and starts the turn. */
 export interface HomeWakeTrigger { taskId: string; message: HomeWakeMessage }
-/** `user`: a user activation drains results as context; `wake`: the last result starts the run. */
-export type HomeWakeDelivery = "user" | "wake";
 export interface HomeWakeEvidence {
   type: string; id: string; sessionId: string; customType?: string; details?: unknown; data?: unknown; content?: unknown;
 }
@@ -201,8 +199,8 @@ export class WakeInboxOwner {
   /** Admits pending results for one activation. `user` admits them as context
    * after the start boundary. `wake` appends all but the last selected result and
    * returns the last one as the trigger: the SDK appends it, and that starts the run. */
-  async admit(route: HomeWakeRoute, operationId: string, delivery: HomeWakeDelivery,
-    append: (message: HomeWakeMessage) => Promise<void>, prepareEnvelope: () => Promise<HomeWakeEnvelope>): Promise<HomeWakeTrigger | undefined> {
+  async admit(route: HomeWakeRoute, operationId: string, delivery: InputDelivery,
+    append: (message: HomeWakeMessage) => Promise<void>, prepareEnvelope: () => Promise<InputEnvelope>): Promise<HomeWakeTrigger | undefined> {
     if (!route.enabled) return undefined;
     return this.mutex.run(async () => {
       // One store read serves the whole selection: it changes no state, so the
@@ -285,7 +283,7 @@ export class WakeInboxOwner {
    * before `append`, so an abort before it returns the event to pending under this
    * mutex. Its later proof would otherwise find no entry and mark a never-delivered
    * event outcome-unknown. */
-  private async deliver(route: HomeWakeRoute, operationId: string, item: { task: HomeTaskRecord; message: HomeWakeMessage }, envelope: HomeWakeEnvelope): Promise<void> {
+  private async deliver(route: HomeWakeRoute, operationId: string, item: { task: HomeTaskRecord; message: HomeWakeMessage }, envelope: InputEnvelope): Promise<void> {
     const task = item.task;
     const delivery = { sessionId: route.sessionId, operationId, generation: route.generation, routeGeneration: route.routeGeneration,
       messageDigest: hash(item.message.content) };

@@ -15,7 +15,8 @@ ordinary profile's first extension and joins canonical receipt writes before inp
 `request-policy.ts` is the neutral activation/request-stage contract; evidence and
 concrete refusal errors stay with the implementing module. `canonical-append.ts`
 carries live writer facts and an opaque module-issued authority, never a copy of
-chapter state or a second Stop fence.
+chapter state or a second Stop fence. `input-admission.ts` carries delivery identities,
+bounds and live envelope readers; delivery state and budgeting remain module-owned.
 
 ## Contract
 
@@ -53,6 +54,9 @@ chapter state or a second Stop fence.
   `appendGuard` surrounds each canonical write synchronously, revalidates admission
   after its awaits, and receives the committed microtask. Home owns its weakly
   slot-bound chapter-limit fence; the Pi adapter still binds the sole writer.
+  `inputAdmission` runs in the session lane before SDK admission. Its module owns
+  the envelope/slow diagnostic, releases an unpersisted trigger before terminal
+  settlement, and settles deliveries only after the canonical terminal receipt.
 - **Fail at start.** A module composed twice, an unknown hook, a second policy
   implementer or an RPC method served twice refuses `start`, and the modules
   already started are stopped.

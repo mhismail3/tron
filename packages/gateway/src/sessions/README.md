@@ -44,7 +44,7 @@ bounded run markers and command receipts; Pi's canonical JSONL stays Pi's.
   `ctx.fork`) settle `completed` in the origin at `beforeSessionInvalidate`; nothing
   more is written under the replacement. Rows a fork inherits project as settled in
   the origin (`settledInOriginSession: true`), never staged; stored receipts are never
-  rewritten.
+  rewritten. Input policy owns delivery; the run retains its sole writer, exact input proof and terminal receipt before inbox settlement.
 - **Transcript.** Order is canonical branch order. The projection separates inbound
   context, agent output and invocations, ambient status and hidden state;
   `custom_message` is model input, `custom`/`appendEntry` extension state. Producer
