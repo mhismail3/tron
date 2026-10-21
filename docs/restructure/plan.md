@@ -317,7 +317,7 @@ top, and nothing else:
 | Primitive | Owns | Today mostly in |
 |---|---|---|
 | **K1 Session** | identity, admission, live-slot lifecycle, catalog, fork/branch, canonical file access, archive/export | `runtime-registry`, `session-catalog`, `catalog-*`, `fork-boundary`, `session-archive*`, `session-export` |
-| **K2 Run** | prompt admission, queue/steer/follow-up, abort/interrupt, command receipts, run markers, compaction policy hookup, bounded tool cancellation | `runtime-slot` (bulk), `invocation-receipts`, `run-markers`, `bounded-tool-cancellation`, `runtime/compaction-policy` |
+| **K2 Run** | prompt admission, queue/steer/follow-up, abort/interrupt, command receipts, run markers, compaction policy hookup, bounded tool cancellation | `runtime-slot` (bulk), `invocation-receipts`, `run-markers`, `bounded-tool-cancellation`, `kernel/run/compaction-policy` |
 | **K3 Module host** | module registration, extension factories, the host contract given to modules, extension UI broker and remote extension host, extension activity/history | `tron-modules`, `extensions/host/*`, `semantic-ui-broker`, `extension-*` |
 | **K4 Resources** | skills, prompts, packages, agent instructions, project trust gating, resource distribution | `agent-instructions`, `resource-*`, `admin/trust-service`, `package-*`, `hook-resources` |
 | **K5 Delegation** | tasks, workers, subagents, child-session admission, delegated provider, managed-subagents adapter, steer/interrupt/report across sessions | `managed-subagents`, `child-session-admission`, `delegated-*`, `subagent-catalog`, `home-task-dispatcher/store/subagents` (generic parts) |

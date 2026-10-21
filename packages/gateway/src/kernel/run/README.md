@@ -41,6 +41,7 @@ Ownership is declared by [`gateway/run`](../../run.module.json).
 
 Abort signals and grace periods, tool text, output and environment filtering remain
 identical to Pi-backed Gateway execution. Cleanup targets only the owned process tree.
+Oversized-request classification retains non-overflow provider errors unchanged.
 
 ## Entry points
 

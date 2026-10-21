@@ -14,7 +14,8 @@ Request-stream cancellation and process-environment primitives around Pi.
 ## Contract
 
 An aborted request's error is classified as aborted; successful terminal results
-remain unchanged. No error-message matching authorizes retry or compaction.
+remain unchanged. Abort classification uses the request signal, never error-message
+matching.
 
 Supervised environment validation applies only to the selected payload Gateway
 entrypoint, never a source child that inherited supervision markers. Alias targets,
