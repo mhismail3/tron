@@ -335,7 +335,7 @@ describe("Home materialization crash recovery", () => {
       expect(live.isDisposed).toBe(true);
       expect(lifecycle.filter(record => record.reason === "publication-uncertain")).toMatchObject([{ event: "runtime.evicted", sessionId: designation.sessionId }]);
       expect(rebuilt.sessionFile).toBe(live.sessionFile);
-      expect((rebuilt as unknown as { liveProfile(): string }).liveProfile()).toBe("ordinary");
+      expect((rebuilt as unknown as { liveProfile(): { name: string } }).liveProfile().name).toBe("ordinary");
       expect(liveRegistry.dispatches).toBe(1);
       report.push({ cut: "live-post-rename-error", recovered: "disabled-fresh-ordinary-slot", replayed: false });
     } finally {

@@ -17,6 +17,7 @@ concrete refusal errors stay with the implementing module. `canonical-append.ts`
 carries live writer facts and an opaque module-issued authority, never a copy of
 chapter state or a second Stop fence. `input-admission.ts` carries delivery identities,
 bounds and live envelope readers; delivery state and budgeting remain module-owned.
+`session-profile.ts` owns the neutral immutable runtime recipe and ordinary defaults.
 
 ## Contract
 
@@ -28,14 +29,20 @@ bounds and live envelope readers; delivery state and budgeting remain module-own
   only when `m` is in the reader's `dependsOn` and started earlier.
   `ModuleHost.contract` is composition's read.
 - **Session extensions.** `registrations(names, session)` asks the named modules
-  for their Pi extensions; each position in the profile's extension list is
-  the kernel's (K-0 §3), so the model-visible order is unchanged. SessionContext
+  for their Pi extensions in recipe order, without reordering or normalizing
+  module metadata (K-0 §3). SessionContext
   carries per-runtime identity, presentation, receipt joining, late-bound settings
   access for the session actor and policy operations;
   concrete policy owners remain outside the host and are resolved at each callback.
   The session model runtime and live profile are kernel facts, not module services.
   `registrations(names, session)` keeps each profile's exact order and optionality;
   `summaries(names)` reads those same descriptors' metadata.
+- **Profiles (D7).** Started instances own named recipes; `profile(name)` reads
+  those definitions, not a second store. `ordinary` and `unrecorded` are reserved.
+  Admission freezes recipe metadata. `profileDecision` reads the owner at each
+  runtime build and canonical append; only `unrecorded` uses a same-id one-shot
+  creation recipe, consumed after selection. The runtime retains its selected
+  object. Its request-policy selector resolves the live K3 hook at the original cut.
 - **RPC (D5).** A module's `rpc` methods are routed before `GatewayService`'s
   switch. `read` handlers are admitted while the Gateway drains; `mutation`
   handlers run under the command receipt and are refused while draining.
@@ -58,7 +65,7 @@ bounds and live envelope readers; delivery state and budgeting remain module-own
   the envelope/slow diagnostic, releases an unpersisted trigger before terminal
   settlement, and settles deliveries only after the canonical terminal receipt.
 - **Fail at start.** A module composed twice, an unknown hook, a second policy
-  implementer or an RPC method served twice refuses `start`, and the modules
+  implementer, duplicate/reserved profile or an RPC method served twice refuses `start`; modules
   already started are stopped.
 
 ## Invariants
@@ -73,7 +80,7 @@ bounds and live envelope readers; delivery state and budgeting remain module-own
 ## Entry points
 
 `ModuleHost.start` (gateway-main, and `test-support/gateway-registry.ts` for test
-registries), `ModuleHost.contract`, `registrations`, `rpc`, `capabilities`, `policy`,
+registries), `ModuleHost.contract`, `profile`, `registrations`, `rpc`, `capabilities`, `policy`,
 `observers`, `stop`.
 
 ## Signals

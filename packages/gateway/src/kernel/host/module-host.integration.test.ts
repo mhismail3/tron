@@ -6,6 +6,7 @@ import { TrustService } from "../../admin/trust-service.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { gatewayModules } from "../../main/modules.js";
+import { ORDINARY_SESSION_PROFILE } from "./session-profile.js";
 import { ModuleHost, type KernelHooks, type ModuleDescriptor, type ModuleInstance } from "./module-host.js";
 
 /**
@@ -65,6 +66,27 @@ describe("kernel/host module host", () => {
     stopped.length = 0;
     await expect(ModuleHost.start([modelUsed("kept"), failing], { tronHome: "/unused", log })).rejects.toThrow("start failed");
     expect(stopped).toEqual(["kept"]);
+  });
+
+  it("admits unique profile recipes by identity and rejects reserved/duplicate names with joined startup cleanup", async () => {
+    const recipe = { ...ORDINARY_SESSION_PROFILE, name: "named" };
+    const host = await ModuleHost.start([descriptor("owner", () => ({ profiles: [recipe] }))], { tronHome: "/unused", log });
+    try {
+      // An admitted recipe cannot be renamed out from under its selected runtimes.
+      Reflect.set(recipe, "name", "renamed");
+      expect(host.profile("named")).toBe(recipe);
+      expect(host.profile("ordinary")).toBe(ORDINARY_SESSION_PROFILE);
+      expect(() => host.profile("missing")).toThrow();
+    } finally { await host.stop(); }
+    for (const name of ["named", "ordinary", "unrecorded"]) {
+      const stopped: string[] = [];
+      const owns = (module: string, profiles: ModuleInstance["profiles"]) => descriptor(module, () => ({
+        profiles, stop: async () => { stopped.push(module); },
+      }));
+      await expect(ModuleHost.start([owns("first", [recipe]), owns("second", [{ ...recipe, name }])], { tronHome: "/unused", log }))
+        .rejects.toThrow(`Profile ${name} is already registered`);
+      expect(stopped).toEqual(["second", "first"]);
+    }
   });
 
   it("dispatches hooks, RPCs and capabilities as they stand at each call", async () => {

@@ -1310,7 +1310,7 @@ describe("Tron Home activations end to end", () => {
       release();
       const slot = await awaitsWithin(flight, "profile construction completion");
       await awaitsWithin(transition, "profile transition completion");
-      const profile = (slot as unknown as { liveProfile: () => string }).liveProfile();
+      const profile = (slot as unknown as { liveProfile: () => { name: string } }).liveProfile().name;
       expect(profile).toBe(enabled ? "home" : "ordinary");
       expect(f.registry.homeOwner().profileFor(slot.id)).toBe(profile);
       expect(await f.registry.acquire(sessionId)).toBe(slot);

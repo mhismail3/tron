@@ -1,3 +1,5 @@
+import { HOME_SESSION_PROFILE_NAME } from "../home/home-session-profile.js";
+import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "../kernel/pi/ai.js";
@@ -58,7 +60,6 @@ import {
   type CanonicalAssistantCompletion,
   type SessionAttentionRebindDisposition,
   type SessionBroadcast,
-  type RuntimeProfile,
   type RuntimeSlotDependencies,
 } from "./runtime-slot.js";
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
@@ -796,7 +797,7 @@ export class RuntimeRegistry {
       tronHome: options.tronHome,
       trust: options.trust,
       sessions: {
-        createHomeSession: async (cwd) => (await this.create(cwd, "home")).id,
+        createHomeSession: async (cwd) => (await this.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
         currentSessionModel: sessionId => this.slots.get(sessionId)?.snapshot().model ?? null,
         applySessionModel: async (sessionId, model) => {
           const slot = this.slots.get(sessionId);
@@ -895,6 +896,10 @@ export class RuntimeRegistry {
   scheduleModuleOperations() { return this.options.scheduleToolOperations; }
   notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
   homeModuleServices() { return homeModuleServices(this.home, this.options, {
+      runtime: async () => ({
+        runtime: applyHomeCacheRetention(sessionRuntimeView(this.options.gatewayModelRuntime ?? await this.dependencies().createModelRuntime())),
+        ownership: this.options.gatewayModelRuntime ? "borrowed" as const : "owned" as const,
+      }),
       knowledge: this.knowledgeService, changes: () => this.settingsOwners?.changes,
       resourcesIdle: sessionId => this.homeResources.idle(sessionId),
       delegate: (sessionId, request, signal) => this.dispatchHomeTask(sessionId, request, signal),
@@ -1058,7 +1063,7 @@ export class RuntimeRegistry {
         || chapterState.attemptId !== attemptId || chapterState.expectedPath !== expectedPath) {
         throw new GatewayError("conflict", "Home materialization authority no longer matches its durable reservation", true);
       }
-      slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, "home", {
+      slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, this.options.modules.profile(HOME_SESSION_PROFILE_NAME), {
         homeId: chapterState.homeId,
         ordinal: chapterState.ordinal,
         sessionId,
@@ -1809,10 +1814,6 @@ export class RuntimeRegistry {
       ...(this.modelQueue ? { modelQueue: this.modelQueue } : {}),
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
-      homeModelRuntime: async () => ({
-        runtime: applyHomeCacheRetention(sessionRuntimeView(this.options.gatewayModelRuntime ?? await this.dependencies().createModelRuntime())),
-        ownership: this.options.gatewayModelRuntime ? "borrowed" as const : "owned" as const,
-      }),
       openAIModelEligibility: this.openAIModelEligibility,
       createModelRuntime: async () => {
         const runtime = applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
@@ -1849,8 +1850,6 @@ export class RuntimeRegistry {
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       modules: this.options.modules,
       settings: () => this.settingsOwners,
-      homeProfile: (sessionId: string, cwd: string) => this.home.profileFor(sessionId, cwd),
-      homeModel: (sessionId: string) => this.home.modelFor(sessionId),
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
       homeTaskSettings: async (sessionId: string, taskId: string, purpose: "resolve" | "change") => {
         const target = await this.home.taskSettingsTarget(sessionId, taskId, purpose);
@@ -1858,9 +1857,6 @@ export class RuntimeRegistry {
       },
       validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
-      homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
-        this.options.persistenceDiagnostic?.(sessionId, "home-model-record-failed");
-      }),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
       ...(this.options.runtimeDisposeTimeout ? { runtimeDisposalTimedOut: this.options.runtimeDisposeTimeout } : {}),
     };
@@ -2986,7 +2982,7 @@ export class RuntimeRegistry {
     return admitTaskWorkerChoice(this.options.gatewayModelRuntime, choice);
   }
 
-  async create(cwdInput: string, profile: RuntimeProfile = "ordinary", taskWorker?: import("../home/home-task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {
+  async create(cwdInput: string, profile: string = ORDINARY_SESSION_PROFILE.name, taskWorker?: import("../home/home-task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;
@@ -3011,7 +3007,7 @@ export class RuntimeRegistry {
       const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
       slot = await stage(
         "session.create.runtime",
-        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, profile, undefined, taskWorker),
+        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, this.options.modules.profile(profile), undefined, taskWorker),
       );
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       await this.mutex.run(() => {

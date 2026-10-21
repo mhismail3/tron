@@ -54,8 +54,8 @@ import { openAIModelEligibility, type OpenAIModelEligibility } from "../provider
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
-import { homeModuleFactories, tronModuleFactories } from "../extensions/tron-modules.js";
-import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
+import { tronModuleFactories } from "../extensions/tron-modules.js";
+import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../kernel/host/session-profile.js";
 import type { ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
 import type { Actor } from "../admin/settings-record.js";
@@ -202,12 +202,6 @@ function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, 
 }
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
-
-/** The curated runtime a session is built with. Decided at runtime creation:
- * `home` is passed explicitly by the Home owner for a brand-new Home session,
- * and every other creation asks the Home owner whether this session id is the
- * enabled Home. */
-export type RuntimeProfile = "ordinary" | "home";
 
 type QueueBehavior = QueuedMessageState["behavior"];
 
@@ -494,10 +488,6 @@ export interface RuntimeSlotDependencies {
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
   createModelRuntime: () => Promise<ModelRuntime>;
-  /** A Home session's chat runtime: a session-local view of the Gateway-wide
-   * runtime, so the model `home.designate` admitted resolves through the same
-   * providers, while the session's own lookup projections stay with it. */
-  homeModelRuntime: () => Promise<{ runtime: ModelRuntime; ownership: "owned" | "borrowed" }>;
   openAIModelEligibility: OpenAIModelEligibility;
   trust: TrustService;
   blobs: BlobStore;
@@ -544,20 +534,6 @@ export interface RuntimeSlotDependencies {
    * Archive state is registry-owned display state, so a slot neither writes nor
    * caches it: the value is absent while the session is visible. */
   archivedAt: (sessionId: string) => string | undefined;
-  /** What the Home record says about this session id. Read once per runtime
-   * creation, so a profile change is never cached past the runtime it applies
-   * to. `unnamed` is the only state in which the explicit creation profile
-   * applies. */
-  homeProfile: (sessionId: string, cwd: string) => "home" | "ordinary" | "unnamed";
-  /** Recorded chat model for an enabled Home, applied when reconstructing an
-   * unloaded runtime instead of restoring the transcript's incidental model. */
-  homeModel: (sessionId: string) => { provider: string; id: string } | undefined;
-  /** Tron Home's memory tools for one session id, for the `zoom`, `date` and
-   * `memory_search` tools the tron-home module registers. It answers undefined
-   * for any session that is not the enabled Home. */
-  /** One model applied to a live Home session, so the Home record keeps the
-   * single source of truth for the model a re-enable restores. */
-  homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
   /** Physical chapter state is consulted only by mutation owners. The registry
    * answers it from the Home chapter ledger; any other session is unsealed. */
   homeChapterState: (sessionId: string) => HomeChapterState;
@@ -883,10 +859,8 @@ export class RuntimeSlot {
   /** Exact process ownership for the built-in foreground bash tool only.
    * Extension-managed detached subagents remain outside this stop boundary. */
   private directBashProcesses: DirectBashProcessOwner | undefined;
-  /** The one session id whose first runtime was created with the explicit Home
-   * profile, before the Home record named it. One-shot: cleared by that first
-   * runtime creation. */
-  private explicitHomeSessionId: string | undefined;
+  /** One-shot creation recipe, used only while its id is unrecorded. */
+  private explicitProfile: { sessionId: string; profile: SessionProfile } | undefined;
   private readonly canonicalAppendContext: CanonicalAppendContext;
   /** The Home wake whose trigger is being sent: its canonical binding and receipt follow its message_end. */
   private homeWakeTrigger: { eventId: string; taskId: string; operationId: string } | undefined;
@@ -900,19 +874,19 @@ export class RuntimeSlot {
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */
-  private readonly runtimeProfiles = new WeakMap<AgentSession, RuntimeProfile>();
+  private readonly runtimeProfiles = new WeakMap<AgentSession, SessionProfile>();
 
   private constructor(
     private sessionManager: SessionManager,
     private readonly dependencies: RuntimeSlotDependencies,
     private readonly hooks: RuntimeSlotHooks,
     interrupted: boolean,
-    creationProfile: RuntimeProfile = "ordinary",
+    creationProfile: SessionProfile = ORDINARY_SESSION_PROFILE,
     homeMaterializationAuthority?: HomeMaterializationAuthority,
     // Rebound only by `bindTaskWorker` when a settled task resumes in place (#929).
     private taskWorker?: HomeTaskReportOwner,
   ) {
-    this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
+    this.explicitProfile = { sessionId: sessionManager.getSessionId(), profile: creationProfile };
     this.canonicalAppendContext = {
       owner: this,
       writeAuthority: homeMaterializationAuthority ? Object.freeze({ ...homeMaterializationAuthority }) : undefined,
@@ -921,7 +895,7 @@ export class RuntimeSlot {
       sessionFile: () => this.sessionFile,
       activeOperationId: () => this.activeOperationId,
       entryCount: () => this.canonicalEntryCount,
-      guardedProfile: manager => this.isHomeProfile(manager),
+      guardedProfile: manager => this.profileFor(manager).chapter,
       abort: (operationId, reason) => this.abort("agent", operationId, reason),
       diagnostic: record => this.emit("session.diagnostic", record),
     };
@@ -1107,7 +1081,7 @@ export class RuntimeSlot {
     dependencies: RuntimeSlotDependencies,
     hooks: RuntimeSlotHooks,
     interrupted: boolean,
-    creationProfile: RuntimeProfile = "ordinary",
+    creationProfile: SessionProfile = ORDINARY_SESSION_PROFILE,
     homeMaterializationAuthority?: HomeMaterializationAuthority,
     taskWorker?: HomeTaskReportOwner,
   ): Promise<RuntimeSlot> {
@@ -1197,7 +1171,7 @@ export class RuntimeSlot {
   get isHomeChapter(): boolean {
     // Creation-time Home is already isolated before its designation record is
     // committed. Settings/provenance must use that same runtime scope.
-    return this.liveProfile() === "home" || this.dependencies.homeChapterState(this.id).homeId !== undefined;
+    return this.liveProfile().chapter || this.dependencies.homeChapterState(this.id).homeId !== undefined;
   }
 
   /**
@@ -1229,11 +1203,12 @@ export class RuntimeSlot {
       },
     });
     const actor = (toolCallId: string): Actor => {
-      const kind = this.liveProfile() === "home" ? "home" : this.taskWorker ? "worker" : "agent";
+      const profileActor = this.liveProfile().settingsActor;
+      const kind = profileActor === "agent" && this.taskWorker ? "worker" : profileActor;
       return { kind, id: this.id, sessionId: this.id, toolCallId, ...(this.taskWorker ? { taskId: this.taskWorker.identity.taskId } : {}) };
     };
     const worker = async (taskId: string, purpose: "resolve" | "change") => {
-      if (this.liveProfile() !== "home") {
+      if (!this.liveProfile().workerSettings) {
         throw new GatewayError("invalid_request", "settings: taskId targets a delegated worker and is available only in Tron Home");
       }
       const { slot, ...task } = await this.dependencies.homeTaskSettings(this.id, taskId, purpose);
@@ -2091,21 +2066,19 @@ export class RuntimeSlot {
     this.lastTouchedAt = Date.now();
   }
 
-  /** Whether one runtime of this slot carries the curated Home profile. The
-   * record decides for every session it names; the explicit creation profile
-   * covers only the first runtime of a brand-new Home session, before the record
-   * names it, and never a fork or a reset (which produce a new session id). */
-  private isHomeProfile(sessionManager: SessionManager): boolean {
+  /** Records decide at each runtime build and canonical append. Only an
+   * unrecorded id may use its one-shot creation recipe; never a fork/reset id. */
+  private profileFor(sessionManager: SessionManager): SessionProfile {
     const sessionId = sessionManager.getSessionId();
-    const decision = this.dependencies.homeProfile(sessionId, sessionManager.getCwd());
-    if (decision === "home") return true;
-    if (decision === "ordinary") return false;
-    return this.explicitHomeSessionId === sessionId;
+    const decision = this.dependencies.modules.policy("profileDecision")?.(sessionId, sessionManager.getCwd()) ?? "unrecorded";
+    return decision === "unrecorded"
+      ? this.explicitProfile?.sessionId === sessionId ? this.explicitProfile.profile : ORDINARY_SESSION_PROFILE
+      : this.dependencies.modules.profile(decision);
   }
 
-  /** The profile the live runtime was built with. */
-  private liveProfile(): RuntimeProfile {
-    return this.runtimeProfiles.get(this.runtime.session) ?? "ordinary";
+  /** The profile the live runtime was built with, not a fresh record decision. */
+  private liveProfile(): SessionProfile {
+    return this.runtimeProfiles.get(this.runtime.session) ?? ORDINARY_SESSION_PROFILE;
   }
 
   private runtimeFactory(): CreateAgentSessionRuntimeFactory {
@@ -2120,9 +2093,9 @@ export class RuntimeSlot {
       // can register a provider into its runtime, and it runs on the Gateway-wide
       // runtime where `home.designate` admitted its model and user provider
       // packages such as CortexKit's are registered (#480).
-      const home = this.isHomeProfile(sessionManager);
-      const binding = home
-        ? await this.dependencies.homeModelRuntime()
+      const profile = this.profileFor(sessionManager);
+      const binding = profile.modelRuntime === "gateway"
+        ? await profile.acquireModelRuntime()
         : { runtime: await this.dependencies.createModelRuntime(), ownership: "owned" as const };
       const modelRuntime = binding.runtime;
       const requestPipeline = new RunRequestPipeline(modelRuntime);
@@ -2140,13 +2113,13 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         // Home's project layer is never trusted: its loader sees only user-level
         // skills and prompt templates, never project `.pi/` or `.agents/` ones.
-        resolveProjectTrust: home
+        resolveProjectTrust: profile.projectTrust === "never"
           ? async () => false
           : async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
       // One-shot: a brand-new Home session's first runtime carries the explicit
       // profile; every later runtime asks the record.
-      this.explicitHomeSessionId = undefined;
+      this.explicitProfile = undefined;
       const sessionContext: SessionContext = {
         sessionId: () => this.id,
         cwd: () => this.cwd,
@@ -2169,14 +2142,14 @@ export class RuntimeSlot {
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
       // Tron modules plus tron-home.
       // Home delegates only through Home tasks, never through managed pi-subagents.
-      const managedSubagents = home ? undefined : this.dependencies.managedSubagents;
+      const managedSubagents = profile.managedSubagents ? this.dependencies.managedSubagents : undefined;
       // The Project layer is the root's `.pi/` (settings-model decision 31); the
       // chat keeps its cwd for tools, context files and session grouping.
-      const settingsManager = home ? undefined : SettingsManager.create(trust.projectDir, this.dependencies.agentDir, { projectTrusted: trust.trusted });
+      const settingsManager = profile.projectSettings ? SettingsManager.create(trust.projectDir, this.dependencies.agentDir, { projectTrusted: trust.trusted }) : undefined;
       const managedLoaderOptions = settingsManager ? await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages)) : undefined;
-      const extensionFactories = home
-        ? homeModuleFactories(this.dependencies.modules, sessionContext)
+      const extensionFactories = profile.extensions !== "ordinary"
+        ? this.dependencies.modules.registrations(profile.extensions, sessionContext)
         : [
             ...(managedLoaderOptions?.extensionFactories ?? []),
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
@@ -2220,21 +2193,7 @@ export class RuntimeSlot {
         modelRuntime,
         resourceLoaderOptions: {
           ...(managedLoaderOptions ?? {}),
-          ...(home ? {
-            noExtensions: true,
-            noContextFiles: true,
-            // User-level skills and prompt templates load only so the composer can
-            // offer them (`commands()`) and Pi can expand the one the user inserts
-            // into that user message. Each skill is user-invocable only, so none
-            // is listed in Home's system prompt; prompt templates never are.
-            skillsOverride: (base) => ({ ...base, skills: base.skills.map((skill) => ({ ...skill, disableModelInvocation: true })) }),
-            // The agent directory's SYSTEM.md and APPEND_SYSTEM.md are not gated
-            // by any `no*` option, so Home drops them at the two overrides the
-            // loader exposes. Nothing from outside the curated profile reaches
-            // Home's system prompt.
-            systemPromptOverride: () => undefined,
-            appendSystemPromptOverride: () => [],
-          } : {}),
+          ...profile.resources,
           extensionFactories,
           extensionsOverride: (base) => attributeExtensions(base, this.dependencies.browserLiveViews ? {
             views: this.dependencies.browserLiveViews,
@@ -2257,17 +2216,17 @@ export class RuntimeSlot {
       if (this.directBashProcesses?.hasActiveProcesses) {
         await this.directBashProcesses.abortAll();
       }
-      const directBashProcesses = home ? undefined : new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId());
+      const directBashProcesses = profile.directBash ? new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId()) : undefined;
       this.directBashProcesses = directBashProcesses;
-      const recordedHomeModel = home ? this.dependencies.homeModel(sessionManager.getSessionId()) : undefined;
-      let homeModel = recordedHomeModel
-        ? modelRuntime.getPhysicalModel(recordedHomeModel.provider, recordedHomeModel.id)
+      const recordedProfileModel = profile.model?.recorded(sessionManager.getSessionId());
+      let selectedProfileModel = recordedProfileModel
+        ? modelRuntime.getPhysicalModel(recordedProfileModel.provider, recordedProfileModel.id)
         : undefined;
-      if (recordedHomeModel && !homeModel) {
+      if (recordedProfileModel && !selectedProfileModel) {
         throw new GatewayError("conflict", "Tron Home's recorded model is unavailable or virtual");
       }
       let initialModel: Model<never> | undefined;
-      if (!homeModel && sessionManager.getEntryCount() === 0) {
+      if (!selectedProfileModel && sessionManager.getEntryCount() === 0) {
         const eligibility = openAIModelEligibility(modelRuntime);
         await eligibility?.refresh();
         const defaultProvider = services.settingsManager.getDefaultProvider();
@@ -2294,14 +2253,14 @@ export class RuntimeSlot {
       const settingsOwner = this.dependencies.settings();
       const launchDefaults = startsNewChat && settingsOwner ? await settingsOwner.model.resolve(
         { kind: "session", sessionId: sessionManager.getSessionId() },
-        { cwd: trust.cwd, home, chat: { settings: {} }, modelRuntime },
+        { cwd: trust.cwd, home: profile.launchDefaults === "settings-profile-layer", chat: { settings: {} }, modelRuntime },
         ["model.ref[role=chat]", "model.thinking[role=chat]", "tools.active"], { storeState: false },
       ) : undefined;
       const profileModel = launchDefaults?.keys.find(row => row.key === "model.ref[role=chat]" && row.layer === "profile")?.value as { provider: string; id: string } | undefined;
-      if (home && profileModel) {
+      if (profile.launchDefaults === "settings-profile-layer" && profileModel) {
         const configured = modelRuntime.getPhysicalModel(profileModel.provider, profileModel.id);
         if (!configured) throw new GatewayError("conflict", "Home's configured profile model is unavailable or virtual");
-        homeModel = configured;
+        selectedProfileModel = configured;
       }
       // Pass the scope-resolved launch thinking explicitly: the SDK's merged
       // per-model map otherwise lets a Mac value outrank a Project plain value.
@@ -2311,13 +2270,13 @@ export class RuntimeSlot {
         sessionManager,
         ...(initialModel ? { model: initialModel } : {}),
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
-        ...(homeModel ? { model: homeModel } : {}),
+        ...(selectedProfileModel ? { model: selectedProfileModel } : {}),
         ...(recordedThinking ? { thinkingLevel: sessionManager.buildSessionContext().thinkingLevel as ThinkingLevel }
           : launchThinking ? { thinkingLevel: launchThinking } : {}),
         // The allowlist is Home's executable ceiling. MCP tools cannot appear
         // under it because no MCP extension is loaded, and Tron's direct bash
         // tool is not registered at all for Home.
-        ...(home ? { tools: [...HOME_TOOL_NAMES] } : {}),
+        ...(profile.tools ? { tools: [...profile.tools] } : {}),
         // Pi's generic ToolDefinition render state is invariant; the concrete
         // bash schema is nevertheless the exact SDK definition registered here.
         ...(directBashProcesses ? { customTools: [
@@ -2345,21 +2304,21 @@ export class RuntimeSlot {
       // declared loadout here; a session without one keeps the defaults.
       const toolChoice = readChatToolChoice(sessionManager.getBranch());
       if (toolChoice) created.session.setActiveToolsByName(toolChoice.tools);
-      else if (home) {
+      else if (profile.launchDefaults === "settings-profile-layer") {
         const tools = launchDefaults?.keys.find(row => row.key === "tools.active" && row.layer === "profile")?.value;
-        if (Array.isArray(tools)) created.session.setActiveToolsByName(tools.filter((name): name is string => typeof name === "string" && HOME_TOOL_NAMES.includes(name)));
+        if (Array.isArray(tools)) created.session.setActiveToolsByName(tools.filter((name): name is string => typeof name === "string" && profile.tools?.includes(name) === true));
       }
-      if (home && startsNewChat && created.session.model) {
-        await this.dependencies.homeModelChanged(sessionManager.getSessionId(), { provider: created.session.model.provider, id: created.session.model.id });
+      if (profile.model && startsNewChat && created.session.model) {
+        await profile.model.changed(sessionManager.getSessionId(), { provider: created.session.model.provider, id: created.session.model.id });
       }
-      this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
-      this.homeRequestPolicy = home
+      this.runtimeProfiles.set(created.session, profile);
+      this.homeRequestPolicy = profile.requestPolicy
         ? this.dependencies.modules.policy("requestPolicy")?.().forSession(sessionManager.getSessionId())
         : undefined;
       const homeRequestPolicy = this.homeRequestPolicy;
       const compactionSession = created.session;
       compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir,
-        home ? { disabled: true } : { chat: () => readChatSettings(compactionSession.sessionManager.getBranch()) });
+        profile.compaction === "disabled" ? { disabled: true } : { chat: () => readChatSettings(compactionSession.sessionManager.getBranch()) });
       const taskWorker = this.taskWorker;
       requestPipeline.install(created.session, {
         applySettings: () => this.applyLiveRunSettings(created.session),
@@ -2514,7 +2473,7 @@ export class RuntimeSlot {
   private effectiveResourceReloadOptions(): { resolveProjectTrust: () => Promise<boolean> } | undefined {
     const override = this.projectTrustReloadOverride;
     // A trust transition never admits project resources into Home.
-    return override === undefined || this.liveProfile() === "home"
+    return override === undefined || this.liveProfile().projectTrust === "never"
       ? this.resourceReloadOptions
       : { resolveProjectTrust: async () => override };
   }
@@ -2577,7 +2536,7 @@ export class RuntimeSlot {
   private async reloadBoundSession(): Promise<void> {
     const session = this.runtime.session;
     await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
-    if (this.liveProfile() === "ordinary") {
+    if (this.liveProfile().managedSubagents) {
       await this.dependencies.managedSubagents?.completeLoad(session.settingsManager, this.cwd, this.dependencies.agentDir, session.resourceLoader.getExtensions().extensions);
     }
     await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
@@ -2654,7 +2613,7 @@ export class RuntimeSlot {
     if (this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)) {
       throw new GatewayError("conflict", "Task worker session identity cannot be replaced");
     }
-    if (this.dependencies.homeChapterState(this.id).homeId || this.liveProfile() === "home") {
+    if (this.dependencies.homeChapterState(this.id).homeId || this.liveProfile().chapter) {
       throw new HomeChapterIdentityReplacementError(this.id);
     }
     const previous = this.rebindAttentionDisposition;
@@ -2804,7 +2763,7 @@ export class RuntimeSlot {
       if (this.runtime.session.isStreaming || blocking.length || drain.length) {
         throw new GatewayError("busy", `The worker session is busy (${[...new Set([...blocking, ...drain])].join(", ") || "streaming"}); resume it when that finishes`, true);
       }
-      if (this.liveProfile() === "home" || this.dependencies.homeChapterState(this.id).homeId) {
+      if (this.liveProfile().chapter || this.dependencies.homeChapterState(this.id).homeId) {
         throw new GatewayError("conflict", "A Home chapter cannot run a task");
       }
       if (this.taskWorker?.controlsActive || this.taskWait || this.activeOperationId !== undefined || this.operation !== undefined
@@ -6946,7 +6905,7 @@ export class RuntimeSlot {
    * lands early costs one incremental read and nothing else.
    */
   private noteCanonicalEntriesCommitted(): void {
-    if (this.liveProfile() !== "home") return;
+    if (!this.liveProfile().chapter) return;
     queueMicrotask(() => { this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).committed(); });
   }
 
@@ -9412,7 +9371,7 @@ export class RuntimeSlot {
       // Home must stay on a fixed physical model: a virtual model routes on the
       // canonical transcript, which Home's profile does not own. The live
       // runtime's profile decides, so an ordinary session keeps the choice.
-      if (this.liveProfile() === "home" && model.api === VIRTUAL_MODEL_API) {
+      if (this.liveProfile().model?.physicalOnly && model.api === VIRTUAL_MODEL_API) {
         throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
       }
       const previousThinking = this.runtime.session.thinkingLevel;
@@ -9421,8 +9380,9 @@ export class RuntimeSlot {
       if (this.runtime.session.thinkingLevel !== previousThinking) await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel);
       // The Home record is the single source of truth for the model a re-enable
       // restores, and only an enabled Home's change belongs to it.
-      if (this.liveProfile() === "home") {
-        await this.dependencies.homeModelChanged(this.id, { provider, id: modelId });
+      const modelPolicy = this.liveProfile().model;
+      if (modelPolicy) {
+        await modelPolicy.changed(this.id, { provider, id: modelId });
       }
       this.revision += 1;
       this.publishSnapshot();
@@ -9489,7 +9449,7 @@ export class RuntimeSlot {
     this.assertUsable();
     // Refused at admission: Home keeps its own history, and the SDK would only
     // refuse this later, after the command was already accepted.
-    if (this.liveProfile() === "home") {
+    if (this.liveProfile().compaction === "disabled") {
       throw new GatewayError("conflict", "Tron Home keeps its own history; manual compaction is unavailable");
     }
     if (this.manualCompactionClaim) {
@@ -9969,7 +9929,7 @@ export class RuntimeSlot {
   /** Failure-soft and uncached: every call re-runs the package's own discovery,
    * and an unavailable package yields an empty list plus one diagnostic. */
   private async loadSubagents(): Promise<SubagentCatalog> {
-    if (this.liveProfile() === "home") return { subagents: [] };
+    if (!this.liveProfile().subagentCatalog) return { subagents: [] };
     return loadSubagentCatalog({
       agentDir: this.dependencies.agentDir,
       cwd: this.cwd,

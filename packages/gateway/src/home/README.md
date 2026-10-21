@@ -11,7 +11,7 @@ unaffected by every rule here.
 
 - **Designation and chapters:** `home-owner.ts` (record, ledger, profile changes, wake
   scheduler), `home-chapter-state.ts`, `home-chapter-contents.ts`, `home-session-*.ts`.
-- **Profile and seam:** `home-runtime-policy.ts`, `home-request-policy.ts`,
+- **Profile and seam:** `home-session-profile.ts` (recipe), `home-runtime-policy.ts`, `home-request-policy.ts`,
   `home-module.ts` (request/input/append/settled hooks), `home-input-admission.ts` (inbox budget/diagnostic), `tron-home-extension.ts` (tools/context/cache).
 - **Memory, research, profile:** `home-memory*.ts`, `home-research-tools.ts`, `home-profile.ts`.
 - **Tasks and wake inbox:** `home-task-*.ts`, `home-wake-inbox.ts`; contract in
@@ -48,13 +48,13 @@ unaffected by every rule here.
 
 ### Runtime profile and request seam
 
-- **Profile** is fixed at runtime creation: `home` for an enabled chapter, `ordinary` when
-  disabled. Home loads only `tron-context-window`, `tron-compaction-policy`, `tron-settings`,
+- **Profile** (`home-session-profile.ts`) is fixed per runtime: creation Home once before its
+  record, then Home/ordinary for enabled/disabled. Home loads only `tron-context-window`, `tron-compaction-policy`, `tron-settings`,
   `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research`; drops
   agent `SYSTEM.md`/`APPEND_SYSTEM.md`; allows exactly `HOME_TOOL_NAMES`; has no MCP,
   subagent discovery (empty `session.resources` catalog) or compaction (`session.compact`
   refuses); runs a fixed non-virtual model on its own view of the Gateway-wide model runtime;
-  and sends zero cache-warming requests (`tron-home` answers `stop`).
+  and sends zero cache-warming requests (`tron-home` answers `stop`). Append guards reclassify the live record, not this recipe.
 - **Profile changes** run in one serialized owner, replacing a live runtime in place after an
   idle check (else `busy`); the enabled Home's model is written back to the record.
 - **Activation:** one admitted input and everything it triggers. Every provider request

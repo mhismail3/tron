@@ -19,24 +19,10 @@ export const ORDINARY_MODULE_NAMES: readonly string[] = [
   "tron-notify",
 ];
 
-/** Home keeps these ordinary modules in ordinary order, then its own two. */
-export const HOME_MODULE_NAMES: readonly string[] = [
-  "tron-context-window",
-  "tron-compaction-policy",
-  "tron-settings",
-  "tron-ask-user",
-  "tron-display",
-  "tron-notify",
-];
-
 export interface TronModuleRegistration { name: string; factory: ExtensionFactory }
 
 export function tronModuleFactories(modules: ModuleHost, session: SessionContext): TronModuleRegistration[] {
   return modules.registrations(ORDINARY_MODULE_NAMES, session);
-}
-
-export function homeModuleFactories(modules: ModuleHost, session: SessionContext): TronModuleRegistration[] {
-  return modules.registrations([...HOME_MODULE_NAMES, "tron-home", "tron-home-research"], session);
 }
 
 export const MODULES_CAPABILITY = "modules.v1";

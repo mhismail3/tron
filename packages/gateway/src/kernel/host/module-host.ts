@@ -4,6 +4,7 @@ import type { JsonValue, TronModuleSummary } from "../../protocol/types.js";
 import type { ToolResultProjection } from "../projection/tool-result.js";
 import type { RequestPolicyHook } from "./request-policy.js";
 import type { InputAdmissionPolicy } from "./input-admission.js";
+import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "./session-profile.js";
 import type { CanonicalAppendContext, CanonicalAppendPolicy } from "./canonical-append.js";
 
 export type AgentTerminalOutcome = "completed" | "limited" | "failed" | "stopped" | "unknown" | "interrupted";
@@ -63,7 +64,7 @@ export interface SessionContext {
   sessionId(): string;
   cwd(): string;
   modelRuntime: ModelRuntime;
-  profile(): "ordinary" | "home";
+  profile(): SessionProfile;
   /** The chat's title as notifications show it. */
   title(): string;
   /** Whether the user is viewing this chat now. */
@@ -110,11 +111,12 @@ export const KERNEL_HOOKS = {
 export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
-export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission">]: (...args: never[]) => unknown } & {
+export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision">]: (...args: never[]) => unknown } & {
   toolResultProjection(): ToolResultProjection;
   runSettled(): RunSettledPolicy;
   requestPolicy(): RequestPolicyHook;
   inputAdmission(): InputAdmissionPolicy;
+  profileDecision(sessionId: string, cwd: string): string | "unrecorded";
   appendGuard(context: CanonicalAppendContext): CanonicalAppendPolicy;
   /** Resolve optional availability before sampling run-owned facts. */
   runTerminal(): ((input: RunTerminalInput) => Promise<void>) | undefined;
@@ -127,6 +129,7 @@ export interface ModuleInstance<C = void> {
   extension?(session: SessionContext): ExtensionFactory | undefined;
   /** Read at every dispatch, never captured. */
   hooks?: Partial<KernelHooks>;
+  readonly profiles?: readonly SessionProfile[];
   rpc?: Readonly<Record<string, RpcHandler>>;
   capabilities?: readonly string[];
   contract?: C;
@@ -190,7 +193,17 @@ export class ModuleHost {
   private static admit(started: readonly Started[]): void {
     const methods = new Map<string, string>();
     const policies = new Map<string, string>();
+    const profiles = new Set([ORDINARY_SESSION_PROFILE.name, "unrecorded"]);
     for (const { descriptor, instance } of started) {
+      for (const profile of instance.profiles ?? []) {
+        if (profiles.has(profile.name)) throw new Error(`Profile ${profile.name} is already registered`);
+        profiles.add(profile.name);
+        Object.freeze(profile.resources);
+        if (profile.model) Object.freeze(profile.model);
+        if (profile.tools) Object.freeze(profile.tools);
+        if (Array.isArray(profile.extensions)) Object.freeze(profile.extensions);
+        Object.freeze(profile);
+      }
       for (const method of Object.keys(instance.rpc ?? {})) {
         const owner = methods.get(method);
         if (owner) throw new Error(`RPC ${method} is served by both ${owner} and ${descriptor.name}`);
@@ -211,6 +224,16 @@ export class ModuleHost {
     const entry = this.find(module as ModuleDescriptor<unknown>);
     if (!entry || !("contract" in entry.instance)) throw new Error(`Module ${module.name} offers no started contract`);
     return entry.instance.contract as C;
+  }
+
+  /** Definitions stay with their started owner; there is no second profile store. */
+  profile(name: string): SessionProfile {
+    if (name === ORDINARY_SESSION_PROFILE.name) return ORDINARY_SESSION_PROFILE;
+    for (const { instance } of this.started) {
+      const profile = instance.profiles?.find(candidate => candidate.name === name);
+      if (profile) return profile;
+    }
+    throw new Error(`Profile ${name} is not composed`);
   }
 
   /** Profile order is explicit; optionality stays with each descriptor. */

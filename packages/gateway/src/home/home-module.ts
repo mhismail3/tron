@@ -1,3 +1,4 @@
+import { homeSessionProfile, type HomeSessionProfileServices } from "./home-session-profile.js";
 import type { ModuleDescriptor, RunSettledPolicy, SessionContext } from "../kernel/host/module-host.js";
 import { createTronHomeExtension } from "./tron-home-extension.js";
 import { homeResearchTools, type HomeResearchTransport } from "./home-research-tools.js";
@@ -21,6 +22,7 @@ export interface HomeModuleServices {
   runSettled: RunSettledPolicy;
   requestPolicy: RequestPolicyHook;
   inputAdmission: InputAdmissionPolicy;
+  profile: HomeSessionProfileServices;
   appendGuard: HomeAppendGuardServices;
   memory(sessionId: string): HomeMemoryToolAccess | undefined;
   delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal): Promise<HomeTaskHandle>;
@@ -36,12 +38,16 @@ export interface HomeModuleServices {
 /** Home owns its extension closures; registry supplies only the kernel-side
  * operations and reads of owners installed after registry construction. */
 export function homeModuleServices(owner: HomeOwner,
-  platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport; homeDiagnostic?: HomeDiagnostic; homeTaskDiagnostic?: (record: HomeTaskDiagnostic) => void },
-  ports: Pick<HomeModuleServices, "knowledge" | "search" | "read" | "delegate"> & { changes(): SettingsChangePath | undefined; resourcesIdle(sessionId: string): void },
+  platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport; homeDiagnostic?: HomeDiagnostic; homeTaskDiagnostic?: (record: HomeTaskDiagnostic) => void; persistenceDiagnostic?: (sessionId: string, code: "home-model-record-failed") => void },
+  ports: Pick<HomeModuleServices, "knowledge" | "search" | "read" | "delegate"> & { changes(): SettingsChangePath | undefined; resourcesIdle(sessionId: string): void; runtime: HomeSessionProfileServices["runtime"] },
 ): HomeModuleServices {
   return {
     knowledge: ports.knowledge, search: ports.search, read: ports.read, delegate: ports.delegate,
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
+    profile: {
+      decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), model: sessionId => owner.modelFor(sessionId), runtime: ports.runtime,
+      changed: (sessionId, model) => owner.noteModelApplied(sessionId, model).catch(() => { platform.persistenceDiagnostic?.(sessionId, "home-model-record-failed"); }),
+    },
     appendGuard: {
       state: sessionId => owner.chapterStateFor(sessionId),
       admission: (sessionId, metrics) => owner.assertChapterAdmission(sessionId, metrics),
@@ -68,7 +74,7 @@ export function homeModuleServices(owner: HomeOwner,
 
 /** Home's profile tool resolves the current change path and actor on each call. */
 export function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined): HomeProfileChangeAccess | undefined {
-  if (!changes || session.profile() !== "home") return undefined;
+  if (!changes || !session.profile().profileChanges) return undefined;
   return { change: (ops, input) => changes.changeProfile(ops, {
     actor: { kind: "home", id: session.sessionId(), sessionId: session.sessionId(), toolCallId: input.toolCallId },
     author: input.author, commandId: input.commandId, web: input.web, ...(input.reason ? { reason: input.reason } : {}),
@@ -80,7 +86,9 @@ export function createHomeModule(services: () => HomeModuleServices): ModuleDesc
     name: "tron-home",
     purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
     tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"], commands: [],
-    start: () => ({ hooks: { runSettled: () => services().runSettled, requestPolicy: () => services().requestPolicy,
+    start: () => ({ profiles: [homeSessionProfile(() => services().profile)], hooks: {
+      profileDecision: (sessionId, cwd) => { const name = services().profile.decision(sessionId, cwd); return name === "unnamed" ? "unrecorded" : name; },
+      runSettled: () => services().runSettled, requestPolicy: () => services().requestPolicy,
       inputAdmission: () => services().inputAdmission, appendGuard: homeAppendGuardHook(() => services().appendGuard) }, extension: session => {
       const owners = services();
       return createTronHomeExtension(() => owners.memory(session.sessionId()),

@@ -14,7 +14,7 @@ settlement. Other session modules have their own manifests here; projection live
 [`kernel/run`](../kernel/run/README.md) receipts, markers, work tokens and cancellation;
 `owned-session-dispatch.ts`, `semantic-ui-broker.ts`, `restart-drain.ts`
 and the rest of `../run.module.json`. State: Gateway-owned
-bounded run markers and command receipts; Pi's canonical JSONL stays Pi's.
+bounded run markers and command receipts; Pi owns JSONL. Host recipes are fixed per runtime; append policies resolve recorded identity live.
 
 ## Contract
 
