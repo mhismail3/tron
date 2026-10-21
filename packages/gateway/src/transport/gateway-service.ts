@@ -2187,11 +2187,9 @@ export class GatewayService {
       }
       case "settings.decide":
         // The maintainer's decision on a pending change, bound to the exact diff
-        // he saw (docs/settings-model.md 5.5). That digest-bound diff is the
-        // decision's fence: approval re-checks every `before` against the stores
-        // and supersedes on any move. The client reads no chat to decide (the
-        // Changes sheet never opened it), so a Chat-layer change applies through
-        // the Gateway-resolved slot appliers, whose lane guards still hold (#1642).
+        // he saw (docs/settings-model.md 5.5): that diff is its fence, re-checked
+        // against the stores, so no client fence is read and a Chat-layer change
+        // applies through the slot's own appliers and lane guards (#1642).
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "requestId", "digest", "approved"], method);
           const requestId = string(params.requestId, "requestId", { max: 100 });
@@ -2497,13 +2495,11 @@ export class GatewayService {
 
   /** A session target's Chat layer and its slot-lane appliers. The fence is the
    * runtime the client read (and its model or revision); the lane guards stay.
-   * A Chat-layer change without one is refused here, before planning, so a dry
-   * run refuses exactly what the change would (#1642). */
+   * Refused before planning when missing, so a dry run refuses it too (#1642). */
   private async settingsSession(slot: RuntimeSlot, rawFence: unknown, chatLayer: boolean, workToken?: string): Promise<SessionSettingsSource & { appliers: ChatAppliers }> {
     const fence = rawFence === undefined ? undefined : object(rawFence, "fence");
     if (fence) rejectUnknownFields(fence, ["runtimeGeneration", "model", "revision"], "fence");
     if (chatLayer && !fence) throw new GatewayError("invalid_request", "A Chat-layer change needs the fence it read");
-    // Only a Chat-layer change reaches these appliers, and it was refused above without a fence.
     const expectation = () => this.configurationExpectation({ expectedRuntimeGeneration: fence!.runtimeGeneration, expectedModel: fence!.model ?? null });
     return {
       cwd: slot.cwd,
