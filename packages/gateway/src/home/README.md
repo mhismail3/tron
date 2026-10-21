@@ -48,13 +48,13 @@ unaffected by every rule here.
 
 ### Runtime profile and request seam
 
-- **Profile** (`home-session-profile.ts`) is fixed per runtime: creation Home once before its
-  record, then Home/ordinary for enabled/disabled. Home loads only `tron-context-window`, `tron-compaction-policy`, `tron-settings`,
-  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research`; drops
-  agent `SYSTEM.md`/`APPEND_SYSTEM.md`; allows exactly `HOME_TOOL_NAMES`; has no MCP,
-  subagent discovery (empty `session.resources` catalog) or compaction (`session.compact`
-  refuses); runs a fixed non-virtual model on its own view of the Gateway-wide model runtime;
-  and sends zero cache-warming requests (`tron-home` answers `stop`). Append guards reclassify the live record, not this recipe.
+- **Profile** (`home-session-profile.ts`) is fixed per runtime. An unrecorded new Home uses
+  its creation recipe once; later runtimes read the record (enabled Home, otherwise ordinary).
+  Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-ask-user`,
+  `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` load. Agent `SYSTEM.md`/
+  `APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
+  (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
+  model on its Gateway-runtime view; no cache warming (`tron-home` answers `stop`). Append guards read the live record.
 - **Profile changes** run in one serialized owner, replacing a live runtime in place after an
   idle check (else `busy`); the enabled Home's model is written back to the record.
 - **Activation:** one admitted input and everything it triggers. Every provider request

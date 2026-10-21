@@ -54,7 +54,7 @@ component registry, presentation store, terminal sanitizer).
 
 ## Entry points
 
-`piBuiltinExtensions`, `tronModuleFactories`, `homeModuleFactories`, the remote host in `host/`.
+`piBuiltinExtensions`, `tronModuleFactories`, profile recipes via `ModuleHost.registrations`, the remote host in `host/`.
 
 ## Signals
 

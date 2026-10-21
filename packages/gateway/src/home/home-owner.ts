@@ -1071,7 +1071,7 @@ export class HomeOwner {
    * The caller has already decided the runtime is Home's. The only two sessions
    * that can be: the one the record names and enables, and the one a designation
    * in flight is creating (its first runtime is built before the record can name
-   * it — the same window `isHomeProfile` covers with its explicit profile).
+   * it — the same window runtime profile selection covers with its creation recipe).
    */
   requestPolicyFor(sessionId: string): HomeRequestPolicy | undefined {
     const record = this.record;

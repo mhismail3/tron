@@ -29,7 +29,7 @@ export function homeSessionProfile(services: () => HomeSessionProfileServices): 
       appendSystemPromptOverride: () => [],
     },
     projectTrust: "never", projectSettings: false, managedSubagents: false, directBash: false,
-    tools: HOME_TOOL_NAMES, modelRuntime: "gateway", acquireModelRuntime: () => services().runtime(),
+    tools: [...HOME_TOOL_NAMES], modelRuntime: "gateway", acquireModelRuntime: () => services().runtime(),
     model: {
       recorded: sessionId => services().model(sessionId),
       changed: (sessionId, model) => services().changed(sessionId, model), physicalOnly: true,
