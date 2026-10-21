@@ -33,6 +33,7 @@ final class RetainedNativeSheetHost: PresentationScopedResource {
         let controller = UIHostingController(rootView: root)
         controller.view.backgroundColor = .clear
         controller.view.isUserInteractionEnabled = false
+        controller.view.accessibilityElementsHidden = true
         self.controller = controller
         #if HOSTED_TEST
         HostedPresentationProbe.record?("anchor-create", "\(ObjectIdentifier(self))")
@@ -55,10 +56,14 @@ struct RetainedNativeSheetPresenter<Anchor: View>: UIViewControllerRepresentable
     @ViewBuilder let anchor: () -> Anchor
 
     func makeUIViewController(context: Context) -> UIHostingController<AnyView> {
-        owner.update(anchor(), environment: context.environment)
+        withTransaction(context.transaction) {
+            owner.update(anchor(), environment: context.environment)
+        }
     }
 
     func updateUIViewController(_ controller: UIHostingController<AnyView>, context: Context) {
-        _ = owner.update(anchor(), environment: context.environment)
+        withTransaction(context.transaction) {
+            _ = owner.update(anchor(), environment: context.environment)
+        }
     }
 }
