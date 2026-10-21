@@ -180,4 +180,3 @@ struct ProviderSetupRow: View {
         return isUsageLoading ? "Account usage is loading" : "Account usage unavailable"
     }
 }
-
