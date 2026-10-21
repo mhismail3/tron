@@ -36,6 +36,8 @@ session resolves its actor and settings owner at every call.
 The full settings contract (foundations, layers, the generated key table,
 timing, change path, tiers, outside changes, project writes, Home profile,
 presentation) is [docs/settings-contract.md](../../docs/settings-contract.md).
+The [three-layer proposal](../../docs/settings-three-layer-design.md) defines the
+pending settings redesign; it does not change this runtime contract.
 In short:
 
 - **One key, declared once on the Gateway** (F1). The schema holds type,
