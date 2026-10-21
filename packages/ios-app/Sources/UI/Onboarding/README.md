@@ -7,7 +7,7 @@ workspace browser, the model picker and the provider authentication prompt sheet
 
 ## Owns
 
-`OnboardingView`, `OnboardingPresentationComponents`, `SetupComponents` (`ModelPicker`),
+`OnboardingView`, `OnboardingPresentationComponents`, `SetupComponents` (`ModelPicker`), `ProviderSetupRow`,
 `ModelRailCard`, `ModelSelectionAvailability`, `QRCodeScanner`, `QRCodeCaptureServices`,
 `WorkspaceBrowser`, `WorkspaceBrowserOwner`, `AuthPromptSheet`.
 

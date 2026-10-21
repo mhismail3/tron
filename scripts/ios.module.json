@@ -2,6 +2,7 @@
   "layer": "L5",
   "owns": [
     "ios-gateway-e2e-test",
+    "ios-gateway-e2e-fixture.sh",
     "ios-gateway-fault-proxy.mjs",
     "ios-mac-terminal-journey",
     "ios-release-toolchain-doctor.sh",
