@@ -188,12 +188,13 @@ separate:
   surfaces (dashboard, chat route) are the parent scope of their sheets.
 - Managed sources publish render-input preferences without adding a background view or AX node
   to a control. `TronNativeSheetCanvas`, mounted at each scene/surface root, contains scope-owned
-  `RetainedNativeSheetHost` graphs with ordinary SwiftUI `.sheet` nodes. Hosts forward inherited
-  environment and transactions; explicit scene-phase observation keeps activation live. Invisible
-  native mounting stays outside control labels, preserving toolbar layout. Native chrome, detents,
-  gestures and focus remain platform-owned. Source removal clears intent and retires its scopes;
-  scope/scene retirement empties graphs and removes native containment. No second modal stack,
-  route registry or replay is installed.
+  `RetainedNativeSheetHost` nodes in one retained SwiftUI hosting controller per surface. Keeping
+  child controllers under a disposable container does not retain their presentations. Hosts forward
+  inherited environment and transactions; explicit scene-phase and dependency-read observation keep
+  activation/freshness live. Invisible mounting stays outside control labels. Native chrome, detents,
+  gestures and focus remain platform-owned. Attached active renders reconcile missing sources;
+  transient content disappearance is not retirement. Source/scope/scene retirement clears intent
+  and empties retained graphs. No second modal stack, route registry or replay is installed.
 - Sheet content declares state that must outlive a rebuild with `@PresentationState`; a view
   appearing more than once in one sheet passes `key:`.
 - Sheet-content teardown goes in `PresentationScopedResource.presentationDidRetire()` or

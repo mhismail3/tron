@@ -70,7 +70,8 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     let onDismiss: (() -> Void)?
     let haptic: TronHaptic?
     @ViewBuilder let sheetContent: () -> SheetContent
-    // An environment snapshot alone is not a scene-phase subscription.
+    // Snapshot forwarding does not subscribe to these changing render inputs.
+    @Environment(\.tronPresentationDependencyRead) private var nativeDependencyRead
     @Environment(\.scenePhase) private var nativeScenePhase
     @Environment(\.self) private var nativeEnvironment
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
@@ -100,6 +101,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     func body(content: Content) -> some View {
         var environment = nativeEnvironment
         environment.scenePhase = nativeScenePhase
+        environment.tronPresentationDependencyRead = nativeDependencyRead
         let source: NativeSheetSource? = isPresented || nativeHost.isInstalled ? NativeSheetSource(
             owner: nativeHost,
             content: AnyView(Color.clear.accessibilityHidden(true).sheet(isPresented: $isPresented, onDismiss: didDismiss) {
@@ -108,7 +110,8 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
                 }
                 .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
             }),
-            environment: environment
+            environment: environment,
+            onRemoval: sourceDidDisappear
         ) : nil
         return content
             .transformPreference(NativeSheetSources.self) { sources in
@@ -126,17 +129,17 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
                     lease.beginDismissal()
                 }
             }
-            .onDisappear {
-                // A removed source must not leave a phantom foremost surface.
-                // Foreground reconstruction retains the native hosting graph.
-                if isPresented { isPresented = false }
-                retireAllTokens()
-                stateStore.retire(path: statePath)
-                if nativeHost.isInstalled {
-                    nativeHost.presentationDidRetire()
-                    nativeHost = RetainedNativeSheetHost()
-                }
-            }
+            .onPresentationRetire(fileID: "native-source:\(identity)@\(site)", line: 0, perform: sourceDidDisappear)
+    }
+
+    private func sourceDidDisappear() {
+        if isPresented { isPresented = false }
+        retireAllTokens()
+        stateStore.retire(path: statePath)
+        if nativeHost.isInstalled {
+            nativeHost.presentationDidRetire()
+            nativeHost = RetainedNativeSheetHost()
+        }
     }
 
     private func registerIfPossible(playHaptic: Bool) {
@@ -179,7 +182,8 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     let onDismiss: (() -> Void)?
     let haptic: TronHaptic?
     @ViewBuilder let sheetContent: (Item) -> SheetContent
-    // Observe activation even when the source's other render inputs stay equal.
+    // Observe activation/freshness even when the source's other inputs stay equal.
+    @Environment(\.tronPresentationDependencyRead) private var nativeDependencyRead
     @Environment(\.scenePhase) private var nativeScenePhase
     @Environment(\.self) private var nativeEnvironment
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
@@ -217,6 +221,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     func body(content: Content) -> some View {
         var environment = nativeEnvironment
         environment.scenePhase = nativeScenePhase
+        environment.tronPresentationDependencyRead = nativeDependencyRead
         let source: NativeSheetSource? = item != nil || nativeHost.isInstalled ? NativeSheetSource(
             owner: nativeHost,
             content: AnyView(Color.clear.accessibilityHidden(true).sheet(item: $item, onDismiss: didDismiss) { value in
@@ -225,7 +230,8 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                 }
                 .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
             }),
-            environment: environment
+            environment: environment,
+            onRemoval: sourceDidDisappear
         ) : nil
         return content
             .transformPreference(NativeSheetSources.self) { sources in
@@ -237,16 +243,18 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                 if previous == nil, current != nil, lease.dismissingToken == nil,
                    let haptic { TronHaptics.shared.play(haptic) }
             }
-            .onDisappear {
-                if item != nil { item = nil }
-                retireAllTokens()
-                if let presentedStatePath { stateStore.retire(path: presentedStatePath) }
-                presentedStatePath = nil
-                if nativeHost.isInstalled {
-                    nativeHost.presentationDidRetire()
-                    nativeHost = RetainedNativeSheetHost()
-                }
-            }
+            .onPresentationRetire(fileID: "native-source:\(site)", line: 0, perform: sourceDidDisappear)
+    }
+
+    private func sourceDidDisappear() {
+        if item != nil { item = nil }
+        retireAllTokens()
+        if let presentedStatePath { stateStore.retire(path: presentedStatePath) }
+        presentedStatePath = nil
+        if nativeHost.isInstalled {
+            nativeHost.presentationDidRetire()
+            nativeHost = RetainedNativeSheetHost()
+        }
     }
 
     private func itemChanged() {

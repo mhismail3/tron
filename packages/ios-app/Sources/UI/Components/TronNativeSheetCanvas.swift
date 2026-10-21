@@ -9,62 +9,56 @@ import UIKit
 }
 #endif
 
-/// Retains the ordinary SwiftUI sheet graph for one managed presenter. Its
-/// native view is mounted by the containing surface, never inside a control.
+/// One source's ordinary SwiftUI sheet node. The surface's retained hosting
+/// root renders it; a source control never contains a platform view.
 @MainActor
-final class RetainedNativeSheetHost: PresentationScopedResource {
-    private var controller: UIHostingController<AnyView>?
+final class RetainedNativeSheetHost {
+    private(set) var content: AnyView?
+    private weak var canvas: NativeSheetCanvas?
+    private var onSourceRemoval: (@MainActor () -> Void)?
     private var retired = false
-    var isInstalled: Bool { controller != nil }
-    var isAttached: Bool { controller?.viewIfLoaded?.window != nil }
+    nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
+    var isInstalled: Bool { content != nil }
+    var isAttached: Bool { canvas?.isAttached == true }
 
     isolated deinit {
         #if HOSTED_TEST
-        if controller != nil { HostedPresentationProbe.record?("anchor-deinit", "\(ObjectIdentifier(self))") }
+        if content != nil { HostedPresentationProbe.record?("anchor-deinit", "\(id)") }
         #endif
-        detach()
     }
 
-    func mount(_ content: AnyView, environment: EnvironmentValues, parent: UIViewController) {
+    func mount(_ source: NativeSheetSource, on canvas: NativeSheetCanvas) {
         guard !retired else { return }
-        let root = AnyView(content.environment(\.self, environment))
-        let controller: UIHostingController<AnyView>
-        if let installed = self.controller {
-            controller = installed
-            controller.rootView = root
-        } else {
-            controller = UIHostingController(rootView: root)
-            controller.view.backgroundColor = .clear
-            controller.view.isUserInteractionEnabled = false
-            controller.view.accessibilityElementsHidden = true
-            self.controller = controller
-            #if HOSTED_TEST
-            HostedPresentationProbe.record?("anchor-create", "\(ObjectIdentifier(self))")
-            #endif
-        }
-        guard controller.parent !== parent else { return }
-        detach()
-        parent.addChild(controller)
-        controller.view.frame = .zero
-        parent.view.addSubview(controller.view)
-        controller.didMove(toParent: parent)
+        #if HOSTED_TEST
+        if content == nil { HostedPresentationProbe.record?("anchor-create", "\(id)") }
+        #endif
+        content = AnyView(source.content.environment(\.self, source.environment))
+        onSourceRemoval = source.onRemoval
+        self.canvas = canvas
+        canvas.include(self)
     }
 
-    private func detach() {
-        guard let controller, controller.parent != nil else { return }
-        controller.willMove(toParent: nil)
-        controller.view.removeFromSuperview()
-        controller.removeFromParent()
+    func sourceWasRemoved() {
+        let removal = onSourceRemoval
+        onSourceRemoval = nil
+        removal?()
     }
+}
 
+extension RetainedNativeSheetHost: PresentationScopedResource {
     func presentationDidRetire() {
         guard !retired else { return }
         retired = true
+        onSourceRemoval = nil
         #if HOSTED_TEST
-        if controller != nil { HostedPresentationProbe.record?("anchor-retire", "\(ObjectIdentifier(self))") }
+        if content != nil { HostedPresentationProbe.record?("anchor-retire", "\(id)") }
         #endif
-        controller?.rootView = AnyView(EmptyView())
-        detach()
+        // Break source/scope/environment captures even while native dismissal
+        // still owns the hosting root. The installed marker remains observable.
+        if content != nil { content = AnyView(EmptyView()) }
+        let parent = canvas
+        canvas = nil
+        parent?.remove(self)
     }
 }
 
@@ -72,6 +66,7 @@ struct NativeSheetSource {
     let owner: RetainedNativeSheetHost
     let content: AnyView
     let environment: EnvironmentValues
+    let onRemoval: @MainActor () -> Void
 }
 
 struct NativeSheetSources: PreferenceKey {
@@ -81,20 +76,76 @@ struct NativeSheetSources: PreferenceKey {
     }
 }
 
+private struct NativeSheetCanvasContent: View {
+    struct Source: Identifiable {
+        let id: ObjectIdentifier
+        let content: AnyView
+    }
+    let sources: [Source]
+
+    var body: some View {
+        ZStack { ForEach(sources) { $0.content } }
+    }
+}
+
+/// The hosting controller itself must survive reconstruction: retaining child
+/// controllers under a disposable UIKit container still dismisses their sheets.
 @MainActor
-private final class NativeSheetCanvas: PresentationScopedResource {
-    let controller: UIViewController = {
-        let controller = UIViewController()
+final class NativeSheetCanvas: PresentationScopedResource {
+    private var sources: [RetainedNativeSheetHost] = []
+    private var hostingController: UIHostingController<NativeSheetCanvasContent>?
+    private var retired = false
+    var isAttached: Bool { hostingController?.viewIfLoaded?.window != nil }
+
+    var controller: UIViewController {
+        if let hostingController { return hostingController }
+        let controller = UIHostingController(rootView: renderedContent)
         controller.view.backgroundColor = .clear
         controller.view.isUserInteractionEnabled = false
         controller.view.accessibilityElementsHidden = true
+        hostingController = controller
         return controller
-    }()
+    }
+
+    func include(_ source: RetainedNativeSheetHost) {
+        guard !retired, !sources.contains(where: { $0 === source }) else { return }
+        sources.append(source)
+        publish()
+    }
+
+    func remove(_ source: RetainedNativeSheetHost) {
+        sources.removeAll { $0 === source }
+        publish()
+    }
+
+    func render(_ inputs: [NativeSheetSource], reconcileRemoval: Bool) {
+        guard !retired else { return }
+        for input in inputs { input.owner.mount(input, on: self) }
+        publish()
+        guard reconcileRemoval else { return }
+        let live = Set(inputs.map { $0.owner.id })
+        for source in sources where !live.contains(source.id) { source.sourceWasRemoved() }
+    }
+
+    private var renderedContent: NativeSheetCanvasContent {
+        NativeSheetCanvasContent(sources: sources.compactMap { source in
+            source.content.map { .init(id: source.id, content: $0) }
+        })
+    }
+
+    private func publish() {
+        // Explicit native-root publication also reaches covered sheet graphs;
+        // an observable child value alone can wait until that root is revealed.
+        hostingController?.rootView = renderedContent
+    }
 
     func presentationDidRetire() {
-        controller.willMove(toParent: nil)
-        controller.view.removeFromSuperview()
-        controller.removeFromParent()
+        guard !retired else { return }
+        retired = true
+        let mounted = sources
+        sources.removeAll()
+        for source in mounted { source.presentationDidRetire() }
+        publish()
     }
 }
 
@@ -106,9 +157,8 @@ private struct NativeSheetCanvasView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: UIViewController, context: Context) {
         withTransaction(context.transaction) {
-            for source in sources {
-                source.owner.mount(source.content, environment: source.environment, parent: controller)
-            }
+            canvas.render(sources, reconcileRemoval: context.environment.scenePhase == .active
+                && controller.viewIfLoaded?.window != nil && controller.parent != nil)
         }
     }
 }
@@ -119,7 +169,8 @@ struct TronNativeSheetCanvas: ViewModifier {
     @PresentationState private var canvas = NativeSheetCanvas()
 
     func body(content: Content) -> some View {
-        content.overlayPreferenceValue(NativeSheetSources.self) { sources in
+        let canvas = canvas
+        return content.overlayPreferenceValue(NativeSheetSources.self) { sources in
             NativeSheetCanvasView(canvas: canvas, sources: sources)
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
