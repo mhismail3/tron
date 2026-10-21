@@ -102,7 +102,6 @@
     "undeclared gateway/gateway-main -> gateway/admin",
     "undeclared gateway/gateway-main -> gateway/automations",
     "undeclared gateway/gateway-main -> gateway/delegation",
-    "undeclared gateway/gateway-main -> gateway/display",
     "undeclared gateway/gateway-main -> gateway/foundation",
     "undeclared gateway/gateway-main -> gateway/home",
     "undeclared gateway/gateway-main -> gateway/integrations",
