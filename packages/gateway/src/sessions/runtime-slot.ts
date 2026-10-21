@@ -2266,14 +2266,12 @@ export class RuntimeSlot {
         workspace: this.dependencies.workspace,
         displayArtifacts: this.dependencies.displayArtifacts,
         title: () => this.notificationTitle(),
-        // The notify tool samples the same foreground lease automatic
-        // alerts use, at its own admission boundary.
+        // Notify samples automatic alerts' foreground lease at its own admission.
         presented: () => this.dependencies.isSessionPresented(this.id),
         contextPolicy: () => contextPolicy,
         compaction: {
           policy: () => compactionPolicy,
-          // Summary auth can finish after Stop but before compaction_start
-          // rotates the display ID. Automatic work retains its prompt fence.
+          // Summary auth can finish after Stop, before display-ID rotation; keep automatic work's prompt fence.
           stopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
             || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
           changed: () => { this.revision += 1; this.publishSnapshot(); },
