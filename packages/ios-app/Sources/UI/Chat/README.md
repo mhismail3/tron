@@ -117,6 +117,7 @@ Session, session history and subagent activity.
 - Disposable state (opening, imports, entrance ledger, floating displays) lives in
   `ChatSessionPresentation`; nothing here is persisted except drafts via State.
 - Reduce Motion removes spatial motion and never hides authoritative text.
+- Disable Home's icon, title and subtitle use `tronError`; Pause memory keeps standard styling.
 
 ## Entry points
 
