@@ -42,7 +42,7 @@ no additional logging or persisted state.
 ## Verify
 
 ```bash
-scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts \\\n  src/kernel/run/run-markers.lock.integration.test.ts src/kernel/run/run.store.lock.integration.test.ts
+scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts src/kernel/run/run-markers.lock.integration.test.ts src/kernel/run/run.store.lock.integration.test.ts
 scripts/tron verify --module gateway/run
 ```
 
