@@ -200,8 +200,10 @@ separate:
 
 `packages/ios-app/scripts/presentation-source-policy.py` makes this the default: managed-sheet
 content may not declare `@State` unless the line says `// view-local: <reason>`. Native focus
-behavior is not overridden. `RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent`
-exercises the foreground path in the paired-Gateway UI lane.
+behavior is not overridden. `TronForegroundCaptureUITests` observes native controller lifetime,
+retained paging/viewport, keyboard input routing, socket read demand and anchor deallocation in
+the hosted UI lane. `RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent`
+exercises the paired-Gateway path.
 
 ## Presentation activity
 
@@ -217,17 +219,21 @@ canonical state, is never persisted, and is not a second state authority.
   after its generation retired. Binding intent registers a child before its transition, and a
   dismissal lease keeps the retiring generation until SwiftUI's callback.
 - Disposable loads, media preparation and polls include surface activity in their task identity:
-  cover cancels them, uncover restarts from current inputs. Publication rejects cancellation
+  cover or an inactive scene cancels them, uncover restarts from current inputs. Visible reads
+  that need the transport wait for foreground reconciliation; accepted operations do not. Publication rejects cancellation
   (a sent read may throw `GatewayPossiblySentError`, not `CancellationError`) and stale
   ownership. Keep the last complete data.
 - Foreground transport recovery continues independently of disposable reads. The foremost
   surface declares required `PresentationRefreshDependency` values: session authority propagates
   down its lineage, queued editing requires the exact session/message, and catalog demand belongs
   only to a surface consuming the roster. Independent Home/global settings and immutable details
-  do not restore a covered chat. The dashboard resumes a stale catalog on reveal.
+  do not restore a covered chat. On reveal, opening readiness checks live subscription authority,
+  not just a retained local ready frame. The dashboard resumes a stale catalog on reveal.
 - A schema editor consumes its shared target snapshot through `PresentationDependencyRead`;
   the foremost surface admits the refresh and the settings owner deduplicates it. Providers and
   authorized devices refresh through their visible owners, not an unconditional reconnect pair.
+  The dashboard usage card owns its provider-catalog read separately from usage; changed provider
+  IDs restart usage without recursively reloading the catalog.
 - Compatible read admission changes retain the last complete frame, cursor and viewport until
   replacement data is admitted. New sources clear it; new reads and mutations still require
   current authority. Navigation resets a viewport once per new request, not again on refresh.

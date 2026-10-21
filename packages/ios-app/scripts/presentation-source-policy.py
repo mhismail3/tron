@@ -11,7 +11,8 @@ from the background, so a view constructed directly as managed-sheet content
 (a `tronManagedSheet` closure, or a progressive settings link's destination)
 declares `@PresentationState` instead. A `@State` that is genuinely view-local
 says why on its line: `// view-local: <reason>`. The behavioral proof is
-RealGatewayPairAndChatUITests.testForegroundAndReconnectKeepSheetsAndTheirContent.
+TronForegroundCaptureUITests at the UIKit/socket boundary; the paired-Gateway
+journey is RealGatewayPairAndChatUITests.testForegroundAndReconnectKeepSheetsAndTheirContent.
 """
 import pathlib
 import re
