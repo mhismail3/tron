@@ -2,6 +2,7 @@
   "layer": "L5",
   "owns": [
     "Hosted*Fixture.swift",
+    "HostedSettingsReviewSchema.swift",
     "hosted-fixtures.module.json"
   ],
   "exceptions": [
