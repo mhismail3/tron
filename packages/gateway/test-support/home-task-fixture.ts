@@ -1,3 +1,4 @@
+import { createTestRegistry } from "./gateway-registry.js";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { TrustService } from "../src/admin/trust-service.js";
 import { NotificationService } from "../src/notifications/notification-service.js";
 import { NotificationGrantStore } from "../src/notifications/grant-store.js";
 import type { PushRelayClient } from "../src/notifications/relay-client.js";
-import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { ManagedSubagents } from "../src/sessions/managed-subagents.js";
 import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
 import { settingsDependencies } from "./settings-dependencies.js";
@@ -17,7 +18,6 @@ import { MODEL_QUEUE_PROJECTION_ENV } from "../src/providers/model-queue-extensi
 import { modelQueueProjectionPath, type ModelQueueRecord } from "../src/providers/model-queue.js";
 import type { ProviderUsageOwner } from "../src/providers/provider-usage.js";
 import { HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
-import { startTestModules } from "./gateway-modules.js";
 
 // Registered runtime roots of the current test file. Each file's afterEach calls
 // disposeFixtures(), so a fixture is retired with the file that created it.
@@ -162,7 +162,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   await pushStore.initialize();
   // No relay: admission validates and records nothing is sent off the Mac.
   const pushAdmission = new NotificationService(pushStore, { available: false, relayOrigin: "https://push.invalid" } as unknown as PushRelayClient);
-  const createRegistry = async () => new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
+  const createRegistry = async () => await createTestRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
     // Production admits the same artifact root (gateway-main.ts): run status artifacts are read only under it.
     ...(managed ? { delegatedArtifactRoot: delegatedArtifactRoot(tronHome) } : {}),
     gatewayModelRuntime: gateway,

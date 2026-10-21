@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
@@ -31,13 +32,7 @@ import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
-import {
-  HEAP_REFUSAL_RETRY_AFTER_MS,
-  LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
-  RuntimeRegistry,
-  type CapacityShedRecord,
-  type RuntimeLifecycleRecord,
-} from "./runtime-registry.js";
+import { type RuntimeRegistry, HEAP_REFUSAL_RETRY_AFTER_MS, LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR, type CapacityShedRecord, type RuntimeLifecycleRecord } from "./runtime-registry.js";
 import type { ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
@@ -48,7 +43,6 @@ import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js"
 import { syntheticOversizedJpeg, syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { catalogOwner, createColdRegistryFixture, initializeRegistry, settleCatalog, temporaryRoot } from "../../test-support/runtime-registry-fixture.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** Test-owned producer for one deterministic status.json replacement.
  *
@@ -216,7 +210,7 @@ async function queuedImageSession(registries: RuntimeRegistry[], root: string, p
   faux.setResponses(responses);
   const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
   runtime.registerNativeProvider(faux.provider);
-  const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")), agentDir,
+  const registry = await createTestRegistry({ agentDir,
     tronHome: join(root, "tron"),
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime,
@@ -494,7 +488,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     await fixture.registry.dispose();
     registries.splice(registries.indexOf(fixture.registry), 1);
-    const cold = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron-cold")),
+    const cold = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron-cold"),
       idleRuntimeMs: 60_000,
@@ -520,7 +514,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await cold.dispose();
     registries.splice(registries.indexOf(cold), 1);
 
-    const indexed = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron-cold")),
+    const indexed = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron-cold"),
       idleRuntimeMs: 60_000,
@@ -620,7 +614,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     runtime.registerNativeProvider(faux.provider);
     const enqueue = vi.fn(async () => "queued" as const);
     const suppressAutomatic = vi.fn(async () => "suppressed" as const);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -711,7 +705,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     );
     await fixture.registry.dispose();
 
-    const restarted = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron")),
+    const restarted = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron"),
       idleRuntimeMs: 60_000,
@@ -740,7 +734,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     fixture.manager.appendMessage(fauxAssistantMessage("unowned successful leaf"));
     await fixture.registry.dispose();
 
-    const restarted = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron")),
+    const restarted = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron"),
       idleRuntimeMs: 60_000,
@@ -780,7 +774,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     fixture.manager.appendMessage(fauxAssistantMessage("newer markerless completion"));
     await fixture.registry.dispose();
 
-    const restarted = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron")),
+    const restarted = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron"),
       idleRuntimeMs: 60_000,
@@ -797,7 +791,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     await restarted.dispose();
     fixture.manager.appendMessage(fauxAssistantMessage("still markerless"));
-    const secondRestart = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron")),
+    const secondRestart = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron"),
       idleRuntimeMs: 60_000,
@@ -947,7 +941,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     let listChanges = 0;
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 1,
@@ -1024,7 +1018,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(ownership.summaryRevisions.has(evictedSlot.id)).toBe(false);
     expect(ownership.latestSummaries.has(evictedSlot.id)).toBe(false);
 
-    const fresh = new RuntimeRegistry({ modules: await startTestModules(join(root, "fresh-tron")),
+    const fresh = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "fresh-tron"),
       idleRuntimeMs: 60_000,
@@ -1045,7 +1039,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -1100,7 +1094,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }]);
     runtime.registerNativeProvider(faux.provider);
     const summaries: SessionSummaryUpdate[] = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -1203,7 +1197,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     runtime.registerNativeProvider(faux.provider);
     const snapshots: any[] = [];
     const configurationEvents: any[] = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -1264,7 +1258,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     runtime.registerNativeProvider(faux.provider);
     const summaries: SessionSummaryUpdate[] = [];
     let listChanges = 0;
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -1319,7 +1313,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       maximumTraversalBytes = 8 * 1_024 * 1_024,
     ) => {
       const reconciled: SessionCatalogReconcileOutcome[] = [];
-      const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, `tron-${label}`)),
+      const registry = await createTestRegistry({ 
         agentDir,
         tronHome: join(root, `tron-${label}`),
         idleRuntimeMs: 60_000,
@@ -1409,7 +1403,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       childSession.getSessionId(),
     ]);
 
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -1509,7 +1503,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // is published and a read refuses retryably instead of serving a partial one.
     const bounded = async (label: string, maximumSessions: number) => {
       const reconciled: SessionCatalogReconcileOutcome[] = [];
-      const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, `tron-${label}`)),
+      const registry = await createTestRegistry({ 
         agentDir,
         tronHome: join(root, `tron-${label}`),
         idleRuntimeMs: 60_000,
@@ -1560,7 +1554,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       type: "session", version: 3, id: info.id, timestamp: now.toISOString(), cwd: root, parentSession: parentPath,
     })}\n`)));
     const reconciled: SessionCatalogReconcileOutcome[] = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -1641,7 +1635,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await settleCatalog(fixture.registry);
     expect(existsSync(indexPath)).toBe(true);
     await fixture.registry.dispose();
-    const restarted = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron")),
+    const restarted = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron"),
       idleRuntimeMs: 60_000,
@@ -1717,7 +1711,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // The append is injected inside reconciliation because no public caller can
     // schedule work between the index read and its post-read evidence cut.
     await fixture.registry.dispose();
-    const restarted = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron")),
+    const restarted = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron"),
       idleRuntimeMs: 60_000,
@@ -1877,7 +1871,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await appendFile(fixture.sessionFile, '{"type":"message"');
 
     const reconciled: SessionCatalogReconcileOutcome[] = [];
-    const restarted = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron")),
+    const restarted = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron"),
       idleRuntimeMs: 60_000,
@@ -1940,7 +1934,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       manager.appendMessage(fauxAssistantMessage("x".repeat(2_000)));
       target ||= manager.getSessionId();
     }
-    const make = async () => new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const make = async () => await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -2050,7 +2044,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       await gate;
       return ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     });
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -2603,7 +2597,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   it("reports files over the header budget as unproven and refuses an over-budget acquisition retryably", async () => {
     const fixture = await coldFixture("header-bound");
     const reconciled: SessionCatalogReconcileOutcome[] = [];
-    const headerRegistry = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron-header-bound")),
+    const headerRegistry = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron-header-bound"),
       idleRuntimeMs: 60_000,
@@ -2632,7 +2626,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       walks.restore();
     }
 
-    const admissionRegistry = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron-admission-bound")),
+    const admissionRegistry = await createTestRegistry({ 
       agentDir: fixture.agentDir,
       tronHome: join(fixture.root, "tron-admission-bound"),
       idleRuntimeMs: 60_000,
@@ -2670,7 +2664,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         cwd,
       })}\n${"x".repeat(4_096)}\n`,
     )));
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -2752,7 +2746,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await writeFile(join(childDirectory, "session.jsonl"), `${JSON.stringify({
       type: "session", version: 3, id: childId, timestamp, cwd,
     })}\n`);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -2795,7 +2789,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await writeFile(childFile, `${JSON.stringify({
       type: "session", version: 3, id: childId, timestamp, cwd, parentSession: otherParentFile,
     })}\n`);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -3045,7 +3039,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await writeFile(childFile, `${JSON.stringify({
       type: "session", version: 3, id: childId, timestamp, cwd,
     })}\n`);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -3100,7 +3094,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await writeFile(join(childDirectory, "session.jsonl"), `${JSON.stringify({
       type: "session", version: 3, id: childId, timestamp, cwd,
     })}\n`);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -3167,7 +3161,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         cwd: index < 4 ? "/x" : "x".repeat(200),
       })}\n${"x".repeat(4_096)}\n`,
     )));
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -3211,7 +3205,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     whole.appendMessage(fauxAssistantMessage("whole"));
     const fraction = SessionManager.create(cwd, sessionDirectory);
     fraction.appendMessage(fauxAssistantMessage("fraction"));
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -3284,7 +3278,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const faux = fauxProvider({ provider: "tron-catalog-index", tokensPerSecond: 10_000 });
     faux.setResponses([fauxAssistantMessage("catalog index ready"), fauxAssistantMessage("catalog index forked")]);
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -3395,7 +3389,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const faux = fauxProvider({ provider: "tron-duplicate-session-id", tokensPerSecond: 10_000 });
     faux.setResponses([fauxAssistantMessage("persisted")]);
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -3487,7 +3481,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     });
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")), agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+    const registry = await createTestRegistry({ agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       maximumLiveRuntimes: DEFAULT_MAX_LIVE_RUNTIMES, modelRuntimeFactory: runtimeFactory,
       trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
     registries.push(registry);
@@ -3551,7 +3545,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       async () => { await new Promise((resolve) => setTimeout(resolve, 150)); return fauxAssistantMessage("second complete"); },
     ]);
 
-    const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome,
       idleRuntimeMs: 60_000,
@@ -3629,7 +3623,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       async () => { await firstBarrier; return fauxAssistantMessage("first"); },
       fauxAssistantMessage("queued complete"),
     ]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => {
         const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -3672,7 +3666,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const faux = fauxProvider({ provider: "tron-completion-capacity", tokensPerSecond: 10_000 });
     faux.setResponses([async () => { await responseBarrier; return fauxAssistantMessage("complete"); }]);
     const workRegistry = new GatewayWorkRegistry("epoch", 4);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, workRegistry,
       modelRuntimeFactory: async () => {
         const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -3717,7 +3711,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       await trustBarrier;
       return resolveTrust(input);
     });
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -5032,7 +5026,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // A cold reconstructed slot must reject the same foreign terminal header before
     // it can synthesize a child or append a terminal parent receipt.
     await fixture.registry.dispose();
-    const recoveredRegistry = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron")),
+    const recoveredRegistry = await createTestRegistry({ 
       agentDir: fixture.agentDir, tronHome: join(fixture.root, "tron"), idleRuntimeMs: 60_000,
       trust: new TrustService(fixture.agentDir), broadcast: () => {},
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -5145,7 +5139,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // re-admits the same canonical owner without parsing its large report body.
     await fixture.registry.dispose();
     await writeModern();
-    const recoveredRegistry = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron")),
+    const recoveredRegistry = await createTestRegistry({ 
       agentDir: fixture.agentDir, tronHome: join(fixture.root, "tron"), idleRuntimeMs: 60_000,
       trust: new TrustService(fixture.agentDir), broadcast: () => {},
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -5831,7 +5825,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     faux.setResponses([fauxAssistantMessage("complete")]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       modelRuntimeFactory: async () => runtime,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -5904,7 +5898,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -6118,7 +6112,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     faux.setResponses([fauxAssistantMessage("complete")]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       modelRuntimeFactory: async () => runtime,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -6161,7 +6155,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }\n`);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -6204,7 +6198,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }\n`);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -6240,7 +6234,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await trust.set(cwd, true);
     const summaries: SessionSummaryUpdate[] = [];
     const userInputRequired = vi.fn(async () => {});
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       broadcast: () => {}, sessionSummaryChanged: (summary) => summaries.push(summary), sessionListChanged: () => {},
       machineId: "machine-input-test",
@@ -6308,7 +6302,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }\n`);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -6371,7 +6365,7 @@ export default function (pi) {
     };
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -6444,7 +6438,7 @@ export default function (pi) {
     const snapshots: Array<{ phase: string; operation?: unknown }> = [];
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -6551,7 +6545,7 @@ export default function (pi) {
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
     const tronHome = join(root, "tron");
-    const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: createModels, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -6602,7 +6596,7 @@ export default function (pi) {
       .filter((id): id is string => id !== undefined);
     expect(durableCompletionIds).toHaveLength(2);
     expect(new Set(durableCompletionIds).size).toBe(2);
-    const restarted = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+    const restarted = await createTestRegistry({ 
       agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: createModels,
       trust: new TrustService(agentDir),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -6636,7 +6630,7 @@ export default function (pi) {
     faux.setResponses([fauxAssistantMessage("prompt response")]);
     runtime.registerNativeProvider(faux.provider);
     const events: Array<{ topic: string; payload: any; at: number }> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime,
       trust: new TrustService(agentDir), broadcast: (_id, topic, payload) => events.push({ topic, payload, at: Date.now() }),
@@ -6704,7 +6698,7 @@ export default function (pi) {
     const events: Array<{ topic: string; payload: any }> = [];
     const liveSnapshots: Array<{ progress: any; streaming: any }> = [];
     let currentSlot: Awaited<ReturnType<RuntimeRegistry["create"]>> | undefined;
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: (_id, topic, payload) => {
@@ -6771,7 +6765,7 @@ export default function (pi) {
     };
     faux.setResponses([fauxAssistantMessage(text)]);
     const events: Array<{ topic: string; at: number; payload: { eventSequence?: number; data?: any } }> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -6879,7 +6873,7 @@ export default function (pi) {
     };
     faux.setResponses([fauxAssistantMessage(unwatched), fauxAssistantMessage(watched)]);
     const events: Array<{ topic: string; payload: { data?: any } }> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -6951,7 +6945,7 @@ export default function (pi) {
         return runtime;
       };
       faux.setResponses([fauxAssistantMessage("stable identity")]);
-      const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+      const registry = await createTestRegistry({ 
         agentDir,
         tronHome: join(root, "tron"),
         idleRuntimeMs: 60_000,
@@ -7010,7 +7004,7 @@ export default function (pi) {
     }\n`);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -7052,7 +7046,7 @@ export default function (pi) {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     const failures: unknown[] = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       modelRuntimeFactory: async () => runtime,
       broadcast: (_id, topic, payload) => { if (topic === "session.operationFailed") failures.push(payload); },
@@ -7097,7 +7091,7 @@ export default function (pi) {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     const failures: unknown[] = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       modelRuntimeFactory: async () => runtime,
       broadcast: (_id, topic, payload) => { if (topic === "session.operationFailed") failures.push(payload); },
@@ -7121,7 +7115,7 @@ export default function (pi) {
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -7405,7 +7399,7 @@ export default function (pi) {
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -7532,7 +7526,7 @@ export default function (pi) {
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -7613,7 +7607,7 @@ export default function (pi) {
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -7697,7 +7691,7 @@ export default function (pi) {
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -7793,7 +7787,7 @@ export default function (pi) {
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -7902,7 +7896,7 @@ export default function (pi) {
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -8453,7 +8447,7 @@ export default function (pi) {
     expect(userEntry).toBeDefined();
     await fixture.registry.dispose();
     registries.splice(registries.indexOf(fixture.registry), 1);
-    const resumedRegistry = new RuntimeRegistry({ modules: await startTestModules(join(fixture.root, "tron")),
+    const resumedRegistry = await createTestRegistry({ 
       agentDir: fixture.agentDir, tronHome: join(fixture.root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => { const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }); runtime.registerNativeProvider(faux.provider); return runtime; },
       trust: new TrustService(fixture.agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -8593,7 +8587,7 @@ export default function (pi) {
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     const snapshots: Array<{ phase: string; operation?: { kind: string }; retry?: unknown }> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -8651,7 +8645,7 @@ export default function (pi) {
     faux.setResponses([fauxAssistantMessage("skill complete"), fauxAssistantMessage("prompt complete")]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: (_sessionId, topic, payload) => {
@@ -8707,7 +8701,7 @@ export default function (pi) {
     faux.setResponses([async () => { agentEntered(); await responseBarrier; return fauxAssistantMessage("should not complete"); }]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -8742,7 +8736,7 @@ export default function (pi) {
     faux.setResponses([fauxAssistantMessage("completed before dispose")]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -8794,7 +8788,7 @@ export default function (pi) {
     faux.setResponses([async () => { agentEntered(); await responseBarrier; return fauxAssistantMessage("completed on its own"); }]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -8841,7 +8835,7 @@ export default function (pi) {
     faux.setResponses([fauxAssistantMessage("finished before Stop")]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -8894,7 +8888,7 @@ export default function (pi) {
     };
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9039,7 +9033,7 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9121,7 +9115,7 @@ export default function (pi) {
       async () => { await responseBarrier; return fauxAssistantMessage("first completion"); },
       fauxAssistantMessage("next completion"),
     ]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9180,7 +9174,7 @@ export default function (pi) {
       fauxAssistantMessage("first completion"),
       fauxAssistantMessage("must not be admitted"),
     ]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9235,7 +9229,7 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9279,7 +9273,7 @@ export default function (pi) {
       await responseBarrier;
       return fauxAssistantMessage("run complete");
     }]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9330,7 +9324,7 @@ export default function (pi) {
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9381,7 +9375,7 @@ export default function (pi) {
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     const broadcasts: Array<{ sessionId: string; topic: string; payload: unknown }> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9448,7 +9442,7 @@ export default function (pi) {
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     const broadcasts: Array<{ topic: string; payload: any }> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
       trust: new TrustService(agentDir),
@@ -9500,7 +9494,7 @@ export default function (pi) {
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9541,7 +9535,7 @@ export default function (pi) {
       async () => { await firstBarrier; return fauxAssistantMessage("first complete"); },
       async () => { await secondBarrier; return fauxAssistantMessage("second complete"); },
     ]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9616,7 +9610,7 @@ export default function (pi) {
       await responseBarrier;
       return fauxAssistantMessage("run complete");
     }]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9665,7 +9659,7 @@ export default function (pi) {
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9716,7 +9710,7 @@ export default function (pi) {
     let releaseFactory!: () => void;
     const factoryWasEntered = new Promise<void>((resolve) => { factoryEntered = resolve; });
     const factoryBarrier = new Promise<void>((resolve) => { releaseFactory = resolve; });
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -9766,7 +9760,7 @@ export default function (pi) {
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -9789,7 +9783,7 @@ export default function (pi) {
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -10012,7 +10006,7 @@ export default function (pi) {
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("bash", { command }, { id: "call-owned-bash" })], { stopReason: "toolUse" }),
     ]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -10073,7 +10067,7 @@ export default function (pi) {
     ]);
     await writeFile(join(cwd, "one.txt"), "one\n");
     const events: Array<{ topic: string; payload: any }> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -10255,7 +10249,7 @@ export default function (pi) {
       fauxAssistantMessage("done"),
     ]);
     const events: Array<{ topic: string; payload: any }> = [];
-    const makeRegistry = async () => new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const makeRegistry = async () => await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: createModels, trust,
       broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
@@ -10352,7 +10346,7 @@ export default function (pi) {
       fauxAssistantMessage("done"),
     ]);
     const liveFrames: Array<{ calls: Array<{ arguments?: unknown }>; complete: boolean }> = [];
-    const makeRegistry = async () => new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const makeRegistry = async () => await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory: createModels, trust,
       broadcast: (_sessionId, topic, payload: any) => {
         if (topic === "session.toolProgress" && payload.data?.toolCallId === "codemode-list" && payload.data.nestedCalls) {
@@ -10425,7 +10419,7 @@ export default function (pi) {
     ]);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: createModels, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -10496,7 +10490,7 @@ export default function (pi) {
     )], { stopReason: "toolUse" })]);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => {
         const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -10586,7 +10580,7 @@ export default function (pi) {
         runtime.registerNativeProvider(faux.provider);
         return runtime;
       };
-      const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+      const registry = await createTestRegistry({ 
         agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory,
         trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
       });
@@ -10680,7 +10674,7 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, maximumLiveRuntimes: 1,
       modelRuntimeFactory, trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -10773,7 +10767,7 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const makeRegistry = async () => new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const makeRegistry = async () => await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, maximumLiveRuntimes: 1,
       modelRuntimeFactory, trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -10863,7 +10857,7 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -10933,7 +10927,7 @@ export default function (pi) {
       return runtime;
     };
     const progress: Array<{ toolCallId: string; toolSegmentId?: string }> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -10988,7 +10982,7 @@ export default function (pi) {
       fauxAssistantMessage("finished"),
     ]);
     const events: Array<{ topic: string; payload: any }> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -11078,7 +11072,7 @@ export default function (pi) {
       fauxAssistantMessage("finished"),
     ]);
     const progress: Array<{ toolCallId: string; toolSegmentId?: string }> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -11141,7 +11135,7 @@ export default function (pi) {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     const failures: unknown[] = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       modelRuntimeFactory: async () => runtime,
       broadcast: (_id, topic, payload) => { if (topic === "session.operationFailed") failures.push(payload); },
@@ -11187,7 +11181,7 @@ export default function (pi) {
     runtime.registerNativeProvider(faux.provider);
     const workRegistry = new GatewayWorkRegistry("failed-command-turn-epoch");
     const derivedAdmissions = vi.spyOn(workRegistry, "beginDerived");
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust, workRegistry,
       modelRuntimeFactory: async () => runtime,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -11392,7 +11386,7 @@ export default function (pi) {
     faux.setResponses([fauxAssistantMessage("streaming ".repeat(100))]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       modelRuntimeFactory: async () => runtime,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -11548,7 +11542,7 @@ export default function (pi) {
     }\n`);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -11622,7 +11616,7 @@ export default function (pi) {
     }\n`);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -11802,7 +11796,7 @@ export default function (pi) {
     await trust.set(closingCwd, true);
     const shutdownTopics: string[] = [];
     let listChanges = 0;
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       broadcast: (_sessionID, topic) => shutdownTopics.push(topic),
       sessionSummaryChanged: () => {},
@@ -11879,7 +11873,7 @@ export default function (pi) {
     ]);
     const trust = new TrustService(agentDir);
     await Promise.all([trust.set(firstCwd, true), trust.set(secondCwd, true)]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -11911,7 +11905,7 @@ export default function (pi) {
       return runtime;
     };
     faux.setResponses([fauxAssistantMessage("cached")]);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -11959,7 +11953,7 @@ export default function (pi) {
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
     const resourceEvents: string[] = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -12054,7 +12048,7 @@ export default function (pi) {
     ]);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -12121,7 +12115,7 @@ export default function (pi) {
       return runtime;
     };
     const createRegistry = async () => {
-      const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+      const registry = await createTestRegistry({ 
         agentDir,
         tronHome: join(root, "tron"),
         idleRuntimeMs: 60_000,
@@ -12190,7 +12184,7 @@ export default function (pi) {
     };
     faux.setResponses([fauxAssistantMessage("done")]);
     const rekeys: Array<[string, string]> = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
@@ -8,7 +9,7 @@ import { expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { managedProducerAPI } from "../extensions/managed-producer.js";
 import { producerIdentity, withExtensionOwner } from "../extensions/owner-attribution.js";
@@ -18,7 +19,6 @@ import { fileURLToPath } from "node:url";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
 import { invocationProjection, invocationReceipts } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt, extensionActivityReceipts } from "./extension-activity-history.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 it("attributes real workflow completion and supervisor delivery to their managed producer", async ({ task }) => {
   const root = await mkdtemp(join(tmpdir(), "tron-managed-attribution-"));
@@ -128,7 +128,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
     let catalogPasses = 0;
-    const createRegistry = async () => new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, managedSubagents, delegatedArtifactRoot: delegatedArtifactRoot(tronHome), trust, idleRuntimeMs: 60_000,
+    const createRegistry = async () => await createTestRegistry({ agentDir, tronHome, managedSubagents, delegatedArtifactRoot: delegatedArtifactRoot(tronHome), trust, idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => {
         const runtime = await ModelRuntime.create({ modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
         runtime.registerNativeProvider(faux.provider);

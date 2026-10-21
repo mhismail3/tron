@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's learned profile (#731), end to end: the `profile` tool called by a
  * faux Home model inside real activations, the real Knowledge store behind it,
@@ -38,14 +39,13 @@ import { HomeTaskStore, type HomeTaskRecord } from "../home/home-task-store.js";
 import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../admin/settings-record.js";
 import { SettingsApprovals } from "../admin/settings-approvals.js";
 import { HomeProfileItems } from "../home/home-profile.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PROVIDER = "tron-home-profile";
 const MODEL_ID = "chat";
@@ -206,7 +206,7 @@ async function fixture(label: string): Promise<Fixture> {
   runtime.registerNativeProvider(memoryFaux.provider);
   const trust = new TrustService(agentDir);
   await trust.set(project, true);
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir,
+  const registry = await createTestRegistry({ agentDir,
     tronHome,
     idleRuntimeMs: 60_000,
     gatewayModelRuntime: runtime,

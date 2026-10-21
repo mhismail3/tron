@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { homeMemoryChange } from "../../test-support/chat-settings-change.js";
@@ -14,9 +15,8 @@ import type { HomeStatus } from "../protocol/types.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+
 import { OpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 // #480 A1-A4, found live: Home's chat reached Pi's built-in Anthropic provider
 // instead of the user's CortexKit package. A user package registers its provider
@@ -75,7 +75,7 @@ async function fixture(options: { shareGatewayRuntime: boolean }) {
   // The Gateway-wide runtime: built-ins plus the user's package provider.
   const gateway = await create();
   gateway.registerNativeProvider(packaged.provider);
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+  const registry = await createTestRegistry({ 
     agentDir, tronHome, idleRuntimeMs: 60_000,
     modelRuntimeFactory: create,
     ...(options.shareGatewayRuntime ? { gatewayModelRuntime: gateway } : {}),

@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -18,12 +19,11 @@ import { GatewayServer } from "../transport/server.js";
 import { DeviceStore } from "../security/device-store.js";
 import { ManagedSubagents } from "./managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import { HOME_SOFT_BYTES } from "../home/home-chapter-state.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
 import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 function barrier() {
   let release!: () => void;
@@ -101,7 +101,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       return "queued" as const;
     });
     const suppressAutomatic = vi.fn(async () => "suppressed" as const);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, idleRuntimeMs: 60_000,
+    const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000,
       delegatedArtifactRoot: delegatedArtifactRoot(tronHome),
       modelRuntimeFactory: async () => runtime, trust,
       ...(managedSubagents ? { managedSubagents } : {}),

@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,10 +8,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayError } from "../errors.js";
 import { DeviceStore } from "../security/device-store.js";
 import { TrustService } from "../admin/trust-service.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+
 import { GatewayServer } from "./server.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -127,7 +127,7 @@ describe("terminal attachment revocation after session deletion", () => {
     const port = await unusedPort();
     let gateway!: GatewayServer;
     const sessionClosed = vi.fn((sessionId: string) => gateway.revokeSessionTerminals(sessionId));
-    const sessions = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const sessions = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

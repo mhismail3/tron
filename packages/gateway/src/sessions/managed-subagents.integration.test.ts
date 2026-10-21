@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,9 +12,8 @@ import { GatewayLogger } from "../transport/logger.js";
 import { TrustService } from "../admin/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** Real Gateway/SDK execution; only the external model output is scripted.
  * The fixture owns home/cache/session state and disposes the runtime before files. */
@@ -111,7 +111,7 @@ it.each([
     ]);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    registry = new RuntimeRegistry({ modules: await startTestModules(foreignHome ? join(root, "foreign-tron") : tronHome),
+    registry = await createTestRegistry({ 
       agentDir, tronHome: foreignHome ? join(root, "foreign-tron") : tronHome, managedSubagents, trust, idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => {
         const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });

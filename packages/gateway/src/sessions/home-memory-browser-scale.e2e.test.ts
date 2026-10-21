@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 /**
  * Manage Home → Memory at a real Home's scale (#940): three chapters, 1200+
  * messages and tens of megabytes of canonical JSONL, built through the real
@@ -27,8 +28,7 @@ import type { HomeMemoryEvidencePage, HomeMemoryView, HomeStatus } from "../prot
 import type { GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 
 const PROVIDER = "tron-home-scale";
 const MODEL = { provider: PROVIDER, id: "chat" };
@@ -63,7 +63,7 @@ interface Gateway { registry: RuntimeRegistry; service: GatewayService; receipts
 async function openGateway(root: string, runtime: ModelRuntime): Promise<Gateway> {
   const agentDir = join(root, "agent");
   const tronHome = join(root, "tron");
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+  const registry = await createTestRegistry({ 
     agentDir, tronHome, idleRuntimeMs: 600_000,
     modelRuntimeFactory: async () => runtime,
     trust: new TrustService(agentDir),

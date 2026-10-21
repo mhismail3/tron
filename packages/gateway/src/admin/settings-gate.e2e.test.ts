@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,7 +13,7 @@ import { TrustService } from "./trust-service.js";
 import { APPROVAL_TTL_MS } from "./settings-approvals.js";
 import type { ChangeEntry } from "./settings-record.js";
 import { SETTINGS_OUTCOME_MESSAGE } from "./tron-settings-extension.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
@@ -20,7 +21,6 @@ import type { HomeDiagnosticRecord } from "../home/home-diagnostic.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { disposeFixtures, fixture as homeTaskFixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * The settings risk gate end to end (docs/settings-model.md 5.4-5.5, F3): real
@@ -98,7 +98,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   await trust.set(project, true);
   const runtimeEvents: Array<{ sessionId: string; topic: string; payload: unknown }> = [];
   const homeDiagnostics: HomeDiagnosticRecord[] = [];
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
+  const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
     ...(options.maximumLiveRuntimes === undefined ? {} : { maximumLiveRuntimes: options.maximumLiveRuntimes }),
     broadcast: (sessionId, topic, payload) => { runtimeEvents.push({ sessionId, topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     homeDiagnostic: event => homeDiagnostics.push(event),
@@ -445,7 +445,7 @@ describe("settings risk gate", () => {
     const fork = await slot.fork(point.id, "at");
     expect(slot.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(reset.fixedAt);
     await f.registry.dispose();
-    const reopened = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+    const reopened = await createTestRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
     registries.push(reopened);
     await reopened.initialize();
@@ -784,7 +784,7 @@ describe("settings risk gate", () => {
     expect(changes.map(entry => entry.op)).toEqual(expect.arrayContaining(["set", "unset"]));
     // Cold resume of the parent keeps its own Chat values (the fork's unset is branch-local).
     await f.registry.dispose();
-    const reopened = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+    const reopened = await createTestRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
     registries.push(reopened);
     await reopened.initialize();
@@ -922,7 +922,7 @@ describe("settings risk gate", () => {
     expect(canonical).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.settings.v1",
       data: expect.objectContaining({ settings: expectedChat }) }));
     await f.registry.dispose();
-    const reopened = new RuntimeRegistry({ modules: await startTestModules(f.tronHome),
+    const reopened = await createTestRegistry({ 
       agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -1183,7 +1183,6 @@ describe("settings risk gate", () => {
     expect(entries.map(entry => entry.actor.taskId)).toEqual(["clean-worker", "marked-worker"]);
     transcript.push({ case: "Home task worker", steps: entries.map(entry => ({ actor: entry.actor, tier: entry.tier, tierBasis: entry.tierBasis, status: entry.status })) });
   }, 90_000);
-
 
   /**
    * #1336: Home reads and changes a delegated worker's settings while that worker

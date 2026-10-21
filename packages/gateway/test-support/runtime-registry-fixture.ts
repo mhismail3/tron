@@ -1,3 +1,4 @@
+import { createTestRegistry } from "./gateway-registry.js";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,8 +12,7 @@ import type { GatewayWorkRegistry } from "../src/sessions/gateway-work-registry.
 import type { ResourceRecorder } from "../src/transport/stall-diagnostics.js";
 import type { SessionCatalog, SessionCatalogReconcileOutcome } from "../src/sessions/session-catalog.js";
 import type { ExtensionArtifactDiscoveryCounts } from "../src/sessions/extension-artifact-discovery.js";
-import { RuntimeRegistry, type CapacityShedRecord, type RuntimeLifecycleRecord } from "../src/sessions/runtime-registry.js";
-import { startTestModules } from "./gateway-modules.js";
+import { type RuntimeRegistry, type CapacityShedRecord, type RuntimeLifecycleRecord } from "../src/sessions/runtime-registry.js";
 
 /** Shared cold-start RuntimeRegistry fixture for the runtime-registry journeys. Each caller owns
  * the registry array it passes in: disposal and PI_CODING_AGENT_DIR restoration stay in that
@@ -90,7 +90,7 @@ export async function createColdRegistryFixture(registries: RuntimeRegistry[], l
   const events: Array<{ topic: string; payload: any }> = [];
   const summaries: SessionSummaryUpdate[] = [];
   const delegatedRoot = options.delegatedRoot;
-  const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+  const registry = await createTestRegistry({ 
     agentDir,
     tronHome: join(root, "tron"),
     idleRuntimeMs: 60_000,

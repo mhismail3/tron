@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { existsSync } from "node:fs";
 import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -12,8 +13,7 @@ import type { GatewayConfig } from "../config.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 
 const PROVIDER = "tron-home-fixture";
 const MODEL_ID = "home-model";
@@ -102,7 +102,7 @@ async function openRegistry(f: {
   diagnostics: Fixture["diagnostics"];
   events: Fixture["events"];
 }): Promise<{ registry: RuntimeRegistry; service: GatewayService }> {
-  const registry = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: f.agentDir,
+  const registry = await createTestRegistry({ agentDir: f.agentDir,
     tronHome: f.tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => f.runtime,

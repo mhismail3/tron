@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -15,7 +16,7 @@ import { SettingsModel } from "../admin/settings-model.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
 import { MacTerminalKeys } from "../security/mac-terminal.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { PROTOCOL_VERSION } from "../version.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService, type GatewayServiceDependencies } from "./gateway-service.js";
@@ -23,7 +24,6 @@ import { GatewayLogger, type LogRecord } from "./logger.js";
 import { GatewayServer } from "./server.js";
 import { RequestSpan, runInRequestSpan } from "./request-span.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * Proves the request span's breakdown reaches the real log writer: every
@@ -163,7 +163,7 @@ describe("cold session.open request span", () => {
     }
     const fileBytes = (await readFile(manager.getSessionFile()!)).byteLength;
 
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -350,7 +350,7 @@ describe("settings.resolve request span", () => {
     }
     const macTerminalKeys = new FixtureMacTerminalKeys(join(root, "ssh"));
     const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys });
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

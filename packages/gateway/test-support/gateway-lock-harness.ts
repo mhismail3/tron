@@ -1,3 +1,4 @@
+import { createTestRegistry } from "./gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -18,7 +19,7 @@ import { MacTerminalKeys } from "../src/security/mac-terminal.js";
 import { DeviceStore } from "../src/security/device-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
 import { TerminalService } from "../src/machine/terminal-service.js";
-import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../src/sessions/runtime-registry.js";
+import { type RuntimeRegistry, type RuntimeLifecycleRecord } from "../src/sessions/runtime-registry.js";
 import type { NotificationService } from "../src/notifications/notification-service.js";
 import { GatewayAutomationExecutor } from "../src/automations/automation-executor.js";
 import { AutomationScheduler } from "../src/automations/automation-scheduler.js";
@@ -35,7 +36,6 @@ import {
   type TraceNormalization, type TraceValue,
 } from "./scenario-lock.js";
 import { waitFor } from "./wait-for.js";
-import { startTestModules } from "./gateway-modules.js";
 
 /**
  * One real Gateway for a kernel scenario lock (restructure plan §6.4): the
@@ -239,8 +239,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   let server: GatewayServer | undefined;
   const notificationService = await options.notifications?.(tronHome);
   const runtimeLifecycle: RuntimeLifecycleRecord[] = [];
-  const modules = await startTestModules(tronHome);
-  const registry = new RuntimeRegistry({ modules,
+  const registry = await createTestRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     ...(notificationService ? { notifications: notificationService, machineId: "lock-machine" } : {}),
     ...(options.automations ? {
@@ -296,7 +295,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const uploads = new UploadStore(tronHome, 1_048_576);
   const service = new GatewayService({
     config: { machineId: "lock-machine", machineGroupID: "lock-group", machineName: "Lock Mac", tronHome, agentDir },
-    modelRuntime, devices, sessions: registry, modules, trust, settingsModel, settingsChanges, receipts,
+    modelRuntime, devices, sessions: registry, modules: registry.moduleHost, trust, settingsModel, settingsChanges, receipts,
     ...(options.home ? { home: registry.homeOwner() } : {}),
     ...(automations ? { automations } : {}),
     notifications: notificationService

@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,7 +9,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { AuthBroker } from "../admin/auth-broker.js";
 import { TrustService } from "../admin/trust-service.js";
 import { DeviceStore } from "../security/device-store.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { GatewayServer } from "./server.js";
@@ -16,7 +17,6 @@ import { settingsDependencies } from "../../test-support/settings-dependencies.j
 import { chatSettingChange, changedRevision, type ChatSetting } from "../../test-support/chat-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TerminalService } from "../machine/terminal-service.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which RPCs the session idle
@@ -102,7 +102,7 @@ async function fixture(options: {
   };
   let server: GatewayServer | undefined;
   const trust = new TrustService(agentDir);
-  const registry = new RuntimeRegistry({ modules: await startTestModules(root), agentDir,
+  const registry = await createTestRegistry({ agentDir,
     tronHome: root,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: runtimeFactory as never,

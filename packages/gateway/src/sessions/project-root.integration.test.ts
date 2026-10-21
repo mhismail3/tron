@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -9,9 +10,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { GatewayError } from "../errors.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * The Project layer is the worktree root's `.pi/` (settings-model decision 31),
@@ -123,7 +123,7 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, maximumLiveRuntimes: 4,
       modelRuntimeFactory, trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

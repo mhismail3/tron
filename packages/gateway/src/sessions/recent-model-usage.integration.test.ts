@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -6,9 +7,8 @@ import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { MAXIMUM_RECENT_MODELS, type RecentModelUsage } from "../providers/recent-models.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** Wait for the catalog owner's first published cut: a read that lands before
  * it refuses retryably, and no reader walks the folder (G-1c). */
@@ -54,7 +54,7 @@ describe("recent model usage", { concurrent: false }, () => {
     runtime.registerNativeProvider(faux.provider);
     const changes: string[] = [];
     const recentChangeListeners = new Set<() => void>();
-    const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome,
       idleRuntimeMs: 60_000,
@@ -162,7 +162,7 @@ describe("recent model usage", { concurrent: false }, () => {
     const tronHome = join(root, "tron");
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(tronHome, "gateway"), { recursive: true })]);
     await writeFile(join(tronHome, "gateway", "model-recents.json"), "{ not json", "utf8");
-    const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+    const registry = await createTestRegistry({ 
       agentDir,
       tronHome,
       idleRuntimeMs: 60_000,

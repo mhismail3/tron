@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
@@ -8,10 +9,9 @@ import { expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { ManagedSubagents } from "./managed-subagents.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 // Failure modes: managed loader/admission leaks into Home, or its resource read
 // still discovers external agents. Exercise real profile owners and SDK reloads.
@@ -39,7 +39,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
     const openRegistry = async () => {
       const trust = new TrustService(agentDir);
       await trust.set(cwd, true);
-      const next = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+      const next = await createTestRegistry({ 
         agentDir, tronHome, managedSubagents, trust, idleRuntimeMs: 60_000,
         modelRuntimeFactory: async () => {
           const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });

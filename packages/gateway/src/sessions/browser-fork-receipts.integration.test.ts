@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,9 +8,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const installedFork = process.env.TRON_P99_17_BROWSER_FORK_COPY;
 const installedForkSource = "git:github.com/fitchmultz/pi-agent-browser-native@d6cde09af8d7757bbfba5a4ffaf83381bb392683";
@@ -91,7 +91,7 @@ describe("installed agent-browser fork receipts", () => {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const createRegistry = async () => new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const createRegistry = async () => await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       browserLiveViews: views, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

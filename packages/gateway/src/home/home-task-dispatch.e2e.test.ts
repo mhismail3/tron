@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import * as fileSystem from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { spawn, spawnSync } from "node:child_process";
@@ -14,7 +15,7 @@ import { HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "./home-task-dispatcher.js"
 import { HomeMemoryRefusal } from "./home-request-policy.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { SessionCatalog } from "../sessions/session-catalog.js";
 import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -26,7 +27,6 @@ import { GatewayError } from "../errors.js";
 import { freezeHomeLedgerWriter } from "../../test-support/home-ledger-crash-frozen-owner.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 import { issueGrant } from "../../test-support/home-task-grant.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const evidence: Array<Record<string, unknown>> = [];
 afterEach(async () => {
@@ -93,7 +93,6 @@ async function observeTaskAcknowledgement<T>(f: Awaited<ReturnType<typeof fixtur
   }
   return accepted;
 }
-
 
 describe("Home task authorization RPC", () => {
   async function controls() {
@@ -1941,7 +1940,7 @@ describe("Home task production dispatch", () => {
     await f.registry.dispose();
     await rm(await taskFile(f, "task-one"));
     let constructions = 0;
-    const cold = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    const cold = await createTestRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
       modelRuntimeFactory: async () => {
         constructions += 1;
         throw new Error("Executable runtime constructed before task reference check");

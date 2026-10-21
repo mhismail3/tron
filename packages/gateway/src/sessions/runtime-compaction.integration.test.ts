@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,12 +10,11 @@ import type { SessionSnapshot, ExtensionRunActivity } from "../protocol/types.js
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import type { RunMarkerStore } from "./run-markers.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { chatSettingChange } from "../../test-support/chat-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 describe("compaction cancellation with the pinned runtime", { concurrent: false }, () => {
   it("settles one Stop during between-turn compaction without starting another summary", async () => {
@@ -66,7 +66,7 @@ describe("compaction cancellation with the pinned runtime", { concurrent: false 
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")), agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+    const registry = await createTestRegistry({ agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: (_id, topic) => { sessionEvents.push(topic); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
       compactionDiagnostic: diagnostic => compactionDiagnostics.push(diagnostic),
@@ -161,7 +161,7 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
   const sessionEvents: Array<{ topic: string; payload: unknown }> = [];
   let onSnapshot: ((snapshot: SessionSnapshot) => void) | undefined;
   const trust = new TrustService(agentDir);
-  const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+  const registry = await createTestRegistry({ 
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime, trust,
     broadcast: (_id, event, value) => {
@@ -649,7 +649,7 @@ describe("compaction operation admission and authoritative reconciliation", { co
     const diagnostics: Array<Record<string, unknown>> = [];
     const adopted: Array<Record<string, unknown>> = [];
     const events: string[] = [];
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: (_id, topic, value) => {

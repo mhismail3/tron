@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { request } from "node:http";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,13 +10,12 @@ import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { DeviceStore } from "../security/device-store.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { GatewayServer } from "./server.js";
 import type { AsyncMutex } from "../util/async-mutex.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 function gate() {
   let resolve!: () => void;
@@ -66,7 +66,7 @@ async function fixture() {
   await Promise.all([mkdir(agentDir), mkdir(cwd)]);
   const faux = fauxProvider({ provider: "revocation-fixture", tokensPerSecond: 100_000 });
   faux.setResponses([fauxAssistantMessage("one accepted response")]);
-  registry = new RuntimeRegistry({ modules: await startTestModules(root),
+  registry = await createTestRegistry({ 
     agentDir, tronHome: root, idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });

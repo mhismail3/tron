@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's curated read-only research tools (#724), end to end: `web_search`,
  * `web_fetch`, `session_search`, `session_read`, `knowledge` and `read_file` registered by the
@@ -39,10 +40,9 @@ import type { HomeResearchToolDetails } from "../home/home-research-tools.js";
 import { legacyEntriesDigest, seedLegacyChronicle } from "../../test-support/legacy-chronicle.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import { SessionSearchIndex } from "./session-search-index.js";
 import { SessionSearchService } from "./session-search-service.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PROVIDER = "tron-home-research";
 const MODEL_ID = "chat";
@@ -162,7 +162,7 @@ async function fixture(
   await trust.set(project, true);
   const requestRecords: HomeRequestRecord[] = [];
   const web = webTransport();
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir,
+  const registry = await createTestRegistry({ agentDir,
     tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime,

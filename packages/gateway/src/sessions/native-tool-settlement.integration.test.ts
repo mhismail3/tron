@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
@@ -8,9 +9,8 @@ import { InMemoryCredentialStore, fauxAssistantMessage, fauxProvider, fauxToolCa
 import { describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -159,7 +159,7 @@ describe("native-tool settlement qualification with the pinned runtime", { concu
           fauxToolCall("fixture_native_action", {}, { id: callId }),
         ], { stopReason: "toolUse" })]);
         const workRegistry = new GatewayWorkRegistry();
-        registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+        registry = await createTestRegistry({ 
           agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust, workRegistry,
           modelRuntimeFactory: async () => {
             const runtime = await ModelRuntime.create({

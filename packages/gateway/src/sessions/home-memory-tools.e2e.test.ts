@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's memory tools end to end: `zoom`, `date` and `memory_search`
  * registered by the real `tron-home` module, called by a faux model inside a real
@@ -40,8 +41,7 @@ import { HOME_MEMORY_VIEW_MARKER, type HomeMemoryUnavailableReason } from "../ho
 import type { HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeMemoryToolDetails } from "../home/home-memory-tools.js";
 import type { HomeMemoryStatus } from "../protocol/types.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
+import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
 
 const PROVIDER = "tron-home-tools";
 const MODEL_ID = "chat";
@@ -152,7 +152,7 @@ interface Fixture {
 }
 
 async function openRegistry(f: Fixture): Promise<RuntimeRegistry> {
-  const registry = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: join(f.root, "agent"),
+  const registry = await createTestRegistry({ agentDir: join(f.root, "agent"),
     tronHome: f.tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => f.runtime,

@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's request seam inside the real Gateway runtime (`RuntimeRegistry` +
  * `RuntimeSlot`), with the pinned Pi SDK, a faux provider and the real episodic
@@ -57,8 +58,7 @@ import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
 import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason, type HomeRequestRecord } from "../home/home-request-policy.js";
 import * as tronModules from "../extensions/tron-modules.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 
 const PROVIDER = "tron-home-seam";
 const MODEL_ID = "fixture";
@@ -187,7 +187,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
   const diagnostics: CapturedDiagnostic[] = [];
   const snapshots: SessionSnapshot[] = [];
   const requestRecords: HomeRequestRecord[] = [];
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir,
+  const registry = await createTestRegistry({ agentDir,
     tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime,
@@ -432,7 +432,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
 
     const coldModelRuntime = await ModelRuntime.create({ authPath: join(item.root, "auth.json"), modelsPath: null, refreshOnCreate: false });
     coldModelRuntime.registerNativeProvider(item.faux.provider);
-    const coldRegistry = new RuntimeRegistry({ modules: await startTestModules(item.tronHome),
+    const coldRegistry = await createTestRegistry({ 
       agentDir: item.agentDir,
       tronHome: item.tronHome,
       idleRuntimeMs: 60_000,

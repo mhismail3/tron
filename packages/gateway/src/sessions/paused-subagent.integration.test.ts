@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,10 +7,9 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import type { ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which lifecycle facts the
@@ -65,7 +65,7 @@ async function pausedFixture(label: string): Promise<Fixture> {
   const manager = SessionManager.create(cwd, sessionDirectory);
   manager.appendMessage(fauxAssistantMessage(`paused subagent ${label}`));
   const summaries: SessionSummaryUpdate[] = [];
-  const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+  const registry = await createTestRegistry({ 
     agentDir,
     tronHome: join(root, "tron"),
     idleRuntimeMs: 60_000,

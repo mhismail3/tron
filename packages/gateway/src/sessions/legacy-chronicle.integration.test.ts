@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 /**
  * Chronicle generation is retired (#1315); its history is not.
  *
@@ -22,10 +23,9 @@ import { TrustService } from "../admin/trust-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { LEGACY_CHRONICLE_CONFIG, legacyEntriesDigest, persistedKnowledgeConfig, seedLegacyChronicle } from "../../test-support/legacy-chronicle.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 describe("retired Chronicle generation over preserved legacy history", { concurrent: false }, () => {
   const cleanup: Array<() => Promise<void>> = [];
@@ -51,7 +51,7 @@ describe("retired Chronicle generation over preserved legacy history", { concurr
       fauxAssistantMessage("Noted, replies stay concise."),
     ]);
     runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

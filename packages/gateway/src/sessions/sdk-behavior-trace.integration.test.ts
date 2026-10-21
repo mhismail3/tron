@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,14 +10,13 @@ import {
 } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import {
   clientEventTrace, collapseRepeatedRequests, compareWithGolden, eventShapePaths, hashPromptText,
   lockUpdateRequested, normalizeTraceValue, promptSectionHeadings,
   type BehaviorTrace, type ProviderRequestTrace, type TraceValue,
 } from "../../test-support/scenario-lock.js";
 import { WAIT_HANG_BOUND_MS, awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * The SDK-boundary behavior trace (epic #468, layer L2).
@@ -319,7 +319,7 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     await runtime.setRuntimeApiKey("typesafe", "synthetic-typesafe-key");
     return runtime;
   };
-  const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+  const registry = await createTestRegistry({ 
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
     broadcast: (_sessionId, topic, payload) => { clientEvents.push({ topic, paths: eventShapePaths(topic, payload) }); },
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},

@@ -890,7 +890,7 @@ export class RuntimeRegistry {
 
   /** The composition's one workspace (`workspaceModule`), shared by capability stores. */
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
-
+  get moduleHost(): ModuleHost { return this.options.modules; }
   setSearchInvalidator(invalidator: (sessionID: string, nextSessionID?: string) => void): void {
     this.searchInvalidator = invalidator;
   }

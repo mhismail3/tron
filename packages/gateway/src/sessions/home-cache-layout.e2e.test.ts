@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { homeMemoryChange } from "../../test-support/chat-settings-change.js";
@@ -18,8 +19,6 @@ import type { HomeStatus } from "../protocol/types.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 // Recipe §8 caching, proved on the wire (#491): Home
 // turns and the episodic summarizer's calls go through pi-ai's real Anthropic
@@ -132,7 +131,7 @@ async function fixture(responses = false) {
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
   const records: HomeRequestRecord[] = [];
   const configurations: Array<{ sessionId: string; blocker: unknown }> = [];
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, idleRuntimeMs: 60_000,
+  const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime,
     trust: new TrustService(agentDir),
     broadcast: (sessionId: string, topic: string, payload: unknown) => {

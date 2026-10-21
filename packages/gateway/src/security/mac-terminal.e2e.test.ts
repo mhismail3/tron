@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { Socket, createServer } from "node:net";
 import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
@@ -12,10 +13,9 @@ import { SettingsChangeRecord } from "../admin/settings-record.js";
 import { TrustService } from "../admin/trust-service.js";
 import { DeviceStore } from "./device-store.js";
 import { MAC_TERMINAL_SOURCES, MacTerminalHost, MacTerminalKeys, type MacTerminalStatus } from "./mac-terminal.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * Mac Terminal end to end (README "Mac Terminal"): a real Gateway enrolls a
@@ -145,7 +145,7 @@ async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory:
   const runtimeFactory = () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
   const modelRuntime = await runtimeFactory();
   const trust = new TrustService(agentDir);
-  const sessions = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+  const sessions = await createTestRegistry({ 
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
   });

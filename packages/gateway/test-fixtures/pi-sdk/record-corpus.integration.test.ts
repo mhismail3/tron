@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 /**
  * Records the persisted-state upgrade corpus (#471, layer L1).
  *
@@ -45,7 +46,7 @@ import { TrustService } from "../../src/admin/trust-service.js";
 import { UploadStore } from "../../src/machine/upload-store.js";
 import type { JsonValue } from "../../src/protocol/types.js";
 import { DeviceStore } from "../../src/security/device-store.js";
-import { RuntimeRegistry } from "../../src/sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../../src/sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../../src/transport/command-receipts.js";
 import { GatewayService, type GatewayServiceDependencies } from "../../src/transport/gateway-service.js";
 import {
@@ -78,7 +79,6 @@ import {
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { SYNTHETIC_NATIVE_IMAGE } from "./computer-use-image.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const REPOSITORY_ROOT = resolve(PACKAGE_ROOT, "../..");
@@ -221,7 +221,7 @@ describe("persisted-state upgrade corpus recorder", () => {
       auth.respond("device:corpus", admission.operationId, keyPrompt.payload.promptId as string, CORPUS_AZURE_API_KEY);
       await waitFor(() => authEvents.some((event) => event.topic === "auth.completed"), "the provider key to be stored");
 
-      const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
+      const registry = await createTestRegistry({ 
         agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 600_000, modelRuntimeFactory, trust,
         // Pi's built-in MCP sign-in relays its authorization URL to the Tron
         // operation that started it; this is the hook the Gateway installs.
@@ -387,7 +387,7 @@ describe("persisted-state upgrade corpus recorder", () => {
       });
       const stagedTrust = new TrustService(staged.agentDir);
       await stagedTrust.set(staged.cwd, true);
-      const stagedRegistry = new RuntimeRegistry({ modules: await startTestModules(join(stagedRoot, "tron")),
+      const stagedRegistry = await createTestRegistry({ 
         agentDir: staged.agentDir, tronHome: join(stagedRoot, "tron"), idleRuntimeMs: 600_000, modelRuntimeFactory,
         trust: stagedTrust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
       });

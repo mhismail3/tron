@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
@@ -8,11 +9,10 @@ import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPrompt, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { TrustService } from "../admin/trust-service.js";
 import { TronWorkspace } from "./tron-workspace.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -43,7 +43,7 @@ async function fixture(extension?: string) {
     contexts.push(context);
     return fauxAssistantMessage(text);
   };
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+  const registry = await createTestRegistry({ 
     agentDir, tronHome, idleRuntimeMs: 60_000,
     trust: new TrustService(agentDir),
     modelRuntimeFactory: async () => {

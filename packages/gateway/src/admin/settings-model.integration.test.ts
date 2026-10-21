@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,10 +17,9 @@ import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from ".
 import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "./settings-types.js";
 import { ScopeToolCatalog } from "./tool-catalog.js";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * settings.resolve at its real boundaries (docs/settings-model.md F1, F4):
@@ -89,7 +89,7 @@ async function fixture() {
   }));
   const trust = new TrustService(agentDir);
   const scopeTools = new ScopeToolCatalog(agentDir, trust);
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
+  const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
   });
   registries.push(registry);

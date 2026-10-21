@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home end to end: the real `EpisodicMemory` behind Home's request seam,
  * driven through the Gateway RPC surface, with a deterministic faux compactor and
@@ -81,12 +82,11 @@ import { INLINE_IMAGE_BASE64_LIMIT_BYTES, UploadStore } from "../machine/upload-
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { RuntimeSlot } from "../sessions/runtime-slot.js";
 import { invocationReceipts } from "../sessions/invocation-receipts.js";
 import { logHomeDiagnostic } from "../home/home-diagnostic.js";
 import { GatewayLogger } from "../transport/logger.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PROVIDER = "tron-home-e2e";
 const MODEL_ID = "chat";
@@ -273,7 +273,7 @@ interface Fixture {
 }
 
 async function openRegistry(f: Fixture): Promise<void> {
-  const registry = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: f.agentDir,
+  const registry = await createTestRegistry({ agentDir: f.agentDir,
     tronHome: f.tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => f.runtime,

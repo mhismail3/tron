@@ -48,7 +48,7 @@ ordinary profile's first extension and joins canonical receipt writes before inp
 
 ## Entry points
 
-`ModuleHost.start` (gateway-main, and `test-support/gateway-modules.ts` for test
+`ModuleHost.start` (gateway-main, and `test-support/gateway-registry.ts` for test
 registries), `ModuleHost.contract`, `extension`, `rpc`, `capabilities`, `policy`,
 `observers`, `stop`.
 

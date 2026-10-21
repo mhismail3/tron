@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 /**
  * Installed Swift apps (#1157), end to end through a real RuntimeRegistry and
  * GatewayService: a faux model calls the `swift_app` tool in an ordinary
@@ -28,11 +29,10 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContex
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { TrustService } from "../../admin/trust-service.js";
-import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { type RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { SWIFT_APPS_CAPABILITY } from "./swift-app-store.js";
-import { startTestModules } from "../../../test-support/gateway-modules.js";
 
 const REPORT_PATH = "test-results/swift-app-store/report.json";
 const report: { generatedAt: string; cases: Array<Record<string, unknown>> } = { generatedAt: new Date().toISOString(), cases: [] };
@@ -58,8 +58,7 @@ interface Gateway { registry: RuntimeRegistry; service: GatewayService }
 async function gateway(root: string, faux: ReturnType<typeof fauxProvider>): Promise<Gateway> {
   const agentDir = join(root, "agent");
   const tronHome = join(root, "tron");
-  const modules = await startTestModules(tronHome);
-  const registry = new RuntimeRegistry({ modules,
+  const registry = await createTestRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000,
     trust: new TrustService(agentDir),
     modelRuntimeFactory: async () => {
@@ -73,7 +72,7 @@ async function gateway(root: string, faux: ReturnType<typeof fauxProvider>): Pro
   await registry.initialize();
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
-    sessions: registry, modules, receipts: new CommandReceiptStore(tronHome), broadcast: () => {},
+    sessions: registry, modules: registry.moduleHost, receipts: new CommandReceiptStore(tronHome), broadcast: () => {},
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
   return { registry, service };

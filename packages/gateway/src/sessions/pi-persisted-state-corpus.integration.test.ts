@@ -1,3 +1,4 @@
+import { createTestRegistry } from "../../test-support/gateway-registry.js";
 /**
  * Reopens the persisted-state upgrade corpus with the installed Pi SDK (#471, layer L1).
  *
@@ -39,7 +40,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { type RuntimeRegistry } from "./runtime-registry.js";
 import {
   CORPUS_DIR,
   CORPUS_MCP_SERVERS,
@@ -58,7 +59,6 @@ import {
   type StagedCorpusPaths,
 } from "../../test-support/pi-persisted-state-corpus.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const MCP_STDIO_FIXTURE = resolve(PACKAGE_ROOT, "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
@@ -152,7 +152,7 @@ describe("persisted-state upgrade corpus", () => {
     const before = await sessionFileHashes(staged.sessionDir, CORPUS_SOURCE_DIR);
     const trust = new TrustService(staged.agentDir);
     await trust.set(staged.cwd, true);
-    const registry = new RuntimeRegistry({ modules: await startTestModules(join(staged.root, "tron")),
+    const registry = await createTestRegistry({ 
       agentDir: staged.agentDir, tronHome: join(staged.root, "tron"), idleRuntimeMs: 600_000,
       modelRuntimeFactory: () => corpusModelRuntime(staged.agentDir, corpusFauxProvider()),
       trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
