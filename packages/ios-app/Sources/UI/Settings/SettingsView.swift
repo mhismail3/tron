@@ -271,8 +271,8 @@ struct SettingsSectionLinks: View {
     /// line; joining each section's served description would wrap.
     private func sectionDescription(_ id: String) -> String? {
         let members = members(id)
-        if members.count > 1, let line = id == "model" ? "Models, thinking, and workers"
-            : id == "advanced" ? "Connection, retries, and approvals" : nil { return line }
+        if id == "advanced" { return "Connection, retries, and approvals" }
+        if members.count > 1, id == "model" { return "Models, thinking, and workers" }
         let text = members.compactMap(\.description).joined(separator: " · ")
         return text.isEmpty ? nil : text
     }
