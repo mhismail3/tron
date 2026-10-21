@@ -1,3 +1,4 @@
+import type { ToolDisplayProjection } from "./tool-result.js";
 import type { AgentSession } from "../pi/coding-agent.js";
 import type { BlobStore } from "../../sessions/blob-store.js";
 import type { ExtensionRunActivity, SessionProcessActivity, SessionProcessHistoryPage, ChatSemanticMetadata } from "../../protocol/types.js";
@@ -8,6 +9,7 @@ import { listExtensionActivityHistory, extensionActivityHistoryRevision, extensi
 import { listProcessHistory, processHistoryDetail } from "./process-activity.js";
 
 export interface PageSource {
+  displayProjection: ToolDisplayProjection;
   assertNoTrustReload(): void;
   runtimeGeneration: string;
   runtime: { session: AgentSession };
@@ -38,7 +40,7 @@ export function transcriptPageAfter(source: PageSource,
   }
   try {
     return {
-      ...projectTranscriptPageAfter(source.runtime.session.sessionManager, source.dependencies.blobs, after,
+      ...projectTranscriptPageAfter(source.displayProjection, source.runtime.session.sessionManager, source.dependencies.blobs, after,
         undefined, expectedPreviousEntryId, source.toolMetadata, source.presentationIDs, source.toolLabels(),
         source.bashMetadata, source.forkBoundary),
       runtimeGeneration: source.runtimeGeneration,
@@ -68,7 +70,7 @@ export function transcriptPage(source: PageSource,
     throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
   }
   try {
-    const page = projectTranscriptPage(
+    const page = projectTranscriptPage(source.displayProjection,
         source.runtime.session.sessionManager,
         source.dependencies.blobs,
         before,

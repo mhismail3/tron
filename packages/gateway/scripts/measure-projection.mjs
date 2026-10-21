@@ -21,8 +21,11 @@ if (args.length !== 0 && (args.length !== 2 || args[0] !== "--baseline")) {
 }
 const candidatePath = new URL("../dist/kernel/projection/projection.js", import.meta.url);
 const baselinePath = args.length ? pathToFileURL(resolve(args[1], "kernel/projection/projection.js")) : undefined;
-const modules = [{ name: "candidate", path: candidatePath, projection: await import(candidatePath.href) }];
-if (baselinePath) modules.unshift({ name: "baseline", path: baselinePath, projection: await import(baselinePath.href) });
+const modules = [];
+for (const [name, path] of [...(baselinePath ? [["baseline", baselinePath]] : []), ["candidate", candidatePath]]) {
+  const { admitToolDisplayProjection } = await import(new URL("../../display/display-contract.js", path).href);
+  modules.push({ name, path, projection: await import(path.href), displayProjection: admitToolDisplayProjection });
+}
 const warmup = 10;
 const repetitions = 30;
 const deadline = performance.now() + 120_000;
@@ -54,7 +57,7 @@ for (const entries of extended ? [100, 1_000, 10_000, 25_000, 100_000] : [100, 1
       let branchWalks = 0;
       const reader = { getBranch: () => { branchWalks++; return manager.getBranch(); }, getSessionId: () => manager.getSessionId() };
       const started = performance.now();
-      const page = record.module.projection.projectTranscriptPage(reader, blobs);
+      const page = record.module.projection.projectTranscriptPage(record.module.displayProjection, reader, blobs);
       const duration = performance.now() - started;
       assert.equal(page.total, entries);
       assert.equal(page.end, entries);

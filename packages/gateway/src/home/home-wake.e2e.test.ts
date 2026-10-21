@@ -1,3 +1,4 @@
+import { admitToolDisplayProjection } from "../display/display-contract.js";
 import { fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -208,7 +209,7 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(session.settingsManager.getCompactionSettings(session.model).enabled).toBe(false);
     checkinEvidence.push({ case: "worker-result-title", taskTitle: delivered.details.taskTitle });
     // The wake's turn projects to the delivered-context row, then Home's reply: no user row.
-    const rows = projectTranscriptPage((home as unknown as { sessionManager: never }).sessionManager, new BlobStore()).items
+    const rows = projectTranscriptPage(admitToolDisplayProjection, (home as unknown as { sessionManager: never }).sessionManager, new BlobStore()).items
       .map(item => item.kind === "message" ? `message:${item.role}` : item.kind)
       .filter(kind => kind !== "modelChange");
     // The wake's turn starts at its delivered result: no user row before Home's reply.

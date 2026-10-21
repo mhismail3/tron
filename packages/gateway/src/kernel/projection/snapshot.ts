@@ -1,3 +1,4 @@
+import type { ToolDisplayProjection } from "./tool-result.js";
 import type { AgentMessage } from "../pi/agent-core.js";
 import type { AgentSession } from "../pi/coding-agent.js";
 import type { BlobStore } from "../../sessions/blob-store.js";
@@ -8,6 +9,7 @@ import { boundExtensionActivities } from "./extension-run-projection.js";
 
 /** Synchronous reads of run-owned facts. No run state or canonical entries are copied here. */
 export interface SnapshotSource {
+  displayProjection: ToolDisplayProjection;
   assertNoTrustReload(): void;
   runtime: { session: AgentSession; diagnostics: readonly { type: string; message: string }[] };
   ensureAgentProjection(): void;
@@ -104,7 +106,7 @@ export class SnapshotProjection {
     const streaming = streamingMessage
       ? (() => {
         source.captureStreamIdentity(streamingMessage);
-        return projectMessage(
+        return projectMessage(source.displayProjection,
           "streaming",
           source.streamAnchorId ?? null,
           source.streamStartedAt ?? new Date().toISOString(),

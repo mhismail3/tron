@@ -15,7 +15,7 @@ import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_P
 import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
-import { observeTrustedAgentBrowserResult } from "../display/browser-live-view-adapter.js";
+import type { ToolResultProjection } from "../kernel/projection/tool-result.js";
 import { isManagedSubagentExtension, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../sessions/managed-subagents.js";
 import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
 
@@ -167,6 +167,7 @@ interface RegistrationAdmission {
     views: BrowserLiveViewRegistry;
     sessionId: string;
     runtimeGeneration: string;
+    observeResult: ToolResultProjection["observeBrowserResult"];
     loadToken: string;
   };
 }
@@ -225,7 +226,7 @@ function admitTool(state: RegistrationAdmission, name: string, registered: Regis
   const execute = ownCallback(async (...args: Parameters<ToolDefinition["execute"]>) => {
     const result = await definition.execute(...args);
     if (!state.browserLiveView) return result;
-    return observeTrustedAgentBrowserResult({
+    return state.browserLiveView.observeResult({
       // The SDK finalizes public package provenance after extensionsOverride.
       // Read it at execution, never authorize from the provisional owner.
       owner: extensionOwnerFor(state.extension),
@@ -235,7 +236,6 @@ function admitTool(state: RegistrationAdmission, name: string, registered: Regis
       sessionId: state.browserLiveView.sessionId,
       runtimeGeneration: state.browserLiveView.runtimeGeneration,
       loadToken: state.browserLiveView.loadToken,
-      views: state.browserLiveView.views,
     }) as Awaited<ReturnType<ToolDefinition["execute"]>>;
   }, state.extension);
   attributedToolOwners.set(execute, state.extension);
@@ -350,6 +350,7 @@ export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?
   views: BrowserLiveViewRegistry;
   sessionId: string;
   runtimeGeneration: string;
+  observeResult: ToolResultProjection["observeBrowserResult"];
 }, options?: { requireTronAskUser?: boolean; managedSubagents?: ManagedSubagents }): LoadExtensionsResult {
   const loadToken = browserLiveView?.views.beginSessionLoad(browserLiveView.sessionId);
   options?.managedSubagents?.admit(base.extensions);

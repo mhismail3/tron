@@ -16,7 +16,9 @@
     "README.md",
     "snapshot.ts",
     "session-pages.ts",
-    "activity.ts"
+    "activity.ts",
+    "tool-result.ts",
+    "tool-result.integration.test.ts"
   ],
   "dependsOn": [
     "gateway/pi"

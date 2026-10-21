@@ -1,6 +1,7 @@
 import type { ExtensionFactory, ModelRuntime, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
 import type { SettingsToolAccess } from "../settings/tool-contract.js";
 import type { JsonValue, TronModuleSummary } from "../../protocol/types.js";
+import type { ToolResultProjection } from "../projection/tool-result.js";
 
 /** One log line from a module, in the Gateway logger's shape. */
 export interface ModuleLog {
@@ -81,7 +82,9 @@ export const KERNEL_HOOKS = {
 export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
-export type KernelHooks = { [K in HookName]: (...args: never[]) => unknown };
+export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection">]: (...args: never[]) => unknown } & {
+  toolResultProjection(): ToolResultProjection;
+};
 
 export interface ModuleInstance<C = void> {
   /** This module's Pi extension for one session runtime, or undefined when it

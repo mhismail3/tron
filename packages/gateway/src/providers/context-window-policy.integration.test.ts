@@ -1,3 +1,4 @@
+import { admitToolDisplayProjection } from "../display/display-contract.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,7 +131,7 @@ describe("context window policy", () => {
       { reason: "direct", model: "gpt-6-astra" },
     ]);
     expect(session.sessionManager.getBranch().some(entry => entry.type === "custom" && entry.customType === "pi.virtual-model-state")).toBe(true);
-    const transcript = projectTranscriptPage(session.sessionManager, new BlobStore()).items;
+    const transcript = projectTranscriptPage(admitToolDisplayProjection, session.sessionManager, new BlobStore()).items;
     const assistant = transcript.find(item => item.kind === "message" && item.role === "assistant");
     expect(assistant).toMatchObject({ provider: physical.provider, modelId: "other", thinkingLevel: "off" });
     expect(transcript.some(item => item.kind === "message" && item.role === "assistant" && item.modelId === "router")).toBe(false);

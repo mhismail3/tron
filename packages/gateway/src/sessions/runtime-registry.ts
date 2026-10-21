@@ -3178,7 +3178,7 @@ export class RuntimeRegistry {
       let page: TranscriptPage;
       try {
         const toolLabels = this.slots.get(expectedParentSessionId)?.toolPresentationLabels();
-        page = projectTranscriptPage(
+        page = projectTranscriptPage((...args) => this.options.modules.policy("toolResultProjection")?.().display(...args),
           { getBranch: () => parsed.branch },
           this.blobs,
           before,

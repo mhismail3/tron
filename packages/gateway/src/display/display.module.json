@@ -4,6 +4,7 @@
     "**"
   ],
   "dependsOn": [
+    "gateway/projection",
     "gateway/host",
     "gateway/workspace",
     "gateway/pi"

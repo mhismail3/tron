@@ -25,7 +25,7 @@ export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): Re
 }
 import { GatewayError } from "../../errors.js";
 import { jsonNodeCount } from "../../protocol/json-budget.js";
-import { admitToolDisplayProjection } from "../../display/display-contract.js";
+import type { ToolDisplayProjection } from "./tool-result.js";
 import { trustedExtensionOriginKind } from "../../extensions/owner-attribution.js";
 import { isGatewayTimestamp } from "../../util/timestamp.js";
 import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../../util/bounded-text.js";
@@ -1317,7 +1317,7 @@ export interface ToolProjectionMetadata {
   toolLabel?: string;
 }
 
-export function projectMessage(
+export function projectMessage(displayProjection: ToolDisplayProjection,
   id: string,
   parentId: string | null,
   timestamp: string,
@@ -1365,7 +1365,7 @@ export function projectMessage(
         semantic: semanticForMessage("assistant"),
       };
     case "toolResult": {
-      const display = admitToolDisplayProjection(message.toolName, message.details, message.toolCallId, ownerSessionId);
+      const display = displayProjection(message.toolName, message.details, message.toolCallId, ownerSessionId);
       return {
         id,
         parentId,
@@ -1472,7 +1472,7 @@ export function projectMessage(
   }
 }
 
-function projectEntry(
+function projectEntry(displayProjection: ToolDisplayProjection,
   entry: SessionEntry,
   blobs: BlobStore,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
@@ -1486,7 +1486,7 @@ function projectEntry(
 ): TranscriptItem | undefined {
   switch (entry.type) {
     case "message":
-      return projectMessage(
+      return projectMessage(displayProjection,
         entry.id,
         entry.parentId,
         entry.timestamp,
@@ -1906,14 +1906,14 @@ function rowKind(item: TranscriptItem | undefined): SessionTreeNode["kind"] {
   return item?.kind ?? "sessionInfo";
 }
 
-function projectedTreeNode(
+function projectedTreeNode(displayProjection: ToolDisplayProjection,
   node: PiSessionTreeNode,
   blobs: BlobStore,
   depth: number,
   currentPath: Set<string>,
   contextDelivery?: ContextDeliveryMetadata,
 ): SessionTreeNode {
-  const item = projectEntry(node.entry, blobs, undefined, undefined, undefined, contextDelivery);
+  const item = projectEntry(displayProjection, node.entry, blobs, undefined, undefined, undefined, contextDelivery);
   return {
     id: node.entry.id,
     parentId: node.entry.parentId,
@@ -1975,7 +1975,7 @@ function omittedFromTreeOutline(
   }
 }
 
-export function projectTree(manager: SessionManager, blobs: BlobStore): SessionTreeNode[] {
+export function projectTree(displayProjection: ToolDisplayProjection, manager: SessionManager, blobs: BlobStore): SessionTreeNode[] {
   const canonicalRoots = manager.getTree();
   const currentPath = new Set(manager.getBranch().map((entry) => entry.id));
   const contextDelivery = contextDeliveryMetadataByEntry(manager.getEntries());
@@ -2031,13 +2031,13 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
   for (let index = entries.length - 1; index >= 0 && selected.length < MAX_TREE_NODES; index -= 1) {
     const ref = byId.get(entries[index]!.id);
     if (!ref) continue;
-    const candidate = projectedTreeNode(
+    const candidate = projectedTreeNode(displayProjection,
       ref.source, treeProjectionProbe, ref.depth, currentPath, contextDelivery.get(ref.source.entry.id),
     );
     validateProjectedTreeNode(candidate);
     const nodeBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
     if (bytes + nodeBytes > TREE_PROJECTION_BYTES) break;
-    const admitted = projectedTreeNode(
+    const admitted = projectedTreeNode(displayProjection,
       ref.source, blobs, ref.depth, currentPath, contextDelivery.get(ref.source.entry.id),
     );
     validateProjectedTreeNode(admitted);
@@ -2267,7 +2267,7 @@ export interface TranscriptPage {
   forkBoundary?: TranscriptForkBoundary;
 }
 
-export function projectTranscriptPage(
+export function projectTranscriptPage(displayProjection: ToolDisplayProjection,
   manager: TranscriptSessionReader,
   blobs: BlobStore,
   before?: number,
@@ -2308,7 +2308,7 @@ export function projectTranscriptPage(
     const entry = entries[start - 1]!;
     const boundInvocation = invocationByCanonicalEntry.get(entry.id);
     const resourceText = invokedResourceText(boundInvocation);
-    const item = projectEntry(
+    const item = projectEntry(displayProjection,
       entry,
       blobs,
       toolMetadata,
@@ -2346,7 +2346,7 @@ export function projectTranscriptPage(
   };
 }
 
-export function projectTranscriptPageAfter(
+export function projectTranscriptPageAfter(displayProjection: ToolDisplayProjection,
   manager: TranscriptSessionReader,
   blobs: BlobStore,
   after: number,
@@ -2378,7 +2378,7 @@ export function projectTranscriptPageAfter(
     const entry = entries[end]!;
     const boundInvocation = invocationByCanonicalEntry.get(entry.id);
     const resourceText = invokedResourceText(boundInvocation);
-    const item = projectEntry(entry, blobs, toolMetadata, presentationIDs, toolLabels,
+    const item = projectEntry(displayProjection, entry, blobs, toolMetadata, presentationIDs, toolLabels,
       contextDelivery.get(entry.id), toolSegmentIDs.get(entry.id), resourceText,
       bashMetadata, manager.getSessionId?.());
     if (!item) throw new Error(`projectable transcript entry produced no item: ${entry.type}${entry.type === "message" ? `/${entry.message.role}` : ""}`);

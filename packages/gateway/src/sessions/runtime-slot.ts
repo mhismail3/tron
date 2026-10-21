@@ -157,7 +157,8 @@ import type { DisplayArtifactStore } from "../display/display-artifact-store.js"
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { tronContext } from "../workspace/tron-core-extension.js";
 import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
-import { admitToolDisplayProjection, displayArtifactIDs } from "../display/display-contract.js";
+import { displayArtifactIDs } from "../display/display-contract.js";
+import type { ToolDisplayProjection } from "../kernel/projection/tool-result.js";
 import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
@@ -2088,7 +2089,7 @@ export class RuntimeSlot {
       for (const entry of branch) {
         if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
         const details = entry.message.details;
-        const display = admitToolDisplayProjection(entry.message.toolName, details, entry.message.toolCallId, manager.getSessionId());
+        const display = this.displayProjection(entry.message.toolName, details, entry.message.toolCallId, manager.getSessionId());
         if (display?.liveView) this.browserLiveReferences.add(`${display.liveView.viewId}\0${display.liveView.generation}`);
         const nested = details && typeof details === "object" && !Array.isArray(details)
           ? (details as Record<string, unknown>).tronNested : undefined;
@@ -2309,6 +2310,7 @@ export class RuntimeSlot {
             views: this.dependencies.browserLiveViews,
             sessionId: sessionManager.getSessionId(),
             runtimeGeneration: this.runtimeGeneration,
+            observeResult: input => this.dependencies.modules.policy("toolResultProjection")?.().observeBrowserResult(input) ?? input.result,
           } : undefined, { requireTronAskUser: true, ...(managedSubagents ? { managedSubagents } : {}) }),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
@@ -3466,7 +3468,7 @@ export class RuntimeSlot {
     // subscribes mid-stream receives the streaming item in its snapshot and the
     // frames after it.
     if (this.dependencies.sessionAudience(this.id) === 0) return false;
-    const projected = projectMessage(
+    const projected = projectMessage(this.displayProjection,
       "streaming",
       this.streamAnchorId ?? null,
       this.streamStartedAt,
@@ -3494,7 +3496,7 @@ export class RuntimeSlot {
     if (this.progressFlushTimer !== undefined) clearTimeout(this.progressFlushTimer);
     this.progressFlushTimer = undefined;
     this.pendingProgressMessage = undefined;
-    const projected = projectMessage(
+    const projected = projectMessage(this.displayProjection,
       "streaming",
       this.streamAnchorId ?? null,
       this.streamStartedAt,
@@ -7453,11 +7455,13 @@ export class RuntimeSlot {
     return stage("snapshot.build", () => this.buildSnapshot(sequence));
   }
 
+  private readonly displayProjection: ToolDisplayProjection = (...args) => this.dependencies.modules.policy("toolResultProjection")?.().display(...args);
   private readonly snapshotProjection = new SnapshotProjection();
 
   private buildSnapshot(sequence: number): SessionSnapshot {
     const slot = this;
     return this.snapshotProjection.build({
+      displayProjection: this.displayProjection,
       assertNoTrustReload: (...args) => slot.assertNoTrustReload(...args),
       get runtime() { return slot.runtime; },
       ensureAgentProjection: (...args) => slot.ensureAgentProjection(...args),
@@ -7529,6 +7533,7 @@ export class RuntimeSlot {
   private pageSource(): sessionPages.PageSource {
     const slot = this;
     return {
+      displayProjection: this.displayProjection,
       assertNoTrustReload: (...args) => slot.assertNoTrustReload(...args),
       get runtimeGeneration() { return slot.runtimeGeneration; },
       get runtime() { return slot.runtime; },
@@ -9960,7 +9965,7 @@ export class RuntimeSlot {
 
   tree(): SessionTreeNode[] {
     this.assertNoTrustReload();
-    return projectTree(this.runtime.session.sessionManager, this.dependencies.blobs);
+    return projectTree(this.displayProjection, this.runtime.session.sessionManager, this.dependencies.blobs);
   }
 
   commands(): CommandInfo[] {
