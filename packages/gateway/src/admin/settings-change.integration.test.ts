@@ -558,7 +558,7 @@ describe("settings.change", () => {
     const [entry] = await f.history({ key: "run.retry.maxRetries" });
     expect(entry).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, layer: "mac", before: 4, after: 6, status: "applied", tier: "quiet",
       tierBasis: { floor: "quiet", floorSource: "code", web: false, risk: null },
-      presentation: { label: "Retries", section: "advanced", actor: "You", layer: "Mac", display: { before: "4 retries", after: "6 retries" } } });
+      presentation: { label: "Retries", section: "run", actor: "You", layer: "Mac", display: { before: "4 retries", after: "6 retries" } } });
 
     // A stale `expected` is refused and changes nothing.
     await expect(f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 9, expected: 4 }])).rejects.toMatchObject({ code: "conflict" });
@@ -768,13 +768,12 @@ describe("settings.change", () => {
       actor: { kind: "home", id: "home" }, reason: "Use less thinking for workers",
     });
     const ids = async (filter: Record<string, unknown>) => (await f.history(filter)).map(entry => entry.changeId);
-    expect(await ids({ actor: "agents", section: "run" })).toEqual([worker.changes[0]!.changeId]);
-    expect(await ids({ actor: "agents", section: "advanced" })).toEqual([homeRun.changes[0]!.changeId]);
+    expect(await ids({ actor: "agents", section: "run" })).toEqual([worker.changes[0]!.changeId, homeRun.changes[0]!.changeId]);
     expect(await ids({ actor: "home", layer: "profile", section: "workers" })).toEqual([profile.changes[0]!.changeId]);
     expect(await ids({ actor: "home", layer: "mac", key: "run.retry.maxRetries", status: "applied" })).toEqual([homeRun.changes[0]!.changeId]);
     expect(await ids({ actor: "ui" })).toHaveLength(1);
     expect(await ids({})).toHaveLength(4);
-    for (const filter of [{ actor: "unknown" }, { layer: "builtin" }, { section: "unknown" }]) {
+    for (const filter of [{ actor: "unknown" }, { layer: "builtin" }, { section: "unknown" }, { section: "advanced" }]) {
       await expect(f.service.invoke(client(), "settings.history", filter)).rejects.toMatchObject({ code: "invalid_request" });
     }
     transcript.push({ case: "Changes filters", detail: await f.history({ actor: "agents" }) });
@@ -1187,11 +1186,13 @@ describe("every key at every allowed layer", () => {
     const targets: Record<string, Record<string, unknown>> = {
       chat: { kind: "session", sessionId: slot.id }, profile: { kind: "home" }, project: { kind: "project", cwd: project }, mac: { kind: "mac" },
     };
-    type Served = { key: string; qualifiers?: Record<string, string>; value: unknown; layer: string;
+    type Served = { key: string; group: string; qualifiers?: Record<string, string>; value: unknown; layer: string;
       presentation: { editableLayers: string[]; valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
     const resolve = async (layer: string, key: string) => {
       const resolution = await f.service.invoke(client([slot.id]), "settings.resolve", { target: targets[layer], keys: [key], renderer: { version: 1, controls } }) as unknown as { keys: Served[] };
-      return resolution.keys[0];
+      const row = resolution.keys[0];
+      if (key === "permissions.macTerminalKey") expect(row?.group).toBe("connections");
+      return row;
     };
     const fence = () => { const snapshot = slot.snapshot(); return { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model, revision: snapshot.revision }; };
     const differs = (left: unknown, right: unknown) => JSON.stringify(left ?? null) !== JSON.stringify(right ?? null);

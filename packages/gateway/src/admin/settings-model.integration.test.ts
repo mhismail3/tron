@@ -539,16 +539,22 @@ describe("settings renderer contract", () => {
     expect(group("model.queue[role=worker]")).toBe("workers");
     expect(group("context.images.block")).toBe("tools");
     expect(group("run.transport")).toBe("run");
-    expect(group("run.queue.steeringMode")).toBe("advanced");
-    expect(group("run.retry.maxRetries")).toBe("advanced");
-    expect(group("permissions.defaultProjectTrust")).toBe("advanced");
+    expect(group("run.queue.steeringMode")).toBe("run");
+    expect(group("run.retry.maxRetries")).toBe("run");
+    expect(group("permissions.defaultProjectTrust")).toBe("trust");
+    expect(group("model.thinkingBudgets")).toBe("workers");
+    expect(group("model.offered")).toBe("workers");
+    expect(group("permissions.floor")).toBe("approvals");
+    expect(before.sections.map(entry => entry.id)).not.toContain("advanced");
+    expect(section(before, "approvals").order).toBeLessThan(section(before, "run").order);
+    expect(presentedRow(before, "permissions.floor").presentation.help).toBe("Which setting changes need your OK.");
     for (const served of before.sections) expect(served.description.length, served.id).toBeGreaterThan(0);
     // A section the target has no key in is not presented at all.
     expect(before.sections.map(entry => entry.id)).not.toContain("accounts");
     // Filtering the live RPC must also prune unrelated destinations.
     const filtered = await f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: ["number"] } }) as unknown as PresentedResolution;
     expect(filtered.keys.map(key => key.key)).toEqual(["run.retry.maxRetries"]);
-    expect(filtered.sections.map(entry => entry.id)).toEqual(["advanced"]);
+    expect(filtered.sections.map(entry => entry.id)).toEqual(["run"]);
     transcript.push({ case: "sections", response: { sections: before.sections, filtered } });
   });
 

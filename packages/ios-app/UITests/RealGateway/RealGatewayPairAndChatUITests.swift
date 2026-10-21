@@ -1268,7 +1268,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertEqual(inspection.switches.count, 0)
         burst("chat-configuration")
         dismissTopSheet(app)
-        openSheet("settings-section-advanced-open", "chat-more", section: "advanced")
+        openSheet("settings-section-advanced-open", "chat-more", section: "run")
         dismissTopSheet(app)
         dismissTopSheet(app) // Chat Settings
         dismissTopSheet(app) // Manage Session
