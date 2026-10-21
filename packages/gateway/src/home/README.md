@@ -139,9 +139,9 @@ changes keep its store, cursors and spend.
 
 ## Verify
 `scripts/tron verify --module gateway/home` or `scripts/tron test gateway <file>` covers
-`src/home/*.test.ts` and `src/sessions/home-*.test.ts` (nested suites add `--config
-vitest.nested.config.ts`). Managed queue persistence allows 60 s for two cold reopens;
-crash suites cover process abandonment, not power loss.
+`src/home/*.test.ts` and `src/sessions/home-*.test.ts` (nested suites add `--config vitest.nested.config.ts`).
+Managed queue persistence allows 60 s for two cold reopens; crash suites cover process abandonment, not power loss.
+`input-admission.integration.test.ts` locks unpersisted trigger release to pending before terminal settlement.
 
 ## Not here
 
