@@ -1,8 +1,9 @@
 import XCTest
 
-/// Chat haptics (#1562), read from the hosted probe of every haptic the app
-/// played (XCUITest cannot feel the Taptic Engine). The fixture is the real
-/// chat route, composer and attachment strip over a scripted Gateway.
+/// Chat haptics (#1562) and sheet presentation haptics (#1599), read from the
+/// hosted probe of every haptic the app played (XCUITest cannot feel the
+/// Taptic Engine). The fixtures are the real chat route, composer and
+/// attachment strip, and the real Settings root, over scripted Gateways.
 final class TronChatHapticsUITests: XCTestCase {
     /// Each live event plays its own haptic exactly once: one tick per pasted
     /// photo, the accepted send, the settled run, a worker result and a
@@ -43,7 +44,9 @@ final class TronChatHapticsUITests: XCTestCase {
         keep(app, "1562-answered-question-read-only")
         app.buttons["Done"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForNonExistence(timeout: 10), app.debugDescription)
-        assertHaptics(app, expected, "re-presenting, answering and reopening the answered question play nothing")
+        // The answered question's tool sheet is an ordinary sheet: one soft tap (#1599).
+        expected += ",sheetPresented"
+        assertHaptics(app, expected, "re-presenting and answering the question play nothing; its tool sheet taps once")
 
         send("fail", app, composer)
         XCTAssertTrue(waitGateway(app, "rejected:1"), gateway(app))
@@ -98,7 +101,100 @@ final class TronChatHapticsUITests: XCTestCase {
         assertHaptics(app, "promptSent", "a run settled in the background plays nothing on return")
     }
 
+    /// A tool detail sheet plays one soft tap per presentation (#1599), never
+    /// on dismissal, and the restored question beneath it plays nothing.
+    @MainActor func testToolSheetPlaysOneSoftTapPerPresentation() {
+        continueAfterFailure = false
+        let app = launch(photos: 0, ["-chat-haptics-history"]); defer { app.terminate() }
+        let cancel = app.buttons["Cancel form"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 30), app.debugDescription)
+        cancel.tap()
+        XCTAssertTrue(cancel.waitForNonExistence(timeout: 10), app.debugDescription)
+        assertHaptics(app, "none", "the restored question and its dismissal play nothing")
+        let tool = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ask User")).firstMatch
+        var expected: [String] = []
+        for _ in 0..<2 {
+            XCTAssertTrue(tool.waitForExistence(timeout: 10), app.debugDescription)
+            tool.tap()
+            XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 10), app.debugDescription)
+            expected.append("sheetPresented")
+            XCTAssertTrue(waitHaptics(app, expected.joined(separator: ",")), haptics(app))
+            app.buttons["Done"].tap()
+            XCTAssertTrue(app.buttons["Done"].waitForNonExistence(timeout: 10), app.debugDescription)
+            assertHaptics(app, expected.joined(separator: ","), "dismissing the tool sheet plays nothing")
+        }
+        keep(app, "1599-tool-sheet")
+    }
+
+    /// A Settings section sheet and the Value & Source sheet nested on it each
+    /// play one soft tap per presentation (#1599); a detent change and each
+    /// dismissal play nothing.
+    @MainActor func testSettingsAndNestedSheetsPlayOneSoftTapEach() {
+        continueAfterFailure = false
+        let app = launchSettings(["-settings-renderer-source-actions"]); defer { app.terminate() }
+        let section = app.buttons["settings-section-model-open"]
+        XCTAssertTrue(section.waitForExistence(timeout: 30), app.debugDescription)
+        assertHaptics(app, "none", "the Settings root presents no sheet")
+        section.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["settings-section-model-detail"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitHaptics(app, "sheetPresented"), haptics(app))
+
+        let heading = app.navigationBars.staticTexts["Models"].firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 5), app.debugDescription)
+        heading.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        assertHaptics(app, "sheetPresented", "expanding the sheet's detent plays nothing")
+
+        let source = app.buttons["settings-row-model.ref-source"]
+        XCTAssertTrue(source.waitForExistence(timeout: 10), app.debugDescription)
+        source.tap()
+        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitHaptics(app, "sheetPresented,sheetPresented"), "the nested sheet taps once: \(haptics(app))")
+        keep(app, "1599-nested-sheet")
+        closeTopSheet(app)
+        XCTAssertTrue(app.staticTexts["Value & Source"].waitForNonExistence(timeout: 10), app.debugDescription)
+        assertHaptics(app, "sheetPresented,sheetPresented", "dismissing the nested sheet plays nothing")
+
+        source.tap()
+        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitHaptics(app, "sheetPresented,sheetPresented,sheetPresented"), haptics(app))
+        closeTopSheet(app)
+        closeTopSheet(app)
+        XCTAssertTrue(section.waitForExistence(timeout: 10), app.debugDescription)
+        assertHaptics(app, "sheetPresented,sheetPresented,sheetPresented", "dismissing both sheets plays nothing")
+    }
+
+    /// A sheet already presented when its shared presenter mounts (as on
+    /// launch, reconnect or a rebuilt parent) plays nothing, nor does its
+    /// dismissal (#1599).
+    @MainActor func testSheetPresentedAtMountPlaysNone() {
+        continueAfterFailure = false
+        let app = launchSettings(["-sheet-haptics-restored"]); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Release preview"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["fixture.haptics"].waitForExistence(timeout: 30), app.debugDescription)
+        keep(app, "1599-restored-sheet")
+        assertHaptics(app, "none", "a sheet presented at mount plays nothing")
+        closeTopSheet(app)
+        XCTAssertTrue(app.buttons["Release preview"].waitForNonExistence(timeout: 10), app.debugDescription)
+        assertHaptics(app, "none", "its dismissal plays nothing")
+    }
+
     // MARK: - Helpers
+
+    @MainActor private func launchSettings(_ extra: [String]) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
+        app.launch()
+        return app
+    }
+
+    /// Dismisses the frontmost sheet by its own Done; covered sheets' Done
+    /// buttons are not hittable.
+    @MainActor private func closeTopSheet(_ app: XCUIApplication) {
+        let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.last { $0.isHittable }
+        XCTAssertNotNil(done, app.debugDescription)
+        done?.tap()
+    }
 
     @MainActor private func launch(photos: Int, _ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()

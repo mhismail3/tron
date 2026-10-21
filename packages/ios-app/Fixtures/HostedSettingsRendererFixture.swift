@@ -13,7 +13,8 @@ struct HostedSettingsRendererFixture: View {
     @State private var push = PushNotificationCoordinator(credentials: UIReviewPushStore(), notifications: .live, appAttest: .live, configuration: nil)
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
-    @State private var covering = false
+    /// `-sheet-haptics-restored`: the cover is already presented when its presenter mounts.
+    @State private var covering = ProcessInfo.processInfo.arguments.contains("-sheet-haptics-restored")
     @State private var nestedSettings = false
     @State private var heldPreviews = 0
     @State private var error: String?
@@ -146,9 +147,8 @@ struct HostedSettingsRendererFixture: View {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
                         Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
-                        if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") {
-                            Button("Cover renderer") { covering = true }
-                        }
+                        if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") { Button("Cover renderer") { covering = true } }
+                        Text("haptics:\(TronHapticsProbe.shared.summary)").accessibilityIdentifier("fixture.haptics")
                         Text("thinking-options:\(thinkingOptions)").accessibilityIdentifier("fixture.settings-renderer-thinking-options")
                         Text("undos:\(undos)").accessibilityIdentifier("fixture.settings-changes-undos")
                         Text(decisions).accessibilityIdentifier("fixture.settings-changes-decisions")
