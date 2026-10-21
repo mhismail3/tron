@@ -608,7 +608,6 @@ struct GatewayConnectionDetailView: View {
                     SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
                         presentation: .section("connections"), embedded: true)
                 }
-
                 GatewayMaintenanceActions(
                     lifecycle: lifecycleActions,
                     destructive: GatewayMaintenanceAction(id: "forget", title: "Forget Server") {
@@ -1026,8 +1025,7 @@ struct GatewayConnectionDetailView: View {
 
 }
 
-/// One server maintenance action. The descriptor keeps the command with its
-/// owner while the shared component owns layout, order, and accents.
+/// A maintenance action retains its owner's command; the shared view owns styling.
 struct GatewayMaintenanceAction: Identifiable {
     let id: String
     let title: String
@@ -1035,23 +1033,19 @@ struct GatewayMaintenanceAction: Identifiable {
     let perform: () -> Void
 }
 
-/// The server sheet's maintenance actions: the lifecycle actions share one
-/// accent in paired columns; a lone trailing action uses the full row width.
-/// The irreversible pairing action stands alone below them in the error accent.
+/// Lifecycle actions inherit the sheet theme; irreversible pairing stays semantic red.
 struct GatewayMaintenanceActions: View {
     let lifecycle: [GatewayMaintenanceAction]
     let destructive: GatewayMaintenanceAction
-    var accent: Color = .tronEmerald
     @Environment(\.tronSettingsVisualTheme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Eager rows, not a lazy grid: four short actions need no
-            // materialization window, and each stays one labelled target.
+            // Eager rows keep the short action list fully materialized and individually labelled.
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: 12) {
                     ForEach(row) { action in
-                        button(action, accent: theme?.accent ?? accent)
+                        button(action, accent: theme?.accent ?? .tronEmerald)
                     }
                 }
             }
