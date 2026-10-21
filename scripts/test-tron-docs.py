@@ -238,7 +238,7 @@ class FixtureTests(unittest.TestCase):
             export type LayerId = typeof LAYERS[number];
             """
         schema = """\
-            import { LAYERS, type LayerId } from "./settings-types.js";
+            import { LAYERS, type LayerId } from "../kernel/settings/tool-contract.js";
             const both = (path: string) => ({ project: path, mac: path });
             const ROLES = ["worker", "background"] as const;
             export const KEYS: readonly { id: string; layers: Partial<Record<LayerId, string>> }[] = [
@@ -250,7 +250,8 @@ class FixtureTests(unittest.TestCase):
             export const RECORD_SUBJECTS = [{ id: "tools.mcp.server", group: "tools", qualifier: "server", floor: "notify" }];
             void LAYERS;
             """
-        self.module("packages/gateway/src/admin", "admin", {"settings-schema.ts": schema, "settings-types.ts": types})
+        self.module("packages/gateway/src/admin", "admin", {"settings-schema.ts": schema})
+        self.module("packages/gateway/src/kernel/settings", "settings", {"tool-contract.ts": types})
         self.write("settings.md", "<!-- tron docs settings -->\n<!-- /tron docs -->\n")
         self.write("root.module.json", json.dumps({"layer": "L5", "owns": ["settings.md", "root.module.json"]}))
         self.docs("update")
