@@ -13,7 +13,8 @@ reusable components. Its binding rules are [presentation parity](../../docs/pres
   Automations and Home), `TronCardRail`, `TronDisclosure`, `TronContentFitDetent`, `TronWidthCap`,
   `TronSafariView`.
 - `Components/`: `TronDocumentSheet`, `TronPagedList`, `TronTextEntrySheet`, `StructuredJSONView`,
-  `TechnicalDetailPresentation`, `InAppNoticePresentation` (`InAppNoticeHost`),
+  `TechnicalDetailPresentation`, `TronNativeSheetCanvas` (surface-level native containment for
+  State-scoped `RetainedNativeSheetHost` graphs), `InAppNoticePresentation` (`InAppNoticeHost`),
   `ProcessActivityOrb`, `ResourceTagLabel`, `ThinkingLevelPresentation`, `TronHaptics` (the app's one
   haptic seam; hosted journeys read `TronHapticsProbe`).
 
@@ -24,7 +25,8 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
 ## Contract
 
 - Components are presentation only: they take values and emit intents, own no Gateway reads,
-  receipts or canonical state.
+  receipts or canonical state. Native sheet sources are preference inputs, not views inside controls;
+  `TronNativeSheetCanvas` mounts retained ordinary SwiftUI sheets at the containing surface root.
 - One owner per pattern: a new or changed pattern changes the shared component and
   [presentation parity](../../docs/presentation-parity.md) together.
 - Fonts are built from descriptors and reused, bounded, by every input that shapes them; adaptive

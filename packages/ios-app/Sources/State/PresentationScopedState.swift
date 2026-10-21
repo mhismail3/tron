@@ -162,7 +162,8 @@ struct TronPresentationStateRoot: ViewModifier {
     @State private var lifetime = PresentationStateLifetime()
 
     func body(content: Content) -> some View {
-        content.environment(\.tronPresentationStateStore, lifetime.store)
+        content.modifier(TronNativeSheetCanvas())
+            .environment(\.tronPresentationStateStore, lifetime.store)
     }
 }
 

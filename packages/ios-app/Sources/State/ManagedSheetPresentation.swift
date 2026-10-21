@@ -70,6 +70,9 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     let onDismiss: (() -> Void)?
     let haptic: TronHaptic?
     @ViewBuilder let sheetContent: () -> SheetContent
+    // An environment snapshot alone is not a scene-phase subscription.
+    @Environment(\.scenePhase) private var nativeScenePhase
+    @Environment(\.self) private var nativeEnvironment
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var parent
     @Environment(\.tronPresentationStateStore) private var sceneStateStore
@@ -95,21 +98,21 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     private var statePath: String { PresentationStateStore.path(parent: parentStateScope, identity: "\(identity)@\(site)") }
 
     func body(content: Content) -> some View {
-        content
-            .background {
-                if isPresented || nativeHost.isInstalled {
-                    RetainedNativeSheetPresenter(owner: nativeHost) {
-                        Color.clear.accessibilityHidden(true).sheet(isPresented: $isPresented, onDismiss: didDismiss) {
-                            TronPresentationSurface(token: lease.contentToken(identity: identity), parent: parent) {
-                                sheetContent()
-                                    .environment(\.chatOwnsStatusBar, false)
-                                    .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
-                            }
-                        }
-                    }
-                    .frame(width: 0, height: 0)
-                    .accessibilityHidden(true)
+        var environment = nativeEnvironment
+        environment.scenePhase = nativeScenePhase
+        let source: NativeSheetSource? = isPresented || nativeHost.isInstalled ? NativeSheetSource(
+            owner: nativeHost,
+            content: AnyView(Color.clear.accessibilityHidden(true).sheet(isPresented: $isPresented, onDismiss: didDismiss) {
+                TronPresentationSurface(token: lease.contentToken(identity: identity), parent: parent) {
+                    sheetContent().environment(\.chatOwnsStatusBar, false)
                 }
+                .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
+            }),
+            environment: environment
+        ) : nil
+        return content
+            .transformPreference(NativeSheetSources.self) { sources in
+                if let source { sources.append(source) }
             }
             // Only a live false → true change plays: a sheet already presented
             // when its presenter mounts (launch, reconnect, rebuild) is silent.
@@ -176,6 +179,9 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     let onDismiss: (() -> Void)?
     let haptic: TronHaptic?
     @ViewBuilder let sheetContent: (Item) -> SheetContent
+    // Observe activation even when the source's other render inputs stay equal.
+    @Environment(\.scenePhase) private var nativeScenePhase
+    @Environment(\.self) private var nativeEnvironment
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var parent
     @Environment(\.tronPresentationStateStore) private var sceneStateStore
@@ -209,21 +215,21 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     }
 
     func body(content: Content) -> some View {
-        content
-            .background {
-                if item != nil || nativeHost.isInstalled {
-                    RetainedNativeSheetPresenter(owner: nativeHost) {
-                        Color.clear.accessibilityHidden(true).sheet(item: $item, onDismiss: didDismiss) { value in
-                            TronPresentationSurface(token: lease.contentToken(identity: identity(value)), parent: parent) {
-                                sheetContent(value)
-                                    .environment(\.chatOwnsStatusBar, false)
-                                    .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
-                            }
-                        }
-                    }
-                    .frame(width: 0, height: 0)
-                    .accessibilityHidden(true)
+        var environment = nativeEnvironment
+        environment.scenePhase = nativeScenePhase
+        let source: NativeSheetSource? = item != nil || nativeHost.isInstalled ? NativeSheetSource(
+            owner: nativeHost,
+            content: AnyView(Color.clear.accessibilityHidden(true).sheet(item: $item, onDismiss: didDismiss) { value in
+                TronPresentationSurface(token: lease.contentToken(identity: identity(value)), parent: parent) {
+                    sheetContent(value).environment(\.chatOwnsStatusBar, false)
                 }
+                .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
+            }),
+            environment: environment
+        ) : nil
+        return content
+            .transformPreference(NativeSheetSources.self) { sources in
+                if let source { sources.append(source) }
             }
             .onChange(of: item.map(identity), initial: true) { previous, current in
                 itemChanged()

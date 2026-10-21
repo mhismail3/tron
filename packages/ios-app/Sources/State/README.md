@@ -29,7 +29,7 @@ disposable projection or an in-flight command owner.
 | `KnowledgeRPCClient`, `KnowledgePresentationStores`, `KnowledgePreviewStore` | Knowledge reads and receipted mutations. |
 | `IntegrationsRPCClient` | Connection-owner projections and mutations. |
 | `SessionHistoryStore`, `SessionProcessHistoryStore`, `ReadOnlySubagentSessionStore`, `PagedListStore` | History pages, subagent history, read-only child transcripts, shared paging. |
-| `PresentationActivityCoordinator`, `PresentationRefreshPolicy`, `ManagedSheetPresentation`, `RetainedNativeSheetPresenter`, `PresentationScopedState` | Foremost read demand, native sheet graphs, binding leases and presentation-lifetime state ([parity](../../docs/presentation-parity.md#presentation-activity)). |
+| `PresentationActivityCoordinator`, `PresentationRefreshPolicy`, `ManagedSheetPresentation`, `PresentationScopedState` | Foremost read demand, native sheet graphs, binding leases and presentation-lifetime state ([parity](../../docs/presentation-parity.md#presentation-activity)). |
 | `InAppNoticeCenter` | The one in-app notice queue. |
 | `SnapshotCache` | Disposable session-summary cache. |
 | `AppDiagnostics`, `IOSMetricKitDiagnostics`, `GatewayDiagnosticsService` | Client log ring, Logs collection and export, MetricKit summaries, Git/log reads. |

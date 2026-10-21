@@ -286,6 +286,7 @@ struct TronPresentationSurface<Content: View>: View {
         #endif
         content()
             .modifier(TronSheetLoadingHostModifier())
+            .modifier(TronNativeSheetCanvas())
             #if HOSTED_TEST
             .background { HostedPresentationProbe.nativeView?(token.id) }
             #endif
