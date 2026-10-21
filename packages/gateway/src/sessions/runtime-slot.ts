@@ -48,7 +48,7 @@ import { HeldPromptQueue } from "../kernel/run/held-prompt-queue.js";
 import { MAXIMUM_PROMPT_ATTACHMENTS, type QueueBehavior, type RuntimeQueuedMessage, type HeldPrompt, type PromptQueueDisplay } from "../kernel/run/queue-input.js";
 import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
-import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
+import { CompactionOperationPolicy } from "../kernel/run/compaction-policy.js";
 import type { RequestPolicy } from "../kernel/host/request-policy.js";
 import { HomeChapterIdentityReplacementError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMaterializationAuthority } from "../home/home-append-guard.js";

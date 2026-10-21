@@ -4,6 +4,8 @@
     "sessions/README.md",
     "sessions/administrative-drain-snapshot.integration.test.ts",
     "kernel/run/bounded-tool-cancellation.ts",
+    "kernel/run/compaction-policy.integration.test.ts",
+    "kernel/run/compaction-policy.ts",
     "sessions/codemode-classify-cost.integration.test.ts",
     "sessions/codemode-nested-interactive.integration.test.ts",
     "kernel/run/context-delivery-receipts.ts",

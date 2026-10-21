@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAgentSessionServices, createAgentSessionFromServices, ModelRuntime, SessionManager, type AgentSession, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { Type, fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, normalizeContext, type TranscriptContext, type SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { abortAwareStream } from "./abort-aware-stream.js";
+import { abortAwareStream } from "../../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy, compactionPolicyExtension } from "./compaction-policy.js";
 
 /** Captured verbatim from opencode-go rejecting a 48MB conversation: the

@@ -1,9 +1,9 @@
-import type { CompactionPolicyLifecycle, ModuleDescriptor } from "../kernel/host/module-host.js";
-import { clampThinkingLevel, normalizeContext, type AssistantMessage } from "../kernel/pi/ai.js";
-import type { StreamFn } from "../kernel/pi/agent-core.js";
-import { SettingsManager, type AgentSession, type ExtensionFactory, type SessionBeforeCompactEvent } from "../kernel/pi/coding-agent.js";
-import { GatewayError } from "../errors.js";
-import type { CompactionConfiguration, CompactionPolicyProjection, ResolvedCompactionConfiguration } from "../protocol/types.js";
+import type { CompactionPolicyLifecycle, ModuleDescriptor } from "../host/module-host.js";
+import { clampThinkingLevel, normalizeContext, type AssistantMessage } from "../pi/ai.js";
+import type { StreamFn } from "../pi/agent-core.js";
+import { SettingsManager, type AgentSession, type ExtensionFactory, type SessionBeforeCompactEvent } from "../pi/coding-agent.js";
+import { GatewayError } from "../../errors.js";
+import type { CompactionConfiguration, CompactionPolicyProjection, ResolvedCompactionConfiguration } from "../../protocol/types.js";
 
 export const COMPACTION_POLICY_INSTRUCTION_LIMIT = 4_000;
 const COMPACTION_THINKING_LEVELS = ["inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;

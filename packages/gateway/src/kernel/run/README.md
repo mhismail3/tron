@@ -20,6 +20,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
 - `run-work-owner.ts`: exact per-operation handles, retirement and marker-before-token
   orphan repair, with live retained-owner rechecks after persistence.
 
+- `compaction-policy.ts`: operation-bound settings budgets, signal-fenced summary
+  generation, provider 413 classification and the `tron-compaction-policy` descriptor.
 - `held-prompt-queue.ts`: accepted compaction/Stop-time input and its ordered deferred
   admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types/bounds.
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option
@@ -30,6 +32,9 @@ Gateway-owned execution primitives layered on Pi's session loop.
 `RuntimeSlot` installs bounded tool cancellation on its Pi session and owns one
 `DirectBashProcessOwner`. The process owner exposes the existing bash definition,
 active-process state and joined abort operation; it does not own prompt admission.
+`compactionPolicyModule` retains its registration position. Its live SessionContext
+compaction port checks Stop before capture and publishes synchronously; policy restore
+runs at session start. Pi remains the canonical settings/compaction owner.
 Ownership is declared by [`gateway/run`](../../run.module.json).
 
 ## Invariants
@@ -46,16 +51,18 @@ detached descendants, timeout, Stop and environment boundaries.
 ## Signals
 
 Existing aborted/timed-out command errors and bounded-tool cancellation results;
-no additional logging or persisted state.
+no additional logging or persisted state. Compaction diagnostics remain with the
+[session run owner](../../sessions/README.md#signals).
 
 ## Verify
 
 ```bash
 scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts src/kernel/run/run-markers.lock.integration.test.ts src/kernel/run/run.store.lock.integration.test.ts
+scripts/tron test gateway src/kernel/run/compaction-policy.integration.test.ts
 scripts/tron verify --module gateway/run
 ```
 
 ## Not here
 
-Prompt admission, canonical Pi appends, profiles, Pi's active queue and compaction remain with
+Prompt admission, canonical Pi appends, profiles, Pi's active queue and compaction orchestration remain with
 `RuntimeSlot`; delegated worker lifecycle is separate.

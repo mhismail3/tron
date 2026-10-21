@@ -1,43 +1,41 @@
-# gateway/runtime
+# Runtime stream and environment
 
 ## Purpose
 
-Session compaction policy on top of Pi's canonical settings and lifecycle.
+Request-stream cancellation and process-environment primitives around Pi.
 
 ## Owns
 
-`compaction-policy.ts`: settings precedence, operation-bound policy, provider 413
-classification and the `tron-compaction-policy` descriptor/extension.
+- `abort-aware-stream.ts`: one AgentSession stream boundary for ordinary responses
+  and summarization, including asynchronous setup and result-only streams.
+- `node-command-environment.ts`: supervised Node/Pi alias validation and ordered
+  agent-bin/Homebrew PATH configuration before resource discovery.
 
 ## Contract
 
-`compactionPolicyModule` supplies the extension at its existing registration
-position. Its SessionContext compaction port reads the live policy, checks the
-operation's stop fence, and publishes changes. The descriptor does not capture a
-policy at Gateway startup. `CompactionOperationPolicy` retains the concrete
-session and settings authority; the host sees only `restore` and `capture`.
+An aborted request's error is classified as aborted; successful terminal results
+remain unchanged. No error-message matching authorizes retry or compaction.
 
-## Invariants
-
-- Restore at session start; check stop before capture, then publish, synchronously.
-- No new store or settings schema. Pi remains the session and compaction owner.
-- Oversized-request classification retains non-overflow provider errors unchanged.
+Supervised environment validation applies only to the selected payload Gateway
+entrypoint, never a source child that inherited supervision markers. Alias targets,
+package metadata and executable identity must agree. Stable keeps its payload Node
+first; Debug may retain a developer Node first. Agent-bin insertion and Homebrew
+append preserve that precedence. These helpers do not install or restart anything.
 
 ## Entry points
 
-`CompactionOperationPolicy`, `compactionPolicyModule`, `compactionPolicyExtension`.
-
-## Signals
-
-Compaction diagnostics are owned by [gateway/run](../sessions/README.md#signals).
+`abortAwareStream`, `configureSupervisedNodeCommandEnvironment`,
+`configureAgentBinEnvironment`, `configureHomebrewPath`.
 
 ## Verify
 
 ```bash
-scripts/tron test gateway src/runtime/compaction-policy.integration.test.ts \
-  src/sessions/run.lock.integration.test.ts
+scripts/tron test gateway src/kernel/run/compaction-policy.integration.test.ts src/kernel/run/direct-bash-process-owner.integration.test.ts
+scripts/tron verify --module gateway/runtime
 ```
 
 ## Not here
 
-Run admission and cancellation: [gateway/run](../sessions/README.md).
+Compaction policy and the live ModuleHost compaction port:
+[gateway/run](../kernel/run/README.md). Run admission and cancellation orchestration
+remain in [sessions](../sessions/README.md).

@@ -1,6 +1,6 @@
 import { GatewayError } from "../errors.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
-import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../runtime/compaction-policy.js";
+import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../kernel/run/compaction-policy.js";
 import { validateMacTerminalKey } from "../security/mac-terminal.js";
 import { MODEL_QUEUE_ROLES, modelQueueKey } from "../providers/model-queue.js";
 import { boolean, integer, object, string, arrayOfStrings } from "../util/validation.js";

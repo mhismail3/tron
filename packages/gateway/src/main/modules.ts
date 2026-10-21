@@ -1,7 +1,7 @@
 import { ModuleHost, type GatewayHost, type ModuleDescriptor } from "../kernel/host/module-host.js";
 import { settlementModule } from "../kernel/host/settlement-module.js";
 import { contextWindowModule } from "../providers/context-window-policy.js";
-import { compactionPolicyModule } from "../runtime/compaction-policy.js";
+import { compactionPolicyModule } from "../kernel/run/compaction-policy.js";
 import { initTheme } from "../kernel/pi/adapters.js";
 import { settingsModule } from "../admin/settings-module.js";
 import { askUserModule } from "../extensions/ask-user-module.js";
