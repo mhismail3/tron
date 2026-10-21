@@ -8,7 +8,7 @@ background checkpoints and bundled resources.
 ## Owns
 
 `App/TronMobileApp.swift`, `App/ProductionSceneRoot.swift`, `App/AppBackgroundCheckpointCoordinator.swift`,
-`Assets.xcassets`, `Info.plist`, `PrivacyInfo.xcprivacy`, `Resources/` (fonts, third-party notices,
+`Assets.xcassets`, `Icons/` (Icon Composer app icons), `Info.plist`, `PrivacyInfo.xcprivacy`, `Resources/` (fonts, third-party notices,
 `tron-notification.caf`). The hosted `Hosted*Fixture.swift` files live in `../Fixtures/`, the hosted-fixtures
 module.
 
@@ -24,6 +24,12 @@ module.
   assertion; it retires the transport epoch but never tears down accepted Gateway work.
 - Both packaged targets (app and share extension) declare the required-reason UserDefaults privacy
   manifest; archive verification fails if either is absent.
+- `Icons/AppIcon.icon` and `Icons/AppIconBeta.icon` are the shipping and development/test app
+  icons. Each separates the original raster deer silhouette (including antialiased edges) from
+  its cream/green or amber/white background and color. Icon Composer supplies glass, specular
+  lighting, shadow and translucency, with dark backgrounds and system tinted/clear renditions.
+  The existing xcconfig icon names select these bundles; there is no duplicate flat app-icon set.
+  Mac icons remain independent and unchanged.
 - Directory sources exclude `**/*.module.json` and `**/README.md`, so manifests and owner docs never
   reach the bundle (`project.yml`).
 

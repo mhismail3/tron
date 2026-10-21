@@ -5,6 +5,7 @@
     "App/ProductionSceneRoot.swift",
     "App/TronMobileApp.swift",
     "Assets.xcassets/**",
+    "Icons/**",
     "Info.plist",
     "PrivacyInfo.xcprivacy",
     "README.md",

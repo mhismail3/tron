@@ -148,6 +148,8 @@ targets:
     type: application
     platform: iOS
     sources:
+      # Recursive discovery includes Icons/*.icon as Icon Composer resources;
+      # the xcconfigs still select AppIcon or AppIconBeta by bundle name.
       - path: Sources
         createIntermediateGroups: true
         # The folder references below own these resources. Without the
