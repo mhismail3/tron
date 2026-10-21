@@ -255,4 +255,3 @@ struct TaskReportPage: Hashable, Sendable {
         return result
     }
 }
-

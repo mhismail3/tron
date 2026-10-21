@@ -60,4 +60,3 @@ extension HomeToolDetailPresentation {
         return HomeToolDetailPresentation(header: header, sections: sections)
     }
 }
-
