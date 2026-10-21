@@ -2,7 +2,7 @@ import { fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@e
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { BlobStore } from "../sessions/blob-store.js";
-import { projectTranscriptPage } from "../sessions/projection.js";
+import { projectTranscriptPage } from "../kernel/projection/projection.js";
 import { disposeFixtures, dispatch, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import type { GatewayError } from "../errors.js";

@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "vitest";
-import { storePathLock } from "../../test-support/store-path-lock.js";
+import { storePathLock } from "../../../test-support/store-path-lock.js";
 import { SessionAttentionStore } from "./session-attention-store.js";
 
 /**

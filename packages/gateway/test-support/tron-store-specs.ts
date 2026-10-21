@@ -28,7 +28,7 @@ import { DeviceStore } from "../src/security/device-store.js";
 import { MacTerminalKeys } from "../src/security/mac-terminal.js";
 import { RunMarkerStore } from "../src/sessions/run-markers.js";
 import { SessionArchiveStore } from "../src/sessions/session-archive-store.js";
-import { SessionAttentionStore } from "../src/sessions/session-attention-store.js";
+import { SessionAttentionStore } from "../src/kernel/projection/session-attention-store.js";
 import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { TronWorkspace } from "../src/workspace/tron-workspace.js";
 

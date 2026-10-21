@@ -12,7 +12,8 @@
     "session-attention-store.ts",
     "session-attention.lock.integration.test.ts",
     "locks/session-attention-paths.golden.json",
-    "session-presentation-presence.ts"
+    "session-presentation-presence.ts",
+    "README.md"
   ],
   "dependsOn": [
     "gateway/pi"

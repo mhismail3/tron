@@ -19,8 +19,8 @@ if (extended) args.shift();
 if (args.length !== 0 && (args.length !== 2 || args[0] !== "--baseline")) {
   throw new Error("Usage: node --expose-gc scripts/measure-projection.mjs [--extended] [--baseline /path/to/compiled/dist]");
 }
-const candidatePath = new URL("../dist/sessions/projection.js", import.meta.url);
-const baselinePath = args.length ? pathToFileURL(resolve(args[1], "sessions/projection.js")) : undefined;
+const candidatePath = new URL("../dist/kernel/projection/projection.js", import.meta.url);
+const baselinePath = args.length ? pathToFileURL(resolve(args[1], "kernel/projection/projection.js")) : undefined;
 const modules = [{ name: "candidate", path: candidatePath, projection: await import(candidatePath.href) }];
 if (baselinePath) modules.unshift({ name: "baseline", path: baselinePath, projection: await import(baselinePath.href) });
 const warmup = 10;

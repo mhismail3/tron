@@ -43,7 +43,7 @@ import type { ExtensionArtifactDiscoveryCounts } from "./extension-artifact-disc
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-markers.js";
-import { toolSegmentId } from "./projection.js";
+import { toolSegmentId } from "../kernel/projection/projection.js";
 import { AutomationService } from "../automations/automation-service.js";
 import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
 import { syntheticOversizedJpeg, syntheticPng } from "../../test-fixtures/synthetic-image.js";

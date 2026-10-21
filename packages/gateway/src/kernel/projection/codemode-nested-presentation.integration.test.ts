@@ -1,18 +1,18 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
-import type { NativeLiveClient, NativeLiveClientFactory } from "../display/native-live-view.js";
-import { TrustService } from "../admin/trust-service.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { BrowserLiveViewRegistry } from "../../display/browser-live-view.js";
+import type { NativeLiveClient, NativeLiveClientFactory } from "../../display/native-live-view.js";
+import { TrustService } from "../../admin/trust-service.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 const driver = vi.hoisted(() => ({ active: 0, maximumActive: 0, calls: 0 }));
-vi.mock("../machine/cua-client.js", () => ({ CuaComputerClient: class {
+vi.mock("../../machine/cua-client.js", () => ({ CuaComputerClient: class {
   private pending = false;
   constructor(readonly binding: unknown) {}
   invalidateObservation() {}
@@ -48,7 +48,7 @@ describe("codemode nested presentation tools", () => {
     const extensionDir = join(cwd, ".pi", "extensions");
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(extensionDir, { recursive: true })]);
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
-    const browserReferenceUrl = new URL("../display/browser-tool-reference.ts", import.meta.url).href;
+    const browserReferenceUrl = new URL("../../display/browser-tool-reference.ts", import.meta.url).href;
     const browserFixture = `import { sealBrowserToolReference } from ${JSON.stringify(browserReferenceUrl)};
 export default function(pi) { pi.registerTool({ name: "agent_browser", label: "Fixture browser", description: "Returns a sealed live view receipt", parameters: { type: "object", properties: {} }, execute: async (id, _args, _signal, _update, ctx) => {
  const descriptor = { schema: "tron.browser-live-view.v1", viewId: "nested-browser-view", generation: "nested-browser-generation", title: "Fixture browser", fallbackText: "Closed" };

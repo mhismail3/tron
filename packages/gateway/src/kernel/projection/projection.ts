@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
-import type { AgentMessage } from "../kernel/pi/agent-core.js";
-import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "../kernel/pi/coding-agent.js";
+import type { AgentMessage } from "../pi/agent-core.js";
+import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "../pi/coding-agent.js";
 
 type TranscriptSessionReader = Pick<SessionManager, "getBranch"> & Partial<Pick<SessionManager, "getSessionId">>;
 
@@ -23,19 +23,19 @@ export function canonicalToolResultCallIDsFromBranch(branch: readonly SessionEnt
 export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): ReadonlySet<string> {
   return canonicalToolResultCallIDsFromBranch(manager.getBranch());
 }
-import { GatewayError } from "../errors.js";
-import { jsonNodeCount } from "../protocol/json-budget.js";
-import { admitToolDisplayProjection } from "../display/display-contract.js";
-import { trustedExtensionOriginKind } from "../extensions/owner-attribution.js";
-import { isGatewayTimestamp } from "../util/timestamp.js";
-import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../util/bounded-text.js";
-import type { BlobStore } from "./blob-store.js";
-import { projectForkBoundary, type ForkBoundaryAnchor } from "./fork-boundary.js";
-import type { ChatOrigin, ChatSemanticMetadata, InvocationLifecycle, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, NestedToolCallsProjection, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../protocol/types.js";
-import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
-import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
-import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "./extension-notification-receipts.js";
-import { projectSkillInvocation, RESOURCE_NAME_MAX_BYTES } from "./resource-invocation.js";
+import { GatewayError } from "../../errors.js";
+import { jsonNodeCount } from "../../protocol/json-budget.js";
+import { admitToolDisplayProjection } from "../../display/display-contract.js";
+import { trustedExtensionOriginKind } from "../../extensions/owner-attribution.js";
+import { isGatewayTimestamp } from "../../util/timestamp.js";
+import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../../util/bounded-text.js";
+import type { BlobStore } from "../../sessions/blob-store.js";
+import { projectForkBoundary, type ForkBoundaryAnchor } from "../../sessions/fork-boundary.js";
+import type { ChatOrigin, ChatSemanticMetadata, InvocationLifecycle, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, NestedToolCallsProjection, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../../protocol/types.js";
+import { contextDeliveryMetadataByEntry } from "../../sessions/context-delivery-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "../../sessions/invocation-receipts.js";
+import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "../../sessions/extension-notification-receipts.js";
+import { projectSkillInvocation, RESOURCE_NAME_MAX_BYTES } from "../../sessions/resource-invocation.js";
 
 const MAX_TEXT = 64_000;
 const MAX_JSON_STRING = 100_000;

@@ -29,13 +29,13 @@ import type {
   SessionSummary,
   SessionSummaryUpdate,
 } from "../protocol/types.js";
-import { SessionAttentionStore, type SessionAttentionProjection } from "./session-attention-store.js";
+import { SessionAttentionStore, type SessionAttentionProjection } from "../kernel/projection/session-attention-store.js";
 import { SessionArchiveStore } from "./session-archive-store.js";
 import { RecentModelStore, type RecentModelUsage } from "../providers/recent-models.js";
 import {
   SessionPresentationPresenceRegistry,
   type SessionPresentationPresenceProjection,
-} from "./session-presentation-presence.js";
+} from "../kernel/projection/session-presentation-presence.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { QueuedWorkGate } from "../util/queued-work-gate.js";
 import { abortableRead } from "../util/abortable-read.js";
@@ -62,7 +62,7 @@ import {
   type RuntimeSlotDependencies,
 } from "./runtime-slot.js";
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
-import { ProcessActivityRecency } from "./process-activity-recency.js";
+import { ProcessActivityRecency } from "../kernel/projection/process-activity-recency.js";
 import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
@@ -82,7 +82,7 @@ import {
   invocationReceipts,
   type InvocationProjection,
 } from "./invocation-receipts.js";
-import { projectTranscriptPage, type TranscriptPage } from "./projection.js";
+import { projectTranscriptPage, type TranscriptPage } from "../kernel/projection/projection.js";
 import {
   CatalogMetadataIndex,
   type CatalogMetadataIndexFailure,
@@ -728,7 +728,7 @@ export class RuntimeRegistry {
        * of its roots, with the counts it spent. A directory past the stop is
        * examined by a later pass; the report keeps the stop visible. */
       artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
-      extensionArtifactWarning?: (warning: { reason: import("./extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
+      extensionArtifactWarning?: (warning: { reason: import("../kernel/projection/extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
       scheduleToolOperations?: ScheduleToolOperations;
       connections?: ConnectionOwner;
       /** One Home designation lifecycle outcome, for the Gateway log. */

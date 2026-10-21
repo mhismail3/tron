@@ -1,5 +1,5 @@
-import type { SessionProcessActivity, SessionProcessLifecycle } from "../protocol/types.js";
-import { RecencyDeadlines, systemRecencyClock, type RecencyClock } from "./recency-deadlines.js";
+import type { SessionProcessActivity, SessionProcessLifecycle } from "../../protocol/types.js";
+import { RecencyDeadlines, systemRecencyClock, type RecencyClock } from "../../sessions/recency-deadlines.js";
 
 export const PROCESS_ACTIVITY_RECENT_MS = 5 * 60 * 1_000;
 const MAX_PROCESS_TIMESTAMP_FUTURE_SKEW_MS = 60_000;

@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import type { HomeChapterList, HomeProfileList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryView, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
 import { readHomeProfile } from "./home-profile.js";
 import type { SessionEntry } from "../kernel/pi/coding-agent.js";
-import { historyEntry } from "../sessions/history.js";
+import { historyEntry } from "../kernel/projection/history.js";
 import type { EpisodicMemory } from "../episodic/episodic-memory.js";
 import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, type HomeMemoryViewRequest } from "./home-memory-browser.js";
 import { GatewayError } from "../errors.js";

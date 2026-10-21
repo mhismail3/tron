@@ -13,7 +13,7 @@ import { managedProducerAPI, type ManagedInternalWake } from "../extensions/mana
 import { loadSubagentCatalog } from "./subagent-catalog.js";
 import { producerIdentity, withExtensionOwner } from "../extensions/owner-attribution.js";
 
-const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
+const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {
   version: string; fork: { commit: string }; closure: { path: string; sha512: string };
 };

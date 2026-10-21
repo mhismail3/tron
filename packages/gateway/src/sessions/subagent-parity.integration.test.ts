@@ -11,7 +11,7 @@ import { expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { PackageService } from "../admin/package-service.js";
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
-import { subagentProcessesFromActivity } from "./process-activity.js";
+import { subagentProcessesFromActivity } from "../kernel/projection/process-activity.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
 import { waitFor } from "../../test-support/wait-for.js";

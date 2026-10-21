@@ -85,7 +85,7 @@ it("installs the real pinned closure in an empty home, admits its tool, and disc
 it("loads one peer-free install through two host SDK payload paths with exact host export identity", () => {
   expect(existsSync(join(root, "node_modules", "@earendil-works", "pi-coding-agent"))).toBe(false);
   expect(existsSync(join(root, "node_modules", "typebox"))).toBe(false);
-  const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
+  const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
   const probe = join(home, "host-proof.mjs");
   writeFileSync(probe, `import { SessionManager } from '@earendil-works/pi-coding-agent';
     export default function(pi) { pi.registerTool({name:'host_proof',label:'Proof',description:'Proof',parameters:{type:'object'},

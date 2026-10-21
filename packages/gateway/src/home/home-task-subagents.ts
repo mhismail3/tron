@@ -5,7 +5,7 @@ import { GatewayError } from "../errors.js";
 import type { ExtensionRunLifecycleState } from "../protocol/types.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../sessions/context-delivery-receipts.js";
 import { delegatedArtifactPathAllowed, DELEGATED_PROVIDER_TOOL_NAME } from "../sessions/delegated-provider.js";
-import { MAX_EXTENSION_ARTIFACT_BYTES, observedPausedProcessTerminalAt } from "../sessions/extension-run-projection.js";
+import { MAX_EXTENSION_ARTIFACT_BYTES, observedPausedProcessTerminalAt } from "../kernel/projection/extension-run-projection.js";
 import { homeTaskOperationSpan } from "./home-task-report.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON, HOME_TASK_SEALED_REASON } from "./home-task-worker-extension.js";
 

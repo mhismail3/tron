@@ -41,7 +41,7 @@ import { HOME_MEMORY_VIEW_MARKER, type HomeMemoryUnavailableReason } from "../ho
 import type { HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeMemoryToolDetails } from "../home/home-memory-tools.js";
 import type { HomeMemoryStatus } from "../protocol/types.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 
 const PROVIDER = "tron-home-tools";
 const MODEL_ID = "chat";

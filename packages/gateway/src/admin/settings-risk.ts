@@ -1,5 +1,5 @@
 import { JEV_MAX_ESTIMATED_CHARGE_CENTS, type JevDecisionClient } from "../knowledge/jev-client.js";
-import { redactProcessText } from "../sessions/process-activity.js";
+import { redactProcessText } from "../kernel/projection/process-activity.js";
 import type { ActorKind } from "./settings-record.js";
 import type { Direction } from "./settings-types.js";
 import type { Tier } from "../kernel/settings/tool-contract.js";

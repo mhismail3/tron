@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { redactCredentials } from "../util/credential-redaction.js";
+import { redactCredentials } from "../../util/credential-redaction.js";
 import { basename } from "node:path";
-import type { SessionManager } from "../kernel/pi/coding-agent.js";
+import type { SessionManager } from "../pi/coding-agent.js";
 
 type ReadonlySessionManager = Pick<SessionManager, "getBranch" | "getSessionId" | "getLeafId">;
 import type {
@@ -12,8 +12,8 @@ import type {
   SessionProcessHistoryPage,
   SessionProcessOverview,
   SessionProcessState,
-} from "../protocol/types.js";
-import { boundedHistoryPage, extensionActivityReceipts, extensionReceiptActivity } from "./extension-activity-history.js";
+} from "../../protocol/types.js";
+import { boundedHistoryPage, extensionActivityReceipts, extensionReceiptActivity } from "../../sessions/extension-activity-history.js";
 import {
   PROCESS_ACTIVITY_RECENT_MS,
   isActiveProcessLifecycle,

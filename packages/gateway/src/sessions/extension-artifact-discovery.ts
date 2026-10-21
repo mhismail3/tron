@@ -11,7 +11,7 @@ import {
   lifecycleProjectionArtifact,
   observedPausedProcessTerminalAt,
   parseExtensionLifecycleProjectionHeader,
-} from "./extension-run-projection.js";
+} from "../kernel/projection/extension-run-projection.js";
 
 // MaximumLiveRuntimes is 16 and each slot retains at most 64 owned activity
 // bindings, so this covers every exact drain owner before ambient work. An

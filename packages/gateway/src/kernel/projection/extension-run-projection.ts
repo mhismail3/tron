@@ -8,7 +8,7 @@ import type {
   ExtensionRunLifecycle,
   ExtensionRunLifecycleState,
   ExtensionToolOrigin,
-} from "../protocol/types.js";
+} from "../../protocol/types.js";
 
 export const MAX_EXTENSION_RUN_CHILDREN = 32;
 const MAX_CHILDREN_TOTAL = 64;

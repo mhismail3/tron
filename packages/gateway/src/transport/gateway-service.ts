@@ -33,7 +33,7 @@ import {
   PROCESS_ACTIVITY_HISTORY_CAPABILITY,
   PROCESS_TRANSCRIPT_ABORT_CAPABILITY,
   PROCESS_TRANSCRIPT_CAPABILITY,
-} from "../sessions/process-activity.js";
+} from "../kernel/projection/process-activity.js";
 import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
 import { QueuedWorkGate } from "../util/queued-work-gate.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
@@ -58,7 +58,7 @@ import {
 } from "../admin/ios-device-install-service.js";
 import type { GatewayLogger } from "./logger.js";
 import type { CommandReceiptBinding, CommandReceiptStore } from "./command-receipts.js";
-import { fitSessionSnapshot, safeJson } from "../sessions/projection.js";
+import { fitSessionSnapshot, safeJson } from "../kernel/projection/projection.js";
 import { ModelCatalogPager } from "./model-pagination.js";
 import { exportDiagnosticSnapshot } from "./diagnostic-export.js";
 import { SessionListPaginationStore } from "./session-list-pagination.js";

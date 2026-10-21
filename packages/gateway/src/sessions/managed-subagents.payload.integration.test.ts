@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
-const gateway = fileURLToPath(new URL("../../", import.meta.url));
+const gateway = fileURLToPath(new URL("../..", import.meta.url));
 const run = promisify(execFile);
 
 it("activates a real staged Mac app offline without checkout pin or artifact access", async () => {

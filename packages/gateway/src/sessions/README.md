@@ -4,8 +4,8 @@
 
 The session run kernel: one live Pi runtime per canonical session, serialized
 mutations, prompt admission, run markers, invocation receipts and terminal
-settlement. The other `src/sessions/` modules (catalog, projection, delegation,
-extension activity, resources, session search) have their own manifests here;
+settlement. Other session modules have their own manifests here; projection lives in
+[`kernel/projection`](../kernel/projection/README.md);
 `scripts/tron docs modules packages/gateway/src/sessions` lists them.
 
 ## Owns
@@ -143,7 +143,7 @@ rows). Locks: `run.lock`, `run.store.lock`, `run-markers.lock` (`.integration.te
 ## Not here
 
 - Wire contracts: [transport](../transport/README.md). Projection rules:
-  `projection.ts` (gateway/projection). Delegated activity:
+  [`kernel/projection`](../kernel/projection/README.md). Delegated activity:
   [delegated activity](delegated-activity.md).
 - Settings applied through the slot: [admin](../admin/README.md). Home:
   [home](../home/README.md). Terminal alerts: [notifications](../notifications/README.md).

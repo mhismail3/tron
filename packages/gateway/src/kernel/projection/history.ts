@@ -1,6 +1,6 @@
-import type { SessionEntry, SessionManager } from "../kernel/pi/coding-agent.js";
-import { GatewayError } from "../errors.js";
-import type { JsonValue, SessionTreeNode } from "../protocol/types.js";
+import type { SessionEntry, SessionManager } from "../pi/coding-agent.js";
+import { GatewayError } from "../../errors.js";
+import type { JsonValue, SessionTreeNode } from "../../protocol/types.js";
 import type { PiMessageContentBlock } from "./projection.js";
 
 const HISTORY_PAGE_SIZE = 100;

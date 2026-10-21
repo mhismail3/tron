@@ -16,7 +16,7 @@ import { delegatedProviderEnvironment } from "./delegated-provider.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { copyPayload, refuseUnjoinedFixture, retainedFiles } from "../../test-support/nested-vitest-payload.js";
 
-const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
+const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
 const leg = process.env.TRON_SUBAGENTS_ROLLBACK_LEG;
 interface Completion { parentId: string; parentFile: string; childId: string; childFile: string; runId: string; processId?: string }
 

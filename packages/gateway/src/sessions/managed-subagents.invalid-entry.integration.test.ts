@@ -13,7 +13,7 @@ import { copyPayload, refuseUnjoinedFixture, retainedFiles } from "../../test-su
 import { ManagedSubagents } from "./managed-subagents.js";
 import { delegatedProviderEnvironment } from "./delegated-provider.js";
 
-const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
+const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
 const ownTestFile = "managed-subagents.invalid-entry.integration.test.ts";
 const leg = process.env.TRON_SUBAGENTS_INVALID_ENTRY_FIXTURE;
 
