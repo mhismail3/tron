@@ -84,6 +84,7 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSourcesTextDoneAndRoutes"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testProviderLoginSurvivesSafariAndReconnect"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCompletedAskUserColdReplayRetainsSelectedAnswers"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
@@ -110,7 +111,7 @@ ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
     *testHomeStatusShowsHostPressureAndWorkers) echo "1 no" ;;
-    *testForegroundAndReconnectKeepSheetsAndTheirContent) echo "2 yes" ;;
+    *testForegroundAndReconnectKeepSheetsAndTheirContent|*testProviderLoginSurvivesSafariAndReconnect) echo "2 yes" ;;
     *) echo "0 no" ;;
   esac
 }
@@ -596,6 +597,23 @@ const scripted = (context, options, state, model) => {
 faux.setResponses(Array.from({ length: 64 }, () => scripted));
 export default function (pi) {
   pi.registerProvider(faux.provider);
+  // Hermetic manual OAuth: no browser endpoint or real credential is used.
+  // The real Pi session owns this callback/state across the phone's reconnect.
+  pi.registerProvider("tron-e2e-oauth", {
+    name: "Tron OAuth Fixture", api: "openai-completions", baseUrl: "https://example.invalid/v1",
+    models: [{ id: "oauth-fixture", name: "OAuth Fixture", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 4096, maxTokens: 1024 }],
+    oauth: {
+      name: "Tron OAuth Fixture",
+      async login(callbacks) {
+        callbacks.onAuth({ url: "https://example.invalid/authorize?state=fixture-state" });
+        const input = await callbacks.onPrompt({ message: "Paste the fixture callback code:", placeholder: "Fixture OAuth code" });
+        if (input !== "fixture-code#fixture-state") throw new Error("Fixture OAuth state mismatch");
+        return { refresh: "fixture-refresh", access: "fixture-access", expires: Date.now() + 3600000 };
+      },
+      async refreshToken(credentials) { return credentials; },
+      getApiKey(credentials) { return credentials.access; }
+    }
+  });
   pi.on("agent_start", (_event, ctx) => { steerContext = ctx; });
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
