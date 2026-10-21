@@ -149,6 +149,11 @@ Device-local settings (S=no, P=no, safety=no, immediate presentation effect; not
 
 ## Sheets and removal map
 
+Every settings sheet hides its top drag indicator and follows the shared presentation contract:
+managed/progressive presentation, native top-right Done, inherited title/action tint, shared top
+chrome and standard detents. No local sheet-style or toolbar replacement; interactive Project
+pills and passive Overridden tags reuse the shared control/status owners.
+
 | Surface / owner | Proposed disposition |
 | --- | --- |
 | Global `SettingsView`, section links/cards | Keep current group styling/order; every setting row editable, never an inspection clone |

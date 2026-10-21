@@ -7,8 +7,8 @@ import TronMobileCore
 @MainActor
 struct HostedSettingsThreeLayerPreview: View {
     let surface: String
-    @State private var showInfo = false
-    @State private var showFilters = false
+    @State private var previewPresented = true
+    @State private var previewDetent: PresentationDetent = .large
     @State private var scope = "All scopes"
     @State private var actor = "Everyone"
     @State private var group = "Any group"
@@ -20,6 +20,32 @@ struct HostedSettingsThreeLayerPreview: View {
     private var home: Bool { surface.contains("home") }
 
     var body: some View {
+        Color.clear.tronManagedSheet(isPresented: $previewPresented, identity: "preview.settings.\(surface)") {
+            Group {
+                if surface == "global" {
+                    previewContent
+                } else {
+                    NavigationStack {
+                        previewContent.toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button { previewPresented = false } label: {
+                                    Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction()
+                                }
+                                .accessibilityLabel("Done")
+                            }
+                        }
+                    }
+                }
+            }
+            .tronTopBlur(.sheet)
+            .tronPresentation()
+            .tronSettingsLayout()
+            .presentationDetents([.medium, .large], selection: $previewDetent)
+            .presentationDragIndicator(.hidden)
+        }
+    }
+
+    private var previewContent: some View {
         Group {
             switch surface {
             case "global": SettingsView()
@@ -37,14 +63,6 @@ struct HostedSettingsThreeLayerPreview: View {
                 .foregroundStyle(Color.tronTextSecondary)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity)
-                .background(Color.tronBackground)
-        }
-        .tronManagedSheet(isPresented: $showInfo, identity: "preview.project-setting-info") {
-            NavigationStack { projectInfo }
-                .presentationDetents([.height(300), .medium])
-        }
-        .tronManagedSheet(isPresented: $showFilters, identity: "preview.changes-filters") {
-            NavigationStack { filters }
         }
     }
 
@@ -135,11 +153,7 @@ struct HostedSettingsThreeLayerPreview: View {
             HStack(spacing: 8) {
                 Text(value).foregroundStyle(Color.tronTextSecondary)
                 if overridden {
-                    Text("Overridden")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronPurple)
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(Color.tronPurple.opacity(0.1), in: Capsule())
+                    TronStatusPill(text: "Overridden", accent: .tronPurple)
                     Button { overridden = false } label: {
                         TronInlineActionLabel("", icon: "arrow.uturn.backward", accent: .tronPurple)
                     }
@@ -153,12 +167,12 @@ struct HostedSettingsThreeLayerPreview: View {
         TronSettingsRow(icon: "cpu", title: "Model") {
             VStack(alignment: .trailing, spacing: 6) {
                 Text("GPT-6.1 Sol").foregroundStyle(Color.tronTextSecondary)
-                Button { showInfo = true } label: {
-                    Text("Set by Project settings")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronEmerald)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.tronEmerald.opacity(0.1), in: Capsule())
+                TronProgressiveSheetLink(accessibilityLabel: "Set by Project settings",
+                                         identity: "preview.project-setting-info", detents: .fixed([.height(300), .medium])) {
+                    projectInfo
+                } label: {
+                    TronInlineActionLabel("Set by Project settings")
+                        .controlSize(.small)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("preview-project-pill")
@@ -257,8 +271,13 @@ struct HostedSettingsThreeLayerPreview: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { showFilters = true } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
-                    .accessibilityLabel("Filters").accessibilityIdentifier("preview-changes-filters")
+                TronProgressiveSheetLink(accessibilityLabel: "Filters", identity: "preview.changes-filters") {
+                    filters
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(TronTypography.buttonSM).tronToolbarAction()
+                }
+                .accessibilityIdentifier("preview-changes-filters")
             }
         }
     }
