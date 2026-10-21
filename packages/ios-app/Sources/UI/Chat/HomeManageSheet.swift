@@ -140,9 +140,7 @@ extension HomeSheet {
         if let sessionID {
             TronGlassCard(accent: .tronSessionTeal) {
                 TronProgressiveSheetLink(accessibilityLabel: "Home Settings", identity: "home.settings", accent: .tronSessionTeal) {
-                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["profile"], changesScope: .home(sessionID),
-                                     homeProfileID: profileID,
-                                     onOpenSession: onOpenSession.map { callback in { route in callback(route.sessionID) } })
+                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["profile"], homeProfileID: profileID)
                         .tronNavigationTitle("Home Settings")
                 } label: {
                     TronSettingsRow(icon: "slider.horizontal.3", title: "Home Settings",

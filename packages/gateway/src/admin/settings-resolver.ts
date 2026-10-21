@@ -1,9 +1,10 @@
-import { type SettingsTarget, type FixedSetting, type Badge, type LayerValue, type ResolvedKey, type Diagnostic, type Resolution, type LayerId, type Qualifiers } from "../kernel/settings/tool-contract.js";
-import { dirname } from "node:path";
+import { type SettingsTarget, type FixedSetting, type Badge, type LayerValue, type ResolvedKey, type Resolution, type LayerId, type Qualifiers } from "../kernel/settings/tool-contract.js";
+import { dirname, join } from "node:path";
 import { KEYS, keyForHome, builtinValue, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext } from "./settings-types.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
+import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
 
 
 
@@ -165,15 +166,6 @@ function layerApplied(stores: SettingsStores, layer: LayerId): { applied: boolea
   return { applied: true };
 }
 
-/** Pi-file paths a key does not allow, used to report values set where they are ignored. */
-function disallowedPiPaths(key: KeyDeclaration, layer: "project" | "mac"): readonly (readonly string[])[] {
-  if (key.layers[layer]) return [];
-  const other = key.layers[layer === "project" ? "mac" : "project"];
-  if (other?.store === "pi") return [other.path];
-  if (other?.store === "pi-model-ref") return [["defaultProvider"], ["defaultModel"]];
-  return [];
-}
-
 export interface ResolveOptions {
   format: FormatContext;
   options: OptionSources;
@@ -182,7 +174,8 @@ export interface ResolveOptions {
 
 /** Resolve every key (or the requested ones) for a target. */
 export function resolveSettings(target: SettingsTarget, stores: SettingsStores, options: ResolveOptions): Resolution {
-  const diagnostics: Diagnostic[] = [];
+  const diagnostics = stores.project
+    ? projectSettingsDiagnostics(stores.project.document, join(stores.project.root, ".pi", "settings.json")) : { diagnostics: [] };
   const applicable = KEYS.map(key => keyForHome(key, stores.layers.includes("profile")));
   const keys = options.keys ? applicable.filter(key => options.keys!.includes(key.id)) : applicable;
   const resolved: ResolvedKey[] = [];
@@ -200,18 +193,15 @@ export function resolveSettings(target: SettingsTarget, stores: SettingsStores, 
     // A key belongs to a target that has at least one of its allowed layers
     // (doc 3.3): Home-only profile keys never appear on an ordinary chat.
     if (!Object.keys(key.layers).some(layer => stores.layers.includes(layer as LayerId))) continue;
-    for (const layer of ["project", "mac"] as const) {
-      if (!stores.layers.includes(layer)) continue;
-      const document = piDocument(stores, layer);
-      for (const path of disallowedPiPaths(key, layer)) {
-        if (readPath(document, path) !== undefined) diagnostics.push({ key: key.id, layer, reason: "layer-not-allowed", path: path.join(".") });
-      }
-    }
     for (const qualifiers of instances(key, target, stores, modelQualifier)) {
       resolved.push(resolveInstance(key, qualifiers, stores, options, dependencyValue));
     }
   }
-  return { target, layers: stores.layers, ...(stores.project?.unreadable ? { projectUnreadable: true as const } : {}), keys: resolved, diagnostics };
+  const projectNotice = stores.project && (stores.project.unreadable || (!stores.project.applied && Object.keys(stores.project.document).length))
+    ? { file: join(stores.project.root, ".pi", "settings.json"), message: stores.project.unreadable
+      ? "Project settings couldn't be read" : "Project settings aren't applied until this project is trusted" } : undefined;
+  return { target, layers: stores.layers, ...(stores.project?.unreadable ? { projectUnreadable: true as const } : {}),
+    ...(projectNotice ? { projectNotice } : {}), keys: resolved, ...diagnostics };
 }
 
 function instances(key: KeyDeclaration, target: SettingsTarget, stores: SettingsStores, model: string | undefined): Qualifiers[] {
@@ -355,6 +345,15 @@ function resolveInstance(
       action: { kind: "useCurrentDefault", label: "Use the current default" } });
   }
 
+  const localLayer = stores.layers.includes("profile") ? "profile" : stores.layers.includes("chat") ? "chat" : "mac";
+  const localBinding = key.layers[localLayer];
+  const localValue = localBinding?.store === "chat-settings" ? readPath(stores.chat?.settings, localBinding.path)
+    : localBinding ? readBinding(stores, localLayer, localBinding, qualifiers, false, key.id) : undefined;
+  const projectValue = shown.find(entry => entry.layer === "project" && entry.applied);
+  const binding = key.layers.project;
+  const projectPath = binding?.store === "pi-model-ref" ? "defaultProvider + defaultModel" : binding?.store === "pi"
+    ? projectSettingPath((qualified.some(entry => entry.layer === "project") ? binding.qualified! : binding.path)
+      .map(segment => segment === "{model}" ? qualifiers.model! : segment)) : undefined;
   return {
     key: key.id,
     ...(Object.keys(qualifiers).length ? { qualifiers } : {}),
@@ -369,6 +368,8 @@ function resolveInstance(
     ...(fixedAt ? { fixedAt } : {}),
     origin: layer !== "chat" ? "inherited" : fixedAt ? fixedAt.from === "chat" ? "override" : "launch"
       : key.layers.chat?.store === "chat-settings" && readPath(stores.chat?.settings, key.layers.chat.path) !== undefined ? "override" : "legacy-session",
+    overridden: localValue !== undefined,
+    ...(projectValue && projectPath && stores.project ? { projectSetting: { file: join(stores.project.root, ".pi", "settings.json"), path: projectPath } } : {}),
     layers: key.redacted ? layerValues.map(({ value: _value, ...rest }) => rest) : layerValues,
   };
 }

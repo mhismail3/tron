@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
@@ -124,6 +124,87 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     const observed = { effective: retryValue(await f.resolve(slot, ["run.retry.maxRetries"])), requests: await f.attempts(slot) };
     evidence.push({ case: "existing revert positive control", observed });
     expect(observed).toEqual({ effective: 1, requests: 2 });
+  });
+
+  it("serves the shared editor's scope grants, inactive override and exact Project path from real resolution", async () => {
+    const f = await setup();
+    const slot = await f.create();
+    await f.retryChange(slot, "set", 0);
+    await f.project({ retry: { maxRetries: 2 } });
+    const read = async () => f.service.invoke(f.client, "settings.resolve", {
+      target: { kind: "session", sessionId: slot.id }, keys: ["run.retry.maxRetries"],
+      renderer: { version: 1, controls: ["number"] },
+    }) as Promise<{ keys: Array<{ value: unknown; overridden: boolean; projectSetting?: { file: string; path: string }; presentation: { sessionOverridable: boolean; projectSettable: boolean; editable: boolean } }> }>;
+    const masked = (await read()).keys[0]!;
+    expect(masked).toMatchObject({ value: 2, overridden: true,
+      projectSetting: { file: join(await realpath(f.cwd), ".pi", "settings.json"), path: "retry.maxRetries" },
+      presentation: { sessionOverridable: true, projectSettable: true, editable: true } });
+    await f.project({});
+    const active = (await read()).keys[0]!;
+    expect(active).toMatchObject({ value: 0, overridden: true });
+    expect(active.projectSetting).toBeUndefined();
+    await f.retryChange(slot, "unset");
+    expect((await read()).keys[0]).toMatchObject({ value: 1, overridden: false });
+  });
+
+  it("serves target-specific editor capability, Global reset presence and no stopped-runtime setting row", async () => {
+    const f = await setup();
+    const read = (target: Record<string, string>) => f.service.invoke(f.client, "settings.resolve", {
+      target, keys: ["run.retry.maxRetries", "setup.sessionDir"], renderer: { version: 1, controls: ["number", "text"] },
+    }) as Promise<{ keys: Array<{ key: string; overridden: boolean; presentation: { editable: boolean } }> }>;
+    const global = await read({ kind: "mac" });
+    expect(global.keys).toHaveLength(1);
+    expect(global.keys[0]).toMatchObject({ key: "run.retry.maxRetries", overridden: true, presentation: { editable: true } });
+    await f.project({ retry: { maxRetries: 2 } });
+    const project = await read({ kind: "project", cwd: f.cwd });
+    expect(project.keys.find(row => row.key === "run.retry.maxRetries")?.presentation.editable).toBe(false);
+  });
+
+  it("reports ignored Project fields with a bounded file/key/reason projection, never their values", async () => {
+    const f = await setup();
+    const slot = await f.create();
+    await f.project({ defaultTools: ["do-not-disclose-value"], thinkingBudgets: { high: 7 },
+      retry: { maxRetries: 2 }, ...Object.fromEntries(Array.from({ length: 40 }, (_, index) => [`unknown${index}`, "do-not-disclose-value"])) });
+    const resolved = await f.resolve(slot, ["run.retry.maxRetries"]) as Resolution & { diagnosticsTruncated?: true };
+    expect(retryValue(resolved)).toBe(2);
+    expect(resolved.diagnostics).toHaveLength(32);
+    expect(resolved.diagnosticsTruncated).toBe(true);
+    expect(resolved.diagnostics).toContainEqual({ key: "tools.active", layer: "project", reason: "project-forbidden",
+      path: "defaultTools", file: join(await realpath(f.cwd), ".pi", "settings.json") });
+    expect(JSON.stringify(resolved.diagnostics)).not.toContain("do-not-disclose-value");
+  });
+
+  it("leaves untrusted and unreadable Project rows inherited and editable, with path-only notices", async () => {
+    const f = await setup();
+    const slot = await f.create();
+    await f.project({ retry: { maxRetries: 2 } });
+    await f.trust.set(f.cwd, false);
+    const untrusted = await f.resolve(slot, ["run.retry.maxRetries"]);
+    expect(retryValue(untrusted)).toBe(1);
+    expect(untrusted.keys[0]?.projectSetting).toBeUndefined();
+    expect(untrusted.projectNotice).toEqual({ file: join(await realpath(f.cwd), ".pi", "settings.json"),
+      message: "Project settings aren't applied until this project is trusted" });
+    await writeFile(join(f.cwd, ".pi", "settings.json"), "unreadable-json-secret-value");
+    const unreadable = await f.resolve(slot, ["run.retry.maxRetries"]);
+    expect(retryValue(unreadable)).toBe(1);
+    expect(unreadable.keys[0]?.projectSetting).toBeUndefined();
+    expect(unreadable.projectNotice).toEqual({ file: join(await realpath(f.cwd), ".pi", "settings.json"),
+      message: "Project settings couldn't be read" });
+    expect(JSON.stringify(unreadable)).not.toContain("unreadable-json-secret-value");
+  });
+
+  it("keeps thinking budgets and image visibility Global-only during real SDK admission", async () => {
+    const f = await setup();
+    const globalPath = join(f.agentDir, "settings.json");
+    const global = JSON.parse(await readFile(globalPath, "utf8"));
+    await writeFile(globalPath, JSON.stringify({ ...global, thinkingBudgets: { high: 4096 }, images: { blockImages: true } }));
+    await f.project({ thinkingBudgets: { high: 8 }, images: { blockImages: false } });
+    const slot = await f.create();
+    expect(slot.runtime.session.settingsManager.getThinkingBudgets()).toEqual({ high: 4096 });
+    expect(slot.runtime.session.settingsManager.getBlockImages()).toBe(true);
+    const rows = (await f.resolve(slot, ["model.thinkingBudgets", "context.images.block"])).keys;
+    expect(rows.find(row => row.key === "model.thinkingBudgets")?.value).toEqual({ high: 4096 });
+    expect(rows.find(row => row.key === "context.images.block")?.value).toBe(true);
   });
 
   it("Project compaction budget reaches both the real SDK threshold and operation projection", async () => {

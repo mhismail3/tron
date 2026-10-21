@@ -8,7 +8,7 @@ struct SettingsRendererRow: View {
     let setting: ResolvedSetting
     let target: JSONValue
     let editable: Bool
-    /// Detailed rows show help; every key's body opens the shared Value & Source sheet.
+    /// Detailed rows show the registry's help beside the shared editor.
     var detailed = false
     /// One of several instances of a key (per project, per model): titled by its
     /// instance, with the key's label and help on the enclosing group.
@@ -16,9 +16,6 @@ struct SettingsRendererRow: View {
     /// The title of the instance with no qualifier of its own, beside its
     /// per-model siblings ("All models"); otherwise it keeps the key's label.
     var baseInstanceTitle: String? = nil
-    /// Configuration inspection adds a concise application/source summary;
-    /// precise layers and launch evidence remain in Value & Source.
-    var inspecting = false
     /// A live owner can retain its receipt-aware control while this row still
     /// owns the shared, independent source and inherited-reset affordances.
     var liveControl: AnyView? = nil
@@ -28,7 +25,6 @@ struct SettingsRendererRow: View {
     /// An instance's own description, when its group's help does not say it
     /// (an approval level describes the setting it governs).
     var instanceHelp: String? = nil
-    var inactiveNote: String? = nil  // Why the saved value has no effect here, for Value & Source.
     /// The options the key's source serves, read by the renderer with the
     /// resolution itself, so a row is never without them once it renders.
     let options: SettingsOptionsResponse?
@@ -75,23 +71,12 @@ struct SettingsRendererRow: View {
     /// The key's help and note, on detailed rows only; an instance's help is on its group.
     private var subtitle: String? {
         guard detailed else { return nil }
-        if inspecting { return applicationSummary }
         // An instance is titled by its short name; its full scope (a project's path)
         // describes it when nothing else does.
         let scope = setting.badge("scope")?.label
         let instanceLine = instanceHelp ?? (scope != title ? scope : nil) ?? ""
         let lines = [instanced ? instanceLine : presentation?.help ?? "", presentation?.note ?? ""].filter { !$0.isEmpty }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
-    }
-
-    private var applicationSummary: String {
-        let source = setting.badge("source")?.label ?? settingsLayerLabel(setting.layer)
-        if setting.applied == false { return "\(source) · Not applied" }
-        switch setting.origin {
-        case "launch": return "\(source) · Retained launch value"
-        case "legacy-session": return "Retained session value · Launch source unavailable"
-        default: return source
-        }
     }
 
     /// A text row's subtitle also says what to type, on rows that show help.
@@ -121,9 +106,8 @@ struct SettingsRendererRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Group {
-                if let liveControl { liveControl } else { control(for: control) }
+                if let liveControl, setting.projectSetting == nil { liveControl } else { control(for: control) }
             }
-                .environment(\.tronSettingsRowInspection, inspection)
                 .environment(\.tronSettingsRowAccessory, accessory)
             details
         }
@@ -131,22 +115,30 @@ struct SettingsRendererRow: View {
         .accessibilityIdentifier(settingsRowIdentifier(setting))
     }
 
-    private var inspection: TronSettingsRowInspection {
-        TronSettingsRowInspection(label: "Value and source for \(title)", identifier: "\(settingsRowIdentifier(setting))-source",
-                                  destination: { AnyView(SettingsProvenanceView(setting: setting, inactiveNote: inactiveNote)) })
-    }
-
     private var accessory: (@MainActor @Sendable () -> AnyView)? {
+        if let source = setting.projectSetting {
+            return { AnyView(
+                TronProgressiveSheetLink(accessibilityLabel: "Set by Project settings",
+                    identity: "settings.project.\(setting.id)", detents: .fixed([.height(300), .medium])) {
+                    SettingsProjectInfo(source: source)
+                } label: { TronInlineActionLabel("Set by Project settings").controlSize(.small) }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("\(settingsRowIdentifier(setting))-project")
+            ) }
+        }
         guard canReset && editable && control != .readOnly else { return nil }
-        return { AnyView(resetButton) }
+        return { AnyView(HStack(spacing: 8) {
+            if target.objectValue?["kind"]?.stringValue != "mac" { TronStatusPill(text: "Overridden", accent: theme?.accent ?? .tronPurple) }
+            resetButton
+        }) }
     }
 
     private var resetLabel: String {
-        setting.badges.compactMap(\.action).first { ["useCurrentDefault", "followDefault"].contains($0.kind) }?.label ?? "Reset to inherited"
+        target.objectValue?["kind"]?.stringValue == "mac" ? "Reset" : "Revert"
     }
 
     private var resetButton: some View {
-        Button { if !resetDisabled { onChange(nil) } } label: {
+        Button { if !resetDisabled { TronHaptics.shared.play(.selectionChanged); onChange(nil) } } label: {
             TronInlineActionLabel("", icon: "arrow.uturn.backward", accent: theme?.accent ?? .tronEmerald)
         }
             .controlSize(.small)
@@ -350,61 +342,27 @@ struct SettingsRendererRow: View {
     }
 }
 
-/// Read-only provenance for one key. Layers are values from their owners, never audit entries.
-private struct SettingsProvenanceView: View {
-    let setting: ResolvedSetting
-    let inactiveNote: String?
-
+/// The same shared rows/chrome as Global; only the repository's file/key are shown.
+struct SettingsProjectInfo: View {
+    let source: SettingsProjectSource
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                TronSettingsGroup("Effective value", detail: setting.presentation?.help) {
-                    TronSettingsRow(icon: "checkmark.circle", title: setting.presentation?.label ?? setting.key,
-                                    subtitle: setting.badge("source")?.detail ?? setting.badge("layer")?.label) {
-                        TronDynamicValue(text: setting.display, color: .tronTextSecondary)
+                TronSettingsCaption("This is set by the current project's settings. Ask an agent to update them in the repo.")
+                TronSettingsGroup(nil) {
+                    TronSettingsRow(icon: "doc.text", title: "File") {
+                        Text(source.file).font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
                     }
-                    ForEach((setting.qualifiers ?? [:]).sorted { $0.key < $1.key }, id: \.key) { qualifier in
-                        TronSettingsDivider()
-                        TronSettingsRow(icon: "scope", title: qualifier.key.capitalized) {
-                            TronDynamicValue(text: qualifier.value, color: .tronTextSecondary)
-                        }
+                    TronSettingsDivider()
+                    TronSettingsRow(icon: "key", title: "Key") {
+                        Text(source.path).font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
                     }
-                }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("settings-provenance-effective")
-                if let inactiveNote { TronSettingsCaption(inactiveNote).accessibilityIdentifier("settings-provenance-inactive") }
-                TronSettingsGroup("Configuration sources", detail: "Highest priority first. Unset layers inherit; history is not a source.") {
-                    ForEach(Array(setting.layers.enumerated()), id: \.offset) { index, layer in
-                        if index > 0 { TronSettingsDivider() }
-                        TronSettingsRow(icon: "square.3.layers.3d", title: settingsLayerLabel(layer.layer),
-                                        subtitle: layer.applied == false ? "Not applied · untrusted repository" : nil) {
-                            TronDynamicValue(text: layer.display ?? "Inherited", color: .tronTextSecondary)
-                        }
-                    }
-                }
-                let evidence = setting.badges.filter { $0.kind != "layer" }
-                if !evidence.isEmpty {
-                    TronSettingsGroup("Application & provenance") {
-                        ForEach(Array(evidence.enumerated()), id: \.offset) { index, badge in
-                            if index > 0 { TronSettingsDivider() }
-                            TronSettingsRow(icon: "info.circle", title: badge.label, subtitle: badge.detail)
-                        }
-                    }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("settings-provenance-evidence")
-                }
-                if let effect = setting.presentation?.effect {
-                    TronSettingsCaption("Application boundary: \(effect).")
-                }
-                if setting.origin == "launch" {
-                    TronSettingsCaption("This retained launch value remains applied until explicitly reset or changed. Values in lower source layers are current defaults, not proof of what was used at launch.")
-                } else if setting.origin == "legacy-session" {
-                    TronSettingsCaption("This session retained the value without attributable launch provenance. Its original source is unknown.")
                 }
             }.padding(20)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Value & Source")
+        .tronNavigationTitle("Project setting")
+        .presentationDragIndicator(.hidden)
     }
 }
 

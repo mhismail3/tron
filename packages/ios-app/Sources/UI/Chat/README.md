@@ -15,7 +15,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   `ChatTranscriptProjectionKernel`, `ChatCommittedLedger`, `TranscriptRow`, `TronMarkdownView`.
 - Details: `ToolDetailSheet` and tool presentations, `ToolChangesSheet`, extension interaction,
   form and widget sheets, `SessionProcessSheets`, attachment previews and camera capture.
-- Manage Session and Home: `SessionModelConfigurationCard`, `WorkspaceInspectorSheet`,
+- Manage Session and Home: `SessionContextSheet`, `WorkspaceInspectorSheet`,
   `AgentInstructionsSheet`, `SessionTreeSheet`, `HomeManageSheet` and the `Home*Sheet(s)` files.
 - `NewSessionSheet`, `NewSessionConfigurationOwner` (`NewSessionCreationOwner`), `ProjectSettingsSheet`.
 

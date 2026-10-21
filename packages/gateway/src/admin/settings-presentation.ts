@@ -39,12 +39,16 @@ export interface KeyPresentation {
   redacted?: true;
   /** What to type into the key's text field or a list's new value, and a realistic example. */
   entry?: EntryGuidance;
-  editableLayers: string[];
+  sessionOverridable: boolean;
+  projectSettable: boolean;
+  /** Target-specific store/capability availability; Project masks remain visible. */
+  editable: boolean;
   timing: KeyDeclaration["timing"];
   effect: KeyDeclaration["effect"];
 }
 
-function presentKey(key: KeyDeclaration, clientControls: readonly string[] | undefined): KeyPresentation {
+function presentKey(key: KeyDeclaration, clientControls: readonly string[] | undefined, layer: "mac" | "chat" | "profile" | "project"): KeyPresentation {
+  const binding = key.layers[layer];
   const { control, note } = negotiateControl(key, clientControls);
   return {
     label: key.label,
@@ -55,7 +59,9 @@ function presentKey(key: KeyDeclaration, clientControls: readonly string[] | und
     ...(note ? { note } : {}),
     valueKind: key.type.kind,
     // Project files remain repository-owned; the app is an inspector there.
-    editableLayers: key.writers.includes("ui") ? Object.entries(key.layers).filter(([layer, binding]) => layer !== "project" && binding.store !== "chat-launch").map(([layer]) => layer) : [],
+    sessionOverridable: key.sessionOverridable,
+    projectSettable: key.projectSettable,
+    editable: layer !== "project" && key.writers.includes("ui") && binding !== undefined && binding.store !== "chat-launch",
     timing: key.timing,
     effect: key.effect,
     ...(key.type.options ? { options: key.type.options } : {}),
@@ -138,9 +144,11 @@ export function presentHistoryEntry(entry: ChangeEntry) {
 }
 
 export function presentResolution(resolution: Resolution, input: PresentationInput): PresentedResolution {
-  const keys: PresentedKey[] = resolution.keys.map(key => ({
+  const layer = resolution.target.kind === "mac" ? "mac" : resolution.target.kind === "project" ? "project"
+    : resolution.layers.includes("profile") ? "profile" : "chat";
+  const keys: PresentedKey[] = resolution.keys.filter(key => input.controls === undefined || schemaKey(key.key).writers.length > 0).map(key => ({
     ...key,
-    presentation: presentKey(keyForHome(schemaKey(key.key), resolution.layers.includes("profile")), input.controls),
+    presentation: presentKey(keyForHome(schemaKey(key.key), resolution.layers.includes("profile")), input.controls, layer),
   }));
   const sections = SECTIONS.flatMap((section): SettingsSectionPresentation[] =>
     keys.some(key => key.group === section.id) ? [{

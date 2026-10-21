@@ -7,16 +7,16 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 ## Foundations
 
 - **F1 Schema.** Each setting is one key declared once (`src/admin/settings-schema.ts`): type
-  and validation, group, allowed layers, timing, effect point, tier floor, writers, redaction
-  and display. iOS renders keys generically, so a new key needs no iOS release. "Mac only" or
-  "a chat may override it" are allowed layers, never rules.
+  and validation, group, scope grants, store bindings, timing, effect point, tier floor,
+  writers, redaction and display. `sessionOverridable` and `projectSettable` govern admission;
+  store bindings describe owned persistence. iOS renders the served metadata generically.
 - **F2 Truth.** Each layer's store is the truth; the change record is audit and undo, never
   consulted for a value. A store that differs from the last observed value is an
   [outside change](#outside-changes), offered **Apply again**; Tron never re-applies on its own.
 - **F3 Policy.** Every change takes one Gateway path and one tier:
   `tier = max(floor + web, assessment)`, capped at approve; no per-key exceptions
   ([tiers](#tiers)).
-- **F4 Layers.** Top wins: **Chat > Home profile > Project > Mac > Built-in**, among the
+- **F4 Layers.** Top wins: **Project > Chat > Home profile > Mac > Built-in**, among the
   layers the target has and the key allows. One resolver takes the topmost applied layer with
   a value; the effective value is computed, never stored.
 
@@ -214,13 +214,20 @@ note, grouped and undone together, refused on a stale revision.
 
 ## Presentation
 
-Words, badges and values come from the schema and resolver; iOS decides only layout.
+Words and values come from the schema and resolver; iOS decides only layout.
 `settings.resolve` serves sections (Model, Workers & delegation, Compaction, Tools,
 Agent changes, Connection, Trusted Projects, Mac Terminal, Accounts, Sources, Storage) and badges `{ kind, label, detail?, action? }`
 (Layer, Source, Scope, Authority, State; unknown kinds render neutrally; actions go through
 `settings.change`). Controls: `toggle`, `choice`, `number`, `text`, `secret`, `list`,
 `checklist`, `catalog`, `readOnly`; the client sends what it implements and gets the declared
-control, its `fallback`, or `readOnly` with "Update Tron to edit" — never a hidden value.
+control, its `fallback`, or `readOnly` with "Update Tron to edit". Stopped-runtime settings with
+no writer are not Settings rows. `sessionOverridable`/`projectSettable` grant scopes; `editable`
+is the target's binding/writer capability, not a second client-side permission list. Override
+presence is explicit even for equal/false/zero values. Applied Project values serve their exact
+file/key; ignored fields serve bounded value-free diagnostics. Untrusted/unreadable Project notices
+name their file and never make a Session editor look Project-owned.
 `settings.options` pages options; `dryRun` returns per-key errors and the tier. Changes list
 pending approvals first. Global writes Mac, Session the Chat layer, Home only `profile`;
-Project is inspection only. Hand-built screens remain only for guided flows and viewers.
+Project is inspection only. Session/Home reuse Global's renderer and editors; Project-owned rows
+have a read-only value and separate Project info pill, explicit overrides have Overridden/Revert,
+and Global alone has a Changes entry. Hand-built screens remain only for guided flows and viewers.

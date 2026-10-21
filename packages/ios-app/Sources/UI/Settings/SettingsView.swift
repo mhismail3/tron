@@ -329,11 +329,8 @@ struct SessionSettingsView: View {
     /// The layers this chat writes, in order of preference.
     let ownedLayers: [String]
     var projectCWD: String?
-    let changesScope: SettingsChangesScope
     /// Only Home owns delegation scopes; ordinary chats keep the same schema renderer.
     var homeProfileID: String? = nil
-    /// Opens a change's requesting chat or task chat from Changes.
-    var onOpenSession: ((AppModel.SessionNavigationRoute) -> Void)?
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
 
@@ -341,8 +338,7 @@ struct SessionSettingsView: View {
         homeProfileID == nil ? SettingsTarget.sessionGatewayTarget(sessionID) : .object(["kind": .string("home")])
     }
     private var selection: SettingsKeySelection {
-        .editable(ownedLayers, excluding: homeProfileID == nil
-            ? ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"] : [])
+        .sessionOverrides
     }
 
     private func inline(_ section: SettingsRendererSection) -> Bool {
@@ -363,8 +359,9 @@ struct SessionSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: TronSpacing.lg) {
                 TronSettingsCaption(homeProfileID == nil
-                    ? "Additional choices for this session. Models and Available Tools are edited in Manage Session. Reset uses the inherited value."
-                    : "Home's own assistant profile. These choices do not become defaults for ordinary sessions. Worker launch choices are explicit below.")
+                    ? "Choices for this session. Revert an override to use Global settings."
+                    : "Home's overrides of Global settings. Worker launch choices apply to new workers.")
+                if let snapshot = model.settingsSnapshot(for: target) { SettingsProjectNotices(resolution: snapshot.resolution) }
                 if sections.isEmpty {
                     TronSheetLoadingState(label: "Loading settings…")
                 } else {
@@ -383,20 +380,21 @@ struct SessionSettingsView: View {
                         }
                     }
                 }
-                TronGlassCard {
-                    TronProgressiveSheetLink(accessibilityLabel: "Configuration", identity: "settings.configuration.\(sessionID)") {
-                        SettingsConfigurationInspection(target: SettingsTarget.sessionGatewayTarget(sessionID),
-                            detail: homeProfileID == nil
-                                ? "Settings for this session. Retained launch values can differ from current defaults. Open any row for Value & Source."
-                                : "Settings for this Home chapter. Current profile defaults and retained launch values can differ. Open any row for Value & Source.")
-                    } label: {
-                        TronSettingsRow(icon: "square.3.layers.3d", title: "Configuration",
-                                        subtitle: "Applied values and where they come from")
+                if homeProfileID == nil, model.settingsSnapshot(for: target)?.resolution.keys.contains(where: SettingsKeySelection.projectOnly.includes) == true {
+                    TronGlassCard {
+                        TronProgressiveSheetLink(accessibilityLabel: "Set by Project", identity: "settings.project-only.\(sessionID)") {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 16) {
+                                    SettingsProjectGroups(target: target, selection: .projectOnly)
+                                }.padding(20)
+                            }
+                            .tronScrollEdgeChrome()
+                            .tronNavigationTitle("Set by Project")
+                        } label: {
+                            TronSettingsRow(icon: "folder.badge.gearshape", title: "Set by Project",
+                                            subtitle: "Read-only repository settings")
+                        }
                     }
-                }
-                TronGlassCard {
-                    SettingsChangesLink(scope: changesScope, subtitle: "One audit history · \(changesScope.title)",
-                                        onOpenSession: onOpenSession)
                 }
             }
             .accessibilityElement(children: .contain)
@@ -423,37 +421,36 @@ struct SessionSettingsView: View {
     }
 }
 
-/// The same schema renderer, with no unrelated editors or secondary configuration store.
-struct SettingsConfigurationInspection: View {
-    let target: JSONValue
-    let detail: String
-    @Environment(AppModel.self) private var model
-    @Environment(\.tronPresentationActivity) private var activity
+/// Project diagnostics share one presentation in Session and Project settings.
+struct SettingsProjectNotices: View {
+    let resolution: SettingsResolution
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                TronSettingsCaption(detail)
-                SettingsConfigurationGroups(target: target)
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("settings-configuration")
-            .padding(20)
+        if let notice = resolution.projectNotice {
+            TronSettingsGroup(nil, detail: notice.file) { TronSettingsNotice(message: notice.message) }
         }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Configuration")
-        .task(id: PresentationActivityTaskID(source: model.settingsFreshness, presentationActive: activity.allowsPresentationPublication)) {
-            guard activity.allowsPresentationPublication else { return }
-            try? await model.refreshSettingsSnapshot(for: target)
+        if !resolution.diagnostics.isEmpty {
+            TronSettingsGroup("Ignored Project settings", detail: resolution.diagnostics.first?.file) {
+                ForEach(Array(resolution.diagnostics.enumerated()), id: \.offset) { index, diagnostic in
+                    if index > 0 { TronSettingsDivider() }
+                    TronSettingsRow(icon: "info.circle", title: diagnostic.key,
+                                    subtitle: "\(diagnostic.path) · \(diagnostic.reason == "project-forbidden" ? "Not allowed in Project settings" : "Unknown field")")
+                        .textSelection(.enabled)
+                }
+                if resolution.diagnosticsTruncated {
+                    TronSettingsDivider()
+                    TronSettingsRow(icon: "ellipsis", title: "Additional diagnostics omitted",
+                                    subtitle: "Project diagnostics have a bounded size.")
+                }
+            }
         }
     }
 }
 
-/// Direct read-only section contents shared by Configuration and repository
-/// inspection. This type deliberately has no writable-layer parameter.
-struct SettingsConfigurationGroups: View {
+/// Only admitted, applied repository values; never a Global inspection clone.
+struct SettingsProjectGroups: View {
     let target: JSONValue
-    var selection: SettingsKeySelection = .all
+    var selection: SettingsKeySelection = .projectValues
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -462,9 +459,9 @@ struct SettingsConfigurationGroups: View {
                 snapshot.resolution.keys.contains { $0.group == section.id && selection.includes($0) }
             }) { section in
                 SettingsRendererView(target: target, writeLayer: nil, presentation: .section(section.id),
-                                     embedded: true, inspecting: true, selection: selection)
+                                     embedded: true, selection: selection)
             }
-        } else { TronSheetLoadingState(label: "Loading configuration…") }
+        } else { TronSheetLoadingState(label: "Loading Project settings…") }
     }
 }
 
@@ -564,7 +561,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                     themed(destination()
                         // A field's source/reset projection belongs to that row,
                         // never to rows in its separately owned destination.
-                        .environment(\.tronSettingsRowInspection, nil)
                         .environment(\.tronSettingsRowAccessory, nil)
                         .toolbar {
                         ToolbarItem(placement: .confirmationAction) {

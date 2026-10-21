@@ -44,7 +44,9 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
     /// What to type into the key's text field or a list's new value (#939).
     let entry: SettingsEntryGuidance?
     /// UI-editable scopes, timing and effect are declared by the Gateway, not iOS.
-    let editableLayers: [String]?
+    let sessionOverridable: Bool
+    let projectSettable: Bool
+    let editable: Bool
     let timing: JSONValue?
     let effect: String?
 }
@@ -54,21 +56,22 @@ enum SettingsKeySelection: Equatable {
     case all
     /// Every key but these, which another surface owns (Trusted Projects).
     case allExcept(Set<String>)
-    case editable([String], excluding: Set<String>)
-    case overrides(String)
+    case editable(excluding: Set<String>)
+    case sessionOverrides
+    case projectValues
+    case projectOnly
 
     func includes(_ setting: ResolvedSetting) -> Bool {
         switch self {
-        case .all: true
-        case .allExcept(let excluded): !excluded.contains(setting.key)
-        case .editable(let layers, let excluded):
-            !excluded.contains(setting.key) && layers.contains { layer in
-                setting.layers.contains { $0.layer == layer }
-                    && (setting.presentation?.editableLayers?.contains(layer) ?? true)
-            }
-        case .overrides(let layer):
-            setting.layers.contains { $0.layer == layer && ($0.value != nil || $0.display != nil) }
-                && (layer != "chat" || setting.origin == "override")
+        case .all: return true
+        case .allExcept(let excluded): return !excluded.contains(setting.key)
+        case .editable(let excluded):
+            return !excluded.contains(setting.key) && setting.presentation?.editable == true
+        case .sessionOverrides:
+            return setting.presentation?.sessionOverridable == true && setting.presentation?.editable == true
+        case .projectOnly:
+            return setting.projectSetting != nil && setting.presentation?.sessionOverridable == false
+        case .projectValues: return setting.projectSetting != nil
         }
     }
 }

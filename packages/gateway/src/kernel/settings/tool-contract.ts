@@ -81,17 +81,22 @@ export interface ResolvedKey {
   /** Derived from canonical entries; legacy sessions never acquire invented origin. */
   origin: "override" | "launch" | "legacy-session" | "inherited";
   layers: LayerValue[];
+  /** A stored Session/Home override, including one currently masked by Project. */
+  overridden?: boolean;
+  projectSetting?: { file: string; path: string };
 }
 
-export interface Diagnostic { key: string; layer: LayerId; reason: "layer-not-allowed"; path: string }
+export interface Diagnostic { key: string; layer: LayerId; reason: "project-forbidden" | "unknown-key"; path: string; file: string }
 
 export interface Resolution {
   target: SettingsTarget;
   layers: readonly LayerId[];
   /** The Project store exists but cannot be parsed (for example merge markers). */
   projectUnreadable?: true;
+  projectNotice?: { file: string; message: string };
   keys: ResolvedKey[];
   diagnostics: Diagnostic[];
+  diagnosticsTruncated?: true;
 }
 
 export type WritableLayer = Exclude<LayerId, "builtin">;

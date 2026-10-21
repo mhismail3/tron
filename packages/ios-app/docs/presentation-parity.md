@@ -132,12 +132,11 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   slot: a 28-point circle trailing-aligned in a 44-point target. Invisible target width is
   leading, so the zero-gap value/reset cluster shows a 16-point visible gap and the 14-point
   inset without overlapping hit regions. Every owned override's reset uses this capsule.
-- **Provenance** lives only in the shared Value & Source sheet: effective value, served
-  qualifiers, ordered layers, application/launch evidence. Rows carry no source, qualifier or
-  provenance pills. Absent non-secret values render a dash.
-- **Row-body inspection.** The icon/title/help part of every schema row opens Value & Source; the
-  link, value control and optional reset are sibling targets, never nested buttons or a row-wide
-  gesture. At accessibility sizes the cluster stacks under the text column.
+- **Overrides.** Inherited values have no source affordance. Session/Home overrides show the
+  shared Overridden status pill and Revert. An applied Project value replaces the editor with a
+  read-only value and a shared Project pill opening file/key information. Absent non-secret values
+  render a dash. Values, pills and resets remain independent sibling targets, not nested buttons;
+  at accessibility sizes the cluster stacks under the text column.
 - **Reset.** Uses the renderer's preview/confirmation/receipted `settings.change` unset at the
   writable layer. Inherited values have no reset; nothing invents a default locally.
 - **Text entry** ends through `tronTextEntryDone` (return reads Done; multi-line or

@@ -18,7 +18,6 @@ struct SettingsRendererView: View {
     /// Inside a caller's scroll view (a hand-built sheet that shows a section's keys).
     var embedded = false
     var detailedKeys = false
-    var inspecting = false
     /// Existing live model/tool owners retain admission and pending controls;
     /// schema rows supply their single source/reset path, not another editor.
     var liveControl: ((ResolvedSetting) -> AnyView)? = nil
@@ -240,7 +239,7 @@ struct SettingsRendererView: View {
         TronProgressiveSheetLink(accessibilityLabel: setting.presentation?.label ?? setting.key,
                                  identity: "settings.instances.\(setting.key)") {
             SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers, projectCWD: projectCWD,
-                                 presentation: .instances(key: setting.key), inspecting: inspecting, selection: selection)
+                                 presentation: .instances(key: setting.key), selection: selection)
                 .tronNavigationTitle(setting.presentation?.label ?? setting.key)
         } label: {
             TronSettingsRow(icon: "list.bullet.indent", title: setting.presentation?.label ?? setting.key,
@@ -274,7 +273,6 @@ struct SettingsRendererView: View {
             detailed: detailed,
             instanced: instanced,
             baseInstanceTitle: baseInstanceTitle,
-            inspecting: inspecting,
             // A live control keeps its surface's viewport-wide slider host;
             // this schema wrapper owns only source/reset, not a nested overlay.
             liveControl: liveControl.map { control in
@@ -282,14 +280,8 @@ struct SettingsRendererView: View {
                     inheritedSliderPresentation ?? sliderPresentation))
             },
             resetDisabled: resetDisabled,
-            canReset: writableLayer(for: setting).map { layer in
-                setting.layers.contains { $0.layer == layer && ($0.value != nil || $0.display != nil) }
-                    || (setting.layer == layer && setting.badges.contains { ["useCurrentDefault", "followDefault"].contains($0.action?.kind ?? "") })
-            } ?? false,
+            canReset: writableLayer(for: setting) != nil && setting.overridden == true,
             instanceHelp: instanceHelp,
-            // A Mac or Project default tool whose built-in extension is off there.
-            inactiveNote: setting.key == "tools.active" ? target.objectValue?["kind"]?.stringValue.flatMap { ["mac", "project"].contains($0)
-                ? DefaultToolsSettingsSection.inactiveNote(resolution, layer: $0) : nil } : nil,
             options: options[setting.id],
             error: rowErrors[setting.id],
             onChange: { value in
@@ -325,12 +317,9 @@ struct SettingsRendererView: View {
 
     private func writableLayer(for setting: ResolvedSetting) -> String? {
         // Repository configuration is inspectable, never editable through app navigation.
-        guard target.objectValue?["kind"]?.stringValue != "project" else { return nil }
+        guard target.objectValue?["kind"]?.stringValue != "project", setting.projectSetting == nil else { return nil }
         let candidates = ownedLayers.isEmpty ? [writeLayer].compactMap { $0 } : ownedLayers
-        return candidates.first { layer in
-            layer != "project" && setting.layers.contains(where: { $0.layer == layer })
-                && (setting.presentation?.editableLayers?.contains(layer) ?? true)
-        }
+        return setting.presentation?.editable == true ? candidates.first : nil
     }
 
     /// A dry run first: the Gateway validates (no client copy of a key's rules),

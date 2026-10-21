@@ -209,6 +209,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                     "action": .object(["kind": .string("useCurrentDefault"), "label": .string("Use the current default")])])]),
                 "presentation": .object(["label": .string("Chat thinking"), "help": .string("Thinking for this chat."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("choice"),
+                    "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true),
                     "options": .array([.object(["value": .string("off"), "label": .string("Off")]),
                                        .object(["value": .string("high"), "label": .string("High")])])]),
             ]), .object([
@@ -218,7 +219,8 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 // As the Gateway serves it: a chat can set its own compaction.
                 "layers": .array([.object(["layer": .string("chat")]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
                 "presentation": .object(["label": .string("Automatic compaction"), "help": .string("Automatic compaction policy."),
-                    "order": .number(10), "importance": .string("essential"), "control": .string("toggle")]),
+                    "order": .number(10), "importance": .string("essential"), "control": .string("toggle"),
+                    "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true)]),
             ]), HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model",
                 .object(["provider": .string("fixture"), "id": .string("model")]), "Fixture Model", "catalog", order: 5, essential: true, layer: "chat"),
                 HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true),
@@ -244,8 +246,8 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                         }
                         return .object(layer)
                     })
-                    if var presentation = row["presentation"]?.objectValue, let layers = presentation["editableLayers"]?.arrayValue {
-                        presentation["editableLayers"] = .array(layers.filter { $0.stringValue != "profile" })
+                    if var presentation = row["presentation"]?.objectValue {
+                        presentation["editable"] = .bool((row["layers"]?.arrayValue ?? []).contains { $0.objectValue?["layer"]?.stringValue == "chat" })
                         row["presentation"] = .object(presentation)
                     }
                     return .object(row)

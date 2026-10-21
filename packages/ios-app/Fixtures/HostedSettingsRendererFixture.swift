@@ -436,7 +436,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 row["layers"] = .array([.object(["layer": .string("mac"), "value": row["value"] ?? .null]), .object(["layer": .string("builtin")])])
                 row["badges"] = .array([.object(["kind": .string("layer"), "label": .string("Mac")])])
                 if var presentation = row["presentation"]?.objectValue {
-                    presentation["editableLayers"] = .array([.string("mac")])
+                    presentation["sessionOverridable"] = .bool(false)
+                    presentation["projectSettable"] = .bool(false)
+                    presentation["editable"] = .bool(true)
                     if row["key"]?.stringValue == "model.ref[role=chat]" {
                         presentation["valueKind"] = .string("model")
                         presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
@@ -623,6 +625,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                      badges: [JSONValue] = [], presentation: JSONValue) -> JSONValue {
         var object: [String: JSONValue] = [
             "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string(layer), "applied": .bool(true),
+            "overridden": .bool(layer == "mac"),
             "layers": .array(ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") && id == "tools.active"
                 ? HostedExtensionsReview.layers(own: value ?? .null) : [.object(["layer": .string("mac")])]),
             "badges": .array([.object(["kind": .string("layer"), "label": .string(layer == "mac" ? "Set on Mac" : layer == "project" ? "Set in repository" : "Tron default")])] + badges),
@@ -638,6 +641,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         .object([
             "label": .string(label), "help": .string(help), "order": .number(Double(order)), "importance": .string(importance),
             "control": .string(control), "valueKind": .string("fixture"),
+            "sessionOverridable": .bool(false), "projectSettable": .bool(false), "editable": .bool(true),
         ].merging(extra) { $1 })
     }
 

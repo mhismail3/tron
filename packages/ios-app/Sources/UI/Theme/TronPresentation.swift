@@ -1517,27 +1517,12 @@ enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
     case scrollOptimized
 }
 
-/// The renderer supplies source navigation and an optional owned reset. The row
-/// keeps them beside, never around, its independently actionable value control.
-struct TronSettingsRowInspection: Sendable {
-    let label: String
-    let identifier: String
-    let destination: @MainActor @Sendable () -> AnyView
-}
-
-private struct TronSettingsRowInspectionKey: EnvironmentKey {
-    static let defaultValue: TronSettingsRowInspection? = nil
-}
-
+/// A renderer supplies a shared trailing status/action without wrapping its editor.
 private struct TronSettingsRowAccessoryKey: EnvironmentKey {
     static let defaultValue: (@MainActor @Sendable () -> AnyView)? = nil
 }
 
 extension EnvironmentValues {
-    var tronSettingsRowInspection: TronSettingsRowInspection? {
-        get { self[TronSettingsRowInspectionKey.self] }
-        set { self[TronSettingsRowInspectionKey.self] = newValue }
-    }
     var tronSettingsRowAccessory: (@MainActor @Sendable () -> AnyView)? {
         get { self[TronSettingsRowAccessoryKey.self] }
         set { self[TronSettingsRowAccessoryKey.self] = newValue }
@@ -1631,7 +1616,6 @@ struct TronSettingsRow<Trailing: View>: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     @Environment(\.controlSize) private var controlSize
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.tronSettingsRowInspection) private var inspection
     @Environment(\.tronSettingsRowAccessory) private var accessory
 
     init(
@@ -1671,38 +1655,18 @@ struct TronSettingsRow<Trailing: View>: View {
             stackedSpacing: dynamicTypeSize.isAccessibilitySize ? TronSpacing.md : nil,
             stackedLeadingInset: icon == nil ? 0 : TronSettingsLayoutPolicy.iconSize + TronSpacing.xl
         ) {
-            Group {
-                if let inspection {
-                    TronProgressiveSheetLink(accessibilityLabel: inspection.label,
-                                             identity: inspection.identifier) {
-                        inspection.destination()
-                    } label: {
-                        rowLabels
-                    }
-                    // A live mutation lock must not disable read-only provenance.
-                    // Presentation activity still owns navigation admission.
-                    .environment(\.isEnabled, true)
-                    .accessibilityIdentifier(inspection.identifier)
-                    .accessibilityValue(subtitle ?? "")
-                    .accessibilityHint("Opens Value & Source. The value control and Revert act separately.")
-                } else {
-                    rowLabels
-                }
-            }
-            // Separate sibling targets: opening provenance can never toggle,
-            // edit, or reset the value, nor can those actions open provenance.
+            rowLabels
             HStack(spacing: 0) {
                 trailing
                 if let accessory { accessory() }
             }
-            .environment(\.tronSettingsRowInspection, nil)
             .environment(\.tronSettingsRowAccessory, nil)
         }
         .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
         .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
         .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
         .contentShape(Rectangle())
-        .accessibilityElement(children: inspection == nil ? .combine : .contain)
+        .accessibilityElement(children: accessory == nil ? .combine : .contain)
     }
 
     private var rowLabels: some View {
@@ -1763,9 +1727,8 @@ struct TronSettingsRow<Trailing: View>: View {
 
         }
         .padding(.vertical, controlSize == .small && !dynamicTypeSize.isAccessibilitySize ? TronSpacing.xl : 0)
-        .frame(maxWidth: .infinity, minHeight: inspection == nil ? nil : 44, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .environment(\.tronSettingsRowInspection, nil)
         .environment(\.tronSettingsRowAccessory, nil)
     }
 }

@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 private enum ManageSessionDestination: String, Identifiable {
-    case agentInstructions, tools, projectResources, history, processHistory, terminal, workspace
+    case agentInstructions, projectResources, history, processHistory, terminal, workspace
     var id: String { rawValue }
 }
 
@@ -235,7 +235,7 @@ struct SessionContextSheet: View {
                         // controls. Settings (the gear) owns every scope's settings.
                         SessionContextUsageCard(snapshot: snapshot)
                             .settingsApprovals(.session(sessionID))
-                        modelConfigurationCard(snapshot)
+                        TronGlassCard { manualCompactionRow(snapshot) }
                         sessionSection(snapshot)
                         settingsSection(snapshot)
                         exportSection
@@ -318,8 +318,6 @@ struct SessionContextSheet: View {
                     switch route {
                     case .agentInstructions:
                         AgentInstructionsSheet(sessionID: sessionID)
-                    case .tools:
-                        SessionToolPickerSheet(sessionID: sessionID)
                     case .projectResources:
                         ProjectResourcesView(sessionID: sessionID)
                     case .history:
@@ -452,14 +450,6 @@ struct SessionContextSheet: View {
         ) { destination = .processHistory }
     }
 
-    private func modelConfigurationCard(_ snapshot: SessionContextPresentation) -> some View {
-        SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot, onError: { surfaceActionError($0) }) {
-            // A live action, not a second policy editor. Automatic compaction
-            // belongs to Session Settings alongside the rest of that policy.
-            manualCompactionRow(snapshot)
-        }
-    }
-
     private func reconcilePresentation(_ value: SessionContextPresentation?) {
         if presentation != value { presentation = value }
     }
@@ -486,9 +476,6 @@ struct SessionContextSheet: View {
                 divider()
                 manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
                           subtitle: "The complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }
-                divider()
-                manageRow(icon: "wrench.and.screwdriver", title: "Available Tools",
-                          subtitle: "Loaded tools and this chat's active selection", accent: sessionRowAccent) { destination = .tools }
                 divider()
                 manageRow(icon: "shippingbox", title: "Project Resources",
                           subtitle: "Loaded skills, subagents, prompts, and commands", accent: sessionRowAccent) { destination = .projectResources }
@@ -524,12 +511,11 @@ struct SessionContextSheet: View {
                 }
                 TronProgressiveSheetLink(accessibilityLabel: "Session Settings", identity: "session.\(sessionID).settings",
                                          accent: .tronEmerald) {
-                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
-                                     changesScope: .session(sessionID, projectCWD: snapshot.cwd), onOpenSession: onForkCreated)
+                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd)
                         .tronNavigationTitle("Session Settings")
                 } label: {
                     TronSettingsRow(icon: "slider.horizontal.3", title: "Session Settings",
-                                    subtitle: "Effective values, overrides, and sources", accent: .tronEmerald)
+                                    subtitle: "Models, tools, and session overrides", accent: .tronEmerald)
                 }
                 .accessibilityIdentifier("chat-settings-link")
             }

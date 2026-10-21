@@ -39,7 +39,7 @@ services, paired Macs and devices, notifications and logs.
   (the nearest saved decision governs).
 - **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `number`, `text`,
   `secret`, `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
-  order. An unimplemented control renders its `display` read-only, an unknown badge is neutral, an
+  order. An unimplemented control renders its `display` read-only; an
   undeclared group shows under its id: a value is never hidden. Options come from
   `settings.options`, re-requested when a `dependsOn` key changes; catalog pages fence every
   completion and stop on repeated cursors. Choices open picker sheets of `TronCatalogOptionRow`
@@ -48,16 +48,16 @@ services, paired Macs and devices, notifications and logs.
   below a short embedded section. `chatInline` metadata owns section placement.
 - **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
   `confirm` text asks before sending. Secret drafts start empty and clear on dismissal; list and
-  numeric-map drafts write only on Save; unknown fields stay read-only. Source badges may carry
-  `useCurrentDefault`, `followDefault` or `applyAgain`; unknown actions stay display-only. Rows
-  outside the resolver's allowed layers are read-only links to their editor.
+  numeric-map drafts write only on Save; unknown fields stay read-only. Outside-change recovery
+  remains an explicit Apply again action. The Gateway supplies override presence and permissions;
+  rows never infer ownership from value equality.
 - **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView`: Home
-  resolves a `home` target and edits `profile`, ordinary chats edit `chat`. Each has one read-only
-  Configuration destination; Manage Session keeps the live Models and Available Tools editors, so
-  Session Settings never duplicates them. Project Settings (`ProjectSettingsContent`) lists actual
-  repository overrides read-only, its trust row opens `TrustSettingsView` for that project, and
-  it requires **Use This Server** for another Mac.
-- **Changes.** `SettingsChangesView` pages `settings.history`, intersects filters with the
+  resolves a `home` target and edits its Profile override; ordinary chats edit their Session override.
+  Both reuse Global's renderer and editors, including models and tools. Project-owned controls are
+  read-only with a shared Project info pill; explicit overrides have Overridden and circular Revert.
+  `SettingsProjectGroups` shows applied Project values only; `SettingsProjectNotices` shares bounded
+  file/key/reason diagnostics. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
+- **Changes.** Only Global has a Changes entry. `SettingsChangesView` pages `settings.history`, intersects filters with the
   surface's scope, pins approvals above history, and keeps last-look per Mac and scope. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
   entries never show their definition.
@@ -75,7 +75,7 @@ services, paired Macs and devices, notifications and logs.
 - **Default Tools.** Mac Tools' Always include switches edit `tools.active`. While
   `sources.extensions` keeps the built-in from loading at that scope (Pi's rule: a Project entry
   overrides the Mac list), the switch is dimmed, shows Off and says why; the saved entry is kept,
-  and the `tools.active` Value & Source explains it.
+  and the row explains why.
 - **Extensions.** Inventory counts, installed packages (Tron's bundled subagents provider without
   Update/Remove), Install Package, read-only Tron Modules and search paths. A package's detail lists
   what it Provides; `conflict` and `nodeRequirement` (#243) show as statuses. Hooks reads
@@ -91,7 +91,7 @@ services, paired Macs and devices, notifications and logs.
   Server** first). Rebuild is user-initiated only: agents never press it or submit its RPC. Status
   polling is command-bound and stops at terminal state, reconnect or disappearance. Maintenance
   action containers inherit the sheet theme; Forget Server keeps semantic red. The selected
-  server shows its Gateway-declared Mac Terminal key using the standard renderer and Value & Source;
+  server shows its Gateway-declared Mac Terminal key using the standard renderer;
   other servers require Use This Server before exposing this control-plane setting.
 - **Logs.** Gateway records are fetched only while Logs is presented, merged with the iOS client
   ring, refreshed every 15 s while visible, and exported through Export Diagnostics.

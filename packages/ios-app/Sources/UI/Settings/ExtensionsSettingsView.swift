@@ -121,7 +121,7 @@ struct ExtensionsSettingsView: View {
                 // setting omits the bundled provider the inventory includes.
                 SettingsRendererView(target: settingsTarget, writeLayer: settingsWriteLayer, projectCWD: projectCWD,
                                      presentation: .section("sources"), embedded: true,
-                                     selection: .editable([settingsWriteLayer], excluding: [Self.packagesKey, Self.npmCommandKey]))
+                                     selection: .editable(excluding: [Self.packagesKey, Self.npmCommandKey]))
 
                 if let inventory {
                     localThemesGroup(inventory)

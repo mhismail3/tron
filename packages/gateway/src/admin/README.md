@@ -13,7 +13,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 |---|---|
 | Settings schema, formatting and validation | `settings-schema.ts` (`KEYS`, `RECORD_SUBJECTS`), `settings-registry.ts` (binding admission from `sessionOverridable`/`projectSettable`), `settings-types.ts`; vocabulary: [kernel settings](../kernel/settings/README.md) |
 | SDK scope admission and operational model selection | `settings-sdk-manager.ts`, `settings-admission.ts` |
-| Resolution and presentation | `settings-resolver.ts`, `settings-model.ts` (`SettingsModel`), `settings-presentation.ts` |
+| Resolution and presentation | `settings-resolver.ts`, `settings-model.ts` (`SettingsModel`), `settings-presentation.ts`, `settings-project-diagnostics.ts` |
 | Change path and policy | `settings-model.ts` (`SettingsChangePath`), `settings-record.ts`, `settings-approvals.ts`, `settings-risk.ts` |
 | Appliers and outside writers | `project-settings-writer.ts`, `trust-service.ts`, `settings-outside.ts` (`OutsideChanges`) |
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
@@ -34,6 +34,8 @@ Durable stores: `<tronHome>/gateway/settings/` (`changes/`, `approvals.json`,
 vocabulary is the [kernel settings contract](../kernel/settings/README.md); the
 session resolves its actor and settings owner at every call.
 
+Project diagnostics contain file/key/reason only: at most 32 entries, 1,024 visited
+fields and 256-character paths (ellipsis when shortened). Unknown objects are not traversed.
 The full settings contract (foundations, layers, the generated key table,
 timing, change path, tiers, outside changes, project writes, Home profile,
 presentation) is [docs/settings-contract.md](../../docs/settings-contract.md).
