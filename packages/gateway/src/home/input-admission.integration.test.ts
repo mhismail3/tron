@@ -26,15 +26,17 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
     .map(line => JSON.parse(line) as { type: string; customType?: string; details?: { eventId?: string } })
     .filter(entry => entry.type === "custom_message" && entry.customType === HOME_TASK_RESULT_MESSAGE && entry.details?.eventId === eventId);
   const calls = f.faux.state.callCount;
-  // Fail at the real Pi send boundary, before it appends the admitted trigger.
+  // Inject refusal at Pi's send boundary, before it appends the admitted trigger.
   const session = (home as unknown as { runtime: { session: AgentSession } }).runtime.session;
   const send = session.sendCustomMessage.bind(session);
   let refused = false;
+  let stateAfterRefusal: string | undefined;
+  let callsBeforePersistence: number | undefined;
   const fault = vi.spyOn(session, "sendCustomMessage").mockImplementation(async (message, options) => {
     if (options?.triggerTurn && message.customType === HOME_TASK_RESULT_MESSAGE) {
-      refused = true;
       // Isolate release from the pre-existing failed-wake retry loop (#1620).
       await f.registry.homeOwner().pauseMemory();
+      refused = true;
       throw new Error("controlled pre-persistence trigger refusal");
     }
     return send(message, options);
@@ -43,7 +45,10 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
     await f.registry.homeOwner().resumeMemory();
     await waitFor(() => refused && home.snapshot().phase === "idle" && home.snapshot().operation === undefined
       && home.snapshot().configurationBlocker === null, "failed wake retired");
-    expect((await f.registry.homeOwner().taskResult(run.taskId)).wake).toMatchObject({ eventId, state: "pending" });
+    const wake = (await f.registry.homeOwner().taskResult(run.taskId)).wake;
+    stateAfterRefusal = wake?.state;
+    callsBeforePersistence = f.faux.state.callCount - calls;
+    expect(wake).toMatchObject({ eventId, state: "pending" });
     expect(await rows()).toEqual([]);
     expect(f.faux.state.callCount).toBe(calls);
   } finally { fault.mockRestore(); }
@@ -59,8 +64,9 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
   expect(f.registry.administrativeWorkRegistry.size).toBe(0);
   await mkdir("test-results/input-admission", { recursive: true });
   await writeFile("test-results/input-admission/unpersisted-trigger.json", JSON.stringify({
-    pendingAfterRefusal: true, providerCallsBeforePersistence: 0, canonicalDeliveries: deliveryRows.length,
-    acknowledgedAfterResume: true, providerCallsAfterRelease: f.faux.state.callCount - calls,
+    stateAfterRefusal, providerCallsBeforePersistence: callsBeforePersistence, canonicalDeliveries: deliveryRows.length,
+    stateAfterResume: (await f.registry.homeOwner().taskResult(run.taskId)).wake?.state,
+    providerCallsAfterRelease: f.faux.state.callCount - calls,
     administrativeWork: f.registry.administrativeWorkRegistry.size,
   }, null, 2));
 });
