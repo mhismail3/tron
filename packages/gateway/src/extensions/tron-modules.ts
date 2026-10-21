@@ -5,10 +5,10 @@ import { contextWindowExtension, type SessionContextWindowPolicy } from "../prov
 import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
 import { appsModule } from "../modules/apps/module.js";
 import type { ModuleHost, SessionContext } from "../kernel/host/module-host.js";
-import { createTronAskUserExtension } from "./tron-ask-user-extension.js";
+import { askUserModule } from "./ask-user-module.js";
 import { createTronDisplayExtension } from "../display/tron-display-extension.js";
 import { createTronNativeCaptureExtension } from "../display/tron-native-capture-extension.js";
-import { createTronComputerExtension } from "../display/tron-computer-extension.js";
+import { computerModule } from "../display/computer-module.js";
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
 import { createTronHomeExtension } from "../home/tron-home-extension.js";
@@ -154,11 +154,11 @@ export const TRON_MODULES: readonly TronModule[] = [
     factory: (host) => createTronSettingsExtension(() => host.settings()),
   },
   {
-    name: "tron-ask-user",
-    purpose: "Lets the agent ask you one bounded decision question.",
-    tools: ["ask_user"],
-    commands: [],
-    factory: () => createTronAskUserExtension(),
+    name: askUserModule.name,
+    purpose: askUserModule.purpose,
+    tools: askUserModule.tools,
+    commands: askUserModule.commands,
+    factory: (host) => host.modules.extension(askUserModule, sessionContext(host)),
   },
   {
     name: "tron-display",
@@ -190,13 +190,11 @@ export const TRON_MODULES: readonly TronModule[] = [
       : undefined),
   },
   {
-    name: "tron-computer",
-    purpose: "Lets the agent inspect and operate the Mac desktop.",
-    tools: ["computer"],
-    commands: [],
-    factory: (host) => (process.platform === "darwin"
-      ? createTronComputerExtension({ sessionId: () => host.sessionId() })
-      : undefined),
+    name: computerModule.name,
+    purpose: computerModule.purpose,
+    tools: computerModule.tools,
+    commands: computerModule.commands,
+    factory: (host) => host.modules.extension(computerModule, sessionContext(host)),
   },
   {
     name: "tron-schedule",

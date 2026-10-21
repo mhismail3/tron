@@ -21,6 +21,9 @@ component registry, presentation store, terminal sanitizer).
   Scoped `-builtin:<name>` settings enable each. MCP can activate codemode or
   tool-search for its exposure even when neither is a `defaultTools` entry. Pi's MCP
   extension is the only MCP client ([MCP](../../docs/mcp.md)).
+- **Decision descriptor.** `ask-user-module.ts` owns `tron-ask-user` metadata and
+  its stateless extension. The started module is used at the same ordinary and
+  Home registration position.
 - **`modules.list`** reports Tron's built-in modules for Settings without a session:
   one row per `TRON_MODULES` entry (name, purpose, tool and command names), the same
   definition `RuntimeSlot` registers, so the list cannot disagree with a session.

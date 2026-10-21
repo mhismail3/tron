@@ -1,5 +1,7 @@
 import { ModuleHost, type GatewayHost, type ModuleDescriptor } from "../kernel/host/module-host.js";
 import { initTheme } from "../kernel/pi/adapters.js";
+import { askUserModule } from "../extensions/ask-user-module.js";
+import { computerModule } from "../display/computer-module.js";
 import { appsModule } from "../modules/apps/module.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 
@@ -7,7 +9,9 @@ import { workspaceModule } from "../workspace/workspace-module.js";
  * started in this order and stopped in reverse. */
 export const GATEWAY_MODULES: readonly ModuleDescriptor<unknown>[] = [
   workspaceModule,
+  askUserModule,
   appsModule,
+  computerModule,
 ];
 
 /** Starts the composition for one Gateway (gateway-main, before anything loads an

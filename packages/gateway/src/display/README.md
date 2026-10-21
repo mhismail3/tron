@@ -15,6 +15,10 @@ settlement](../../docs/native-tool-settlement.md).
 
 ## Contract
 
+**Computer descriptor.** `computer-module.ts` owns `tron-computer` metadata and
+its per-session extension. Availability remains Mac-only, sampled when the
+runtime requests its extension; session identity is read at each operation.
+
 **Display results.** `display` advertises `display-artifacts.v1` and persists one
 ordinary `tron.display.v1` tool result in canonical JSONL: bounded title, caption,
 alt/fallback text, content kind, requested `sheet`/`inline`/`floating` surface, and an
