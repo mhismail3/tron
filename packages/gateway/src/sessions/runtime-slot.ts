@@ -44,6 +44,7 @@ import {
 import { GatewayError, asUncertainOutcome } from "../errors.js";
 import { RunPersistence, CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS } from "../kernel/run/run-persistence.js";
 import { RunWorkOwner } from "../kernel/run/run-work-owner.js";
+import { RunAbortOwner } from "../kernel/run/run-abort-owner.js";
 import { HeldPromptQueue } from "../kernel/run/held-prompt-queue.js";
 import { MAXIMUM_PROMPT_ATTACHMENTS, type QueueBehavior, type RuntimeQueuedMessage, type HeldPrompt, type PromptQueueDisplay } from "../kernel/run/queue-input.js";
 import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
@@ -280,7 +281,6 @@ const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
  */
 const STREAMING_PROGRESS_FLUSH_MS = 150;
 const DEFAULT_RUNTIME_DISPOSAL_GRACE_MS = 5_000;
-const FOREGROUND_ABORT_SETTLEMENT_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_COMPLETION_DISPOSITIONS = 16;
 
@@ -572,11 +572,35 @@ export class RuntimeSlot {
    * before publication never was one. */
   private published = false;
   private readonly stateChangeWaiters = new Set<() => void>();
-  private readonly stopSteeringRecoveryIDs = new Set<string>();
+  private readonly runAbort = new RunAbortOwner({
+    runLane: operation => this.lane.run(operation),
+    assertAvailable: () => this.assertAvailable(),
+    taskWorker: () => this.taskWorker,
+    liveTaskOperationId: () => this.liveTaskOperationId(),
+    queued: () => this.queuedMessages,
+    replaceQueued: items => { this.queuedMessages = items; },
+    pendingAdmission: () => this.pendingQueueAdmission,
+    operation: () => this.operation,
+    operationMatches: target => this.operationMatches(target),
+    activeOperationId: () => this.activeOperationId,
+    hasActiveAgentRun: () => this.hasActiveAgentRun,
+    pendingPromptId: () => this.pendingPrompt?.id,
+    session: () => this.runtime.session,
+    sessionId: () => this.id,
+    suppressQueueEvents: value => { this.suppressQueueEvents = value; },
+    clearSdkSteeringIds: () => this.sdkQueuedSteeringIDs.clear(),
+    bumpQueueRevision: () => { this.queueRevision += 1; },
+    cancelRequest: operationId => this.homeRequestPolicy?.cancel(operationId),
+    invocation: operationId => this.invocationForOperation(operationId),
+    directBashProcesses: () => this.directBashProcesses,
+    terminalizeInvocation: (operationId, lifecycle, errorCode) => this.terminalizeInvocation(operationId, lifecycle, errorCode),
+    settleOperationWork: operationId => this.runWork.settleOperationWork(operationId),
+    diagnostic: () => this.dependencies.stopSteeringDiagnostic?.bind(this.dependencies),
+    heldQueue: () => this.heldQueue,
+    admitPrompt: (...args) => this.admitPrompt(...args),
+    publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
+  });
   private readonly sdkQueuedSteeringIDs = new Set<string>();
-  private readonly stopRecoveryHoldIDs = new Set<string>();
-  private stopRecoveryQueueClosed = false;
-  private stopSteeringContinuation: { operationId?: string; queuedSteerCount: number } | undefined;
   private retainedLeaseCount = 0;
   private readonly ownedTerminalObservers = new Map<string, (terminal: OwnedOperationTerminal) => Promise<void> | void>();
   private snapshotTimer: NodeJS.Timeout | undefined;
@@ -822,7 +846,7 @@ export class RuntimeSlot {
     draining: () => this.lifecycle.isDraining,
     disposed: () => this.disposed,
     shuttingDown: () => this.shuttingDown,
-    queueClosed: () => this.stopRecoveryQueueClosed,
+    queueClosed: () => this.runAbort.stopRecoveryQueueClosed,
     isMessage: text => {
       const command = parsePiLiteralCommand(text)?.name;
       return command === undefined || this.runtime.session.extensionRunner.getCommand(command) === undefined;
@@ -833,7 +857,7 @@ export class RuntimeSlot {
     validateQueue: items => RuntimeSlot.validateQueue(items),
     beginWork: id => this.runWork.beginOperationWork(id, "queued-mutation"),
     settleWork: id => this.runWork.settleOperationWork(id),
-    markRecovery: id => this.stopRecoveryHoldIDs.add(id),
+    markRecovery: id => this.runAbort.stopRecoveryHoldIDs.add(id),
     bumpQueueRevision: () => { this.queueRevision += 1; },
     publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
     queueRevision: () => this.queueRevision,
@@ -884,8 +908,6 @@ export class RuntimeSlot {
   private shuttingDown = false;
   private shutdownPromise: Promise<void> | undefined;
   private suppressQueueEvents = false;
-  /** Abort intent is recorded before SDK cancellation can synchronously settle. */
-  private readonly abortedOperations = new Set<string>();
   /** Retirement waiters parked until this slot may have settled. */
   private readonly settleWaiters = new Set<() => void>();
   /** Exact process ownership for the built-in foreground bash tool only.
@@ -1328,7 +1350,7 @@ export class RuntimeSlot {
   private liveTaskConfiguration(): boolean {
     const worker = this.taskWorker;
     if (!worker?.acceptsSteering || this.disposed || this.shuttingDown || this.trustReloadPending || this.runPersistence.hasBlockedOwnershipWrite) return false;
-    if (this.phase === "compacting" || this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)) return false;
+    if (this.phase === "compacting" || this.activeOperationId !== undefined && this.runAbort.abortedOperations.has(this.activeOperationId)) return false;
     const session = this.runtime.session;
     if (session.isStreaming) return this.liveTaskOperationId() === worker.identity.operationId;
     return this.taskWait !== undefined && this.taskWait.wakeOperationId === undefined
@@ -1816,24 +1838,6 @@ export class RuntimeSlot {
       && current?.startedAt === target.startedAt;
   }
 
-  private async waitForForegroundAbortSettlement(
-    target: SessionOperationState | undefined,
-    agentOperationId: string | undefined,
-  ): Promise<boolean> {
-    const deadline = performance.now() + FOREGROUND_ABORT_SETTLEMENT_GRACE_MS;
-    const stillActive = () => this.directBashProcesses?.hasActiveProcesses === true
-      || (target !== undefined && this.operationMatches(target))
-      || (agentOperationId !== undefined
-        && this.activeOperationId === agentOperationId
-        && (this.hasActiveAgentRun
-          || this.pendingPrompt?.id === agentOperationId
-          || this.operation?.id === agentOperationId));
-    while (stillActive() && performance.now() < deadline) {
-      await new Promise<void>((resolveDelay) => { setTimeout(resolveDelay, 20); });
-    }
-    return !stillActive();
-  }
-
   private publishStateChange(): void {
     this.publishConfiguration();
     const waiters = [...this.stateChangeWaiters];
@@ -2076,8 +2080,8 @@ export class RuntimeSlot {
         compaction: {
           policy: () => compactionPolicy,
           // Summary auth can finish after Stop, before display-ID rotation; keep automatic work's prompt fence.
-          stopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
-            || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
+          stopped: (event) => (this.operation?.id !== undefined && this.runAbort.abortedOperations.has(this.operation.id))
+            || (event.reason !== "manual" && this.activeOperationId !== undefined && this.runAbort.abortedOperations.has(this.activeOperationId)),
           changed: () => { this.revision += 1; this.publishSnapshot(); },
         },
         joinTerminalReceiptWrites: () => this.joinTerminalReceiptWrites(),
@@ -2226,7 +2230,7 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         ...(directBashProcesses ? { customTools: [
           directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
-          ...(this.taskWorker ? [this.taskWorker.checkinTool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined), this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined,
+          ...(this.taskWorker ? [this.taskWorker.checkinTool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined), this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined,
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
@@ -3507,7 +3511,7 @@ export class RuntimeSlot {
     // by design: that is its completion, not an unknown outcome.
     const reportCompleted = reason === "toolUse" && this.taskWorker?.reportSealed === true
       && this.taskWorker.identity.operationId === operationId;
-    const outcome: AgentTerminalOutcome = this.abortedOperations.has(operationId) || reason === "aborted" ? "stopped"
+    const outcome: AgentTerminalOutcome = this.runAbort.abortedOperations.has(operationId) || reason === "aborted" ? "stopped"
       : reason === "error" ? "failed"
       : reason === "length" ? "limited"
       : reason === "stop" || reportCompleted ? "completed"
@@ -3834,7 +3838,7 @@ export class RuntimeSlot {
     const completionId = this.completionOwnershipQueue.findLast(item => item.completion.operationId === operationId)?.completion.id
       ?? this.operationObservations.get(operationId)?.observedCompletionId;
     if (!completionId) return;
-    const interrupted = this.abortedOperations.has(operationId);
+    const interrupted = this.runAbort.abortedOperations.has(operationId);
     const attention = this.attentionBarrier;
     void this.persistInvocationTerminal(
       operationId, interrupted ? "interrupted" : "completed", interrupted ? "user-abort" : undefined,
@@ -3842,7 +3846,7 @@ export class RuntimeSlot {
     ).then(async terminal => {
       if (attention) await attention;
       if (terminal) await this.notifyOwnedTerminal(terminal);
-      this.abortedOperations.delete(operationId);
+      this.runAbort.abortedOperations.delete(operationId);
     }).catch(() => {});
   }
 
@@ -4296,18 +4300,9 @@ export class RuntimeSlot {
           : terminalNotification?.outcome === "unknown" ? "outcomeUnknown" as const
           : "completed" as const;
         const terminalErrorCode = terminalLifecycle === "interrupted"
-          ? (settledOperationId && this.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
+          ? (settledOperationId && this.runAbort.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
           : terminalLifecycle === "failed" ? "agent-error" : undefined;
-        if (this.stopSteeringContinuation) {
-          this.dependencies.stopSteeringDiagnostic?.({
-            sessionId: this.id,
-            queuedSteerCount: this.stopSteeringContinuation.queuedSteerCount,
-            outcome: terminalLifecycle === "completed" ? "completed"
-              : terminalLifecycle === "interrupted" ? "stopped"
-                : terminalLifecycle === "failed" ? "failed" : "unknown",
-          });
-          this.stopSteeringContinuation = undefined;
-        }
+        this.runAbort.completeContinuation(terminalLifecycle);
         // Observation admission is issued only after the exact terminal receipt
         // path below settles; before that point canonical durability is still
         // provisional and must not be projected as memory coverage.
@@ -4355,7 +4350,7 @@ export class RuntimeSlot {
                 await this.clearMarkerOwnership(settledOperationId);
                 this.runWork.settleOperationWork(settledOperationId);
               }
-              if (settledOperationId) this.abortedOperations.delete(settledOperationId);
+              if (settledOperationId) this.runAbort.abortedOperations.delete(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
             })().catch(() => {}));
             break;
@@ -4391,7 +4386,7 @@ export class RuntimeSlot {
                 }));
               },
             ).finally(() => {
-              this.abortedOperations.delete(settledOperationId);
+              this.runAbort.abortedOperations.delete(settledOperationId);
               this.runWork.settleOperationWork(settledOperationId);
               this.hooks.settled(this.id);
               this.publishSnapshot();
@@ -4503,7 +4498,7 @@ export class RuntimeSlot {
         // Retire only the completed compaction's abort intent. This remains
         // safe when a successor replaced `operation`, because its identity is
         // fenced by the captured compaction owner.
-        if (completedOperation?.id) this.abortedOperations.delete(completedOperation.id);
+        if (completedOperation?.id) this.runAbort.abortedOperations.delete(completedOperation.id);
         if (outcome === "failure" && event.reason !== "manual"
           && (ownerStillCurrent || completedOperation === undefined)) {
           this.emit("session.operationFailed", {
@@ -4611,7 +4606,7 @@ export class RuntimeSlot {
           // repeated text and crossing user callbacks cannot impersonate it.
           if (this.pendingPrompt && this.pendingPromptMessage === undefined) {
             this.pendingPromptMessage = event.message;
-            this.consumeStopSteeringRecoveryOwner(this.pendingPrompt.id);
+            this.runAbort.consumeStopSteeringRecoveryOwner(this.pendingPrompt.id);
           } else {
             // Pi removes steering from its string queue and emits queue_update
             // before this callback. Preserve that exact queue operation across
@@ -4670,7 +4665,7 @@ export class RuntimeSlot {
               });
               if (dequeuedSteeringOperationID) {
                 this.consumedSteeringOperationIDs.add(dequeuedSteeringOperationID);
-                this.consumeStopSteeringRecoveryOwner(dequeuedSteeringOperationID);
+                this.runAbort.consumeStopSteeringRecoveryOwner(dequeuedSteeringOperationID);
               }
             }
           }
@@ -6882,13 +6877,6 @@ export class RuntimeSlot {
     }, 20);
   }
 
-  private consumeStopSteeringRecoveryOwner(operationId: string): void {
-    if (!this.stopSteeringRecoveryIDs.delete(operationId)) return;
-    const retained = this.queuedMessages.filter((item) => item.id !== operationId);
-    if (retained.length === this.queuedMessages.length) return;
-    this.queuedMessages = retained;
-    this.queueRevision += 1;
-  }
 
   private reconcileQueuedMessages(): void {
     const session = this.runtime.session;
@@ -6948,7 +6936,7 @@ export class RuntimeSlot {
     const sdkPresentSteeringIDs = new Set(reconciled.filter((item) => item.behavior === "steer").map((item) => item.id));
     const reconciledIDs = new Set(sdkPresentIDs);
     for (const item of previous) {
-      if (this.stopSteeringRecoveryIDs.has(item.id) && !reconciledIDs.has(item.id)) {
+      if (this.runAbort.stopSteeringRecoveryIDs.has(item.id) && !reconciledIDs.has(item.id)) {
         if (this.sdkQueuedSteeringIDs.has(item.id) && item.behavior === "steer"
           && !this.dequeuedSteeringOwners.includes(item.id)) {
           this.dequeuedSteeringOwners.push(item.id);
@@ -7674,7 +7662,7 @@ export class RuntimeSlot {
   ): Promise<{ operationId: string }> {
     // Once Stop closes Pi's queue, new client work stays Gateway-owned until
     // the stopped originals are admitted as one serialized continuation.
-    if (!ownership && this.stopRecoveryQueueClosed) {
+    if (!ownership && this.runAbort.stopRecoveryQueueClosed) {
       return this.heldQueue.holdPrompt(text, images, behavior, queueDisplay, true);
     }
     // Automation owns its own dispatch and terminal observers, so only client
@@ -7729,7 +7717,7 @@ export class RuntimeSlot {
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
       this.assertHomePromptAdmission();
-      if (!ownership && this.stopRecoveryQueueClosed && !held && !redelivery) {
+      if (!ownership && this.runAbort.stopRecoveryQueueClosed && !held && !redelivery) {
         const heldAdmission = this.heldQueue.holdPrompt(text, images, behavior, queueDisplay, true);
         onAdmitted?.(heldAdmission);
         return heldAdmission;
@@ -8060,7 +8048,7 @@ export class RuntimeSlot {
             // Pi has no active Agent signal during pre-prompt compaction. Stop
             // must also revoke this exact pending prompt at SDK admission; an
             // aborted summary alone does not prevent Agent.prompt() starting.
-            if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)
+            if (ownership?.signal?.aborted || this.runAbort.abortedOperations.has(operationId)
               || (this.taskWorker && operationId !== this.taskWorker.identity.operationId && this.taskWait?.wakeOperationId !== operationId
                 && (!this.taskWorker.acceptsSteering || this.liveTaskOperationId() !== this.taskWorker.identity.operationId))) {
               preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
@@ -8224,7 +8212,7 @@ export class RuntimeSlot {
           // Before queue/user disposition, rejection is definitive and wakes
           // that exact admission below. After disposition, canonical/runtime
           // lifecycle remains authoritative for already accepted work.
-          if (!this.abortedOperations.has(operationId)) this.emit("session.diagnostic", safeJson({
+          if (!this.runAbort.abortedOperations.has(operationId)) this.emit("session.diagnostic", safeJson({
             code: "runtime-prompt-failed",
             operationId,
             message: error instanceof Error ? error.message : String(error),
@@ -8298,7 +8286,7 @@ export class RuntimeSlot {
         // A preflight callback is a disposition, not SDK settlement. Join the
         // exact promise before retiring its marker or publishing idle.
         await run.catch(() => {});
-        const stopped = this.abortedOperations.has(operationId);
+        const stopped = this.runAbort.abortedOperations.has(operationId);
         const terminalLifecycle = stopped ? "interrupted" : "failed";
         const errorCode = stopped ? "user-abort" : "preflight-rejected";
         this.completionObserved(`terminal:${invocationId}`);
@@ -8334,7 +8322,7 @@ export class RuntimeSlot {
         if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
         await this.clearMarkerOwnership(operationId);
         this.runWork.settleOperationWork(operationId);
-        this.abortedOperations.delete(operationId);
+        this.runAbort.abortedOperations.delete(operationId);
         if (this.activeOperationId === undefined && !this.hasActiveAgentRun && !this.queuedManualCompactionInFlight) this.phase = "idle";
         this.hooks.settled(this.id);
         this.revision += 1;
@@ -8504,204 +8492,14 @@ export class RuntimeSlot {
     };
   }
 
-  async abort(
+  abort(
     kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash" = "agent",
     expectedOperationId?: string,
     terminalErrorCode = "user-abort",
   ): Promise<void> {
-    let queuedAtStop: RuntimeQueuedMessage[] | undefined;
-    // Finite task cancellation belongs to its report/controller, not the
-    // ordinary Stop continuation. A sealed task can never admit another turn.
-    if (!this.taskWorker && (this.queuedMessages.some((item) => item.behavior === "steer")
-      || this.pendingQueueAdmission?.behavior === "steer")
-      && this.stopSteeringContinuation === undefined) {
-      queuedAtStop = await this.lane.run(() => {
-        this.assertAvailable();
-        if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId) {
-          throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
-        }
-        const accepted = this.queuedMessages.slice();
-        if (!accepted.some((item) => item.behavior === "steer")) return undefined;
-        // Close before clearing: any steer admitted while Stop waits stays in the
-        // Gateway owner and joins the continuation, never Pi's queue.
-        this.stopRecoveryQueueClosed = true;
-        for (const item of accepted) this.stopSteeringRecoveryIDs.add(item.id);
-        this.suppressQueueEvents = true;
-        try { this.runtime.session.clearQueue(); }
-        finally { this.suppressQueueEvents = false; }
-        this.sdkQueuedSteeringIDs.clear();
-        return accepted;
-      });
-    }
-    const recovered = await this.abortSerialized(kind, expectedOperationId, terminalErrorCode, queuedAtStop);
-    if (recovered.length > 0) {
-      await this.lane.run(() => this.redeliverStoppedSteering(recovered, true));
-    }
+    return this.runAbort.abort(kind, expectedOperationId, terminalErrorCode);
   }
 
-  private async abortSerialized(
-    kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash",
-    expectedOperationId: string | undefined,
-    terminalErrorCode: string,
-    queuedAtStop?: RuntimeQueuedMessage[],
-  ): Promise<RuntimeQueuedMessage[]> {
-    // A persistence blocker must not disable the owner's Stop route. Stop still
-    // proves exact operation identity and reports any unresolved receipt after
-    // cancellation instead of clearing the persistence fence.
-    this.assertAvailable();
-    const taskOperationId = this.taskWorker?.identity.operationId;
-    const taskOwnsForeground = taskOperationId !== undefined && this.liveTaskOperationId() === taskOperationId;
-    const targetsTask = expectedOperationId === taskOperationId
-      || (expectedOperationId === undefined && (taskOwnsForeground || !this.operation))
-      || (taskOwnsForeground && expectedOperationId === this.operation?.id);
-    if (this.taskWorker?.controlsActive && terminalErrorCode === "user-abort" && targetsTask) {
-      await this.taskWorker.stop();
-      return [];
-    }
-    if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId
-      && !(taskOwnsForeground && expectedOperationId === taskOperationId)) {
-      throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
-    }
-
-    // `kind` is presentation metadata, not cancellation authority. A stale
-    // retry/compaction/bash projection must never route Stop around another
-    // foreground controller or the independently owned built-in bash process.
-    // Keep the exact operation fence above, then fan cancellation out across
-    // every foreground primitive and verify settlement before acknowledging.
-    void kind;
-    const target = this.operation ? { ...this.operation } : undefined;
-    const agentOperationId = this.activeOperationId;
-    this.homeRequestPolicy?.cancel(agentOperationId);
-    const invocationOperationId = agentOperationId
-      ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
-    if (invocationOperationId) {
-      const invocation = this.invocationForOperation(invocationOperationId);
-      // A Gateway-owned stop reason outranks the SDK outcome. User Stop is
-      // provisional until cancellation settles; a refused attempt cannot claim
-      // a later natural completion as its interruption.
-      if (invocation && terminalErrorCode !== "user-abort") {
-        // A limit crossing is authoritative even if another Gateway stop races it.
-        if (!invocation.stopReason || terminalErrorCode === "chapter-limit") invocation.stopReason = terminalErrorCode;
-      }
-      this.abortedOperations.add(invocationOperationId);
-    }
-    if (target?.kind === "compaction" && target.id) this.abortedOperations.add(target.id);
-
-    // Retire accepted queue ownership before abort emits queue_update: those
-    // entries were not consumed. Keep their exact owners on this cancellation
-    // frame until their not-delivered receipts are persisted below.
-    const stoppedTaskQueue = this.taskWorker ? this.queuedMessages : [];
-    if (this.taskWorker) {
-      this.suppressQueueEvents = true;
-      try { this.runtime.session.clearQueue(); }
-      finally { this.suppressQueueEvents = false; }
-      this.sdkQueuedSteeringIDs.clear();
-      this.queuedMessages = [];
-      this.queueRevision += 1;
-    }
-    const queuedSteerCount = queuedAtStop?.filter((item) => item.behavior === "steer").length ?? 0;
-    const redeliver = queuedAtStop !== undefined && queuedSteerCount > 0;
-    const session = this.runtime.session;
-    for (const cancel of [
-      () => session.abortCompaction(),
-      () => session.abortRetry(),
-      () => session.abortBranchSummary(),
-      () => session.abortBash(),
-    ]) {
-      try { cancel(); } catch { /* Continue through every independent escape hatch. */ }
-    }
-    const abortResults = await Promise.allSettled([
-      session.abort(),
-      this.directBashProcesses?.abortAll() ?? Promise.resolve(),
-    ]);
-    for (const item of stoppedTaskQueue) {
-      await this.terminalizeInvocation(item.id, "interrupted", "task-stopped-before-delivery");
-      this.runWork.settleOperationWork(item.id);
-    }
-    const settled = await this.waitForForegroundAbortSettlement(target, agentOperationId);
-    if (!settled || this.directBashProcesses?.hasActiveProcesses
-      || abortResults.some((result) => result.status === "rejected")) {
-      // Keep the SDK's actual abort outcome authoritative if cancellation partly
-      // succeeded, but withdraw this unconfirmed invocation-level Stop intent.
-      if (invocationOperationId) this.abortedOperations.delete(invocationOperationId);
-      throw new GatewayError("conflict", "Foreground work did not stop", true);
-    }
-
-    let interruptionPersisted = false;
-    if (invocationOperationId && !redeliver) {
-      await this.terminalizeInvocation(invocationOperationId, "interrupted", terminalErrorCode);
-      interruptionPersisted = true;
-    }
-    if (invocationOperationId && interruptionPersisted) this.abortedOperations.delete(invocationOperationId);
-
-    let recovered: RuntimeQueuedMessage[] = [];
-    if (redeliver) {
-      recovered = queuedAtStop.filter((item) => this.stopSteeringRecoveryIDs.has(item.id));
-      this.stopSteeringContinuation = {
-        ...(invocationOperationId === undefined ? {} : { operationId: invocationOperationId }),
-        queuedSteerCount,
-      };
-      this.dependencies.stopSteeringDiagnostic?.({ sessionId: this.id, queuedSteerCount, outcome: "started" });
-      if (recovered.length === 0) {
-        this.dependencies.stopSteeringDiagnostic?.({ sessionId: this.id, queuedSteerCount, outcome: "completed" });
-        this.stopSteeringContinuation = undefined;
-      }
-    }
-
-    this.revision += 1;
-    this.publishSnapshot();
-    return recovered;
-  }
-
-  private async redeliverStoppedSteering(items: RuntimeQueuedMessage[], laneOwned: boolean): Promise<void> {
-    const processed = new Set<string>();
-    while (true) {
-      const held = this.heldQueue.entries.filter((item) => this.stopRecoveryHoldIDs.has(item.id));
-      const pending = [...items, ...held]
-        .filter((item) => !processed.has(item.id)
-          && (this.stopSteeringRecoveryIDs.has(item.id) || this.stopRecoveryHoldIDs.has(item.id)))
-        .sort((left, right) => left.ordinal - right.ordinal);
-      if (pending.length === 0) break;
-      for (const item of pending) {
-        const heldEntry = this.stopRecoveryHoldIDs.has(item.id)
-          ? this.heldQueue.entries.find((entry) => entry.id === item.id)
-          : undefined;
-        const hasAcceptedInvocation = this.invocationForOperation(item.id) !== undefined;
-        try {
-          await this.admitPrompt(item.text, item.images, item.behavior, {
-            text: item.text,
-            attachmentEnvelope: item.attachmentEnvelope,
-            attachmentCount: item.attachmentCount,
-            ...(item.photoCount === undefined ? {} : { photoCount: item.photoCount }),
-            ...(item.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: item.fileAttachmentCount }),
-            ...(item.attachments === undefined ? {} : { attachments: item.attachments }),
-            ...(item.resourceInvocations === undefined ? {} : { resourceInvocations: item.resourceInvocations }),
-            inputSource: item.inputSource,
-            ...(item.commandId === undefined ? {} : { commandId: item.commandId }),
-          }, undefined, undefined, item.id, heldEntry, hasAcceptedInvocation ? item : undefined, laneOwned);
-          processed.add(item.id);
-          this.stopRecoveryHoldIDs.delete(item.id);
-          // A handled input has no Agent message_start; its terminal receipt
-          // from normal admission is the exact queue-row removal boundary.
-          const lifecycle = this.invocationForOperation(item.id)?.lifecycle;
-          if (lifecycle === "completed" || lifecycle === "failed" || lifecycle === "interrupted") {
-            this.consumeStopSteeringRecoveryOwner(item.id);
-            this.heldQueue.removeHeldPrompt(item.id);
-          }
-        } catch (error) {
-          this.dependencies.stopSteeringDiagnostic?.({
-            sessionId: this.id,
-            queuedSteerCount: items.filter((queued) => queued.behavior === "steer").length,
-            outcome: "failed",
-          });
-          this.stopSteeringContinuation = undefined;
-          throw error;
-        }
-      }
-    }
-    this.stopRecoveryQueueClosed = false;
-    this.stopRecoveryHoldIDs.clear();
-  }
 
   /** Republish this snapshot because the Gateway-owned archive projection
    * changed. Archive commits happen outside the run-admission lane, so this
@@ -9227,7 +9025,7 @@ export class RuntimeSlot {
 
     // Stop and a successor can arrive during marker I/O too. Retire the exact
     // cancellation intent after that await, then re-check presentation ownership.
-    this.abortedOperations.delete(operationId);
+    this.runAbort.abortedOperations.delete(operationId);
     const ownerStillCurrent = this.operationMatches(compactionOwner);
     if (ownerStillCurrent) {
       this.phase = "idle";

@@ -7254,7 +7254,7 @@ export default function (pi) {
       phase: "running" | "compacting";
       activeOperationId?: string;
       operation?: { id?: string; kind: "prompt" | "compaction"; startedAt: string };
-      abortedOperations: Set<string>;
+      runAbort: import("../kernel/run/run-abort-owner.js").RunAbortOwner;
       onEvent: (event: unknown) => void;
       runtime: { session: { readonly isStreaming: boolean } };
     };
@@ -7267,20 +7267,20 @@ export default function (pi) {
     const compactionID = internal.operation?.id;
     expect(internal.operation?.kind).toBe("compaction");
     expect(compactionID).toBeDefined();
-    internal.abortedOperations.add(compactionID!);
+    internal.runAbort.abortedOperations.add(compactionID!);
 
     internal.operation = { id: "successor-operation", kind: "prompt", startedAt: new Date().toISOString() };
     internal.activeOperationId = "successor-operation";
     internal.phase = "running";
-    internal.abortedOperations.add("successor-operation");
+    internal.runAbort.abortedOperations.add("successor-operation");
     internal.onEvent({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false, willRetry: false });
 
     expect(slot.snapshot()).toMatchObject({
       phase: "running",
       operation: { id: "successor-operation", kind: "prompt" },
     });
-    expect(internal.abortedOperations.has(compactionID!)).toBe(false);
-    expect(internal.abortedOperations.has("successor-operation")).toBe(true);
+    expect(internal.runAbort.abortedOperations.has(compactionID!)).toBe(false);
+    expect(internal.runAbort.abortedOperations.has("successor-operation")).toBe(true);
     streaming.mockRestore();
   });
 
@@ -7290,16 +7290,16 @@ export default function (pi) {
     const internal = slot as unknown as {
       phase: "idle" | "running" | "compacting";
       operation?: { id?: string; kind: "prompt" | "compaction"; startedAt: string };
-      abortedOperations: Set<string>;
+      runAbort: import("../kernel/run/run-abort-owner.js").RunAbortOwner;
       runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
     };
     vi.spyOn(internal.runtime.session, "compact").mockImplementation(async () => {
       const compactionID = internal.operation?.id;
       expect(internal.operation?.kind).toBe("compaction");
-      if (compactionID) internal.abortedOperations.add(compactionID);
+      if (compactionID) internal.runAbort.abortedOperations.add(compactionID);
       internal.operation = { id: "manual-successor", kind: "prompt", startedAt: new Date().toISOString() };
       internal.phase = "running";
-      internal.abortedOperations.add("manual-successor");
+      internal.runAbort.abortedOperations.add("manual-successor");
       throw new Error("manual compaction failed after successor start");
     });
 
@@ -7308,7 +7308,7 @@ export default function (pi) {
       phase: "running",
       operation: { id: "manual-successor", kind: "prompt" },
     });
-    expect(internal.abortedOperations.has("manual-successor")).toBe(true);
+    expect(internal.runAbort.abortedOperations.has("manual-successor")).toBe(true);
   });
 
   it("rotates provisional tool segment authority across automatic compaction", async () => {

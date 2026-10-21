@@ -59,6 +59,7 @@
     "kernel/run/request-pipeline.ts",
     "kernel/run/run-persistence.ts",
     "kernel/run/run-work-owner.ts",
+    "kernel/run/run-abort-owner.ts",
     "kernel/run/held-prompt-queue.ts",
     "kernel/run/queue-input.ts",
     "kernel/run/locks/run-markers-paths.golden.json"

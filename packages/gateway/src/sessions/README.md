@@ -34,7 +34,7 @@ bounded run markers and command receipts; Pi owns JSONL. Host recipes are fixed 
   admitted input, but not attention I/O. SDK between-turn entries (a tool-loadout
   message, say) may fall on either side of a receipt; consumers infer nothing from
   that order.
-- **Stop.** A failed Stop (`Foreground work did not stop`) withdraws its interruption
+- **Stop.** `RunAbortOwner` owns intent/recovery; a failed Stop (`Foreground work did not stop`) withdraws its interruption
   intent, so a later natural completion is `completed`; an actual SDK abort settles
   as interrupted. Every tool call runs under its own abort controller, and two
   seconds after cancellation a call that ignores its signal resolves as an error

@@ -529,7 +529,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
       }, "both stop-racing steers admitted and consumed once");
     } catch (error) {
       const snapshot = client.frames.filter((frame: any) => frame.topic === "session.snapshot" && frame.payload?.sessionId === session.id).at(-1)?.payload;
-      throw new Error(`${String(error)}\n${JSON.stringify({snapshot, queued:(slot as any).queuedMessages, held:(slot as any).heldQueue.entries, recovery:[...(slot as any).stopSteeringRecoveryIDs], closed:(slot as any).stopRecoveryQueueClosed})}`);
+      throw new Error(`${String(error)}\n${JSON.stringify({snapshot, queued:(slot as any).queuedMessages, held:(slot as any).heldQueue.entries, recovery:[...(slot as any).runAbort.stopSteeringRecoveryIDs], closed:(slot as any).runAbort.stopRecoveryQueueClosed})}`);
     }
     expect(continuationInputs).toHaveLength(1);
     expect(continuationInputs[0]!.some((text) => text.startsWith("steer before stop"))).toBe(true);

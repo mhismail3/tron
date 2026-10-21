@@ -22,6 +22,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
 
 - `compaction-policy.ts`: operation-bound settings budgets, signal-fenced summary
   generation, provider 413 classification and the `tron-compaction-policy` descriptor.
+- `run-abort-owner.ts`: foreground cancellation intent, exact settlement and accepted
+  Stop steering recovery; all live SDK/queue reads stay at their original cuts.
 - `held-prompt-queue.ts`: accepted compaction/Stop-time input and its ordered deferred
   admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types/bounds.
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option

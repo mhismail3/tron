@@ -954,7 +954,7 @@ describe("compaction operation admission and authoritative reconciliation", { co
   it("retires late manual Stop intent after durable marker cleanup", async () => {
     const item = await boundaryFixture();
     item.faux.setResponses(Array.from({ length: 3 }, () => fauxAssistantMessage("Preserved API contract")));
-    const internal = item.slot as unknown as { dependencies: { markers: RunMarkerStore }; abortedOperations: Set<string> };
+    const internal = item.slot as unknown as { dependencies: { markers: RunMarkerStore }; runAbort: import("../kernel/run/run-abort-owner.js").RunAbortOwner };
     const original = internal.dependencies.markers.clear.bind(internal.dependencies.markers);
     let release!: () => void;
     let clearing = false;
@@ -970,12 +970,12 @@ describe("compaction operation admission and authoritative reconciliation", { co
       await waitFor(() => clearing, "the clear to begin");
       const id = item.slot.snapshot().operation!.id!;
       stopping = item.slot.abort("compaction", id);
-      expect(internal.abortedOperations.has(id)).toBe(true);
+      expect(internal.runAbort.abortedOperations.has(id)).toBe(true);
       release();
       await compacting;
       await stopping;
       await expectSettled(item);
-      expect(internal.abortedOperations.has(id)).toBe(false);
+      expect(internal.runAbort.abortedOperations.has(id)).toBe(false);
       expect((await item.entries()).filter(entry => entry.type === "compaction")).toHaveLength(1);
     } finally { release(); clear.mockRestore(); await compacting.catch(() => {}); await stopping?.catch(() => {}); }
   });
