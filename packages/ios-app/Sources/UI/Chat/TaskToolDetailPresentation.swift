@@ -185,13 +185,15 @@ extension HomeToolDetailPresentation {
         guard let text = report.text else { return nil }
         var rows = identity
         rows.append(Row(icon: "doc.plaintext", title: "Page", value: "Bytes \(offset.formatted())–\(end.formatted()) of \(total.formatted())"))
-        if let outcome = report.outcome { rows.append(Row(icon: "flag.checkered", title: "Outcome", value: outcome.capitalized)) }
+        let outcomeLabel = report.outcome.map { $0 == "needs-input" ? "Needs attention" : $0.replacingOccurrences(of: "-", with: " ").capitalized }
+        if let outcomeLabel { rows.append(Row(icon: "flag.checkered", title: "Outcome", value: outcomeLabel)) }
         if let result = report.resultID { rows.append(Row(icon: "seal", title: "Result ID", value: result)) }
         let detail = next.map { "Home reads the rest from byte \($0.formatted())." }
         var sections: [Section] = [.rows(title: nil, detail: detail, rows: rows)]
         sections.append(.prompt(id: "report", title: report.complete ? "Report" : "Report (this page)", text: text))
-        let pill = report.outcome?.capitalized ?? (next == nil ? "Last page" : "Page")
-        return HomeToolDetailPresentation(header: Header(icon: icon, title: taskID ?? "Task report", subtitle: "Task report", pill: pill, tone: .neutral),
+        let pill = outcomeLabel ?? (next == nil ? "Last page" : "Page")
+        let tone: Tone = report.outcome == "needs-input" ? .failure : .neutral
+        return HomeToolDetailPresentation(header: Header(icon: icon, title: taskID ?? "Task report", subtitle: "Task report", pill: pill, tone: tone),
                                           sections: sections)
     }
 }

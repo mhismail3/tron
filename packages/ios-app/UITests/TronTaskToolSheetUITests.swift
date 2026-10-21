@@ -5,7 +5,7 @@ final class TronTaskToolSheetUITests: XCTestCase {
     @MainActor func testCaptureTaskSheetReview() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
-            for scenario in ["task-list"] {
+            for scenario in ["task-list", "task-status", "task-report", "task-steer", "task-fallback"] {
                 let app = launch(scenario, mode: mode)
                 capture(app, "\(scenario)-\(mode)")
                 app.swipeUp()
@@ -13,6 +13,11 @@ final class TronTaskToolSheetUITests: XCTestCase {
                 app.terminate()
             }
         }
+        let app = launch("task-list", large: true)
+        capture(app, "task-list-large-text")
+        app.swipeUp()
+        capture(app, "task-list-large-text-lower")
+        app.terminate()
     }
 
     @MainActor func testCatalogShowsTaskContentAndKeepsJSONInTechnicalDetails() {
