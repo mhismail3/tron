@@ -18,7 +18,8 @@
     "session-pages.ts",
     "activity.ts",
     "tool-result.ts",
-    "tool-result.integration.test.ts"
+    "tool-result.integration.test.ts",
+    "extension-origin.ts"
   ],
   "dependsOn": [
     "gateway/pi"

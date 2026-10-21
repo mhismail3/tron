@@ -134,12 +134,6 @@ export function producerIdentity(source: string, path: string, title: string): E
   return { id, title, source, kind: source === MANAGED_SUBAGENTS_SOURCE ? "subagent" : "extension" };
 }
 
-export function trustedExtensionOriginKind(owner: ExtensionOwner): "subagent" | "extension" {
-  // Live admission and canonical receipt decoding supply the classification.
-  // Build provenance is not a second consumer-side capability discriminator.
-  return owner.kind ?? "extension";
-}
-
 /**
  * Wraps one callback in its owning extension context. `extensionOwnerFor` is
  * resolved at invocation time, not admission time: the pinned SDK finalizes

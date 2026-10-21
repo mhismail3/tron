@@ -26,7 +26,7 @@ export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): Re
 import { GatewayError } from "../../errors.js";
 import { jsonNodeCount } from "../../protocol/json-budget.js";
 import type { ToolDisplayProjection } from "./tool-result.js";
-import { trustedExtensionOriginKind } from "../../extensions/owner-attribution.js";
+import { trustedExtensionOriginKind } from "./extension-origin.js";
 import { isGatewayTimestamp } from "../../util/timestamp.js";
 import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../../util/bounded-text.js";
 import type { BlobStore } from "../../sessions/blob-store.js";
