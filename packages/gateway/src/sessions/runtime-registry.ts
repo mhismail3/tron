@@ -894,8 +894,7 @@ export class RuntimeRegistry {
   displayModuleServices() { return { artifacts: this.displayArtifacts, liveViews: this.options.browserLiveViews }; }
   scheduleModuleOperations() { return this.options.scheduleToolOperations; }
   notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
-  homeModuleServices() {
-    return homeModuleServices(this.home, this.options, {
+  homeModuleServices() { return homeModuleServices(this.home, this.options, {
       knowledge: this.knowledgeService, changes: () => this.settingsOwners?.changes,
       delegate: (sessionId, request, signal) => this.dispatchHomeTask(sessionId, request, signal),
       search: () => { const owner = this.sessionSearchService; return owner ? (request, signal) => owner.search(request, signal) : undefined; },

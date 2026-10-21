@@ -5,7 +5,7 @@ import type { HomeMemoryToolAccess } from "./home-memory.js";
 import type { HomeProfileChangeAccess } from "./home-profile.js";
 import type { SettingsChangePath } from "../admin/settings-model.js";
 import type { HomeOwner } from "./home-owner.js";
-import type { TrustService } from "../admin/trust.js";
+import type { TrustService } from "../admin/trust-service.js";
 import type { HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
 import type { HomeSessionReader } from "./home-session-read.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
