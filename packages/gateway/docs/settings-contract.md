@@ -52,8 +52,8 @@ lists and thinking-budget maps compose over the layer below; unsupported values 
 | `model.ref[role=chat]` | — | model | chat, profile, project, mac | as allowed | fixed | next-turn | quiet |
 | `model.thinking[role=chat]` | model | model | chat, profile, project, mac | as allowed | fixed | next-turn | quiet |
 | `model.contextWindow` | model | model | chat, project, mac | as allowed | fixed | next-turn | quiet |
-| `model.thinkingBudgets` | — | advanced | project, mac | as allowed | fixed | new-chat | quiet |
-| `model.offered` | — | advanced | project, mac | as allowed | live | next-turn | quiet |
+| `model.thinkingBudgets` | — | workers | project, mac | as allowed | fixed | new-chat | quiet |
+| `model.offered` | — | workers | project, mac | as allowed | live | next-turn | quiet |
 | `model.thinking[role=summarizer]` | — | context | project, mac | none | live | next-compaction | quiet |
 | `model.queue[role=worker]` | — | workers | chat, profile, mac | as allowed | live | delegate | notify |
 | `model.queue[role=subagent]` | — | workers | chat, profile, mac | as allowed | live | next-request | notify |
@@ -71,19 +71,19 @@ lists and thinking-budget maps compose over the layer below; unsupported values 
 | `tools.codemode.inlineBudget` | — | tools | project, mac | none | fixed | new-chat | quiet |
 | `tools.shell.path` | — | tools | project, mac | none | fixed | new-chat | notify |
 | `tools.shell.commandPrefix` | — | tools | project, mac | none | fixed | new-chat | notify |
-| `permissions.projectTrust` | project | advanced | mac | as allowed | live | reload | narrow notify, widen approve |
-| `permissions.macTerminalKey` | device | advanced | mac | as allowed | live | next-change | narrow notify, widen approve |
-| `permissions.defaultProjectTrust` | — | advanced | mac | as allowed | live | next-change | narrow notify, widen approve |
-| `permissions.floor` | key | advanced | mac | as allowed | live | next-change | narrow quiet, widen approve |
+| `permissions.projectTrust` | project | trust | mac | as allowed | live | reload | narrow notify, widen approve |
+| `permissions.macTerminalKey` | device | connections | mac | as allowed | live | next-change | narrow notify, widen approve |
+| `permissions.defaultProjectTrust` | — | trust | mac | as allowed | live | next-change | narrow notify, widen approve |
+| `permissions.floor` | key | approvals | mac | as allowed | live | next-change | narrow quiet, widen approve |
 | `permissions.budget.task` | — | workers | profile | as allowed | narrow live, widen fixed | delegate | narrow quiet, widen approve |
-| `run.queue.steeringMode` | — | advanced | chat, project, mac | as allowed | live | next-turn | quiet |
-| `run.queue.followUpMode` | — | advanced | chat, project, mac | as allowed | live | next-turn | quiet |
-| `run.retry.enabled` | — | advanced | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.retry.maxRetries` | — | advanced | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.retry.baseDelayMs` | — | advanced | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.retry.provider.timeoutMs` | — | advanced | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.retry.provider.maxRetries` | — | advanced | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.retry.provider.maxRetryDelayMs` | — | advanced | chat, project, mac | as allowed | live | next-request | quiet |
+| `run.queue.steeringMode` | — | run | chat, project, mac | as allowed | live | next-turn | quiet |
+| `run.queue.followUpMode` | — | run | chat, project, mac | as allowed | live | next-turn | quiet |
+| `run.retry.enabled` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
+| `run.retry.maxRetries` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
+| `run.retry.baseDelayMs` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
+| `run.retry.provider.timeoutMs` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
+| `run.retry.provider.maxRetries` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
+| `run.retry.provider.maxRetryDelayMs` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
 | `run.transport` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
 | `run.httpIdleTimeoutMs` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
 | `run.websocketConnectTimeoutMs` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
