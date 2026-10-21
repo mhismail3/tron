@@ -9,7 +9,6 @@ import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
 const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_BOUND_BYTES + 1_024);
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
-import { AsyncLocalStorage } from "node:async_hooks";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
 import { boundedSummaryText } from "./summary-text.js";
 import { catalogActivityTimestamp } from "./catalog-metadata-index.js";
@@ -23,7 +22,7 @@ import {
   isInstalledDelegatedTool,
   trustedDelegatedController,
 } from "./delegated-provider.js";
-import type { AgentMessage, AgentTurnDecision, StreamFn, ThinkingLevel } from "../kernel/pi/agent-core.js";
+import type { AgentMessage, AgentTurnDecision, ThinkingLevel } from "../kernel/pi/agent-core.js";
 import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins, readChatFixedSettings, readChatToolChoice } from "./chat-settings.js";
 import { constants, existsSync, lstatSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
@@ -31,7 +30,7 @@ import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { type ImageContent, type Model } from "../kernel/pi/ai.js";
-import { bindRuntimeSession, guardCanonicalAppend, installAgentPipeline, wrapModelRuntimeStream } from "../kernel/pi/adapters.js";
+import { bindRuntimeSession, guardCanonicalAppend } from "../kernel/pi/adapters.js";
 import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
@@ -48,7 +47,7 @@ import {
   type FileEntry,
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
-import { abortAwareStream } from "../runtime/abort-aware-stream.js";
+import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { HomeRequestPolicyError, type HomeRequestPolicy } from "../home/home-request-policy.js";
@@ -2165,29 +2164,7 @@ export class RuntimeSlot {
         ? await this.dependencies.homeModelRuntime()
         : { runtime: await this.dependencies.createModelRuntime(), ownership: "owned" as const };
       const modelRuntime = binding.runtime;
-      // The SDK merges initial optional defaults after agent.streamFunction.
-      // Carry this exact request's resolved settings to the final provider cut:
-      // clearing a Chat/Mac value must not resurrect that stale SDK default.
-      // Ordinary runtimes and Home's borrowed *view* are session-owned; unrelated
-      // memory/extension calls outside this stream retain their explicit options.
-      const requestSettings = new AsyncLocalStorage<ReturnType<SettingsManager["getSettings"]>>();
-      wrapModelRuntimeStream(modelRuntime, (streamSimple) => (model, context, options) => {
-        const settings = requestSettings.getStore();
-        if (!settings) return streamSimple(model, context, options);
-        const { timeoutMs: _timeout, maxRetries: _retries, websocketConnectTimeoutMs: _connect, ...rest } = options ?? {};
-        // Pi settings spell a disabled timeout "disabled" (or 0). As the SDK's own
-        // request options do, a disabled HTTP timeout is the maximum int32 the
-        // provider SDKs accept, and a disabled WebSocket connect wait is 0.
-        const idle = settings.httpIdleTimeoutMs === "disabled" ? 0 : settings.httpIdleTimeoutMs;
-        const timeoutMs = settings.retry?.provider?.timeoutMs ?? (idle === 0 ? 2_147_483_647 : idle);
-        const connect = settings.websocketConnectTimeoutMs === "disabled" ? 0 : settings.websocketConnectTimeoutMs;
-        return streamSimple(model, context, {
-          ...rest,
-          ...(timeoutMs === undefined ? {} : { timeoutMs }),
-          ...(settings.retry?.provider?.maxRetries === undefined ? {} : { maxRetries: settings.retry.provider.maxRetries }),
-          ...(connect === undefined ? {} : { websocketConnectTimeoutMs: connect }),
-        });
-      });
+      const requestPipeline = new RunRequestPipeline(modelRuntime);
       // Only the ModelRuntime owner installs filters. Home's borrowed view reads
       // the Gateway's installation without wrapping its providers on rebuild.
       const detachOpenAIEligibility = binding.ownership === "owned"
@@ -2422,20 +2399,10 @@ export class RuntimeSlot {
       const compactionSession = created.session;
       compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir,
         home ? { disabled: true } : { chat: () => readChatSettings(compactionSession.sessionManager.getBranch()) });
-      let admittedSettings: ReturnType<SettingsManager["getSettings"]> | undefined;
       const taskWorker = this.taskWorker;
-      installAgentPipeline(created.session.agent, {
-        convertToLlm: (convertToLlm) => async messages => {
-          // Image filtering happens during SDK message conversion, before
-          // prepareRequest. Resolve here too, so a tool's narrowing applies to
-          // the very next request rather than leaking one request of images.
-          await this.applyLiveRunSettings(created.session);
-          return convertToLlm(messages);
-        },
-        prepareRequest: (prepareRequest) => async (request, signal) => {
-          if (signal?.aborted) throw new Error("Request cancelled before settings resolution");
-          admittedSettings = await this.applyLiveRunSettings(created.session);
-          if (signal?.aborted) throw new Error("Request cancelled during settings resolution");
+      requestPipeline.install(created.session, {
+        applySettings: () => this.applyLiveRunSettings(created.session),
+        settingsApplied: () => {
           if (this.dependencies.settings()) {
             this.emit("session.diagnostic", safeJson({
               code: "settings-run-applied", retry: created.session.settingsManager.getRetrySettings(),
@@ -2444,27 +2411,10 @@ export class RuntimeSlot {
               steeringMode: created.session.agent.steeringMode, followUpMode: created.session.agent.followUpMode,
             }));
           }
-          return (await prepareRequest?.(request, signal)) ?? undefined;
         },
-        // The guard is INNERMOST, so it validates the exact request the
-        // provider-facing base stream receives: after `abortAwareStream` and after
-        // the compaction policy's summary-focus rewrite. Installed outermost, it
-        // would run before both and never see them.
-        streamFunction: (providerStream) => {
-          const baseStream: StreamFn = (model, context, options) => {
-            const settings = admittedSettings;
-            if (!settings) return providerStream(model, context, options);
-            return requestSettings.run(settings, () => providerStream(model, context, {
-              ...options,
-              ...(settings.transport === undefined ? {} : { transport: settings.transport }),
-              ...(settings.retry?.provider?.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: settings.retry.provider.maxRetryDelayMs }),
-            }));
-          };
-          return compactionPolicy.wrap(abortAwareStream(
-            homeRequestPolicy ? homeRequestPolicy.wrapStreamFunction(baseStream) : baseStream,
-          ));
-        },
+        compactionStream: compactionPolicy.wrap.bind(compactionPolicy),
         ...(homeRequestPolicy ? {
+          policyStream: baseStream => homeRequestPolicy.wrapStreamFunction(baseStream),
           // Outermost on both: the request is cut after the SDK's own projection,
           // and the digest expectation is recorded after every SDK context stage.
           outer: {

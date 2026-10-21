@@ -54,6 +54,7 @@
     "sessions/summary-text.ts",
     "sessions/tron-modules.integration.test.ts",
     "kernel/run/README.md",
+    "kernel/run/request-pipeline.ts",
     "kernel/run/locks/run-markers-paths.golden.json"
   ],
   "dependsOn": [

@@ -16,6 +16,9 @@ Gateway-owned execution primitives layered on Pi's session loop.
 - `run-markers.ts`: durable per-operation crash/interruption evidence.
 - `gateway-work-registry.ts`: bounded admission/drain tokens and joined settlement.
 
+- `request-pipeline.ts`: per-runtime request settings scope and provider-option
+  replacement, live conversion/preparation and ordered stream-policy composition.
+
 ## Contract
 
 `RuntimeSlot` installs bounded tool cancellation on its Pi session and owns one
