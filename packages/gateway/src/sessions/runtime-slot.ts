@@ -445,7 +445,6 @@ interface RuntimeSlotHooks {
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
   /** A completed, quiescent Home turn may durably seal its chapter before the next admission. */
-  homeQuiescent: (sessionId: string) => Promise<void>;
   homeChapterRefused: (reason: "sealed-write") => void;
   homeChapterLimitStopped: (details: {
     chapterOrdinal: number;
@@ -590,8 +589,6 @@ export interface RuntimeSlotDependencies {
   /** Returns a wake trigger that never reached the canonical session to pending. */
   homeInboxRelease: (taskId: string, operationId: string, eventId: string) => Promise<void>;
   homeInboxSettlement: (sessionId: string, operationId: string) => Promise<void>;
-  /** The Home session is idle again after a user activation or a delivered wake. */
-  homeIdle: (sessionId: string, by: "user" | "wake") => void;
   /** Tron Home's memory. The slot only reports that canonical entries changed;
    * the memory owns what it reads, how long it waits and how much it spends. */
   homeMemory: HomeMemoryPort;
@@ -4324,7 +4321,7 @@ export class RuntimeSlot {
         return;
       }
       this.hooks.settled(this.id);
-      await this.hooks.homeQuiescent(this.id);
+      await this.dependencies.modules.policy("runSettled")?.().quiescent(this.id);
       this.phase = this.compactionOperation ? "compacting" : "idle";
       this.noteHomeIdle();
       this.operation ??= this.compactionOperation;
@@ -7906,7 +7903,7 @@ export class RuntimeSlot {
   /** The Home session has no operation left: a user activation or a wake ended. */
   private noteHomeIdle(): void {
     if (!this.homeRequestPolicy || this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined) return;
-    this.dependencies.homeIdle(this.id, this.operationWasHomeWake ? "wake" : "user");
+    this.dependencies.modules.policy("runSettled")?.().idle(this.id, this.operationWasHomeWake ? "wake" : "user");
   }
 
   /** The managed provider uses user input to run Pi's normal before-agent-start

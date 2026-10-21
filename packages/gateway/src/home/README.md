@@ -12,7 +12,7 @@ unaffected by every rule here.
 - **Designation and chapters:** `home-owner.ts` (record, ledger, profile changes, wake
   scheduler), `home-chapter-state.ts`, `home-chapter-contents.ts`, `home-session-*.ts`.
 - **Profile and seam:** `home-runtime-policy.ts`, `home-request-policy.ts`,
-  `home-module.ts` (Home/research descriptors), `tron-home-extension.ts` (tools/context/cache).
+  `home-module.ts` (descriptors, quiescent/idle hooks), `tron-home-extension.ts` (tools/context/cache).
 - **Memory, research, profile:** `home-memory*.ts`, `home-research-tools.ts`, `home-profile.ts`.
 - **Tasks and wake inbox:** `home-task-*.ts`, `home-wake-inbox.ts`; contract in
   [tasks.md](tasks.md). Also `home-diagnostic.ts`, `host-pressure.ts`,

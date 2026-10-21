@@ -40,6 +40,9 @@ ordinary profile's first extension and joins canonical receipt writes before inp
   call, never a copy taken at start. Notification hooks resolve optional owner
   availability before the run samples terminal or interaction facts; notifications
   admits the alert, while the run owns presence and waiting-episode state.
+  Home owns `runSettled`: the run awaits `quiescent` before changing to idle,
+  then notifies `idle` synchronously only for a user activation or delivered wake.
+  Home schedules pending wakes before its resource-idle callback; neither is cached.
 - **Fail at start.** A module composed twice, an unknown hook, a second policy
   implementer or an RPC method served twice refuses `start`, and the modules
   already started are stopped.

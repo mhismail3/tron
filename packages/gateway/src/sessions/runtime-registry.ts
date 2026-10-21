@@ -896,6 +896,7 @@ export class RuntimeRegistry {
   notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
   homeModuleServices() { return homeModuleServices(this.home, this.options, {
       knowledge: this.knowledgeService, changes: () => this.settingsOwners?.changes,
+      resourcesIdle: sessionId => this.homeResources.idle(sessionId),
       delegate: (sessionId, request, signal) => this.dispatchHomeTask(sessionId, request, signal),
       search: () => { const owner = this.sessionSearchService; return owner ? (request, signal) => owner.search(request, signal) : undefined; },
       read: (request, signal) => readHomeSessionEntry(this, request, signal),
@@ -1294,7 +1295,6 @@ export class RuntimeRegistry {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
-      homeQuiescent: (sessionId: string) => this.home.chapterQuiescent(sessionId),
       homeChapterRefused: (reason: "sealed-write") => {
         this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason });
       },
@@ -1868,7 +1868,6 @@ export class RuntimeRegistry {
       homeInboxAdmission: (sessionId: string, operationId: string, delivery: import("../home/home-wake-inbox.js").HomeWakeDelivery, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => this.home.admitTaskResults(sessionId, operationId, delivery, append, envelope),
       homeInboxRelease: (taskId: string, operationId: string, eventId: string) => this.home.releaseWakeTrigger(taskId, operationId, eventId),
       homeInboxSettlement: (sessionId: string, operationId: string) => this.home.settleTaskResults(sessionId, operationId),
-      homeIdle: (sessionId: string, by: "user" | "wake") => { this.home.noteHomeIdle(sessionId, by); this.homeResources.idle(sessionId); },
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
       homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },

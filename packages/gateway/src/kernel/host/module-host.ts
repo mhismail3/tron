@@ -22,6 +22,12 @@ export interface InteractionRequiredInput {
   observed: boolean;
 }
 
+/** Run settlement preserves the awaited quiescent cut and synchronous idle notice. */
+export interface RunSettledPolicy {
+  quiescent(sessionId: string): Promise<void>;
+  idle(sessionId: string, by: "user" | "wake"): void;
+}
+
 /** One log line from a module, in the Gateway logger's shape. */
 export interface ModuleLog {
   log(level: "debug" | "info" | "warning" | "error", message: string, metadata?: Record<string, unknown>): void;
@@ -101,8 +107,9 @@ export const KERNEL_HOOKS = {
 export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
-export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired">]: (...args: never[]) => unknown } & {
+export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled">]: (...args: never[]) => unknown } & {
   toolResultProjection(): ToolResultProjection;
+  runSettled(): RunSettledPolicy;
   /** Resolve optional availability before sampling run-owned facts. */
   runTerminal(): ((input: RunTerminalInput) => Promise<void>) | undefined;
   interactionRequired(): ((input: InteractionRequiredInput) => Promise<void>) | undefined;

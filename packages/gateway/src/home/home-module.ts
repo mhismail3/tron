@@ -1,4 +1,4 @@
-import type { ModuleDescriptor, SessionContext } from "../kernel/host/module-host.js";
+import type { ModuleDescriptor, RunSettledPolicy, SessionContext } from "../kernel/host/module-host.js";
 import { createTronHomeExtension } from "./tron-home-extension.js";
 import { homeResearchTools, type HomeResearchTransport } from "./home-research-tools.js";
 import type { HomeMemoryToolAccess } from "./home-memory.js";
@@ -12,6 +12,7 @@ import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/session-search-contract.js";
 
 export interface HomeModuleServices {
+  runSettled: RunSettledPolicy;
   memory(sessionId: string): HomeMemoryToolAccess | undefined;
   delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal): Promise<HomeTaskHandle>;
   task(sessionId: string, request: unknown): Promise<unknown>;
@@ -27,10 +28,14 @@ export interface HomeModuleServices {
  * operations and reads of owners installed after registry construction. */
 export function homeModuleServices(owner: HomeOwner,
   platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport },
-  ports: Pick<HomeModuleServices, "knowledge" | "search" | "read" | "delegate"> & { changes(): SettingsChangePath | undefined },
+  ports: Pick<HomeModuleServices, "knowledge" | "search" | "read" | "delegate"> & { changes(): SettingsChangePath | undefined; resourcesIdle(sessionId: string): void },
 ): HomeModuleServices {
   return {
     knowledge: ports.knowledge, search: ports.search, read: ports.read, delegate: ports.delegate,
+    runSettled: {
+      quiescent: sessionId => owner.chapterQuiescent(sessionId),
+      idle: (sessionId, by) => { owner.noteHomeIdle(sessionId, by); ports.resourcesIdle(sessionId); },
+    },
     memory: sessionId => owner.memoryToolsFor(sessionId),
     task: (sessionId, request) => owner.taskTool(sessionId, request),
     profileChanges: session => homeProfileChanges(session, ports.changes()),
@@ -55,7 +60,7 @@ export function createHomeModule(services: () => HomeModuleServices): ModuleDesc
     name: "tron-home",
     purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
     tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"], commands: [],
-    start: () => ({ extension: session => {
+    start: () => ({ hooks: { runSettled: () => services().runSettled }, extension: session => {
       const owners = services();
       return createTronHomeExtension(() => owners.memory(session.sessionId()),
         (request, signal) => owners.delegate(session.sessionId(), request, signal),
