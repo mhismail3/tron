@@ -151,7 +151,11 @@ private struct TronTopBlurSurfaceModifier: ViewModifier {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
             .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
             .overlay(alignment: .top) {
-                if let style { TronTopBlurOverlay(style: style) }
+                // Sheets already own their background and native soft scroll edge.
+                // A second backdrop here becomes a separately revealed toolbar band.
+                if let style, style != .sheet, style != .toolDetail {
+                    TronTopBlurOverlay(style: style)
+                }
             }
     }
 }

@@ -81,16 +81,17 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   Reload in the toolbar, and dashboards converge through live Gateway invalidations.
 - **Info.** Every sheet with technical or metadata details opens them from the top-leading
   `TronSheetInfoButton`.
-- **Documents.** Document-style sheets use `TronDocumentSheet` (`TronSheetTitle`/Done, top blur,
+- **Documents.** Document-style sheets use `TronDocumentSheet` (`TronSheetTitle`/Done, shared top chrome,
   hidden drag indicator, `tronPresentation`); an explicit initial detent keeps the other detents
   draggable. Content that owns its own stacks passes `hostsNavigation: false` and applies
   `tronDocumentSheetChrome` at each stack root, never nesting a second NavigationStack.
-- **Top blur.** One shared implementation with a continuous proportional fade, never a solid band;
-  `TronTopBlurStyle` owns the depths. Backdrops attach to the concrete scroll surface inside each
-  NavigationStack so titles and controls render above them, and stay outside scroll content. Every
-  edge is soft (the hard style renders an opaque cutoff on device); system bar backgrounds stay
-  hidden. `tronTopBlurSurface` establishes full width before edge chrome; do not fix a tint column
-  by replacing native material, painting an opaque page or sizing a placeholder.
+- **Top chrome.** Standard sheet and tool-detail styles share the native sheet background all
+  the way behind the title and glass buttons: `tronTopBlurSurface` adds no custom backdrop for
+  either style. The loading reveal must not fade or translate a second toolbar-background layer.
+  Chat, dashboard and dedicated logs backdrops retain their continuous proportional fade and
+  `TronTopBlurStyle` depths. Every native scroll edge is soft (the hard style renders an opaque
+  cutoff on device); system bar backgrounds stay hidden. `tronTopBlurSurface` establishes full
+  width before edge chrome; never replace native material or paint an opaque page.
 - **Loading.** Whole-content loading is a `TronSheetLoadingState` preference that the enclosing
   `TronPresentationSurface` draws once as a centered pulse; while present it sets
   `tronSheetContentLoading`, hiding every `tronScrollEdgeChrome` scroll view (title and Done stay
