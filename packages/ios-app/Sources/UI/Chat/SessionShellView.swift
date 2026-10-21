@@ -116,9 +116,11 @@ struct SessionShellView: View {
     var body: some View {
         TronPresentationSurface(
             id: "dashboard",
+            dependencies: [.sessionCatalog],
             onMount: { token in
                 homeStatusSurfaceToken = token
                 if let presentationActivityCoordinator {
+                    model.foregroundPresentationActivity = presentationActivityCoordinator
                     model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentationActivityCoordinator)
                 }
             },
@@ -279,10 +281,11 @@ struct SessionShellView: View {
                 dashboardReconcileTask?.cancel()
                 dashboardReconcileTask = nil
             }
-            // Settings opens with this Mac's sections already read: warm the shared
-            // snapshot once a Gateway is connected (and again when it goes stale).
-            .task(id: model.connectionState == .connected ? model.settingsFreshness : nil) {
-                guard model.connectionState == .connected else { return }
+            // Warm settings only for the visible dashboard; covered reads wait for reveal.
+            .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
+                presentationActive: activity.allowsPresentationPublication && model.connectionState == .connected)) {
+                guard activity.allowsPresentationPublication, model.connectionState == .connected else { return }
+                model.resumeDeferredSessionCatalogRead()
                 try? await model.refreshSettingsSnapshot(for: SettingsTarget.global.gatewayTarget)
             }
             .task(id: model.actionablePushNavigationRequest?.id) {
@@ -387,7 +390,7 @@ struct SessionShellView: View {
             .toolbar(.visible, for: .navigationBar)
             .id(route.id)
             .tronPresentationSurface(
-                id: "chat.\(route.id)",
+                id: "chat.\(route.id)", dependencies: [.session(route.sessionID)],
                 onMount: { token in
                     guard presentedSession?.id == route.id else { return }
                     mountedSessionRouteToken = token

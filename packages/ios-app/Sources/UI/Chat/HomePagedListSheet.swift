@@ -92,7 +92,6 @@ struct HomePagedListSheet: View {
             }
             .task(id: LoadKey(identity: identity, active: active, revision: request.revision)) { await load() }
             .onChange(of: active) { _, active in if !active { store.suspend() } }
-            .onDisappear { store.suspend() }
             .onPresentationRetire { store.suspend() }
             .tronManagedSheet(item: $child, identity: { "home.\(profileID).\($0.id)" }) {
                 HomeSheet(destination: $0, profileID: profileID, onOpenSession: onOpenSession)
@@ -160,11 +159,11 @@ struct HomePagedListSheet: View {
         guard active, let identity else { store.suspend(); return }
         guard store.identity != identity || store.page == nil || installedRevision != request.revision else { return }
         let pending = request
-        let changedIdentity = store.identity != identity
-        let cursor = changedIdentity ? nil : pending.cursor
+        let changedSource = store.identity.map { !identity.retainsContent(from: $0) } ?? true
+        let cursor = changedSource ? nil : pending.cursor
         let query = cursor?.query ?? destination.initialQuery
         let loaded = await store.load(identity: identity, cursor: cursor,
-            resetViewport: changedIdentity || pending.resetsViewport,
+            resetViewport: changedSource || (pending.resetsViewport && installedRevision != pending.revision),
             isCurrent: { active && self.identity == identity && request.revision == pending.revision }) {
                 try await model.readHomeSheet(query, identity: identity,
                     isCurrent: { active && self.identity == identity && request.revision == pending.revision })

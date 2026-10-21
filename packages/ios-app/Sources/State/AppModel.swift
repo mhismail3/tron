@@ -181,6 +181,7 @@ final class AppModel {
     private static let recoveryPresentationGrace: Duration = .seconds(2)
 
     private let lifecycle: GatewayLifecycleCoordinator
+    @ObservationIgnored weak var foregroundPresentationActivity: PresentationActivityCoordinator?
     var client: GatewayClient { lifecycle.client }
     var profiles: GatewayProfileStore { lifecycle.profiles }
     private let cache: SnapshotCache
@@ -483,7 +484,6 @@ final class AppModel {
 #if HOSTED_TEST
     var hostedDisplayArtifactFile: (@Sendable (String, String, String, Int, Int64) async throws -> URL)?
 #endif
-    private var optionalReconnectRefreshTask: Task<Void, Never>?
     private var mountedOptionalRefreshTask: Task<Void, Never>?
     private var mountedOptionalRefreshLifecycleGeneration: Int?
     private var mountedOptionalRefreshConnectionID: Int?
@@ -1658,8 +1658,6 @@ extension AppModel {
         pushNavigationActivationGeneration &+= 1
         noticeCenter.setBackgrounded(true)
         diagnosticsAreReady = false
-        optionalReconnectRefreshTask?.cancel()
-        optionalReconnectRefreshTask = nil
         mountedOptionalRefreshTask?.cancel()
         mountedOptionalRefreshTask = nil
         mountedOptionalRefreshLifecycleGeneration = nil
@@ -1844,6 +1842,19 @@ extension AppModel {
     func refreshSessions() async -> SessionCatalogRefreshOutcome {
         guard let task = scheduleCatalogRefresh() else { return .retained }
         return await task.value.outcome
+    }
+
+    func resumeDeferredSessionCatalogRead() {
+        guard sessionCatalog.freshness == .stale else { return }
+        refreshForemostSessionCatalog()
+    }
+
+    private func refreshForemostSessionCatalog() {
+        guard foregroundPresentationActivity?.requiresSessionCatalogRefresh() != false else {
+            sessionCatalog.markLoadUnavailable()
+            return
+        }
+        scheduleCatalogRefresh()
     }
 
     @discardableResult
@@ -5541,13 +5552,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         // No revision is bumped for the advertisement: nothing presents it yet,
         // and the profile's dial endpoint did not change.
         adoptConnectedGatewayLanAdvertising()
-        // Catalog and inbox reads can begin as soon as the transport is ready;
-        // provider, settings, and device reads wait for mounted-chat restoration.
-        optionalReconnectRefreshTask?.cancel()
-        optionalReconnectRefreshTask = Task { @MainActor [weak self] in
-            guard let self, !Task.isCancelled, self.admitsLifecycle(admission) else { return }
-            _ = await self.refreshSessions()
-        }
+        refreshForemostSessionCatalog()
         guard admitsLifecycle(admission) else { return }
         reconcileDashboardConnections()
         removeNotice(.gatewayRestart)
@@ -5563,7 +5568,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     ) async -> Bool {
         guard admitsLifecycle(admission) else { return true }
         let mountedTarget = sessionPresentation.mountedTarget
-        let restored = await restoreMountedPresentationAfterReconnect()
+        let restored = await restoreForemostPresentationAfterReconnect()
         guard admitsLifecycle(admission), sessionPresentation.mountedTarget == mountedTarget else {
             // A route replacement owns the newer presentation; its late
             // reconnect result must not poison the lifecycle generation.
@@ -5598,9 +5603,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             let activeConnectionID = await self.client.activeConnectionID()
             guard !Task.isCancelled, self.admitsLifecycle(admission),
                   activeConnectionID == admission.connectionID else { return }
-            async let providerLoad = self.refreshProviders(target: .global)
-            async let deviceLoad = self.refreshDevices()
-            _ = await (providerLoad, deviceLoad)
         }
     }
 
@@ -5618,7 +5620,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         try await client.ensureResponsive()
         try requireLifecycle(admission)
         let mountedTarget = sessionPresentation.mountedTarget
-        let mountedRestored = await sessionPresentation.reconnectMountedPresentation()
+        let mountedRestored = await restoreForemostPresentationAfterReconnect()
         try requireLifecycle(admission)
         guard sessionPresentation.mountedTarget == mountedTarget else {
             // The mounted route changed while this foreground pass was away;
@@ -5638,10 +5640,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         scheduleMountedOptionalReads(admission: admission)
         reconcileDashboardConnections()
         try requireLifecycle(admission)
-        // A responsive foreground refresh needs only catalog demand. Reuse
-        // that owner without cancelling an unfinished connection refresh and
-        // silently losing its later provider/settings/device publications.
-        scheduleCatalogRefresh()
+        refreshForemostSessionCatalog()
         // The inbox coordinator owns this optional read. Reconnect needs fresh
         // demand without an invalidation, but readiness must not await its RPC.
         if let profile = profiles.selected, profile.isEnabled {
@@ -5659,8 +5658,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         // Revoke connection-bound owners before this transition can suspend or fail.
         invalidateSessionConnectionOwnership()
         homeStatus.profileRetired()
-        optionalReconnectRefreshTask?.cancel()
-        optionalReconnectRefreshTask = nil
         mountedOptionalRefreshTask?.cancel()
         mountedOptionalRefreshTask = nil
         mountedOptionalRefreshLifecycleGeneration = nil

@@ -4,7 +4,7 @@ import Observation
 /// One disposable cursor window. Only a successful explicit navigation replaces
 /// the native viewport; refresh, failure and returning from a child retain it.
 @MainActor @Observable
-final class PagedListStore<Page, Cursor: Equatable, Identity: Equatable> {
+final class PagedListStore<Page, Cursor: Equatable, Identity: PresentationReadIdentity> {
     private(set) var page: Page?
     private(set) var pageCursor: Cursor?
     private(set) var loading = false
@@ -23,7 +23,7 @@ final class PagedListStore<Page, Cursor: Equatable, Identity: Equatable> {
         requestedCursor = cursor
         generation &+= 1
         let ticket = generation
-        if self.identity != identity { page = nil; pageCursor = nil }
+        if self.identity.map({ !identity.retainsContent(from: $0) }) ?? true { page = nil; pageCursor = nil }
         self.identity = identity
         loading = true; error = nil
         do {

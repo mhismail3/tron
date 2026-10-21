@@ -60,6 +60,9 @@ final class PresentationStateScope {
     }
 
     fileprivate func retire() {
+        #if HOSTED_TEST
+        ForegroundSheetProbe.record("scope-retire", path)
+        #endif
         guard !isRetired else { return }
         // Teardown reads the presentation's state, so it runs before the state goes.
         let actions = retirements.values
@@ -109,6 +112,12 @@ final class PresentationStateStore {
         return scope
     }
 
+    func retireAll() {
+        let live = Array(scopes.values)
+        scopes.removeAll(); order.removeAll()
+        for scope in live { scope.retire() }
+    }
+
     /// The sheet was dismissed, or a fresh presentation replaces a stale one:
     /// its scope and every scope presented from inside it are torn down.
     func retire(path: String) {
@@ -141,12 +150,19 @@ extension EnvironmentValues {
     }
 }
 
+/// This token is owned by the scene's SwiftUI state, never by the environment
+/// retained in native anchors. Scene destruction therefore breaks those graphs.
+@MainActor private final class PresentationStateLifetime {
+    let store = PresentationStateStore()
+    isolated deinit { store.retireAll() }
+}
+
 /// Installs the scene's one presentation-state store. Scene roots apply it once.
 struct TronPresentationStateRoot: ViewModifier {
-    @State private var store = PresentationStateStore()
+    @State private var lifetime = PresentationStateLifetime()
 
     func body(content: Content) -> some View {
-        content.environment(\.tronPresentationStateStore, store)
+        content.environment(\.tronPresentationStateStore, lifetime.store)
     }
 }
 

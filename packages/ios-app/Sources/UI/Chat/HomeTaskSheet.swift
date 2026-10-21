@@ -83,16 +83,14 @@ struct HomeTaskSheet: View {
             }
         }
         .task(id: TaskID(identity: identity, request: requestID, active: active)) {
-            guard let identity, let coordinator else { owner.retire(); return }
-            guard active else { owner.retireLoading(); return }
+            guard active, let identity, let coordinator else { owner.retireLoading(); return }
             let currentID = requestID; let currentQuery = query
             if destination != nil && owner.holds(requestID: currentID, identity: identity) { return }
             // Delegation has no event stream. Refresh only while its settings
             // surface is visible, preserving the installed rows between reads.
             repeat {
                 await owner.load(requestID: currentID, identity: identity, coordinator: coordinator,
-                                 isCurrent: { self.identity == identity && self.requestID == currentID },
-                                 preserveInstalledFrame: destination == nil) {
+                                 isCurrent: { self.identity == identity && self.requestID == currentID }) {
                     try await model.readHomeSheet(currentQuery, identity: identity, isCurrent: { self.requestID == currentID && self.active })
                 }
                 guard destination == nil else { return }
@@ -161,7 +159,7 @@ struct HomeTaskSheet: View {
         case .failed(_, let message):
             TronPlaceholderState(title: "Home could not be read", detail: message, icon: "exclamationmark.triangle", actionTitle: "Reload") { reload() }
         case .loaded(let read, let content), .loading(let read, .some(let content)):
-            if read.identity == identity {
+            if read.identity.profileID == profileID && read.identity.surfaceToken == token {
                 switch content {
                 case .tasks: EmptyView()
                 case .task(let task, let status):

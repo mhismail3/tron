@@ -433,6 +433,7 @@ private actor HostedHomeShellGateway {
     /// The background model queue the fixture's last accepted change set, `provider/id` in order.
     private var configuredModels: [String] = []
     private var workerThinking = "sameAsHome"
+    private var foreground = HostedForegroundSheetScenario()
     private var taskRedelivered = false
     private var scopeRevoked = false
     private var grantRevoked = false
@@ -579,7 +580,7 @@ private actor HostedHomeShellGateway {
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
-    func capabilities() -> [String] { capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
+    func capabilities() -> [String] { foreground.capabilities(capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"]) }
 
     /// Every Home read a sheet sent, so journeys can prove a return to a sheet re-reads nothing.
     private var homeReads: [String: Int] = [:]
@@ -711,8 +712,6 @@ private actor HostedHomeShellGateway {
             let workers = sheetState == "dashboard-workers" ? HostedHomeDashboardWorkers.sessions : []
             return (.object(["sessions": .array(([row] + workers).map { try! JSONValue.encode($0) }), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
-        // Read on every connection; an unknown-method failure would raise a
-        // notice over the dashboard journeys' screenshots.
         case "device.list":
             return (.object(["devices": .array([])]), nil)
         case "provider.list" where sheetState == "dashboard-workers":
@@ -885,7 +884,7 @@ private actor HostedHomeShellGateway {
             return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
         case "settings.resolve":
             if sheetState == "delayed-status", !configuredModels.isEmpty { try? await Task.sleep(for: .seconds(4)) }
-            return (homeSettingsResolution(session: params["target"]?.objectValue?["kind"]?.stringValue == "session"), nil)
+            return (foreground.settings(homeSettingsResolution(session: params["target"]?.objectValue?["kind"]?.stringValue == "session")), nil)
         case "settings.options":
             return (homeSettingsOptions(params), nil)
         case "settings.approvals":
@@ -959,11 +958,11 @@ private actor HostedHomeShellGateway {
             let sessionID = params["sessionId"]?.stringValue ?? "home-session"
             openedSessions.append(sessionID)
             var snapshot = SessionSnapshot(sessionId: sessionID, runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
-                phase: phase == "active" ? .running : .idle, name: sessionID.hasPrefix("home-") ? "Home fixture chat" : "Ordinary session chat", cwd: "/workspace",
+                phase: foreground.queueEnabled || phase == "active" ? .running : .idle, name: sessionID.hasPrefix("home-") ? "Home fixture chat" : "Ordinary session chat", cwd: "/workspace",
                 parentSessionId: nil, model: nil, thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,
                 stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
                     tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
-                queueRevision: 0, queuedItems: [], automaticCompactionEnabled: true, transcript: [], transcriptStart: nil,
+                queueRevision: foreground.queueRevision, queuedItems: foreground.queuedItems, automaticCompactionEnabled: true, transcript: [], transcriptStart: nil,
                 transcriptTotal: nil, streaming: nil, leafEntryId: nil,
                 operation: phase == "active" ? try! JSONValue.object(["id": .string("home-operation"), "kind": .string("prompt"),
                     "startedAt": .string("2026-01-01T00:00:00Z"), "lifecycle": .string("running")]).decode(SessionOperationState.self) : nil,
