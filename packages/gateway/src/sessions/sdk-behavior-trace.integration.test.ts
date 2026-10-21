@@ -319,7 +319,7 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     await runtime.setRuntimeApiKey("typesafe", "synthetic-typesafe-key");
     return runtime;
   };
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
     broadcast: (_sessionId, topic, payload) => { clientEvents.push({ topic, paths: eventShapePaths(topic, payload) }); },
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},

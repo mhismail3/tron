@@ -432,7 +432,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
 
     const coldModelRuntime = await ModelRuntime.create({ authPath: join(item.root, "auth.json"), modelsPath: null, refreshOnCreate: false });
     coldModelRuntime.registerNativeProvider(item.faux.provider);
-    const coldRegistry = await createTestRegistry({ 
+    const coldRegistry = await createTestRegistry({
       agentDir: item.agentDir,
       tronHome: item.tronHome,
       idleRuntimeMs: 60_000,

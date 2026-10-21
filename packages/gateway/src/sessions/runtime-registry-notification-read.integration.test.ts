@@ -27,7 +27,7 @@ async function fixture() {
   const reads = vi.spyOn(notifications, "markSessionInboxRead");
   // No agent runtime is opened: this exercises the real admitted-subscription,
   // presence and notification owners without a provider or delivery service.
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir: join(root, "agent"), tronHome: root, idleRuntimeMs: 60_000,
     trust: new TrustService(join(root, "agent")), broadcast() {}, sessionSummaryChanged() {}, sessionListChanged() {},
     notifications,

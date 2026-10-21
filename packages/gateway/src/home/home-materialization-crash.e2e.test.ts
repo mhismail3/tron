@@ -56,7 +56,7 @@ async function makeRegistry(root: string, lifecycle: RuntimeLifecycleRecord[] = 
   const packaged = fauxProvider({ provider: model.provider, models: [{ id: model.id, reasoning: false }] });
   packaged.setResponses([fauxAssistantMessage("canonical Home response")]);
   const agentDir = join(root, "agent");
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => {
       const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });

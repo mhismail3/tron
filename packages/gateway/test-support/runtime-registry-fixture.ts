@@ -90,7 +90,7 @@ export async function createColdRegistryFixture(registries: RuntimeRegistry[], l
   const events: Array<{ topic: string; payload: any }> = [];
   const summaries: SessionSummaryUpdate[] = [];
   const delegatedRoot = options.delegatedRoot;
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir,
     tronHome: join(root, "tron"),
     idleRuntimeMs: 60_000,

@@ -121,7 +121,7 @@ describe("MCP auth through a live Gateway session", () => {
     runtime.registerNativeProvider(faux.provider);
     const authLog: unknown[] = [];
     const auth = new AuthBroker(runtime, emit, () => {}, { log: (...entry) => authLog.push(entry) as any });
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust: new TrustService(agentDir),
       modelRuntimeFactory: async () => runtime,
       mcpAuth: { openUrl: (operationId, url, targetSession, server) => auth.openMcpAuthorizationUrl(operationId, url, targetSession, server) },

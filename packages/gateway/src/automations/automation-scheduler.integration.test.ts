@@ -39,7 +39,7 @@ describe("automation cancellation ownership", () => {
       process.env.PI_CODING_AGENT_DIR = agentDir;
       const faux = fauxProvider({ provider: "automation-cancel-fixture", tokensPerSecond: 100_000 });
       faux.setResponses([fauxAssistantMessage("baseline settled"), fauxAssistantMessage("automation settled"), fauxAssistantMessage("next prompt settled")]);
-      registry = await createTestRegistry({ 
+      registry = await createTestRegistry({
         agentDir, tronHome: root, idleRuntimeMs: 60_000, trust: new TrustService(agentDir),
         modelRuntimeFactory: async () => {
           const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });

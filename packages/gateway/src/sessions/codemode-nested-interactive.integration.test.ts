@@ -104,7 +104,7 @@ describe("codemode nested interactive tools", () => {
     };
     const interactionWaiters: Array<() => void> = [];
     const waitForPendingInteraction = (): Promise<void> => new Promise((resolve) => interactionWaiters.push(resolve));
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       machineId: "machine-codemode-test",
       notifications: notificationService as unknown as NotificationServiceType,

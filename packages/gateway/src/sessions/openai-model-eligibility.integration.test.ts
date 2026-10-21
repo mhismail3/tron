@@ -65,7 +65,7 @@ describe("new-session OpenAI default admission", () => {
   }
 
   async function createRegistry(agentDir: string, credentials: CredentialStore, eligibility?: OpenAIModelEligibility): Promise<void> {
-    registry = await createTestRegistry({ 
+    registry = await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       ...(eligibility ? { openAIModelEligibility: eligibility } : {}),
       modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false, credentials }),
@@ -88,7 +88,7 @@ describe("new-session OpenAI default admission", () => {
     const sessionPath = manager.getSessionFile()!;
     const modelChanges = (value: string) => value.split("\n").filter(Boolean).map(line => JSON.parse(line) as { type?: string }).filter(entry => entry.type === "model_change");
     const before = modelChanges(await readFile(sessionPath, "utf8"));
-    registry = await createTestRegistry({ 
+    registry = await createTestRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -127,7 +127,7 @@ describe("new-session OpenAI default admission", () => {
       return originalFetch(target, init);
     });
 
-    registry = await createTestRegistry({ 
+    registry = await createTestRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

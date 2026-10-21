@@ -51,7 +51,7 @@ describe("retired Chronicle generation over preserved legacy history", { concurr
       fauxAssistantMessage("Noted, replies stay concise."),
     ]);
     runtime.registerNativeProvider(faux.provider);
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

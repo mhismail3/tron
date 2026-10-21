@@ -221,7 +221,7 @@ describe("persisted-state upgrade corpus recorder", () => {
       auth.respond("device:corpus", admission.operationId, keyPrompt.payload.promptId as string, CORPUS_AZURE_API_KEY);
       await waitFor(() => authEvents.some((event) => event.topic === "auth.completed"), "the provider key to be stored");
 
-      const registry = await createTestRegistry({ 
+      const registry = await createTestRegistry({
         agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 600_000, modelRuntimeFactory, trust,
         // Pi's built-in MCP sign-in relays its authorization URL to the Tron
         // operation that started it; this is the hook the Gateway installs.
@@ -387,7 +387,7 @@ describe("persisted-state upgrade corpus recorder", () => {
       });
       const stagedTrust = new TrustService(staged.agentDir);
       await stagedTrust.set(staged.cwd, true);
-      const stagedRegistry = await createTestRegistry({ 
+      const stagedRegistry = await createTestRegistry({
         agentDir: staged.agentDir, tronHome: join(stagedRoot, "tron"), idleRuntimeMs: 600_000, modelRuntimeFactory,
         trust: stagedTrust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
       });

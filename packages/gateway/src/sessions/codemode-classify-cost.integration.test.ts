@@ -48,7 +48,7 @@ describe("codemode classifier usage projection", () => {
       await runtime.setRuntimeApiKey("typesafe", "synthetic-typesafe-key");
       return runtime;
     };
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       broadcast: () => {},
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},

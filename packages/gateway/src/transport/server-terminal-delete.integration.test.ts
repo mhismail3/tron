@@ -127,7 +127,7 @@ describe("terminal attachment revocation after session deletion", () => {
     const port = await unusedPort();
     let gateway!: GatewayServer;
     const sessionClosed = vi.fn((sessionId: string) => gateway.revokeSessionTerminals(sessionId));
-    const sessions = await createTestRegistry({ 
+    const sessions = await createTestRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

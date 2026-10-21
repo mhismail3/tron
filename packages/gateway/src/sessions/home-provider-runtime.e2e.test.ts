@@ -75,7 +75,7 @@ async function fixture(options: { shareGatewayRuntime: boolean }) {
   // The Gateway-wide runtime: built-ins plus the user's package provider.
   const gateway = await create();
   gateway.registerNativeProvider(packaged.provider);
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000,
     modelRuntimeFactory: create,
     ...(options.shareGatewayRuntime ? { gatewayModelRuntime: gateway } : {}),

@@ -145,7 +145,7 @@ async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory:
   const runtimeFactory = () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
   const modelRuntime = await runtimeFactory();
   const trust = new TrustService(agentDir);
-  const sessions = await createTestRegistry({ 
+  const sessions = await createTestRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
   });

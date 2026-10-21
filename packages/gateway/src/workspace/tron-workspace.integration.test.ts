@@ -43,7 +43,7 @@ async function fixture(extension?: string) {
     contexts.push(context);
     return fauxAssistantMessage(text);
   };
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000,
     trust: new TrustService(agentDir),
     modelRuntimeFactory: async () => {

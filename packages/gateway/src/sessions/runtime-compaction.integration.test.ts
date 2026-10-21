@@ -161,7 +161,7 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
   const sessionEvents: Array<{ topic: string; payload: unknown }> = [];
   let onSnapshot: ((snapshot: SessionSnapshot) => void) | undefined;
   const trust = new TrustService(agentDir);
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime, trust,
     broadcast: (_id, event, value) => {
@@ -649,7 +649,7 @@ describe("compaction operation admission and authoritative reconciliation", { co
     const diagnostics: Array<Record<string, unknown>> = [];
     const adopted: Array<Record<string, unknown>> = [];
     const events: string[] = [];
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: (_id, topic, value) => {

@@ -86,7 +86,7 @@ export default function(pi) {
     };
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

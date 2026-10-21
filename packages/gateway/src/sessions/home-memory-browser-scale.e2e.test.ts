@@ -63,7 +63,7 @@ interface Gateway { registry: RuntimeRegistry; service: GatewayService; receipts
 async function openGateway(root: string, runtime: ModelRuntime): Promise<Gateway> {
   const agentDir = join(root, "agent");
   const tronHome = join(root, "tron");
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir, tronHome, idleRuntimeMs: 600_000,
     modelRuntimeFactory: async () => runtime,
     trust: new TrustService(agentDir),

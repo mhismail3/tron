@@ -123,7 +123,7 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, maximumLiveRuntimes: 4,
       modelRuntimeFactory, trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

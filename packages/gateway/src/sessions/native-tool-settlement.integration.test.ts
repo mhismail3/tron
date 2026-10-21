@@ -159,7 +159,7 @@ describe("native-tool settlement qualification with the pinned runtime", { concu
           fauxToolCall("fixture_native_action", {}, { id: callId }),
         ], { stopReason: "toolUse" })]);
         const workRegistry = new GatewayWorkRegistry();
-        registry = await createTestRegistry({ 
+        registry = await createTestRegistry({
           agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust, workRegistry,
           modelRuntimeFactory: async () => {
             const runtime = await ModelRuntime.create({

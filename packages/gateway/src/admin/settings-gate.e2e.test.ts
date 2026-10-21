@@ -922,7 +922,7 @@ describe("settings risk gate", () => {
     expect(canonical).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.settings.v1",
       data: expect.objectContaining({ settings: expectedChat }) }));
     await f.registry.dispose();
-    const reopened = await createTestRegistry({ 
+    const reopened = await createTestRegistry({
       agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

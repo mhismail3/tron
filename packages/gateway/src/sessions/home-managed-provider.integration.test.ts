@@ -39,7 +39,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
     const openRegistry = async () => {
       const trust = new TrustService(agentDir);
       await trust.set(cwd, true);
-      const next = await createTestRegistry({ 
+      const next = await createTestRegistry({
         agentDir, tronHome, managedSubagents, trust, idleRuntimeMs: 60_000,
         modelRuntimeFactory: async () => {
           const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });

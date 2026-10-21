@@ -152,7 +152,7 @@ describe("persisted-state upgrade corpus", () => {
     const before = await sessionFileHashes(staged.sessionDir, CORPUS_SOURCE_DIR);
     const trust = new TrustService(staged.agentDir);
     await trust.set(staged.cwd, true);
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir: staged.agentDir, tronHome: join(staged.root, "tron"), idleRuntimeMs: 600_000,
       modelRuntimeFactory: () => corpusModelRuntime(staged.agentDir, corpusFauxProvider()),
       trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

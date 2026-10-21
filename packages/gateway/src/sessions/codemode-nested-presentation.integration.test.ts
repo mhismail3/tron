@@ -90,7 +90,7 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
       return runtime;
     };
     const codemodeDiagnostics: Array<Record<string, unknown>> = [];
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       browserLiveViews: views,
       codemodeDiagnostic: (diagnostic) => codemodeDiagnostics.push(diagnostic),
@@ -148,7 +148,7 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
     const retainedLive = JSON.parse(JSON.stringify(live));
     await registry.dispose();
     registries.splice(registries.indexOf(registry), 1);
-    const reopened = await createTestRegistry({ 
+    const reopened = await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       browserLiveViews: views,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

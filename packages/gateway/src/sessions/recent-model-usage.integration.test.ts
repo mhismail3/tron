@@ -54,7 +54,7 @@ describe("recent model usage", { concurrent: false }, () => {
     runtime.registerNativeProvider(faux.provider);
     const changes: string[] = [];
     const recentChangeListeners = new Set<() => void>();
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir,
       tronHome,
       idleRuntimeMs: 60_000,
@@ -162,7 +162,7 @@ describe("recent model usage", { concurrent: false }, () => {
     const tronHome = join(root, "tron");
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(tronHome, "gateway"), { recursive: true })]);
     await writeFile(join(tronHome, "gateway", "model-recents.json"), "{ not json", "utf8");
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir,
       tronHome,
       idleRuntimeMs: 60_000,

@@ -65,7 +65,7 @@ async function pausedFixture(label: string): Promise<Fixture> {
   const manager = SessionManager.create(cwd, sessionDirectory);
   manager.appendMessage(fauxAssistantMessage(`paused subagent ${label}`));
   const summaries: SessionSummaryUpdate[] = [];
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir,
     tronHome: join(root, "tron"),
     idleRuntimeMs: 60_000,

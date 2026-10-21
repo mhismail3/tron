@@ -28,7 +28,7 @@ describe("hook listing against a live session's resources", { concurrent: false 
     process.env.PI_CODING_AGENT_DIR = agentDir;
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

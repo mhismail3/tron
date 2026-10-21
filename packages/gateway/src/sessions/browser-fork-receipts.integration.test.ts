@@ -91,7 +91,7 @@ describe("installed agent-browser fork receipts", () => {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const createRegistry = async () => await createTestRegistry({ 
+    const createRegistry = async () => await createTestRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       browserLiveViews: views, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

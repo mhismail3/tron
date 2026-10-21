@@ -163,7 +163,7 @@ describe("cold session.open request span", () => {
     }
     const fileBytes = (await readFile(manager.getSessionFile()!)).byteLength;
 
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -350,7 +350,7 @@ describe("settings.resolve request span", () => {
     }
     const macTerminalKeys = new FixtureMacTerminalKeys(join(root, "ssh"));
     const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys });
-    const registry = await createTestRegistry({ 
+    const registry = await createTestRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

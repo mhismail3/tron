@@ -103,7 +103,7 @@ async function fixture(mcp = false) {
 }
 
 async function openRegistry(agentDir: string, tronHome: string, faux: ReturnType<typeof fauxProvider>) {
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000,
     trust: new TrustService(agentDir),
     modelRuntimeFactory: async () => {

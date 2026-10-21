@@ -111,7 +111,7 @@ it.each([
     ]);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    registry = await createTestRegistry({ 
+    registry = await createTestRegistry({
       agentDir, tronHome: foreignHome ? join(root, "foreign-tron") : tronHome, managedSubagents, trust, idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => {
         const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });

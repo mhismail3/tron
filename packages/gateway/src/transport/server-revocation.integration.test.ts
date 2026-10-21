@@ -66,7 +66,7 @@ async function fixture() {
   await Promise.all([mkdir(agentDir), mkdir(cwd)]);
   const faux = fauxProvider({ provider: "revocation-fixture", tokensPerSecond: 100_000 });
   faux.setResponses([fauxAssistantMessage("one accepted response")]);
-  registry = await createTestRegistry({ 
+  registry = await createTestRegistry({
     agentDir, tronHome: root, idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });

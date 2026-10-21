@@ -20,7 +20,7 @@ it("names an executing receipt-backed request and its method as a drain blocker"
   root = await mkdtemp(join(tmpdir(), "tron-drain-snapshot-"));
   const agentDir = join(root, "agent");
   const workRegistry = new GatewayWorkRegistry("epoch", 8);
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, workRegistry,
     trust: new TrustService(agentDir), broadcast: () => {},
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -45,7 +45,7 @@ it("projects a failed persistence receipt as a suspect owner", async () => {
   root = await mkdtemp(join(tmpdir(), "tron-drain-suspect-"));
   const agentDir = join(root, "agent");
   const workRegistry = new GatewayWorkRegistry("epoch", 8);
-  const registry = await createTestRegistry({ 
+  const registry = await createTestRegistry({
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, workRegistry,
     trust: new TrustService(agentDir), broadcast: () => {},
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},
