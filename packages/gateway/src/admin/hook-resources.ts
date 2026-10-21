@@ -1,7 +1,7 @@
 import type { ManagedSubagents } from "../sessions/managed-subagents.js";
 import { basename } from "node:path";
 import { projectHookRegistrations, type HookRegistrationProjection } from "../kernel/projection/hook-projection.js";
-import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import type { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { loadSessionFreeExtensions } from "./session-free-extensions.js";
 import type { TrustService } from "./trust-service.js";

@@ -28,7 +28,7 @@ import { MacKeychainMcpCredentialOwner, McpAdminService } from "./admin/mcp-admi
 import { GlobalProviderResources } from "./admin/global-provider-resources.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
 import { startGatewayModules } from "./main/modules.js";
-import { GatewayWorkRegistry } from "./sessions/gateway-work-registry.js";
+import { GatewayWorkRegistry } from "./kernel/run/gateway-work-registry.js";
 import { logUnresolvedDrainOwners, RestartDrainProgress } from "./sessions/restart-drain.js";
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";

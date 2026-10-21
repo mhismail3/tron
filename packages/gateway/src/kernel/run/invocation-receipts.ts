@@ -1,7 +1,7 @@
-import type { SessionEntry } from "../kernel/pi/coding-agent.js";
-import type { ChatOrigin, InvocationLifecycle, JsonValue, ResourceInvocation } from "../protocol/types.js";
-import { GatewayError } from "../errors.js";
-import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "./resource-invocation.js";
+import type { SessionEntry } from "../pi/coding-agent.js";
+import type { ChatOrigin, InvocationLifecycle, JsonValue, ResourceInvocation } from "../../protocol/types.js";
+import { GatewayError } from "../../errors.js";
+import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "../../sessions/resource-invocation.js";
 
 /** Internal folded lifecycle derived from canonical invocation receipts. */
 export interface InvocationProjection {

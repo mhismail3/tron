@@ -4,7 +4,7 @@ import type { AuthEvent, AuthInteraction, AuthPrompt, AuthType } from "../kernel
 import { CredentialSynchronizationError, type ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
-import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 
 interface PendingPrompt {
   id: string;

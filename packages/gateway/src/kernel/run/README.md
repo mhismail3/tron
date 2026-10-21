@@ -11,6 +11,11 @@ Gateway-owned execution primitives layered on Pi's session loop.
 - `direct-bash-process-owner.ts`: foreground shell process trees, timeout and abort
   cleanup, output settlement and private-environment filtering.
 
+- `invocation-receipts.ts` and `context-delivery-receipts.ts`: canonical receipt
+  parsing, folding and delivery causality; persisted names and bytes remain stable.
+- `run-markers.ts`: durable per-operation crash/interruption evidence.
+- `gateway-work-registry.ts`: bounded admission/drain tokens and joined settlement.
+
 ## Contract
 
 `RuntimeSlot` installs bounded tool cancellation on its Pi session and owns one
@@ -37,11 +42,11 @@ no additional logging or persisted state.
 ## Verify
 
 ```bash
-scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts
+scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts \\\n  src/kernel/run/run-markers.lock.integration.test.ts src/kernel/run/run.store.lock.integration.test.ts
 scripts/tron verify --module gateway/run
 ```
 
 ## Not here
 
-Prompt admission, receipts, profiles, queue and compaction remain with the session
-run owner; delegated worker lifecycle is separate.
+Prompt admission, receipt writes, profiles, queue and compaction remain with the
+session run owner; delegated worker lifecycle is separate.

@@ -7,7 +7,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE } from "../kernel/run/invocation-receipts.js";
 
 /** Repeatable evidence for #311: `npx vitest run src/sessions/multi-resource-message.e2e.test.ts`. */
 const REPORT = "test-results/multi-resource-message.json";

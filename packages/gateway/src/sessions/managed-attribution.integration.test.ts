@@ -16,8 +16,8 @@ import { producerIdentity, withExtensionOwner } from "../extensions/owner-attrib
 import { AsyncResource } from "node:async_hooks";
 import { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
-import { invocationProjection, invocationReceipts } from "./invocation-receipts.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "../kernel/run/context-delivery-receipts.js";
+import { invocationProjection, invocationReceipts } from "../kernel/run/invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt, extensionActivityReceipts } from "./extension-activity-history.js";
 
 it("attributes real workflow completion and supervisor delivery to their managed producer", async ({ task }) => {

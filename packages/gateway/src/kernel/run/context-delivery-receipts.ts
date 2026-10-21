@@ -1,8 +1,8 @@
-import type { SessionEntry } from "../kernel/pi/coding-agent.js";
-import type { ContextDeliveryMetadata, ExtensionToolOrigin } from "../protocol/types.js";
+import type { SessionEntry } from "../pi/coding-agent.js";
+import type { ContextDeliveryMetadata, ExtensionToolOrigin } from "../../protocol/types.js";
 
 import { invocationProjection, invocationReceipts } from "./invocation-receipts.js";
-import { classifyCapturedExtensionOwner } from "./extension-activity-history.js";
+import { classifyCapturedExtensionOwner } from "../../sessions/extension-activity-history.js";
 
 export const CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.context-delivery.v4";
 const HISTORICAL_CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.session-input.v1";

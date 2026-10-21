@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { fauxProvider, type Provider } from "@earendil-works/pi-ai";
 import type { JsonValue } from "../protocol/types.js";
 import { AuthBroker } from "./auth-broker.js";
-import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 type LoginInteraction = Parameters<ModelRuntime["login"]>[2];

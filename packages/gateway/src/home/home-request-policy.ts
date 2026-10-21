@@ -8,7 +8,7 @@ import {
   type SessionProjection,
 } from "../kernel/pi/coding-agent.js";
 import { markAnthropicBlocks } from "../episodic/cache-layout.js";
-import { HOME_TASK_RESULT_MESSAGE } from "../sessions/invocation-receipts.js";
+import { HOME_TASK_RESULT_MESSAGE } from "../kernel/run/invocation-receipts.js";
 import type { HomeContextSection } from "../protocol/types.js";
 
 /*

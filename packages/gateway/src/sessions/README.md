@@ -11,9 +11,9 @@ settlement. Other session modules have their own manifests here; projection live
 ## Owns
 
 `runtime-registry.ts` (`RuntimeRegistry`), `runtime-slot.ts` (`RuntimeSlot`),
-`invocation-receipts.ts`, `run-markers.ts`, `owned-session-dispatch.ts`,
-[`kernel/run`](../kernel/run/README.md) cancellation, `semantic-ui-broker.ts`, `restart-drain.ts`,
-`gateway-work-registry.ts` and the rest of `../run.module.json`. State: Gateway-owned
+[`kernel/run`](../kernel/run/README.md) receipts, markers, work tokens and cancellation;
+`owned-session-dispatch.ts`, `semantic-ui-broker.ts`, `restart-drain.ts`
+and the rest of `../run.module.json`. State: Gateway-owned
 bounded run markers and command receipts; Pi's canonical JSONL stays Pi's.
 
 ## Contract

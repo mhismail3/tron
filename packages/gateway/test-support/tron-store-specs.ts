@@ -26,7 +26,7 @@ import { NotificationGrantStore } from "../src/notifications/grant-store.js";
 import { RecentModelStore } from "../src/providers/recent-models.js";
 import { DeviceStore } from "../src/security/device-store.js";
 import { MacTerminalKeys } from "../src/security/mac-terminal.js";
-import { RunMarkerStore } from "../src/sessions/run-markers.js";
+import { RunMarkerStore } from "../src/kernel/run/run-markers.js";
 import { SessionArchiveStore } from "../src/sessions/session-archive-store.js";
 import { SessionAttentionStore } from "../src/kernel/projection/session-attention-store.js";
 import { CommandReceiptStore } from "../src/transport/command-receipts.js";

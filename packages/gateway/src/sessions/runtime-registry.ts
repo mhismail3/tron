@@ -51,7 +51,7 @@ import {
   SESSION_EXPORT_MINIMUM_FREE_BYTES,
   SESSION_EXPORT_MAX_TOTAL_BYTES,
 } from "./session-export.js";
-import { RunMarkerStore, type RunMarkerEvidence } from "./run-markers.js";
+import { RunMarkerStore, type RunMarkerEvidence } from "../kernel/run/run-markers.js";
 import {
   RuntimeSlot,
   completionOwnedByMarker,
@@ -69,7 +69,7 @@ import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
-import { GatewayWorkRegistry } from "./gateway-work-registry.js";
+import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
 import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
 import { syncDurably } from "../util/durable-json.js";
@@ -81,7 +81,7 @@ import {
   invocationProjection,
   invocationReceipts,
   type InvocationProjection,
-} from "./invocation-receipts.js";
+} from "../kernel/run/invocation-receipts.js";
 import { projectTranscriptPage, type TranscriptPage } from "../kernel/projection/projection.js";
 import {
   CatalogMetadataIndex,

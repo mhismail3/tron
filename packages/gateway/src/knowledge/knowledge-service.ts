@@ -17,7 +17,7 @@ import { awaitAbortableWithSettlement } from "./model-await.js";
 import { captureSource, extractReadableText, readPublicXPost, refreshSourcePreview, type SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
-import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import { createHash } from "node:crypto";
 import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, KNOWLEDGE_TAG_QUESTIONS_PER_CALL, activeTagDefinitions } from "./knowledge-tagger.js";

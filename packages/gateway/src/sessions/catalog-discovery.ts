@@ -5,7 +5,7 @@ import { CatalogLineLimitError, readCatalogLines } from "./catalog-jsonl.js";
 import { GatewayError } from "../errors.js";
 import { SessionManager } from "../kernel/pi/coding-agent.js";
 import type { SessionCreationOrigin } from "../protocol/types.js";
-import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "./invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../kernel/run/invocation-receipts.js";
 import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";
 import { applyCatalogMetadataEntry, type CatalogMetadataAccumulator, type CatalogMetadataIndexFailure } from "./catalog-metadata-index.js";
 

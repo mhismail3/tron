@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { GatewayWorkRegistry } from "./gateway-work-registry.js";
+import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 
 import { TrustService } from "../admin/trust-service.js";
 

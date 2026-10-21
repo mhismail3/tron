@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { GatewayError } from "../errors.js";
+import { GatewayError } from "../../errors.js";
 
 const gatewayWorkKinds = [
   "slot-admission",

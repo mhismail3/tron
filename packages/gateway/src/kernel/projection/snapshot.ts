@@ -3,7 +3,7 @@ import type { AgentMessage } from "../pi/agent-core.js";
 import type { AgentSession } from "../pi/coding-agent.js";
 import type { BlobStore } from "../../sessions/blob-store.js";
 import type { SessionSnapshot, SessionPhase, ToolExecutionState, ExtensionRunActivity, SessionProcessActivity, SessionProcessOverview } from "../../protocol/types.js";
-import { invocationReceipts } from "../../sessions/invocation-receipts.js";
+import { invocationReceipts } from "../run/invocation-receipts.js";
 import { canonicalToolResultCallIDsFromBranch, fitSessionSnapshot, projectMessage, type TranscriptPage } from "./projection.js";
 import { boundExtensionActivities } from "./extension-run-projection.js";
 

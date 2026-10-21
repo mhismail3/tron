@@ -84,7 +84,7 @@ import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { RuntimeSlot } from "./runtime-slot.js";
-import { invocationReceipts } from "./invocation-receipts.js";
+import { invocationReceipts } from "../kernel/run/invocation-receipts.js";
 import { logHomeDiagnostic } from "../home/home-diagnostic.js";
 import { GatewayLogger } from "../transport/logger.js";
 

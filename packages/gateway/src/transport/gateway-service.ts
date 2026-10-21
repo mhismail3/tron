@@ -65,7 +65,7 @@ import { SessionListPaginationStore } from "./session-list-pagination.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
-import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import type { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { admitPromptText, admitResourceInvocations } from "../sessions/resource-invocation.js";
 import type { AutomationService } from "../automations/automation-service.js";
 import { AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY } from "../automations/types.js";

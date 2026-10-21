@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { it } from "vitest";
-import { storePathLock } from "../../test-support/store-path-lock.js";
+import { storePathLock } from "../../../test-support/store-path-lock.js";
 import { RunMarkerStore } from "./run-markers.js";
 
 /**
