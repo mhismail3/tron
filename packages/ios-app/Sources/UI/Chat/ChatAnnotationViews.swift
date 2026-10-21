@@ -317,7 +317,9 @@ struct ChatAnnotationBubbleHost: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Cancel annotation")
                 Button {
-                    composer.becomeFirstResponder()
+                    // UIKit moves the keyboard's input target directly from the
+                    // still-installed comment field, so it is never dismissed.
+                    _ = composer.becomeFirstResponder()
                     presenter.save(comment: comment)
                 } label: {
                     Image(systemName: "checkmark")
