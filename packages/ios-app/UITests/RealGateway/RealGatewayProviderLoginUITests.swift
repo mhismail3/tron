@@ -24,6 +24,7 @@ extension RealGatewayPairAndChatUITests {
         connect.tap()
         let code = app.textFields["Fixture OAuth code"]
         XCTAssertTrue(code.waitForExistence(timeout: 30), app.debugDescription)
+        revealBelowNavigationBar(app, code)
         code.tap(); code.typeText("fixture-code#fixture-state")
         returnFromAnotherApp(app)
         XCTAssertTrue(code.waitForExistence(timeout: 15), "Safari return dismissed the pending provider sheet: \(app.debugDescription)")
@@ -32,6 +33,7 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(code.waitForExistence(timeout: 15), "Reconnect dismissed the pending provider sheet: \(app.debugDescription)")
         XCTAssertEqual(code.value as? String, "fixture-code#fixture-state")
         keepScreenshot(app, name: "1600-provider-login-after-safari-and-reconnect")
+        revealBelowNavigationBar(app, app.buttons["Save"])
         app.buttons["Save"].tap()
         let details = app.buttons["Details for Alpha Login Fixture"]
         for _ in 0..<12 where !details.isHittable { app.swipeDown() }
@@ -48,7 +50,9 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertEqual(code.value as? String, "Fixture OAuth code", "A successor must not inherit the old code")
         returnFromAnotherApp(app)
         XCTAssertTrue(code.waitForExistence(timeout: 15))
+        revealBelowNavigationBar(app, code)
         code.tap(); code.typeText("fixture-code#fixture-state")
+        revealBelowNavigationBar(app, app.buttons["Save"])
         app.buttons["Save"].tap()
         for _ in 0..<12 where !details.isHittable { app.swipeDown() }
         XCTAssertTrue(waitForHittable(details, timeout: 30), "Fixture relogin failed")
