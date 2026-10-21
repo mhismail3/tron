@@ -24,10 +24,6 @@ enum ProviderAuthBrowserPolicy {
         guard let prompt, prompt.operationId == event.operationId else { return false }
         return prompt.kind == .text || prompt.kind == .manualCode
     }
-
-    static func shouldCancelOperationWhenProviderSheetDisappears(sceneIsActive: Bool) -> Bool {
-        sceneIsActive
-    }
 }
 
 struct ProviderAuthEventState: Identifiable, Hashable {

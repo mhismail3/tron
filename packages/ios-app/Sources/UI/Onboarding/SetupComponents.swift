@@ -79,11 +79,28 @@ struct ProviderSetupRow: View {
     var usageSnapshot: ProviderUsageSnapshot? = nil
     /// True while the bounded usage read is still pending for a supported row.
     var isUsageLoading: Bool = false
-    @State private var showsConfiguration = false
+    @PresentationState private var showsConfiguration: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(
+        surfaceStyle: ProviderSetupRowSurfaceStyle = .standalone,
+        provider: ProviderSummary,
+        sessionID: String? = nil,
+        usageSnapshot: ProviderUsageSnapshot? = nil,
+        isUsageLoading: Bool = false
+    ) {
+        self.surfaceStyle = surfaceStyle
+        self.provider = provider
+        self.sessionID = sessionID
+        self.usageSnapshot = usageSnapshot
+        self.isUsageLoading = isUsageLoading
+        // Every provider row shares this declaration site inside one sheet.
+        // Its nested presentation must survive content rebuilds independently.
+        _showsConfiguration = PresentationState(wrappedValue: false, key: "\(sessionID ?? "global"):\(provider.id)")
+    }
 
     private var providerTarget: ProviderCatalogTarget {
         sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
@@ -244,7 +261,6 @@ enum ProviderUsageRefreshPresentation {
 struct ProviderConfigurationSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
@@ -352,11 +368,11 @@ struct ProviderConfigurationSheet: View {
             replayIfNeeded()
         }
         .onChange(of: model.authPrompt?.id) { _, _ in replayIfNeeded() }
-        .onDisappear {
+        .onPresentationRetire {
             usageController.begin()
-            guard ProviderAuthBrowserPolicy.shouldCancelOperationWhenProviderSheetDisappears(
-                sceneIsActive: scenePhase == .active
-            ), let operationID = activeOperationID else { return }
+            // SwiftUI can destroy sheet content on foreground without ending
+            // its presentation. Only real dismissal retires the owned login.
+            guard let operationID = activeOperationID else { return }
             activeOperationID = nil
             Task { await model.cancelAuth(operationID: operationID) }
         }

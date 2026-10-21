@@ -34,7 +34,10 @@ workspace browser, the model picker and the provider authentication prompt sheet
   value-only projection of session admission and pending receipts: applying shows a pulse in a
   fixed slot, a blocked state exposes a 44-point lock that opens the full reason.
 - **Auth prompts.** Provider authentication is presented only by the currently visible Providers or
-  Onboarding surface, so an underlying sheet never defers a login prompt.
+  Onboarding surface, so an underlying sheet never defers a login prompt. Each row's nested-sheet
+  visibility is presentation-scoped and keyed by provider and catalog target. Only actual dismissal
+  retires its owned login; foreground content reconstruction and socket recovery retain the operation
+  and unsent input. Manual callback syntax and state/PKCE checks remain provider-owned.
 
 ## Invariants
 
@@ -60,7 +63,10 @@ scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGateway
 ```
 
 The real-UI journey pairs through the production invitation link and finishes first-run setup;
-its wrong-code control asserts the app's own refusal.
+its wrong-code control asserts the app's own refusal. The focused
+`RealGatewayPairAndChatUITests/testProviderLoginSurvivesSafariAndReconnect` journey retains a manual
+login and unsent input across Safari and socket replacement, then completes, removes its fixture
+credential, and logs in again against real Pi persistence.
 
 ## Not here
 
