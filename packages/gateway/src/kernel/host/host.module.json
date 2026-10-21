@@ -5,7 +5,8 @@
   ],
   "dependsOn": [
     "gateway/pi",
-    "gateway/protocol"
+    "gateway/protocol",
+    "gateway/settings"
   ],
   "riskClass": [
     "kernel"

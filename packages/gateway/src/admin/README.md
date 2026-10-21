@@ -29,6 +29,10 @@ Durable stores: `<tronHome>/gateway/settings/` (`changes/`, `approvals.json`,
 
 ## Contract
 
+`settings-module.ts` owns the settings extension descriptor. Its request/result
+vocabulary is the [kernel settings contract](../kernel/settings/README.md); the
+session resolves its actor and settings owner at every call.
+
 The full settings contract (foundations, layers, the generated key table,
 timing, change path, tiers, outside changes, project writes, Home profile,
 presentation) is [docs/settings-contract.md](../../docs/settings-contract.md).

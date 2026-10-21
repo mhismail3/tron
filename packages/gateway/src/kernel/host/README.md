@@ -25,7 +25,8 @@ ordinary profile's first extension and joins canonical receipt writes before inp
 - **Session extensions.** `extension(m, session)` asks module `m` for its Pi
   extension for one runtime; its position in each profile's extension list is
   the kernel's (K-0 §3), so the model-visible order is unchanged. SessionContext
-  carries per-runtime identity, presentation, receipt joining and policy operations;
+  carries per-runtime identity, presentation, receipt joining, late-bound settings
+  access for the session actor and policy operations;
   concrete policy owners remain outside the host and are resolved at each callback.
 - **RPC (D5).** A module's `rpc` methods are routed before `GatewayService`'s
   switch. `read` handlers are admitted while the Gateway drains; `mutation`

@@ -1,4 +1,5 @@
 import type { ExtensionFactory, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
+import type { SettingsToolAccess } from "../settings/tool-contract.js";
 import type { JsonValue } from "../../protocol/types.js";
 
 /** One log line from a module, in the Gateway logger's shape. */
@@ -37,6 +38,8 @@ export interface SessionContext {
   /** Whether the user is viewing this chat now. */
   presented(): boolean;
   joinTerminalReceiptWrites(): Promise<void>;
+  /** The current session actor and target; installed settings stay late-bound. */
+  settings(): SettingsToolAccess | undefined;
   contextPolicy(): ContextPolicyLifecycle | undefined;
   compaction: {
     policy(): CompactionPolicyLifecycle | undefined;

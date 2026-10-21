@@ -99,7 +99,6 @@
     "undeclared gateway/extensions -> gateway/session-search",
     "undeclared gateway/extensions -> gateway/workspace",
     "undeclared gateway/foundation -> gateway/util",
-    "undeclared gateway/gateway-main -> gateway/admin",
     "undeclared gateway/gateway-main -> gateway/automations",
     "undeclared gateway/gateway-main -> gateway/delegation",
     "undeclared gateway/gateway-main -> gateway/foundation",

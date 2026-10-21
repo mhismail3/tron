@@ -32,7 +32,8 @@
     "session-export.ts"
   ],
   "dependsOn": [
-    "gateway/pi"
+    "gateway/pi",
+    "gateway/settings"
   ],
   "exceptions": [
     {

@@ -14,7 +14,8 @@
     "gateway/pi",
     "gateway/providers",
     "gateway/runtime",
-    "gateway/workspace"
+    "gateway/workspace",
+    "gateway/admin"
   ],
   "exceptions": [
     {

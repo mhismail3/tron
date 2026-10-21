@@ -13,8 +13,7 @@ import { computerModule } from "../display/computer-module.js";
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
 import { createTronHomeExtension } from "../home/tron-home-extension.js";
-import { createTronSettingsExtension } from "../admin/tron-settings-extension.js";
-import { type SettingsToolAccess } from "../kernel/settings/tool-contract.js";
+import { settingsModule } from "../admin/settings-module.js";
 import type { HomeSessionReader } from "../home/home-session-read.js";
 import { homeResearchTools, type HomeResearchTransport } from "../home/home-research-tools.js";
 import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/session-search-contract.js";
@@ -61,9 +60,6 @@ export interface TronModuleHost extends SessionContext {
   /** Transport injection for Home's web tools, the same seam capture's fetch
    * exposes (`SourceCaptureOptions`); production omits it. */
   homeWebTransport?: HomeResearchTransport;
-  /** This chat's settings, as itself (Home, a task worker or an agent), late-bound:
-   * the change path is installed after the registry exists. */
-  settings: () => SettingsToolAccess | undefined;
   /** Home's learned-profile changes through the change path, as Home; late-bound like `settings`. */
   homeProfileChanges: () => HomeProfileChangeAccess | undefined;
 }
@@ -86,7 +82,8 @@ export interface TronModule {
 /** The per-runtime facts a module descriptor's extension reads (K3). */
 function sessionContext(host: TronModuleHost): SessionContext {
   return { sessionId: host.sessionId, cwd: host.cwd, title: host.title, presented: host.presented,
-    joinTerminalReceiptWrites: host.joinTerminalReceiptWrites, contextPolicy: host.contextPolicy, compaction: host.compaction };
+    joinTerminalReceiptWrites: host.joinTerminalReceiptWrites, settings: host.settings,
+    contextPolicy: host.contextPolicy, compaction: host.compaction };
 }
 
 export interface TronModuleRegistration {
@@ -127,11 +124,11 @@ export const TRON_MODULES: readonly TronModule[] = [
     factory: (host) => createTronCoreExtension(host.workspace, host.knowledge, host.jev, host.connections),
   },
   {
-    name: "tron-settings",
-    purpose: "Lets the agent read and change settings through the one logged change path, and marks a run that read web content.",
-    tools: ["settings"],
-    commands: [],
-    factory: (host) => createTronSettingsExtension(() => host.settings()),
+    name: settingsModule.name,
+    purpose: settingsModule.purpose,
+    tools: settingsModule.tools,
+    commands: settingsModule.commands,
+    factory: (host) => host.modules.extension(settingsModule, sessionContext(host)),
   },
   {
     name: askUserModule.name,
