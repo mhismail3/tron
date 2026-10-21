@@ -92,6 +92,15 @@ describe("gateway/notifications push lock", () => {
     expect(opened.ok, JSON.stringify(opened)).toBe(true);
     expect((await phone.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
     const subscriptionToken = opened.result.subscriptionToken as string;
+    const slot = await gateway.registry.acquire(sessionId);
+    // Pin the ordinary idle path before a run can supersede it. Terminal idle
+    // snapshots may all coalesce into rebaselines, even on a loopback socket.
+    await waitFor(() => slot.snapshot().configurationBlocker === null, "the initial session ownership to retire");
+    const initialEvents = phone.events.length;
+    slot.publishSnapshot();
+    await waitFor(() => phone.events.slice(initialEvents).some((event) => event.sessionId === sessionId && event.topic === "session.snapshot"
+      && (event.payload as { configurationBlocker?: unknown }).configurationBlocker === null),
+    "the initial ordinary idle snapshot to reach the phone");
     const prompt = (text: string) => phone.send("session.prompt", { commandId: gateway.commandId(), sessionId, text });
     const answerSelect = async (client: LockClient, answered: number) => {
       const pending = await waitFor(() => {
@@ -148,7 +157,6 @@ describe("gateway/notifications push lock", () => {
       failedProviderReached();
       return fauxAssistantMessage("partial", { stopReason: "error", errorMessage: "lock provider failure" });
     }]);
-    const slot = await gateway.registry.acquire(sessionId);
     const failureEvents = phone.events.length;
     // A slow writer must receive the idle snapshot as a rebaseline covering
     // unsent busy state. Otherwise compression versus receipt I/O decides which
