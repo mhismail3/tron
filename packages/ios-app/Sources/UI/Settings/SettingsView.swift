@@ -57,7 +57,7 @@ struct SettingsView: View {
                         TronSettingsDivider()
                         settingsLink("Trusted Projects", summary: "Projects whose extensions and hooks load", icon: "checkmark.shield") { TrustedProjectsSettingsView() }
                         TronSettingsDivider()
-                        SettingsSectionLinks(ids: ["run", "advanced"], sections: sections,
+                        SettingsSectionLinks(ids: ["approvals", "run"], sections: sections,
                                              target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
                                              selection: .allExcept(TrustedProjectsSettingsView.keys))
                     }
@@ -209,7 +209,7 @@ enum SettingsGroupKind {
 
     /// Schema sections Settings places itself; any other served section joins More.
     /// Sources and setup are shown inside Extensions and Setup.
-    static let placedSections: Set<String> = ["model", "workers", "context", "run", "advanced", "tools", "sources", "setup"]
+    static let placedSections: Set<String> = ["model", "workers", "context", "approvals", "run", "trust", "connections", "tools", "sources", "setup"]
 
     static func icon(forSection id: String) -> String {
         switch id {
@@ -256,9 +256,9 @@ struct SettingsSectionLinks: View {
     @Environment(AppModel.self) private var model
 
     // Presentation grouping only: schema keys, layers and mutation owners stay unchanged.
-    private func root(_ id: String) -> String { id == "workers" ? "model" : id == "run" ? "advanced" : id }
+    private func root(_ id: String) -> String { id == "workers" ? "model" : ["approvals", "run"].contains(id) ? "advanced" : id }
     private func members(_ id: String) -> [SettingsRendererSection] {
-        let ids = id == "model" ? ["model", "workers"] : id == "advanced" ? ["run", "advanced"] : [id]
+        let ids = id == "model" ? ["model", "workers"] : id == "advanced" ? ["approvals", "run"] : [id]
         return ids.compactMap { id in sections.first { $0.id == id } }.filter { section in
             model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
         }
@@ -348,7 +348,7 @@ struct SessionSettingsView: View {
     private func inline(_ section: SettingsRendererSection) -> Bool {
         // Tools is a setting, not a doorway to the same row. Other small
         // sections inline only when no meaningful grouping would be lost.
-        guard !["model", "workers", "run", "advanced"].contains(section.id) else { return false }
+        guard !["model", "workers", "approvals", "run"].contains(section.id) else { return false }
         return section.chatInline || section.id == "tools"
             || (model.settingsSnapshot(for: target)?.resolution.keys.filter {
                 $0.group == section.id && selection.includes($0)

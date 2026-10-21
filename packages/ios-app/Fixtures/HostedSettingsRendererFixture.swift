@@ -672,7 +672,8 @@ enum HostedSettingsReviewSchema {
         section("model", "Model", 10, inline: true),
         section("workers", "Workers & delegation", 15, inline: true),
         section("context", "Compaction", 20), section("tools", "Tools", 30),
-        section("run", "Connection", 50), section("advanced", "Advanced", 55),
+        section("approvals", "Agent changes", 45), section("run", "Connection", 50),
+        section("trust", "Trusted Projects", 55), section("connections", "Mac Terminal", 58),
     ]
 
     private static func section(_ id: String, _ title: String, _ order: Int, inline: Bool = false) -> JSONValue {
@@ -712,15 +713,15 @@ enum HostedSettingsReviewSchema {
     static let sheetThemeKeys: [JSONValue] = {
         let approvals: [JSONValue] = additionalKeys.prefix(12).compactMap { value in
             guard let governed = value.objectValue?["key"]?.stringValue,
-                  var row = key("permissions.floor", "advanced", "Agent approvals", .string("quiet"), "Quiet", "choice", order: 90,
-                    help: "How much of your attention an agent's change to each setting gets: Quiet applies it, Notify also tells you, Approve waits for you.",
+                  var row = key("permissions.floor", "approvals", "Agent approvals", .string("quiet"), "Quiet", "choice", order: 90,
+                    help: "Which setting changes need your OK.",
                     options: [.object(["value": .string("quiet"), "label": .string("Quiet"), "detail": .string("The change applies without telling you")]),
                               .object(["value": .string("notify"), "label": .string("Notify"), "detail": .string("The change applies and tells you")]),
                               .object(["value": .string("approve"), "label": .string("Approve"), "detail": .string("The change waits for your approval")])]).objectValue else { return nil }
             row["qualifiers"] = .object(["key": .string(governed)])
             return .object(row)
         }
-        return approvals + [key("permissions.macTerminalKey", "advanced", "Mac Terminal key", .null, "Not set", "readOnly", order: 15,
+        return approvals + [key("permissions.macTerminalKey", "connections", "Mac Terminal key", .null, "Not set", "readOnly", order: 15,
             help: "Lets this paired iPhone open a shell on the Mac over Tailscale through Remote Login, even when the Gateway is not running.")]
     }()
 
@@ -750,13 +751,13 @@ enum HostedSettingsReviewSchema {
         key("run.websocketConnectTimeoutMs", "run", "WebSocket connect timeout", .number(10_000), "10 s", order: 110, help: "How long a WebSocket connection may take to open."),
         key("run.httpProxy", "run", "HTTP proxy", .null, "Not set", "secret", order: 120, help: "Proxy for model requests. Applies after a restart."),
         key("run.cacheWarming", "run", "Cache warming", .string("off"), "Off", "choice", order: 130, help: "Keep model prompt caches warm.", options: [.object(["value": .string("off"), "label": .string("Off")])]),
-        key("permissions.defaultProjectTrust", "advanced", "Default trust policy", .string("ask"), "Ask", "choice", order: 20, help: "What happens with a project that has no trust decision.", options: [.object(["value": .string("ask"), "label": .string("Ask")])]),
-        key("model.thinkingBudgets", "advanced", "Thinking budgets", .object(["high": .number(16_384)]), "1 budget", "readOnly", order: 60, help: "Token budget per thinking level, for models that take one."),
-        key("model.offered", "advanced", "Offered models", .array([]), "0 items", "list", order: 70, help: "Models offered in the picker. Empty offers every model."),
-        key("run.queue.steeringMode", "advanced", "Steering delivery", .string("one-at-a-time"), "One at a time", "choice", order: 10, subgroup: "Queue"),
-        key("run.queue.followUpMode", "advanced", "Follow-up delivery", .string("one-at-a-time"), "One at a time", "choice", order: 20, subgroup: "Queue"),
-        key("run.retry.enabled", "advanced", "Retry", .bool(true), "On", "toggle", order: 30, subgroup: "Retry"),
-        key("run.retry.maxRetries", "advanced", "Retries", .number(3), "3 retries", order: 40, subgroup: "Retry"),
+        key("permissions.defaultProjectTrust", "trust", "Default trust policy", .string("ask"), "Ask", "choice", order: 20, help: "What happens with a project that has no trust decision.", options: [.object(["value": .string("ask"), "label": .string("Ask")])]),
+        key("model.thinkingBudgets", "workers", "Thinking budgets", .object(["high": .number(16_384)]), "1 budget", "readOnly", order: 60, help: "Token budget per thinking level, for models that take one."),
+        key("model.offered", "workers", "Offered models", .array([]), "0 items", "list", order: 70, help: "Models offered in the picker. Empty offers every model."),
+        key("run.queue.steeringMode", "run", "Steering delivery", .string("one-at-a-time"), "One at a time", "choice", order: 10, subgroup: "Queue"),
+        key("run.queue.followUpMode", "run", "Follow-up delivery", .string("one-at-a-time"), "One at a time", "choice", order: 20, subgroup: "Queue"),
+        key("run.retry.enabled", "run", "Retry", .bool(true), "On", "toggle", order: 30, subgroup: "Retry"),
+        key("run.retry.maxRetries", "run", "Retries", .number(3), "3 retries", order: 40, subgroup: "Retry"),
     ]
 }
 

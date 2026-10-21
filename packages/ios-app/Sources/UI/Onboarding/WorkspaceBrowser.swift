@@ -13,6 +13,8 @@ struct WorkspaceShortcut: Identifiable, Hashable, Sendable {
 struct WorkspaceBrowser: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronEmerald }
     let shortcuts: [WorkspaceShortcut]
     let initialPath: String?
     let onSelect: (String) -> Void
@@ -49,7 +51,7 @@ struct WorkspaceBrowser: View {
         NavigationStack {
             Group {
                 if loading && listing == nil {
-                    TronSheetLoadingState(label: "Loading folders…", accent: .tronEmerald)
+                    TronSheetLoadingState(label: "Loading folders…", accent: accent)
                 } else {
                     browser
                         .opacity(navigating ? 0.62 : 1)
@@ -65,7 +67,7 @@ struct WorkspaceBrowser: View {
                     Button { selectCurrentPath() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: accent)
                     }
                     .disabled(currentPath.isEmpty)
                     .accessibilityLabel("Use current folder")
@@ -80,7 +82,7 @@ struct WorkspaceBrowser: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(Color.tronEmerald)
+        .tint(accent)
     }
 
     private var browser: some View {
@@ -109,14 +111,14 @@ struct WorkspaceBrowser: View {
                                             }
                                         }
                                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                        .foregroundStyle(Color.tronAccentText)
+                                        .foregroundStyle(theme?.accent ?? .tronAccentText)
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 7)
                                         .contentShape(Capsule())
                                     }
                                     .buttonStyle(.plain)
                                     .glassEffect(
-                                        .regular.tint(Color.tronEmerald.opacity(shortcut.path == currentPath ? 0.20 : 0.08)).interactive(),
+                                        .regular.tint(accent.opacity(shortcut.path == currentPath ? 0.20 : 0.08)).interactive(),
                                         in: Capsule()
                                     )
                                 }
@@ -167,7 +169,7 @@ struct WorkspaceBrowser: View {
                                 HStack(spacing: TronSpacing.xl) {
                                     Image(systemName: "folder.fill")
                                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                        .foregroundStyle(Color.tronEmerald)
+                                        .foregroundStyle(accent)
                                         .frame(width: 18)
                                     Text(entry.name)
                                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
@@ -210,19 +212,19 @@ struct WorkspaceBrowser: View {
                 Text(title).lineLimit(1)
             }
             .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-            .foregroundStyle(Color.tronAccentText)
+            .foregroundStyle(theme?.accent ?? .tronAccentText)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.09)).interactive(), in: Capsule())
+        .glassEffect(.regular.tint(accent.opacity(0.09)).interactive(), in: Capsule())
     }
 
     private var newFolderRow: some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
             HStack(spacing: TronSpacing.xl) {
                 Image(systemName: "folder.badge.plus")
-                    .foregroundStyle(Color.tronEmerald)
+                    .foregroundStyle(accent)
                 TextField("Folder name", text: $newFolderName)
                     .tronInlineField()
                     .textInputAutocapitalization(.never)
@@ -230,7 +232,7 @@ struct WorkspaceBrowser: View {
                     .focused($folderFieldFocused)
                     .onSubmit { createFolder() }
                 if submittingFolder {
-                    TronPulseLoadingIndicator(accent: .tronEmerald, size: 16)
+                    TronPulseLoadingIndicator(accent: accent, size: 16)
                 } else {
                     Button { cancelFolder() } label: { Image(systemName: "xmark.circle.fill") }
                         .accessibilityLabel("Cancel new folder")
@@ -242,7 +244,7 @@ struct WorkspaceBrowser: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 14, tintOpacity: 0.15, interactive: true)
+        .tronGlassSurface(accent: accent, cornerRadius: 14, tintOpacity: 0.15, interactive: true)
     }
 
     private var shortcutRows: [WorkspaceShortcut] {
