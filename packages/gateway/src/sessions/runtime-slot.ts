@@ -201,8 +201,6 @@ function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, 
   return isEmbeddedLifecycleArtifact(source) ? markEmbeddedLifecycleArtifact(value) : value;
 }
 
-/** An inbox admission this long holds the Home lane long enough for a person to notice. */
-
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
 /** The curated runtime a session is built with. Decided at runtime creation:

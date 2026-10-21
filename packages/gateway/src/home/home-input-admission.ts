@@ -9,6 +9,7 @@ import { HOME_HARD_BYTES, HOME_HARD_ENTRIES } from "./home-chapter-state.js";
 /** Delivery headroom counts the learned profile at its bound: the activation's section is
  * read inside Home's prompt hook, after this estimate, and never exceeds it. */
 const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_BOUND_BYTES + 1_024);
+/** An inbox admission this long holds the Home lane long enough for a person to notice. */
 const HOME_INBOX_ADMISSION_SLOW_MS = 2_000;
 
 export function homeInputAdmission(owner: HomeOwner, diagnostic?: (record: HomeTaskDiagnostic) => void): InputAdmissionPolicy {
