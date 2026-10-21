@@ -675,6 +675,7 @@ private actor HostedHomeShellGateway {
     }
 
     func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
+        await ForegroundSheetProbe.record("rpc", method)
         if method.hasPrefix("home.") {
             homeReads[method, default: 0] += 1
             if let onHomeRead { await onHomeRead(homeReadSummary()) }

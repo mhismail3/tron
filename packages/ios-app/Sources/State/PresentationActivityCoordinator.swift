@@ -84,6 +84,9 @@ final class PresentationActivityCoordinator {
         guard surfaces[token] == nil,
               !retiredTokens.contains(token),
               parent.map({ !retiredTokens.contains($0) }) ?? true else { return }
+        #if HOSTED_TEST
+        ForegroundSheetProbe.record("register", "\(token.id)#\(token.generation) parent=\(parent?.id ?? "root")")
+        #endif
         surfaces[token] = Surface(parent: parent)
         order.append(token)
     }
@@ -91,6 +94,9 @@ final class PresentationActivityCoordinator {
     /// Retires one exact generation and every mounted descendant. A delayed
     /// callback from an earlier route cannot affect its replacement.
     func retire(_ token: PresentationSurfaceToken) {
+        #if HOSTED_TEST
+        ForegroundSheetProbe.record("retire", "\(token.id)#\(token.generation)")
+        #endif
         let descendants = order.filter { candidate in
             candidate == token || isDescendant(candidate, of: token)
         }
@@ -246,6 +252,9 @@ struct TronPresentationSurface<Content: View>: View {
     }
 
     var body: some View {
+        #if HOSTED_TEST
+        let _ = ForegroundSheetProbe.record("body", "\(token.id)#\(token.generation)")
+        #endif
         content()
             .modifier(TronSheetLoadingHostModifier())
             .environment(\.tronPresentationStateScope, stateScope)
@@ -255,10 +264,16 @@ struct TronPresentationSurface<Content: View>: View {
                 coordinator?.activity(for: token) ?? .active
             )
             .onAppear {
+                #if HOSTED_TEST
+                ForegroundSheetProbe.record("appear", "\(token.id)#\(token.generation)")
+                #endif
                 coordinator?.register(token, parent: explicitParent ?? inheritedParent)
                 if registersLifecycle { onMount?(token) }
             }
             .onDisappear {
+                #if HOSTED_TEST
+                ForegroundSheetProbe.record("disappear", "\(token.id)#\(token.generation)")
+                #endif
                 if registersLifecycle {
                     coordinator?.retire(token)
                     stateStore?.retire(path: statePath)
@@ -377,6 +392,9 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     }
 
     private func didDismiss() {
+        #if HOSTED_TEST
+        ForegroundSheetProbe.record("native-dismiss", identity)
+        #endif
         if lease.dismissingToken == nil, !isPresented { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: isPresented ? identity : nil)
         apply(transition)
@@ -461,6 +479,9 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     }
 
     private func didDismiss() {
+        #if HOSTED_TEST
+        ForegroundSheetProbe.record("native-dismiss", item.map(identity) ?? "nil")
+        #endif
         if lease.dismissingToken == nil, item == nil { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: item.map(identity))
         apply(transition)
