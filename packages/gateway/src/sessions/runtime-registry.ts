@@ -1859,7 +1859,6 @@ export class RuntimeRegistry {
       beforeRunAdmission: (sessionId: string) => this.beforeRunAdmission(sessionId),
       archivedAt: (sessionId: string) => this.archivedAt(sessionId),
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
-      ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       modules: this.options.modules,
       settings: () => this.settingsOwners,

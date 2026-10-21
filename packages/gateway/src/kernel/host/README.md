@@ -37,7 +37,9 @@ ordinary profile's first extension and joins canonical receipt writes before inp
   Capabilities are listed in composition order.
 - **Hooks (D6).** A `policy` hook has one implementer; `observers` hooks run every
   implementer in composition order. Dispatch reads each module's `hooks` at the
-  call, never a copy taken at start.
+  call, never a copy taken at start. Notification hooks resolve optional owner
+  availability before the run samples terminal or interaction facts; notifications
+  admits the alert, while the run owns presence and waiting-episode state.
 - **Fail at start.** A module composed twice, an unknown hook, a second policy
   implementer or an RPC method served twice refuses `start`, and the modules
   already started are stopped.

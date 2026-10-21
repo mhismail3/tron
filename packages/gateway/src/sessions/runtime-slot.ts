@@ -149,9 +149,7 @@ import {
   subagentProcessId,
   subagentProcessesFromActivity,
 } from "../kernel/projection/process-activity.js";
-import type { NotificationService } from "../notifications/notification-service.js";
 import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
-import { notifyTronAgentTerminal } from "../notifications/tron-notify-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { tronContext } from "../workspace/tron-core-extension.js";
@@ -550,7 +548,6 @@ export interface RuntimeSlotDependencies {
   sessionAudience: (sessionId: string) => number;
   resources?: ResourceRecorder;
   machineId?: string;
-  notifications?: NotificationService;
   extensionArtifactWarning?: (warning: { reason: ExtensionArtifactRejectionReason; owner: string }) => void;
   /** Extension cleanup is advisory once runtime disposal begins. A handler that
    * never settles must not strand the canonical session behind idle eviction. */
@@ -1015,19 +1012,14 @@ export class RuntimeSlot {
       presentation,
       (notification) => this.enqueueExtensionNotification(notification),
       (interaction) => {
-        const notifications = this.dependencies.notifications;
-        if (!notifications) return;
+        const interactionRequired = this.dependencies.modules.policy("interactionRequired")?.();
+        if (!interactionRequired) return;
         // Sample the same token-bound foreground lease at the exact semantic
         // interaction admission boundary. The detached service call receives
         // that latched disposition, so a later close/open race cannot change
         // whether this input request was already visible to the user.
         const observed = this.dependencies.isSessionPresented(this.id);
-        return notifications.userInputRequired({
-          sessionId: this.id,
-          interactionId: interaction.id,
-          observed,
-          ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
-        });
+        return interactionRequired({ sessionId: this.id, interactionId: interaction.id, observed });
       },
     );
   }
@@ -3653,22 +3645,19 @@ export class RuntimeSlot {
   private async notifyAgentTerminal(sourceId: string, outcome: AgentTerminalOutcome): Promise<void> {
     // A task's durable result owner, never generic chat completion, decides push.
     if (this.taskWorker) return;
-    const notifications = this.dependencies.notifications;
-    if (!notifications) return;
+    const runTerminal = this.dependencies.modules.policy("runTerminal")?.();
+    if (!runTerminal) return;
     try {
       const pendingBackgroundProcesses = this.pendingBackgroundProcesses();
       const waitingEpisode = pendingBackgroundProcesses.join("\0");
-      await notifyTronAgentTerminal({
+      await runTerminal({
         sessionId: this.id,
         sourceId,
         outcome,
         sessionTitle: this.notificationTitle(),
-        ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
         observed: this.completionObserved(sourceId),
         pendingBackgroundWork: pendingBackgroundProcesses.length,
         waitingEpisode: waitingEpisode !== "" && waitingEpisode === this.waitingNotificationEpisode,
-        suppressAutomatic: (input) => notifications.suppressAutomatic(input),
-        enqueue: (input) => notifications.enqueue(input),
       });
       this.waitingNotificationEpisode = waitingEpisode || undefined;
     } catch {

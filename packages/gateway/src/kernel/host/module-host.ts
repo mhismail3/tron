@@ -5,6 +5,23 @@ import type { ToolResultProjection } from "../projection/tool-result.js";
 
 export type AgentTerminalOutcome = "completed" | "limited" | "failed" | "stopped" | "unknown" | "interrupted";
 
+/** Run-owned facts sampled before the notification module admits an alert. */
+export interface RunTerminalInput {
+  sessionId: string;
+  sourceId: string;
+  outcome: AgentTerminalOutcome;
+  sessionTitle: string;
+  observed: boolean;
+  pendingBackgroundWork: number;
+  waitingEpisode: boolean;
+}
+
+export interface InteractionRequiredInput {
+  sessionId: string;
+  interactionId: string;
+  observed: boolean;
+}
+
 /** One log line from a module, in the Gateway logger's shape. */
 export interface ModuleLog {
   log(level: "debug" | "info" | "warning" | "error", message: string, metadata?: Record<string, unknown>): void;
@@ -84,8 +101,11 @@ export const KERNEL_HOOKS = {
 export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
-export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection">]: (...args: never[]) => unknown } & {
+export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired">]: (...args: never[]) => unknown } & {
   toolResultProjection(): ToolResultProjection;
+  /** Resolve optional availability before sampling run-owned facts. */
+  runTerminal(): ((input: RunTerminalInput) => Promise<void>) | undefined;
+  interactionRequired(): ((input: InteractionRequiredInput) => Promise<void>) | undefined;
 };
 
 export interface ModuleInstance<C = void> {

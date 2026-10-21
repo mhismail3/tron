@@ -92,8 +92,9 @@ deliveries retired as failed with one `schema_upgrade` signal).
 
 ## Entry points
 
-`NotificationService` (admission, inbox, registration); `NotificationGrantStore`; `PushRelayClient`; the RuntimeSlot
-and `SemanticUIBroker` callbacks in [gateway/run](../sessions/README.md).
+`NotificationService` (admission, inbox, registration); `NotificationGrantStore`; `PushRelayClient`;
+`notify-module.ts` implements call-time `runTerminal`/`interactionRequired` kernel hooks.
+[gateway/run](../sessions/README.md) retains presence sampling, task-worker skip and waiting episodes.
 
 ## Signals
 
