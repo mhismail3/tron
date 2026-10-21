@@ -128,8 +128,8 @@ final class TronChatAnnotationUITests: XCTestCase {
         app.typeText("Make the cap configurable")
 
         app.buttons["Save annotation"].firstMatch.tap()
-        // Sample the keyboard from the tap until the chip has settled: a
-        // dismiss-then-refocus flicker would miss at least one sample.
+        // Sample from the tap until the chip has settled: the keyboard must be
+        // present at every sample, not merely restored afterwards.
         let chips = app.otherElements.matching(identifier: "composer.staged-chip")
         var keyboardSamples: [Bool] = []
         let deadline = Date().addingTimeInterval(2)
@@ -137,12 +137,12 @@ final class TronChatAnnotationUITests: XCTestCase {
             keyboardSamples.append(keyboard.exists)
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
+        keepScreenshot(app, "1597-after-save")
         XCTAssertFalse(bubble.exists)
         XCTAssertEqual(chips.count, 1, "The annotation becomes a staged chip: \(app.debugDescription)")
         XCTAssertFalse(keyboardSamples.contains(false), "The keyboard stays up through Save: \(keyboardSamples)")
         let composer = app.textViews["Message input"]
         XCTAssertEqual(composer.value(forKey: "hasKeyboardFocus") as? Bool, true, "Focus moves to the composer input")
-        keepScreenshot(app, "1597-after-save")
 
         app.typeText("Keep typing")
         XCTAssertEqual(composer.value as? String, "Keep typing")
