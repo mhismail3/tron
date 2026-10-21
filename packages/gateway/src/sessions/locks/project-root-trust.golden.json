@@ -406,7 +406,7 @@
                 }
               ],
               "display": "7 retries",
-              "group": "advanced",
+              "group": "run",
               "key": "run.retry.maxRetries",
               "layer": "project",
               "layers": [
@@ -467,10 +467,10 @@
           },
           "sections": [
             {
-              "description": "Model availability, trust, delivery, and retries",
+              "description": "Transport, timeouts, delivery, and retries",
               "id": "<id>",
-              "order": 55,
-              "title": "Advanced"
+              "order": 50,
+              "title": "Connection"
             }
           ],
           "target": {
@@ -512,7 +512,7 @@
                 }
               ],
               "display": "Trusted",
-              "group": "advanced",
+              "group": "trust",
               "key": "permissions.projectTrust",
               "layer": "mac",
               "layers": [
@@ -562,7 +562,7 @@
                 }
               ],
               "display": "7 retries",
-              "group": "advanced",
+              "group": "run",
               "key": "run.retry.maxRetries",
               "layer": "project",
               "layers": [
@@ -618,10 +618,16 @@
           },
           "sections": [
             {
-              "description": "Model availability, trust, delivery, and retries",
+              "description": "Transport, timeouts, delivery, and retries",
+              "id": "<id>",
+              "order": 50,
+              "title": "Connection"
+            },
+            {
+              "description": "Project trust decisions and default policy",
               "id": "<id>",
               "order": 55,
-              "title": "Advanced"
+              "title": "Trusted Projects"
             }
           ],
           "target": {
