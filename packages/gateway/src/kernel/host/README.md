@@ -22,8 +22,8 @@ ordinary profile's first extension and joins canonical receipt writes before inp
 - **Contracts.** `GatewayHost.contract(m)` returns module `m`'s started contract
   only when `m` is in the reader's `dependsOn` and started earlier.
   `ModuleHost.contract` is composition's read.
-- **Session extensions.** `extension(m, session)` asks module `m` for its Pi
-  extension for one runtime; its position in each profile's extension list is
+- **Session extensions.** `registrations(names, session)` asks the named modules
+  for their Pi extensions; each position in the profile's extension list is
   the kernel's (K-0 §3), so the model-visible order is unchanged. SessionContext
   carries per-runtime identity, presentation, receipt joining, late-bound settings
   access for the session actor and policy operations;
@@ -54,7 +54,7 @@ ordinary profile's first extension and joins canonical receipt writes before inp
 ## Entry points
 
 `ModuleHost.start` (gateway-main, and `test-support/gateway-registry.ts` for test
-registries), `ModuleHost.contract`, `extension`, `rpc`, `capabilities`, `policy`,
+registries), `ModuleHost.contract`, `registrations`, `rpc`, `capabilities`, `policy`,
 `observers`, `stop`.
 
 ## Signals

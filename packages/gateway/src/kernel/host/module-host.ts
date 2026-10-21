@@ -175,12 +175,6 @@ export class ModuleHost {
     return entry.instance.contract as C;
   }
 
-  /** A composed module's extension for one runtime; undefined when the module
-   * is not composed or offers none to that runtime. */
-  extension(module: ModuleDescriptor<unknown>, session: SessionContext): ExtensionFactory | undefined {
-    return this.find(module)?.instance.extension?.(session);
-  }
-
   /** Profile order is explicit; optionality stays with each descriptor. */
   registrations(names: readonly string[], session: SessionContext): { name: string; factory: ExtensionFactory }[] {
     return names.flatMap(name => {
