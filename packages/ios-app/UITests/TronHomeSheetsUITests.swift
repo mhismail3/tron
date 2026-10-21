@@ -8,30 +8,6 @@ import XCTest
 final class TronHomeSheetsUITests: XCTestCase {
     private var timings: [String: Double] = [:]
 
-    /// Visual capture journey for #1608; the simulator recorder keeps the opening frames.
-    @MainActor func testSheetToolbarOpeningVisualCapture() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-presentation-loading"]
-                + (appearance == "dark" ? ["-home-dark"] : [])
-            app.launch()
-            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
-            app.buttons["home-pinned-row"].tap()
-            let ring = app.buttons["session-context-button"]
-            XCTAssertTrue(waitFor(ring, "enabled == true"))
-            ring.tap()
-            XCTAssertTrue(element(app, "home-manage-state").waitForExistence(timeout: 30))
-            shot("1608-\(appearance)-manage-loaded")
-            let tasks = element(app, "home-manage-tasks")
-            XCTAssertTrue(tasks.waitForExistence(timeout: 5))
-            tasks.tap()
-            XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 30))
-            shot("1608-\(appearance)-tasks-loaded")
-            app.terminate()
-        }
-    }
-
     @MainActor
     func testHostPressureNormalAndIdleWorkers() {
         checkHostStatus(level: "Normal", workers: "0 workers running", arguments: [])
