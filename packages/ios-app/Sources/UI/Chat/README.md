@@ -8,7 +8,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 ## Owns
 
 - Shell and dashboard: `SessionShellView` (`SessionShellProfileRouteOwner`), session rows and
-  swipe actions, `ArchivedSessionsSection`, `SessionTitleSearch`, `HomePinnedRow`.
+  swipe actions, `ArchivedSessionsSection`, `SessionTitleSearch`, `HomePinnedRow`, `HomeUsageSummaryCard`.
 - Chat route: `ChatView` (composition and lifecycle root), `ChatRoutes`, `ChatTranscriptSheetRoutes`,
   `ChatSessionPresentation`, `ChatTranscriptScrollView`, `ChatTranscriptOrientation`,
   `ChatScrollCoordinator`, `ChatComposerView`, `ChatTranscriptPresentationStore`,
