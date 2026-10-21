@@ -780,7 +780,7 @@ No Stable handoff is needed, because there is no runtime change.
 2. Every `move` commit needs a clean moved-lines report.
 3. Every deletion needs its surviving oracle plus known-bad evidence.
 4. `scripts/tron metrics --compare <base>` and `scripts/tron measure <base>`
-   for the net-lines and concepts-deleted lines (§3 M3, Appendix D).
+   for the net-lines line; list the concepts deleted (§3 M3, Appendix D).
 5. Review if the slice is risk-class (§8.4).
 6. `git fetch && git rebase origin/main`. Rerun **only** verify sets
    invalidated by the integrated diff. Kernel or contract changes from others
