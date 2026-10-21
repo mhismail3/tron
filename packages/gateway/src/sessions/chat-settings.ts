@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getCurrentTools } from "../kernel/pi/ai.js";
 import type { SessionEntry, SessionManager } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
-import type { FixedSetting } from "../admin/settings-resolver.js";
+import type { FixedSetting } from "../kernel/settings/tool-contract.js";
 import { hasChatSettingsApplier, schemaKey } from "../admin/settings-schema.js";
 
 export const CHAT_SETTINGS_ENTRY = "tron.settings.v1";

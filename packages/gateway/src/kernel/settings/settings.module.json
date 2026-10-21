@@ -1,0 +1,5 @@
+{
+  "layer": "L2",
+  "owns": ["**"],
+  "riskClass": ["kernel"]
+}

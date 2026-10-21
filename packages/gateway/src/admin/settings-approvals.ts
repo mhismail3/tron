@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../util/json.js";
 import type { Actor, TierBasis } from "./settings-record.js";
-import type { FixedSetting, SettingsTarget } from "./settings-resolver.js";
-import type { LayerId, Qualifiers, Tier } from "./settings-types.js";
+import type { FixedSetting, SettingsTarget } from "../kernel/settings/tool-contract.js";
+import type { LayerId, Qualifiers, Tier } from "../kernel/settings/tool-contract.js";
 
 /**
  * Pending settings changes (docs/settings-model.md 5.5, decision 8, Q22).

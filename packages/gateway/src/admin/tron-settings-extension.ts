@@ -1,7 +1,7 @@
+import { type SettingsToolAccess } from "../kernel/settings/tool-contract.js";
 import { StringEnum, Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory, ToolInfo } from "../kernel/pi/coding-agent.js";
-import type { ChangeRequest, ChangeResult } from "./settings-model.js";
-import type { Resolution } from "./settings-resolver.js";
+import type { ChangeRequest, ChangeResult } from "../kernel/settings/tool-contract.js";
 
 /**
  * The `settings` tool and the turn's web mark (docs/settings-model.md 5.1, 5.4).
@@ -22,32 +22,11 @@ import type { Resolution } from "./settings-resolver.js";
 
 export const SETTINGS_OUTCOME_MESSAGE = "tron.settings-outcome.v1";
 
-/** A delegated worker's settings state beside its resolved keys (#1336). */
-export interface TaskWorkerSettingsState {
-  /** The worker's task operation is live: a change applies from its next provider request. */
-  running: boolean;
-  /** What the worker's next provider request uses. */
-  selected: { model: string | null; thinking: string };
-  /** What its latest assistant response ran on: the acknowledgment a change took effect. */
-  lastResponse: { model: string; thinking: string | null; at: string } | null;
-}
 
-/** The task a `taskId` call resolved to: the worker's current task (a resume continues it). */
-export interface TaskWorkerSettingsView extends TaskWorkerSettingsState {
-  taskId: string;
-  sessionId: string;
-  operationId: string | null;
-  state: string;
-  resolvedFrom?: string;
-}
 
-/** What the session runtime gives the tool: its own target and identity, or Home's worker target. */
-export interface SettingsToolAccess {
-  resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;
-  change(changes: ChangeRequest[], input: { reason: string; dryRun?: boolean; toolCallId: string; web: boolean; taskId?: string }): Promise<ChangeResult & { worker?: TaskWorkerSettingsView }>;
-  /** Declined, expired or superseded changes this chat asked for, not yet told (Q22). */
-  takeOutcomes(): Promise<string[]>;
-}
+
+
+
 
 /**
  * pi's own tools carry no annotations, so Tron declares the closed-world ones

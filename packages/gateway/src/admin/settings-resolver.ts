@@ -1,34 +1,14 @@
+import { type SettingsTarget, type FixedSetting, type Badge, type LayerValue, type ResolvedKey, type Diagnostic, type Resolution } from "../kernel/settings/tool-contract.js";
 import { dirname } from "node:path";
 import { KEYS, keyForHome, builtinValue, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
-import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
+import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext } from "./settings-types.js";
+import { type LayerId, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
 
-/**
- * The one resolver (docs/settings-model.md section 3, foundation F4).
- *
- * For a target and each key it takes the topmost layer that the target has,
- * that holds a value for the key, that the key allows, and that is applied.
- * It reads stores that were loaded by their owners; it never writes, caches or
- * consults the change record (F2).
- */
 
-export type SettingsTarget =
-  | { kind: "mac" }
-  | { kind: "project"; cwd: string }
-  | { kind: "session"; sessionId: string }
-  | { kind: "home" };
 
-export interface FixedSetting {
-  value: unknown;
-  from: LayerId | "delegate";
-  at: string;
-  ref: string;
-  qualifiers?: Qualifiers;
-  /** Delegation-time source, kept with the fixed value rather than inferred from current Home. */
-  via?: "home-profile:sameAs:home" | "home-profile" | "home-explicit" | "home-fallback";
-  reason?: string;
-}
+
 
 /** The Chat layer as the session record holds it (doc 3.2). */
 export interface ChatStore {
@@ -84,45 +64,15 @@ export interface OptionSources {
   clamp(source: string, dependency: unknown, value: unknown): unknown;
 }
 
-export interface Badge { kind: string; label: string; detail?: string; action?: { kind: string; label: string; changeId?: string } }
 
-export interface LayerValue {
-  layer: LayerId;
-  value?: unknown;
-  display?: string;
-  /** False when the target has the layer and it holds a value that does not apply. */
-  applied: boolean;
-  reason?: "untrusted";
-}
 
-export interface ResolvedKey {
-  key: string;
-  qualifiers?: Qualifiers;
-  group: string;
-  subgroup?: string;
-  value: unknown;
-  display: string;
-  layer: LayerId;
-  /** False when the topmost value present is not applied (an untrusted project). */
-  applied: boolean;
-  reason?: "untrusted";
-  badges: Badge[];
-  fixedAt?: FixedSetting;
-  /** Derived from canonical entries; legacy sessions never acquire invented origin. */
-  origin: "override" | "launch" | "legacy-session" | "inherited";
-  layers: LayerValue[];
-}
 
-export interface Diagnostic { key: string; layer: LayerId; reason: "layer-not-allowed"; path: string }
 
-export interface Resolution {
-  target: SettingsTarget;
-  layers: readonly LayerId[];
-  /** The Project store exists but cannot be parsed (for example merge markers). */
-  projectUnreadable?: true;
-  keys: ResolvedKey[];
-  diagnostics: Diagnostic[];
-}
+
+
+
+
+
 
 const BOTTOM_UP: readonly LayerId[] = ["builtin", "mac", "project", "profile", "chat"];
 

@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import type { GitResult } from "./settings-record.js";
+import type { GitResult } from "../kernel/settings/tool-contract.js";
 
 /**
  * The Project layer's applier (docs/settings-model.md 5.7, decision 14).

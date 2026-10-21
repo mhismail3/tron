@@ -1,3 +1,4 @@
+import { type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult } from "../kernel/settings/tool-contract.js";
 import type { MacTerminalKeys } from "../security/mac-terminal.js";
 import { stage } from "../transport/request-span.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -14,13 +15,16 @@ import { updateJsonLocked } from "../util/json.js";
 import { gitHeadState, projectGitState, readProjectDocument, writeProjectSettings } from "./project-settings-writer.js";
 import { observedInstance, projectStores, type ObservedReaders, type ObservedStore, type OutsideChanges, type PlannedWrite } from "./settings-outside.js";
 import type { TrustService } from "./trust-service.js";
-import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
+import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord, TierBasis } from "./settings-record.js";
+import type { ChangeStatus, GitResult } from "../kernel/settings/tool-contract.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
-import { composedBelow, readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
+import { composedBelow, readBinding, resolveSettings, targetLayers, type ChatStore, type OptionSources, type SettingsStores } from "./settings-resolver.js";
+import { type FixedSetting, type Resolution, type SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, builtinValue, floorFor, floorInstances, hasChatSettingsApplier, hasRuntimeRequestApplier, keyForHome, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { formatProfileValue, profileListItem, type HomeProfileAuthor, type HomeProfileItems, type HomeProfileOp, type HomeProfileSaved, type HomeProfileWrite } from "../home/home-profile.js";
-import { formatStoredSetting, LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
+import { formatStoredSetting, LAYER_LABELS, maxTier, raiseTier, type FormatContext, type ModelRefValue } from "./settings-types.js";
+import { TIERS, type LayerId, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
 
 /** What a session target contributes: its Chat layer and whether it is Home's chat. */
 export interface SessionSettingsSource {
@@ -463,17 +467,9 @@ function optionSources(runtime: ModelRuntime): OptionSources {
 // The one change path (docs/settings-model.md 5.1-5.3, foundation F2/F3).
 // ---------------------------------------------------------------------------
 
-export type WritableLayer = Exclude<LayerId, "builtin">;
 
-export interface ChangeRequest {
-  key: string;
-  qualifiers?: Qualifiers;
-  layer: WritableLayer;
-  op: "set" | "unset";
-  value?: unknown;
-  /** The value the actor read at this layer; `null` means unset. Omitted skips the check. */
-  expected?: unknown;
-}
+
+
 
 /** The Chat layer's appliers: the session's slot-lane setters, whose lane
  * guards (idle configuration, chapter writability, runtime fence) stay. */
@@ -498,17 +494,7 @@ export interface SettingsNotice {
   changes: Array<{ changeId: string; label: string; before?: string; after?: string; effect: KeyDeclaration["effect"] }>;
 }
 
-/**
- * The worker's signal after an applied change (#1336). `queued`: one Gateway steer joined
- * the task's ordered steering lane (`operationId` is that steer's own operation); the change
- * is already stored and the worker's next provider request uses it. `not-running`: no live
- * task operation, so the change takes effect when the worker next runs (resume). `failed`:
- * the change is applied and stored, but the steer was refused; the error says why.
- */
-export type SettingsSignal =
-  | { status: "queued"; taskId: string; operationId: string; appliesFrom: "next-request" }
-  | { status: "not-running"; taskId: string; appliesFrom: "next-run" }
-  | { status: "failed"; taskId: string; appliesFrom: "next-request"; error: { code: string; message: string } };
+
 
 export interface ChangeContext {
   actor: Actor;
@@ -528,44 +514,14 @@ export interface ChangeContext {
   applyAgainOf?: string;
 }
 
-export interface ChangeOutcome {
-  changeId: string;
-  key: string;
-  qualifiers?: Qualifiers;
-  layer: WritableLayer;
-  status: ChangeStatus;
-  tier: Tier;
-  revision?: number;
-  git?: GitResult;
-  /** A dry run's: the key's `confirm` text when this change's tier is approve,
-   * for the maintainer's row to show before he makes it. */
-  confirm?: string;
-  /** The store's resulting state when its applier reports one (trust's inspection). */
-  result?: unknown;
-  error?: { code: string; message: string };
-  /** The value at this layer before and after the change, `null` when unset there. A
-   * redacted key reports neither, only `redacted`, as its change record does. */
-  before?: unknown;
-  after?: unknown;
-  redacted?: true;
-}
+
 
 /** A planned change's values as its outcome reports them. */
 function outcomeValues(redacted: boolean | undefined, before: unknown, after: unknown): Pick<ChangeOutcome, "before" | "after" | "redacted"> {
   return redacted ? { redacted: true } : { before: before ?? null, after: after ?? null };
 }
 
-export interface ChangeResult {
-  dryRun?: true;
-  status: ChangeStatus;
-  /** The request's tier: the highest of its changes (doc 5.4). */
-  tier: Tier;
-  changes: ChangeOutcome[];
-  /** A pending request: what the maintainer decides and the exact diff it binds to. */
-  approval?: { requestId: string; digest: string; expiresAt: string };
-  /** A Home task worker target's signal for its applied Chat-layer changes (#1336). */
-  signal?: SettingsSignal;
-}
+
 
 export interface SettingsWriters {
   /** Optional typed classifier; the gate owns disclosure, max composition and deadline. */

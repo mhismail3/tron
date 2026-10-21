@@ -4,10 +4,8 @@ import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../runtime/compaction-polic
 import { validateMacTerminalKey } from "../security/mac-terminal.js";
 import { MODEL_QUEUE_ROLES, modelQueueKey } from "../providers/model-queue.js";
 import { boolean, integer, object, string, arrayOfStrings } from "../util/validation.js";
-import {
-  type Control, type Direction, type Effect, type LayerId, type QualifierName, type Tier, type Timing, type ValueType, type Writer,
-  DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types,
-} from "./settings-types.js";
+import { type Control, type Direction, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "./settings-types.js";
+import { type LayerId, type QualifierName, type Tier } from "../kernel/settings/tool-contract.js";
 
 /**
  * The settings schema (docs/settings-model.md section 4, foundation F1).

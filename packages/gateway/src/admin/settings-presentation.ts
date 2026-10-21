@@ -1,5 +1,5 @@
 import { HOME_PROFILE_SUBJECT, KEYS, SECTIONS, keyForHome, recordSubject, schemaKey, type EntryGuidance, type KeyDeclaration } from "./settings-schema.js";
-import type { ResolvedKey, Resolution } from "./settings-resolver.js";
+import type { ResolvedKey, Resolution } from "../kernel/settings/tool-contract.js";
 import type { Actor, ChangeEntry } from "./settings-record.js";
 import { formatProfileValue } from "../home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type ValueType } from "./settings-types.js";

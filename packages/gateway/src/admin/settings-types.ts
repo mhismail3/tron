@@ -1,11 +1,10 @@
+import { TIERS, type LayerId, type Tier } from "../kernel/settings/tool-contract.js";
 import { GatewayError } from "../errors.js";
 import { splitModelRef } from "../providers/model-queue.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from "../util/validation.js";
 
-/** The settings model's vocabulary (docs/settings-model.md section 4).
- * Every key's behaviour is data here; nothing outside the schema names a key. */
-export const LAYERS = ["chat", "profile", "project", "mac", "builtin"] as const;
-export type LayerId = typeof LAYERS[number];
+
+
 export const LAYER_LABELS: Record<LayerId, string> = {
   chat: "Chat", profile: "Profile: Home", project: "Project", mac: "Mac", builtin: "Built-in",
 };
@@ -19,8 +18,8 @@ export const LAYER_SOURCE_LABELS: Record<LayerId, string> = {
 export const LAYER_DEFAULT_LABELS: Record<Exclude<LayerId, "chat">, string> = {
   profile: "Home profile", project: "project default", mac: "Mac default", builtin: "Tron default",
 };
-export const TIERS = ["quiet", "notify", "approve"] as const;
-export type Tier = typeof TIERS[number];
+
+
 /** One step up, capped at approve (foundation F3: the web step). */
 export function raiseTier(tier: Tier, steps: number): Tier {
   return TIERS[Math.min(TIERS.indexOf(tier) + steps, TIERS.length - 1)]!;
@@ -37,9 +36,9 @@ export type Control = typeof CONTROLS[number];
 /** The renderer contract the Gateway speaks (doc 7.5). A client names the
  * controls it implements and its version; anything else falls back. */
 export const RENDERER_CONTRACT_VERSION = 1;
-export const QUALIFIER_NAMES = ["role", "model", "provider", "tool", "project", "connection", "key", "direction", "server", "note", "device"] as const;
-export type QualifierName = typeof QUALIFIER_NAMES[number];
-export type Qualifiers = Partial<Record<QualifierName, string>>;
+
+
+
 
 export interface ModelRefValue { provider: string; id: string }
 

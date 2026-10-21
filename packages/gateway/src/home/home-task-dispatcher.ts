@@ -17,7 +17,7 @@ import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHECKIN_VISIBLE, type HomeTaskCheckin } from "./home-task-checkin.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, homeTaskOperationSpan, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
-import type { FixedSetting } from "../admin/settings-resolver.js";
+import type { FixedSetting } from "../kernel/settings/tool-contract.js";
 import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
 import type { HomeTaskCounts, HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
 import { basename } from "node:path";

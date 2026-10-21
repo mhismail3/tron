@@ -11,7 +11,7 @@ import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
 import { SettingsApprovals } from "./settings-approvals.js";
 import { KEYS, terminalIdleLimitMs } from "./settings-schema.js";
-import type { Resolution, ResolvedKey, SettingsTarget } from "./settings-resolver.js";
+import type { Resolution, ResolvedKey, SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
 import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "./settings-types.js";
 import { ScopeToolCatalog } from "./tool-catalog.js";

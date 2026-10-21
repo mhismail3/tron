@@ -1,11 +1,13 @@
+import { type ChangeStatus, type GitResult } from "../kernel/settings/tool-contract.js";
 import { appendFile, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { createHash, randomUUID } from "node:crypto";
 import { durablePublishBoundedJson, syncDurably } from "../util/durable-json.js";
-import type { FixedSetting, SettingsTarget } from "./settings-resolver.js";
-import type { Direction, LayerId, Qualifiers, Tier } from "./settings-types.js";
+import type { FixedSetting, SettingsTarget } from "../kernel/settings/tool-contract.js";
+import type { Direction } from "./settings-types.js";
+import type { LayerId, Qualifiers, Tier } from "../kernel/settings/tool-contract.js";
 
 /**
  * The settings change record (docs/settings-model.md 5.2, foundation F2).
@@ -27,7 +29,7 @@ export interface Actor {
   taskId?: string;
 }
 
-export type ChangeStatus = "applied" | "pending" | "approved" | "declined" | "expired" | "superseded" | "failed" | "outside" | "committed";
+
 
 export interface TierBasis {
   direction: Direction;
@@ -38,17 +40,7 @@ export interface TierBasis {
   riskEvaluation?: { status: "assessed" | "failed" | "timeout"; rationale: string };
 }
 
-export interface GitResult {
-  root: string | null;
-  path: string;
-  staged: boolean;
-  reason?: string;
-  blob?: string;
-  warning?: string;
-  /** An outside change or commit fact: the repository's `HEAD` commit and branch then. */
-  head?: string;
-  branch?: string;
-}
+
 
 export interface ChangeEntry {
   changeId: string;

@@ -4,7 +4,7 @@ import { it, onTestFinished } from "vitest";
 import { countRandomUUID } from "../../test-support/fixed-recording.js";
 import { storePathLock } from "../../test-support/store-path-lock.js";
 import { APPROVAL_TTL_MS, SettingsApprovals, type ApprovalRequest, type PendingChange } from "./settings-approvals.js";
-import type { SettingsTarget } from "./settings-resolver.js";
+import type { SettingsTarget } from "../kernel/settings/tool-contract.js";
 
 /**
  * `gateway/admin` mutation-path lock for the settings approvals store (plan §6.5 V4,
