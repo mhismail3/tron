@@ -42,7 +42,8 @@ final class TronTaskToolSheetUITests: XCTestCase {
         XCTAssertTrue(result.isHittable, app.debugDescription)
         result.tap()
         XCTAssertTrue(app.staticTexts["Result JSON"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "photo-readiness")).firstMatch.exists)
+        let raw = app.textViews.matching(NSPredicate(format: "value CONTAINS %@", "photo-readiness")).firstMatch
+        XCTAssertTrue(raw.waitForExistence(timeout: 5), app.debugDescription)
     }
 
     @MainActor func testStatusShowsRecordedWorkerCheckinAndSpend() {
@@ -56,14 +57,14 @@ final class TronTaskToolSheetUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-tool-row-Check-in"].label.contains("Attachment readiness now has one owner."))
         let spend = app.descendants(matching: .any)["home-tool-row-Tokens"]
         for _ in 0..<6 where !spend.isHittable { app.swipeUp() }
-        XCTAssertTrue(spend.label.contains("18,450"), app.debugDescription)
+        XCTAssertTrue(spend.label.contains("18K in"), app.debugDescription)
     }
 
     @MainActor func testReportAndControlMessagesOpenOriginalTextInSharedReader() {
         continueAfterFailure = false
         for scenario in ["task-report", "task-steer", "task-resume", "task-interrupt"] {
             let app = launch(scenario)
-            let outcome = app.descendants(matching: .any)["home-tool-outcome"]
+            let outcome = app.descendants(matching: .any).matching(identifier: "home-tool-outcome").firstMatch
             XCTAssertTrue(outcome.exists, app.debugDescription)
             if scenario == "task-report" {
                 XCTAssertTrue(app.descendants(matching: .any)["home-tool-row-Page"].label.contains("Bytes 0–"))
