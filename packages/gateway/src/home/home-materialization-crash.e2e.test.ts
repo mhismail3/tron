@@ -33,7 +33,7 @@ vi.mock("../util/durable-json.js", async importOriginal => {
 import { TrustService } from "../admin/trust-service.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeOwner, type HomeSessionPort } from "./home-owner.js";
-import { type RuntimeRegistry, type RuntimeLifecycleRecord } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../sessions/runtime-registry.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 
 const roots: string[] = [];

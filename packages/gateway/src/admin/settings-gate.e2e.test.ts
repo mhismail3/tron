@@ -13,7 +13,7 @@ import { TrustService } from "./trust-service.js";
 import { APPROVAL_TTL_MS } from "./settings-approvals.js";
 import type { ChangeEntry } from "./settings-record.js";
 import { SETTINGS_OUTCOME_MESSAGE } from "./tron-settings-extension.js";
-import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";

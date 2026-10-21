@@ -32,7 +32,13 @@ import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
-import { type RuntimeRegistry, HEAP_REFUSAL_RETRY_AFTER_MS, LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR, type CapacityShedRecord, type RuntimeLifecycleRecord } from "./runtime-registry.js";
+import {
+  HEAP_REFUSAL_RETRY_AFTER_MS,
+  LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
+  RuntimeRegistry,
+  type CapacityShedRecord,
+  type RuntimeLifecycleRecord,
+} from "./runtime-registry.js";
 import type { ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";

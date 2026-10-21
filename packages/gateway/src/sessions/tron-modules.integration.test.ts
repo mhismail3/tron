@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import { TRON_MODULES } from "../extensions/tron-modules.js";
 
 /** The registered module names of one real session, without the SDK's inline path form. */

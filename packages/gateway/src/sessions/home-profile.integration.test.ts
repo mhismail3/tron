@@ -39,7 +39,7 @@ import { HomeTaskStore, type HomeTaskRecord } from "../home/home-task-store.js";
 import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../admin/settings-record.js";
 import { SettingsApprovals } from "../admin/settings-approvals.js";

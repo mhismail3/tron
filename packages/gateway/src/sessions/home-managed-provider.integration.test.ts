@@ -9,7 +9,7 @@ import { expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { ManagedSubagents } from "./managed-subagents.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
 import { waitFor } from "../../test-support/wait-for.js";
 

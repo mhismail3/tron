@@ -13,7 +13,7 @@ import { SettingsChangeRecord } from "../admin/settings-record.js";
 import { TrustService } from "../admin/trust-service.js";
 import { DeviceStore } from "./device-store.js";
 import { MAC_TERMINAL_SOURCES, MacTerminalHost, MacTerminalKeys, type MacTerminalStatus } from "./mac-terminal.js";
-import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 

@@ -10,7 +10,7 @@ import type { SessionSnapshot, ExtensionRunActivity } from "../protocol/types.js
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import type { RunMarkerStore } from "./run-markers.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { chatSettingChange } from "../../test-support/chat-settings-change.js";

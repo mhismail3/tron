@@ -12,7 +12,7 @@ import { TrustService } from "../admin/trust-service.js";
 import { PackageService } from "../admin/package-service.js";
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
 import { subagentProcessesFromActivity } from "./process-activity.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
 import { waitFor } from "../../test-support/wait-for.js";
 

@@ -13,7 +13,7 @@ import { NotificationGrantStore } from "../notifications/grant-store.js";
 import { NotificationService } from "../notifications/notification-service.js";
 import type { PushRelayClient } from "../notifications/relay-client.js";
 import type { NotificationService as NotificationServiceType } from "../notifications/notification-service.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 const registries: RuntimeRegistry[] = [];

@@ -82,7 +82,7 @@ import { INLINE_IMAGE_BASE64_LIMIT_BYTES, UploadStore } from "../machine/upload-
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { RuntimeSlot } from "../sessions/runtime-slot.js";
 import { invocationReceipts } from "../sessions/invocation-receipts.js";
 import { logHomeDiagnostic } from "../home/home-diagnostic.js";

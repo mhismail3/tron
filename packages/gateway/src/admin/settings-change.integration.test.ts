@@ -25,7 +25,7 @@ import { composedBelow, readBinding, type SettingsStores } from "./settings-reso
 import { type Resolution } from "../kernel/settings/tool-contract.js";
 import { KEYS, type KeyDeclaration } from "./settings-schema.js";
 import type { PresentedResolution } from "./settings-presentation.js";
-import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 /**

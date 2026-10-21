@@ -8,7 +8,7 @@ import { NotificationGrantStore, notificationHash } from "../notifications/grant
 import { NotificationService } from "../notifications/notification-service.js";
 import type { PushRelayClient } from "../notifications/relay-client.js";
 import * as durableJson from "../util/durable-json.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 
 const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];

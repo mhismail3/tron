@@ -10,7 +10,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { initializeRegistry } from "../../test-support/runtime-registry-fixture.js";
 import { TrustService } from "../admin/trust-service.js";
-import { type RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { GatewayAutomationExecutor } from "./automation-executor.js";
 import { logAutomationDiagnostic } from "./automation-diagnostic.js";
 import { AutomationScheduler } from "./automation-scheduler.js";

@@ -23,7 +23,7 @@ import { TrustService } from "../admin/trust-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { LEGACY_CHRONICLE_CONFIG, legacyEntriesDigest, persistedKnowledgeConfig, seedLegacyChronicle } from "../../test-support/legacy-chronicle.js";
 

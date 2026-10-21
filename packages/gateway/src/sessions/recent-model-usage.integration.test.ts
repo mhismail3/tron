@@ -7,7 +7,7 @@ import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { MAXIMUM_RECENT_MODELS, type RecentModelUsage } from "../providers/recent-models.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 /** Wait for the catalog owner's first published cut: a read that lands before

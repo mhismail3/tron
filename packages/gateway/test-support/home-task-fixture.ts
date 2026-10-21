@@ -9,7 +9,7 @@ import { TrustService } from "../src/admin/trust-service.js";
 import { NotificationService } from "../src/notifications/notification-service.js";
 import { NotificationGrantStore } from "../src/notifications/grant-store.js";
 import type { PushRelayClient } from "../src/notifications/relay-client.js";
-import { type RuntimeRegistry } from "../src/sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { ManagedSubagents } from "../src/sessions/managed-subagents.js";
 import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
 import { settingsDependencies } from "./settings-dependencies.js";

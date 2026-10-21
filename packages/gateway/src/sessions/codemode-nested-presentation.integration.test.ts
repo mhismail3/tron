@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import type { NativeLiveClient, NativeLiveClientFactory } from "../display/native-live-view.js";
 import { TrustService } from "../admin/trust-service.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 const driver = vi.hoisted(() => ({ active: 0, maximumActive: 0, calls: 0 }));

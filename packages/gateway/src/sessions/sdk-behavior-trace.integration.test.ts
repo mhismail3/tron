@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import {
   clientEventTrace, collapseRepeatedRequests, compareWithGolden, eventShapePaths, hashPromptText,
   lockUpdateRequested, normalizeTraceValue, promptSectionHeadings,

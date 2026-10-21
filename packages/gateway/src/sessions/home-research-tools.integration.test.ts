@@ -40,7 +40,7 @@ import type { HomeResearchToolDetails } from "../home/home-research-tools.js";
 import { legacyEntriesDigest, seedLegacyChronicle } from "../../test-support/legacy-chronicle.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 import { SessionSearchIndex } from "./session-search-index.js";
 import { SessionSearchService } from "./session-search-service.js";
 

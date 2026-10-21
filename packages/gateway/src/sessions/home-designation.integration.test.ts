@@ -13,7 +13,7 @@ import type { GatewayConfig } from "../config.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { type RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
 
 const PROVIDER = "tron-home-fixture";
 const MODEL_ID = "home-model";

@@ -29,7 +29,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContex
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { TrustService } from "../../admin/trust-service.js";
-import { type RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { SWIFT_APPS_CAPABILITY } from "./swift-app-store.js";
