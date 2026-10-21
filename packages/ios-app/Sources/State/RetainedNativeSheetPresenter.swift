@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+#if HOSTED_TEST
+/// Passive observation is injected by the hosted fixture, never imported from it.
+@MainActor enum HostedPresentationProbe {
+    static var record: (@MainActor (String, String) -> Void)?
+    static var nativeView: (@MainActor (String) -> AnyView)?
+}
+#endif
+
 /// A native sheet's SwiftUI presentation node must outlive reconstruction of
 /// its source row. Retain the anchor's hosting graph, not a second modal stack.
 @MainActor
@@ -12,7 +20,7 @@ final class RetainedNativeSheetHost: PresentationScopedResource {
 
     #if HOSTED_TEST
     isolated deinit {
-        if controller != nil { ForegroundSheetProbe.record("anchor-deinit", "\(ObjectIdentifier(self))") }
+        if controller != nil { HostedPresentationProbe.record?("anchor-deinit", "\(ObjectIdentifier(self))") }
     }
     #endif
 
@@ -27,7 +35,7 @@ final class RetainedNativeSheetHost: PresentationScopedResource {
         controller.view.isUserInteractionEnabled = false
         self.controller = controller
         #if HOSTED_TEST
-        ForegroundSheetProbe.record("anchor-create", "\(ObjectIdentifier(self))")
+        HostedPresentationProbe.record?("anchor-create", "\(ObjectIdentifier(self))")
         #endif
         return controller
     }
@@ -36,7 +44,7 @@ final class RetainedNativeSheetHost: PresentationScopedResource {
         guard !retired else { return }
         retired = true
         #if HOSTED_TEST
-        if controller != nil { ForegroundSheetProbe.record("anchor-retire", "\(ObjectIdentifier(self))") }
+        if controller != nil { HostedPresentationProbe.record?("anchor-retire", "\(ObjectIdentifier(self))") }
         #endif
         controller?.rootView = AnyView(EmptyView())
     }

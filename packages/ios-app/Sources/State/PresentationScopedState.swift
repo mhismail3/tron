@@ -61,7 +61,7 @@ final class PresentationStateScope {
 
     fileprivate func retire() {
         #if HOSTED_TEST
-        ForegroundSheetProbe.record("scope-retire", path)
+        HostedPresentationProbe.record?("scope-retire", path)
         #endif
         guard !isRetired else { return }
         // Teardown reads the presentation's state, so it runs before the state goes.
