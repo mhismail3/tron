@@ -1,4 +1,5 @@
 import { GatewayError } from "../errors.js";
+import { admitKey } from "./settings-registry.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../kernel/run/compaction-policy.js";
 import { validateMacTerminalKey } from "../security/mac-terminal.js";
@@ -68,9 +69,9 @@ export interface KeyDeclaration {
   qualifier?: QualifierName;
   type: ValueType;
   optionsSource?: { name: string; dependsOn: readonly string[] };
+  sessionOverridable: boolean;
+  projectSettable: boolean;
   layers: Partial<Record<Exclude<LayerId, "builtin">, Binding>>;
-  /** A curated Home runtime may admit fewer layers and a different built-in.
-   * This is key metadata, not a second client/runtime settings definition. */
   home?: { layers: readonly Exclude<LayerId, "builtin">[]; builtin?: unknown };
   /** The built-in value. `undefined` means none: the key is unset. */
   builtin?: unknown;
@@ -253,17 +254,17 @@ const TIER_ORDER = ["quiet", "notify", "approve"];
 const lowers = (before: unknown, after: unknown): Direction =>
   TIER_ORDER.indexOf(String(after)) < TIER_ORDER.indexOf(String(before)) ? "widen" : "narrow";
 
-export const KEYS: readonly KeyDeclaration[] = [
+export const KEYS: readonly KeyDeclaration[] = ([
   // Model ---------------------------------------------------------------
   {
-    id: "model.ref[role=chat]", group: "model", fixed: { role: "chat" }, type: types.modelRef(),
+    id: "model.ref[role=chat]", sessionOverridable: true, projectSettable: true, group: "model", fixed: { role: "chat" }, type: types.modelRef(),
     optionsSource: { name: "catalog.models", dependsOn: [] },
     layers: { chat: { store: "chat", field: "model" }, profile: { store: "profile", path: ["model", "chat"] }, ...both({ store: "pi-model-ref" }) },
     timing: "fixed", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
     label: "Model", help: "The model this chat runs.", order: 10, importance: "essential", control: "catalog", fallback: "readOnly",
   },
   {
-    id: "model.thinking[role=chat]", group: "model", fixed: { role: "chat" }, qualifier: "model", type: thinkingType,
+    id: "model.thinking[role=chat]", sessionOverridable: true, projectSettable: true, group: "model", fixed: { role: "chat" }, qualifier: "model", type: thinkingType,
     builtin: "medium", // Pinned SDK DEFAULT_THINKING_LEVEL; capability clamping is resolver-owned.
     optionsSource: { name: "catalog.thinkingLevels", dependsOn: ["model.ref[role=chat]"] },
     layers: {
@@ -275,7 +276,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     order: 20, importance: "essential", control: "choice",
   },
   {
-    id: "model.contextWindow", group: "model", qualifier: "model", type: types.integer(1_024, 100_000_000, "tokens"),
+    id: "model.contextWindow", sessionOverridable: true, projectSettable: true, group: "model", qualifier: "model", type: types.integer(1_024, 100_000_000, "tokens"),
     optionsSource: { name: "catalog.contextWindow", dependsOn: ["model.ref[role=chat]"] },
     layers: { chat: { store: "chat", field: "contextWindow" }, ...both(pi("modelContextWindows", "{model}")) },
     timing: "fixed", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
@@ -283,13 +284,13 @@ export const KEYS: readonly KeyDeclaration[] = [
     order: 30, importance: "essential", control: "number",
   },
   {
-    id: "model.thinkingBudgets", group: "workers", type: thinkingBudgetsType(),
+    id: "model.thinkingBudgets", sessionOverridable: false, projectSettable: false, group: "workers", type: thinkingBudgetsType(),
     layers: both(pi("thinkingBudgets")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ANY_ACTOR,
     label: "Thinking budgets", help: "Token budget per thinking level, for models that take one.", order: 60, importance: "advanced",
     control: "list",
   },
   {
-    id: "model.offered", group: "workers", type: types.stringList(500),
+    id: "model.offered", sessionOverridable: false, projectSettable: true, group: "workers", type: types.stringList(500),
     layers: both(pi("enabledModels")), timing: "live", effect: "next-turn", floor: "quiet", writers: ["ui", "home"],
     label: "Offered models", help: "Models offered in the picker. Empty offers every model.", order: 70,
     importance: "advanced", control: "list",
@@ -297,7 +298,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     entry: { hint: "A provider/model ID, or a pattern where * matches any text.", example: "anthropic/claude-sonnet-*" },
   },
   {
-    id: "model.thinking[role=summarizer]", home: { layers: [] }, group: "context", fixed: { role: "summarizer" },
+    id: "model.thinking[role=summarizer]", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "context", fixed: { role: "summarizer" },
     type: types.choice([{ value: "inherit", label: "Same as chat", detail: "Uses the chat's own thinking level" }, ...THINKING], true),
     layers: both(pi("compaction", "thinkingLevel")), builtin: "inherit", timing: "live", effect: "next-compaction", floor: "quiet",
     writers: ANY_ACTOR, label: "Summary thinking", help: "Thinking level for compaction summaries.", order: 80,
@@ -306,7 +307,7 @@ export const KEYS: readonly KeyDeclaration[] = [
   ...MODEL_QUEUE_ROLES.map((role, index): KeyDeclaration => ({
     // An ordered fallback queue (settings-model.md 6.3): the first available
     // model runs; a usage-limit error or a provider at 95% usage moves to the next.
-    id: modelQueueKey(role), group: "workers", fixed: { role }, type: modelQueueType(role),
+    id: modelQueueKey(role), sessionOverridable: true, projectSettable: false, group: "workers", fixed: { role }, type: modelQueueType(role),
     optionsSource: { name: "catalog.models", dependsOn: [] }, builtin: [],
     layers: { ...(role === "background" ? {} : { chat: { store: "chat-launch" as const } }),
       profile: { store: "profile", path: ["modelQueue", role] }, mac: { store: "gateway", path: ["modelQueues", role] } },
@@ -316,14 +317,14 @@ export const KEYS: readonly KeyDeclaration[] = [
     entry: { hint: "A provider/model ID. Tron uses the first available model in this order.", example: "anthropic/claude-haiku-5-5" },
   })),
   {
-    id: "model.thinking[role=worker]", group: "workers", fixed: { role: "worker" }, type: sameAsHomeChoice(thinkingType),
+    id: "model.thinking[role=worker]", sessionOverridable: true, projectSettable: false, group: "workers", fixed: { role: "worker" }, type: sameAsHomeChoice(thinkingType),
     layers: { profile: { store: "profile", path: ["thinking", "worker"] } }, builtin: { sameAs: "home" },
     timing: "fixed", effect: "delegate", floor: "notify", writers: ["ui", "home"],
     label: "Worker thinking", help: "The thinking level Home's task workers start with.", order: 41, importance: "essential", control: "choice",
   },
   // Context -------------------------------------------------------------
   {
-    id: "context.compaction.enabled", home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.boolean(),
+    id: "context.compaction.enabled", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.boolean(),
     // The Chat layer is applied by the session's CompactionOperationPolicy, which
     // overlays this chat's `tron.settings.v1` values on Project and Mac (decision 9).
     layers: chatPi("compaction", "enabled"), builtin: true, timing: "live", effect: "next-compaction", floor: "quiet",
@@ -331,36 +332,36 @@ export const KEYS: readonly KeyDeclaration[] = [
     order: 10, importance: "essential", control: "toggle",
   },
   {
-    id: "context.compaction.reserveTokens", home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(1_024, 1_000_000, "tokens"),
+    id: "context.compaction.reserveTokens", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(1_024, 1_000_000, "tokens"),
     layers: { chat: { store: "chat-settings", path: ["compaction", "reserveTokens"] }, ...both({ store: "pi", path: ["compaction", "reserveTokens"], qualified: ["compaction", "modelOverrides", "{model}", "reserveTokens"] }) },
     builtin: 16_384, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
     label: "Response reserve", help: "Tokens kept free for the reply. Compaction starts once the conversation fills the context window minus this.", order: 20, importance: "advanced", control: "number",
   },
   {
-    id: "context.compaction.keepRecentTokens", home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
+    id: "context.compaction.keepRecentTokens", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
     layers: { chat: { store: "chat-settings", path: ["compaction", "keepRecentTokens"] }, ...both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }) },
     builtin: 20_000, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
     label: "Kept after compaction", help: "The latest tokens of conversation kept word for word; older turns become a summary.", order: 30, importance: "advanced", control: "number",
   },
   {
-    id: "context.compaction.instructions", home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.text(COMPACTION_POLICY_INSTRUCTION_LIMIT, { raw: true }),
+    id: "context.compaction.instructions", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.text(COMPACTION_POLICY_INSTRUCTION_LIMIT, { raw: true }),
     layers: chatPi("compaction", "instructions"), timing: "live", effect: "next-compaction", floor: "notify", writers: ["ui", "home"],
     label: "Summary instructions", help: "Extra instructions for compaction summaries.", order: 40, importance: "advanced", control: "text",
     entry: { hint: "Plain sentences added to the summary prompt.", example: "Keep file paths and open decisions." },
   },
   {
-    id: "context.branchSummary.reserveTokens", home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.integer(1_024, 1_000_000, "tokens"),
+    id: "context.branchSummary.reserveTokens", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.integer(1_024, 1_000_000, "tokens"),
     layers: both(pi("branchSummary", "reserveTokens")), builtin: 16_384, timing: "live", effect: "next-compaction", floor: "quiet",
     writers: ANY_ACTOR, label: "Branch summary reserve", help: "Tokens reserved when summarizing an abandoned branch.",
     order: 50, importance: "advanced", control: "number",
   },
   {
-    id: "context.images.autoResize", group: "tools", subgroup: "Images", type: types.boolean(),
+    id: "context.images.autoResize", sessionOverridable: true, projectSettable: true, group: "tools", subgroup: "Images", type: types.boolean(),
     layers: chatPi("images", "autoResize"), builtin: true, timing: "fixed", effect: "new-chat", floor: "quiet", writers: ANY_ACTOR,
     label: "Resize images", help: "Shrink large images before they are sent.", order: 60, importance: "advanced", control: "toggle",
   },
   {
-    id: "context.images.block", group: "tools", subgroup: "Images", type: types.boolean(["Blocked", "Allowed"]),
+    id: "context.images.block", sessionOverridable: true, projectSettable: false, group: "tools", subgroup: "Images", type: types.boolean(["Blocked", "Allowed"]),
     layers: chatPi("images", "blockImages"), builtin: false, timing: { narrow: "live", widen: "fixed" }, effect: "next-request",
     floor: { widen: "approve", narrow: "quiet" }, direction: turnsOn, writers: ANY_ACTOR,
     label: "Block images", help: "Replace images with a placeholder for the model.", order: 70, importance: "advanced", control: "toggle",
@@ -368,7 +369,7 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   // Tools ---------------------------------------------------------------
   {
-    id: "tools.active", group: "tools", type: toolSelectionType(),
+    id: "tools.active", sessionOverridable: true, projectSettable: false, group: "tools", type: toolSelectionType(),
     optionsSource: { name: "catalog.tools", dependsOn: [] },
     layers: { chat: { store: "chat", field: "tools" }, profile: { store: "profile", path: ["tools"] }, ...both(pi("defaultTools")) },
     home: { layers: ["chat", "profile"], builtin: HOME_TOOL_NAMES },
@@ -377,7 +378,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     label: "Tools", help: "The tools the model may call.", order: 10, importance: "essential", control: "checklist",
   },
   {
-    id: "tools.codemode.mode", home: { layers: [] }, group: "tools", type: types.choice([
+    id: "tools.codemode.mode", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "tools", type: types.choice([
       { value: "on", label: "On", detail: "The model calls tools directly or from a script" },
       { value: "only", label: "Only code mode", detail: "The model calls tools only from scripts" },
     ]),
@@ -385,25 +386,25 @@ export const KEYS: readonly KeyDeclaration[] = [
     writers: ["ui", "home"], label: "Code mode", help: "Let the model call tools from a script.", order: 20, importance: "advanced", control: "choice",
   },
   {
-    id: "tools.codemode.inlineBudget", home: { layers: [] }, group: "tools", type: types.integer(0, 1_000_000, "bytes"),
+    id: "tools.codemode.inlineBudget", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "tools", type: types.integer(0, 1_000_000, "bytes"),
     layers: both(pi("codemode", "inlineBudget")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ["ui", "home"],
     label: "Inline budget", help: "Bytes of script output returned inline.", order: 30, importance: "advanced", control: "number",
   },
   {
-    id: "tools.shell.path", home: { layers: [] }, group: "tools", type: types.text(4_096),
+    id: "tools.shell.path", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "tools", type: types.text(4_096),
     layers: both(pi("shellPath")), timing: "fixed", effect: "new-chat", floor: "notify", writers: ["ui", "home"],
     label: "Shell", help: "The shell the bash tool runs.", order: 40, importance: "advanced", control: "text",
     entry: { hint: "The path to a Bash executable on the Mac. ~ is allowed.", example: "/opt/homebrew/bin/bash" },
   },
   {
-    id: "tools.shell.commandPrefix", home: { layers: [] }, group: "tools", type: types.text(4_096),
+    id: "tools.shell.commandPrefix", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "tools", type: types.text(4_096),
     layers: both(pi("shellCommandPrefix")), timing: "fixed", effect: "new-chat", floor: "notify", writers: ["ui", "home"],
     label: "Command prefix", help: "Text run before every shell command.", order: 50, importance: "advanced", control: "text",
     entry: { hint: "Shell code run before each command, on one line.", example: "shopt -s expand_aliases" },
   },
   // Permissions ---------------------------------------------------------
   {
-    id: "permissions.projectTrust", group: "trust", qualifier: "project", type: types.boolean(["Trusted", "Not trusted"]),
+    id: "permissions.projectTrust", sessionOverridable: false, projectSettable: false, group: "trust", qualifier: "project", type: types.boolean(["Trusted", "Not trusted"]),
     layers: { mac: { store: "trust" } }, timing: "live", effect: "reload", floor: { widen: "approve", narrow: "notify" }, direction: grants,
     writers: ["ui", "home"], label: "Trust for this project", help: "Lets this project's extensions, hooks and settings load.",
     order: 10, importance: "essential", control: "toggle", confirm: "Trusting a project runs its extensions and hooks.",
@@ -412,7 +413,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     // A paired iPhone's Mac Terminal key: its line in ~/.ssh/authorized_keys.
     // Adding one lets that iPhone's Secure Enclave key log in over Tailscale,
     // so it is a credential addition (approve); removing it is a revocation.
-    id: "permissions.macTerminalKey", group: "connections", subgroup: "Mac Terminal", qualifier: "device",
+    id: "permissions.macTerminalKey", sessionOverridable: false, projectSettable: false, group: "connections", subgroup: "Mac Terminal", qualifier: "device",
     type: {
       kind: "text",
       validate: (value: unknown, label: string) => validateMacTerminalKey(value, label),
@@ -429,7 +430,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     confirm: "This iPhone's key will be added to ~/.ssh/authorized_keys and can log in to your Mac account over Tailscale.",
   },
   {
-    id: "permissions.defaultProjectTrust", group: "trust",
+    id: "permissions.defaultProjectTrust", sessionOverridable: false, projectSettable: false, group: "trust",
     type: types.choice([
       { value: "ask", label: "Ask", detail: "Asks you the first time a project opens" },
       { value: "always", label: "Always trust", detail: "Loads every project's extensions and hooks" },
@@ -444,7 +445,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     // Lowering a floor widens what agents may do, so it is this key's widen
     // direction and its floor is approve; only the maintainer's tap writes it,
     // and that tap is the approval (doc 4.2, F3). Nothing else is special.
-    id: "permissions.floor", group: "approvals", subgroup: "Floors", qualifier: "key", type: tierType(),
+    id: "permissions.floor", sessionOverridable: false, projectSettable: false, group: "approvals", subgroup: "Floors", qualifier: "key", type: tierType(),
     layers: { mac: { store: "floors" } }, builtinFor: (qualifiers) => codeFloor(qualifiers),
     timing: "live", effect: "next-change", floor: { widen: "approve", narrow: "quiet" }, direction: lowers, writers: ["ui"],
     label: "Agent approvals", help: "Which setting changes need your OK.",
@@ -455,7 +456,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     // Profile only (doc 6.2): Home's tasks read it at dispatch. A raise never
     // reaches a running task (widen is fixed at its start); a lower applies at
     // its next turn boundary (narrow live). Unset is no limit, today's behaviour.
-    id: "permissions.budget.task", group: "workers", type: taskBudgetType(),
+    id: "permissions.budget.task", sessionOverridable: true, projectSettable: false, group: "workers", type: taskBudgetType(),
     layers: { profile: { store: "profile", path: ["budget", "task"] } }, timing: { narrow: "live", widen: "fixed" }, effect: "delegate",
     floor: { widen: "approve", narrow: "quiet" }, direction: raisesBudget, writers: ["ui", "home"],
     label: "Task budget", help: "Tokens one Home task may use, cached included. Empty is no limit.",
@@ -463,48 +464,48 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   // Run -----------------------------------------------------------------
   {
-    id: "run.queue.steeringMode", group: "run", subgroup: "Queue", type: types.choice(QUEUE),
+    id: "run.queue.steeringMode", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Queue", type: types.choice(QUEUE),
     layers: chatPi("steeringMode"), builtin: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
     label: "Steering delivery", help: "How queued steering messages reach a running turn.", order: 10, importance: "advanced", control: "choice",
   },
   {
-    id: "run.queue.followUpMode", group: "run", subgroup: "Queue", type: types.choice(QUEUE),
+    id: "run.queue.followUpMode", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Queue", type: types.choice(QUEUE),
     layers: chatPi("followUpMode"), builtin: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
     label: "Follow-up delivery", help: "How queued follow-up messages are delivered after a turn.", order: 20, importance: "advanced", control: "choice",
   },
   {
-    id: "run.retry.enabled", group: "run", subgroup: "Retry", type: types.boolean(),
+    id: "run.retry.enabled", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.boolean(),
     layers: chatPi("retry", "enabled"), builtin: true, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Retry", help: "Retry a failed model request.", order: 30, importance: "advanced", control: "toggle",
   },
   {
-    id: "run.retry.maxRetries", group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
+    id: "run.retry.maxRetries", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
     layers: chatPi("retry", "maxRetries"), builtin: 3, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Retries", help: "How many times a failed request is retried.", order: 40, importance: "essential", control: "number",
   },
   {
-    id: "run.retry.baseDelayMs", group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
+    id: "run.retry.baseDelayMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
     layers: chatPi("retry", "baseDelayMs"), builtin: 2_000, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Retry delay", help: "The first delay between retries; later delays grow.", order: 50, importance: "advanced", control: "number",
   },
   {
-    id: "run.retry.provider.timeoutMs", group: "run", subgroup: "Retry", type: types.integer(1_000, 3_600_000, "ms"),
+    id: "run.retry.provider.timeoutMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(1_000, 3_600_000, "ms"),
     layers: chatPi("retry", "provider", "timeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Provider timeout", help: "The provider client's request timeout.", order: 60, importance: "advanced", control: "number",
   },
   {
-    id: "run.retry.provider.maxRetries", group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
+    id: "run.retry.provider.maxRetries", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
     layers: chatPi("retry", "provider", "maxRetries"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Provider retries", help: "Retries inside the provider client.", order: 70, importance: "advanced", control: "number",
   },
   {
-    id: "run.retry.provider.maxRetryDelayMs", group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
+    id: "run.retry.provider.maxRetryDelayMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
     layers: chatPi("retry", "provider", "maxRetryDelayMs"), builtin: 60_000, timing: "live", effect: "next-request", floor: "quiet",
     writers: ANY_ACTOR, label: "Provider retry delay cap", help: "The longest delay the provider client waits.",
     order: 80, importance: "advanced", control: "number",
   },
   {
-    id: "run.transport", group: "run", subgroup: "Connection",
+    id: "run.transport", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Connection",
     type: types.choice([
       { value: "auto", label: "Automatic", detail: "The provider's best available transport" },
       { value: "sse", label: "SSE", detail: "Server-sent events over HTTP" },
@@ -515,22 +516,22 @@ export const KEYS: readonly KeyDeclaration[] = [
     label: "Transport", help: "How requests reach the provider.", order: 90, importance: "essential", control: "choice",
   },
   {
-    id: "run.httpIdleTimeoutMs", group: "run", subgroup: "Connection", type: types.integer(1_000, 3_600_000, "ms"),
+    id: "run.httpIdleTimeoutMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Connection", type: types.integer(1_000, 3_600_000, "ms"),
     layers: chatPi("httpIdleTimeoutMs"), builtin: 300_000, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Idle timeout", help: "How long a silent HTTP stream may idle.", order: 100, importance: "advanced", control: "number",
   },
   {
-    id: "run.websocketConnectTimeoutMs", group: "run", subgroup: "Connection", type: types.integer(1_000, 300_000, "ms"),
+    id: "run.websocketConnectTimeoutMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Connection", type: types.integer(1_000, 300_000, "ms"),
     layers: chatPi("websocketConnectTimeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "WebSocket connect timeout", help: "How long a WebSocket connection may take to open.", order: 110, importance: "advanced", control: "number",
   },
   {
-    id: "run.httpProxy", group: "run", subgroup: "Connection", type: types.text(4_096), redacted: true,
+    id: "run.httpProxy", sessionOverridable: false, projectSettable: false, group: "run", subgroup: "Connection", type: types.text(4_096), redacted: true,
     layers: { mac: pi("httpProxy") }, timing: "live", effect: "restart", floor: "notify", writers: ["ui"],
     label: "HTTP proxy", help: "Proxy for model requests. Applies after a restart.", order: 120, importance: "advanced", control: "secret",
   },
   {
-    id: "run.cacheWarming", home: { layers: [] }, group: "run", subgroup: "Connection",
+    id: "run.cacheWarming", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "run", subgroup: "Connection",
     type: types.choice([
       { value: "off", label: "Off", detail: "Prompt caches are never kept warm" },
       { value: "streaming", label: "While running", detail: "Caches stay warm while a turn runs" },
@@ -542,18 +543,18 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   // Sources -------------------------------------------------------------
   ...(["extensions", "skills", "prompts", "themes"] as const).map((name, index): KeyDeclaration => ({
-    id: `sources.${name}`, home: { layers: [] }, group: "sources", subgroup: "Search paths", type: types.stringList(500),
+    id: `sources.${name}`, sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", subgroup: "Search paths", type: types.stringList(500),
     layers: both(pi(name)), timing: "fixed", effect: "reload", floor: { widen: "notify", narrow: "quiet" }, direction: toolsDirection,
     writers: ["ui", "home"], label: name[0]!.toUpperCase() + name.slice(1), help: `Paths searched for ${name}.`,
     order: 10 + index * 10, importance: "advanced", control: "list", entry: SEARCH_PATH_ENTRY[name],
   })),
   {
-    id: "sources.packages", home: { layers: [] }, group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
+    id: "sources.packages", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
     floor: { widen: "notify", narrow: "quiet" }, direction: (b, a) => larger(Array.isArray(b) ? b.length : 0, Array.isArray(a) ? a.length : 0),
     writers: ["ui", "home"], label: "Packages", help: "Installed pi packages.", order: 50, importance: "essential", control: "readOnly",
   },
   {
-    id: "sources.npmCommand", home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { mac: pi("npmCommand") }, timing: "live", effect: "next-change",
+    id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { mac: pi("npmCommand") }, timing: "live", effect: "next-change",
     floor: "notify", writers: ["ui"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
     // pi runs the first value as the program and passes the rest before its own npm arguments.
     entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
@@ -562,13 +563,13 @@ export const KEYS: readonly KeyDeclaration[] = [
   {
     // No writer: the runtime snapshots its session folder under the ownership
     // lock at start, so it changes only while the Gateway is stopped.
-    id: "setup.sessionDir", group: "setup", type: types.text(4_096), layers: { mac: pi("sessionDir") }, timing: "live", effect: "restart",
+    id: "setup.sessionDir", sessionOverridable: false, projectSettable: false, group: "setup", type: types.text(4_096), layers: { mac: pi("sessionDir") }, timing: "live", effect: "restart",
     floor: "notify", writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
     order: 10, importance: "advanced", control: "text",
     entry: { hint: "A folder path on the Mac. Start with ~ or /.", example: "~/Documents/Tron Sessions" },
   },
   {
-    id: "setup.installTelemetry", group: "setup", type: types.boolean(), layers: { mac: pi("enableInstallTelemetry") }, builtin: true,
+    id: "setup.installTelemetry", sessionOverridable: false, projectSettable: false, group: "setup", type: types.boolean(), layers: { mac: pi("enableInstallTelemetry") }, builtin: true,
     timing: "live", effect: "next-request", floor: "quiet", writers: ["ui"], label: "Install telemetry",
     help: "Send pi's anonymous install attribution header.", order: 20, importance: "advanced", control: "toggle",
   },
@@ -578,14 +579,14 @@ export const KEYS: readonly KeyDeclaration[] = [
     // (open on a device, running a program, holding typed input) never close.
     // TerminalService reads it at every idle pass, so a change applies live;
     // Mac Terminal's shell host reads the same store (machine/mac-terminal-host.ts).
-    id: "setup.terminalIdleMinutes", group: "setup", type: terminalIdleType(),
+    id: "setup.terminalIdleMinutes", sessionOverridable: false, projectSettable: false, group: "setup", type: terminalIdleType(),
     layers: { mac: { store: "gateway", path: ["terminal", "idleMinutes"] } }, builtin: TERMINAL_IDLE_DEFAULT_MINUTES,
     timing: "live", effect: "next-change", floor: "notify", writers: ANY_ACTOR,
     label: "Close idle terminals",
     help: "Closes an app terminal or Mac Terminal shell no device has open, sitting at an empty prompt with nothing typed, after this long.",
     order: 30, importance: "advanced", control: "choice",
   },
-];
+] satisfies readonly KeyDeclaration[]).map(admitKey);
 
 const byId = new Map(KEYS.map(key => [key.id, key]));
 

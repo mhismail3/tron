@@ -1115,6 +1115,12 @@ export class SettingsChangePath {
       if (request.layer === "chat" && chatModel) qualifiers.model = `${chatModel.provider}/${chatModel.id}`;
       else throw new GatewayError("invalid_request", `${key.label} needs a model qualifier`);
     }
+    const projectBinding = key.layers.project;
+    if (request.layer === "chat" && projectBinding && stores.project?.applied) {
+      const value = readBinding(stores, "project", projectBinding, qualifiers, true, key.id)
+        ?? readBinding(stores, "project", projectBinding, qualifiers, false, key.id);
+      if (value !== undefined) throw new GatewayError("conflict", `${key.label} is set by ${join(stores.project.root, ".pi", "settings.json")}; edit its Project key instead. The Session override is retained inactive.`);
+    }
     if (binding.store === "chat-launch") throw new GatewayError("invalid_request", "Delegation launch inputs are read-only");
     if (binding.store === "chat-settings" && !hasChatSettingsApplier(key)) {
       throw new GatewayError("unsupported", `${key.label} has no writable ${LAYER_LABELS[request.layer]} store yet`);

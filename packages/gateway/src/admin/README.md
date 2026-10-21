@@ -11,7 +11,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 
 | Area | Files |
 |---|---|
-| Settings schema, formatting and validation | `settings-schema.ts` (`KEYS`, `RECORD_SUBJECTS`), `settings-types.ts`; shared vocabulary: [kernel settings](../kernel/settings/README.md) |
+| Settings schema, formatting and validation | `settings-schema.ts` (`KEYS`, `RECORD_SUBJECTS`), `settings-registry.ts` (binding admission from `sessionOverridable`/`projectSettable`), `settings-types.ts`; vocabulary: [kernel settings](../kernel/settings/README.md) |
 | Resolution and presentation | `settings-resolver.ts`, `settings-model.ts` (`SettingsModel`), `settings-presentation.ts` |
 | Change path and policy | `settings-model.ts` (`SettingsChangePath`), `settings-record.ts`, `settings-approvals.ts`, `settings-risk.ts` |
 | Appliers and outside writers | `project-settings-writer.ts`, `trust-service.ts`, `settings-outside.ts` (`OutsideChanges`) |

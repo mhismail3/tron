@@ -73,7 +73,7 @@ export interface OptionSources {
 
 
 
-const BOTTOM_UP: readonly LayerId[] = ["builtin", "mac", "project", "profile", "chat"];
+const BOTTOM_UP: readonly LayerId[] = ["builtin", "mac", "profile", "chat", "project"];
 
 function readPath(document: Record<string, unknown> | undefined, path: readonly string[]): unknown {
   let current: unknown = document;
@@ -420,6 +420,6 @@ export function targetLayers(target: SettingsTarget, options: { home?: boolean; 
     case "home": return ["profile", "mac", "builtin"];
     case "session": return options.home
       ? ["chat", "profile", "mac", "builtin"]
-      : options.project === false ? ["chat", "mac", "builtin"] : ["chat", "project", "mac", "builtin"];
+      : options.project === false ? ["chat", "mac", "builtin"] : ["project", "chat", "mac", "builtin"];
   }
 }
