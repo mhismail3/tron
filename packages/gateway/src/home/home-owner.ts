@@ -12,7 +12,7 @@ import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapt
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { HomeChapterList, HomeProfileList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryView, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
-import { readHomeProfile } from "./home-profile.js";
+import { readHomeProfile, profileListItem } from "./home-profile.js";
 import type { SessionEntry } from "../kernel/pi/coding-agent.js";
 import { historyEntry } from "../kernel/projection/history.js";
 import type { EpisodicMemory } from "../episodic/episodic-memory.js";
@@ -165,6 +165,7 @@ export interface HomeOwnerOptions {
   taskDiagnostic?: (record: HomeTaskDiagnostic) => void;
   /** Knowledge supplies the learned profile section of Home's system prompt. */
   knowledge: () => KnowledgeService | undefined;
+  profileDiagnostic?: (sessionId: string, message: string) => void;
 }
 
 /** Tron Home's neutral workspace. It is never part of a Project, so project
@@ -778,8 +779,7 @@ export class HomeOwner {
     if (!knowledge) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
     const read = await readHomeProfile(knowledge);
     return {
-      items: read.items.map(item => ({ id: item.id, revisionId: item.revisionId, kind: item.kind, text: item.text, confirmed: item.confirmed,
-        status: item.status, createdAt: item.record.createdAt, updatedAt: item.record.updatedAt })),
+      items: read.items.map(profileListItem),
       unclassified: read.unclassified,
     };
   }
@@ -1081,7 +1081,11 @@ export class HomeOwner {
     if (!policy) {
       policy = new HomeRequestPolicy({
         prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => this.memoryView(activation, signal),
-        prepareSystemPrompt: async (base: string) => homeSystemPrompt(base, this.options.knowledge, await this.currentChatChoice(sessionId)),
+        prepareSystemPrompt: async (base: string) => {
+          const system = await homeSystemPrompt(base, this.options.knowledge, await this.currentChatChoice(sessionId));
+          for (const message of system.profileDiagnostics ?? []) this.options.profileDiagnostic?.(sessionId, message);
+          return system;
+        },
         ...(this.options.requestDiagnostic ? { onRecord: this.options.requestDiagnostic } : {}),
       });
       this.policies.set(sessionId, policy);

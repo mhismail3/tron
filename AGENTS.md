@@ -1,7 +1,6 @@
 # Tron charter
 
-Tron is the user-facing agent; Pi is its pinned SDK, named only in technical docs. These
-rules bind every change; `[check]` names today's enforcement. Skills add procedures only.
+Tron is the user-facing agent; Pi is its pinned SDK, named only in technical docs. These rules bind every change; `[check]` names today's enforcement. Skills add procedures only.
 
 ## Safety boundaries
 
@@ -34,11 +33,13 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 ## Architecture invariants
 
 - One live Gateway runtime owns each canonical session; never open it in a second client.
+  Home is fully hot-reloadable, with the same global skills, prompt templates and commands as ordinary chats.
 - Mutations serialize per session with command IDs and bounded receipts; sessions run
   concurrently. Accepted prompts survive disconnects; reconnect gets an authoritative
   snapshot; interrupted prompts are never replayed automatically.
-- Runtime JSONL, settings, credentials, packages, resources, compaction and retries are
-  canonical; iOS caches and Gateway snapshots are bounded projections, never second schemas.
+- Runtime JSONL, settings, credentials, packages, resources, compaction and retries are canonical.
+  Settings: Gateway-declared keys, generic iOS rendering; Session > Home > Project > Mac > built-in; stores are truth, the log is audit; shared groups and calm styling.
+  Home memory is the single history; legacy Chronicle stays searchable, never a parallel generator. iOS caches and Gateway snapshots are bounded projections, never second schemas.
 - Trust gates executable project resources but is not a sandbox, and copy says so. The
   Mac wrapper's credential is separate from device and legacy credentials.
 - Exposure binds explicitly: loopback by default; Tailscale its own interface; LAN (on
@@ -60,17 +61,17 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   bounds and cleanup; fix misplaced ownership instead of adding flags, caches, timers,
   retries or parallel state. Presentation reads are disposable and fenced to the latest
   request through every await; accepted mutations stay with their receipt coordinator.
+  Shared web/mini-app assets and sources have canonical documented, worker-findable locations and update/preview/validation instructions; keep versioned source apart from releases, state and review artifacts.
 - **Preserve the product:** no change to UI, UX, copy, model-visible prompts/tools or
-  behavior unless requested; protect chat identity, scroll, layout, composer/keyboard,
-  accessibility, Dynamic Type and focus. UI reuses the shared owners
-  ([Presentation parity](packages/ios-app/docs/architecture.md#presentation-parity));
+  behavior unless requested; protect chat identity, scroll, layout, composer/keyboard, accessibility, Dynamic Type and focus.
+  iOS stays SwiftUI with current look/behavior. UIKit only for measured hotspots, each a previewed, lock-validated, pixel-identical slice deleting its SwiftUI version.
+  UI reuses the shared owners ([Presentation parity](packages/ios-app/docs/architecture.md#presentation-parity));
   a new pattern updates that owner and its docs, with proof.
 - **Prove rather than imply** (inspected ≠ inferred ≠ reproduced ≠ verified); label visuals
   honestly; comments explain why. Whoever adds, moves or deletes a file updates every
   reference; commit no scratch or reports (`progress.md` is gitignored).
-- **Dependencies:** exact versions with lockfiles; Node via `scripts/tron-node exec`, not
-  the signed Gateway runtime on PATH. Pi SDK and `pi-subagents` change only atomically
-  through their updaters; a Pi behavior delta stops for a decision (Gateway README).
+- **Dependencies:** exact versions with lockfiles; Node via `scripts/tron-node exec`, not the signed Gateway runtime on PATH.
+  Pi SDK and `pi-subagents` change only atomically through their updaters; a Pi behavior delta stops for a decision (Gateway README).
 
 ## Testing policy
 
@@ -97,8 +98,7 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 ## Validation and landing
 
-Workers run relevant tests directly. No hosted check, gate, queue, admission, receipt,
-post-merge checker or auto-revert; none without measured benefit and maintainer approval.
+Workers run relevant tests directly. No hosted check, gate, queue, admission, receipt, post-merge checker or auto-revert; none without measured benefit and maintainer approval.
 
 1. Commit in your own worktree (`git config rerere.enabled true`); `git fetch origin &&
    git rebase origin/main` (or merge); run `scripts/tron verify --changed`: it selects only

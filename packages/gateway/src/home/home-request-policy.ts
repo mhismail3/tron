@@ -153,6 +153,7 @@ export interface HomeRequestStep {
 /** Home's system prompt for one activation, as its two parts. The request carries
  * their concatenation, `instructions` then `profile`. */
 export interface HomeSystemPrompt {
+  profileDiagnostics?: string[];
   /** The SDK's base prompt followed by Home's operating context. */
   instructions: string;
   /** The learned-profile section. */

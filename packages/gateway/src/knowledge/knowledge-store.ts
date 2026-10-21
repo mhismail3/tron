@@ -1810,6 +1810,62 @@ export class KnowledgeStore {
       return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, preview: request.preview } }, request.expectedRevision);
     }, undefined, signal);
   }
+  /** One forward profile organization transaction. Text, provenance and prior revisions
+   * remain with Knowledge; only owner labels change. Backup is durable before any head moves. */
+  async readProfileNotes(): Promise<{ notes: Array<KnowledgeRecord & { kind: "note" }>; diagnostics: string[] }> {
+    return this.readState(async (state, paths) => {
+      const notes: Array<KnowledgeRecord & { kind: "note" }> = [];
+      const diagnostics: string[] = [];
+      for (const [id, head] of state.records.entries()) {
+        if (head.kind !== "note" || head.scope !== "personal") continue;
+        try {
+          const note = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
+          if (!note || this.recordHardErased(state, note) || this.recordExcluded(state, note)) continue;
+          if (note.kind === "note" && note.content.tags?.includes("home-profile")) notes.push(note);
+        } catch {
+          // A damaged immutable body must not suppress unrelated accepted rules.
+          diagnostics.push(`Profile diagnostic: Knowledge file records/${id}/${head.latestRevisionId}.json is missing or corrupt; other profile files remain loaded.`);
+        }
+      }
+      return { notes, diagnostics };
+    });
+  }
+
+  async organizeProfile(commandId: string, assignments: ReadonlyArray<{ id: string; expectedRevision: string; file: string }>): Promise<{ records: KnowledgeRecord[]; backup: string | null }> {
+    return this.mutate("knowledge.profile.organize", commandId, assignments, async (state, paths) => {
+      if (!assignments.length || assignments.length > 500 || new Set(assignments.map(item => item.id)).size !== assignments.length) throw invalid("Profile migration requires distinct assignments for 1..500 notes");
+      const notes: KnowledgeRecord[] = [];
+      for (const [id, head] of state.records.entries()) {
+        if (head.kind !== "note" || head.scope !== "personal") continue;
+        const note = await this.currentRecord(state, paths, id);
+        if (note?.kind === "note" && note.content.tags?.includes("home-profile")) notes.push(note);
+      }
+      if (notes.length !== assignments.length || notes.some(note => !assignments.some(item => item.id === note.id))) throw conflict("Profile changed: migration must assign every profile note exactly once");
+      for (const item of assignments) {
+        const note = notes.find(note => note.id === item.id)!;
+        if (note.revisionId !== item.expectedRevision) throw conflict("Profile revision is stale");
+        if (!/^(core|home|scopes\/[a-z][a-z0-9-]{0,47})$/.test(item.file)) throw invalid("Invalid profile file");
+      }
+      const changed = assignments.filter(item => {
+        const note = notes.find(note => note.id === item.id)!;
+        return note.kind === "note" && JSON.stringify(note.content.tags?.filter(tag => tag.startsWith("home-file-"))) !== JSON.stringify([`home-file-${item.file.replace("/", "-")}`]);
+      });
+      if (!changed.length) return { records: [], backup: null };
+      if (notes.every(note => note.kind === "note" && note.content.tags?.some(tag => tag.startsWith("home-file-")))) throw conflict("Profile is already organized; use refine to move an item between files");
+      const backup = `profile-backup-${createHash("sha256").update(commandId).digest("hex")}.json`;
+      await durableAtomicWriteJson(join(paths.root, backup), { version: 1, notes, histories: notes.map(note => ({ id: note.id, revisions: state.records.get(note.id)!.revisionIds })) }, 0o600);
+      const records: KnowledgeRecord[] = [];
+      for (const item of changed) {
+        const note = notes.find(note => note.id === item.id)!;
+        if (note.kind !== "note") throw invalid("Profile member is not a note");
+        const tags = [...(note.content.tags ?? []).filter(tag => !tag.startsWith("home-file-")), `home-file-${item.file.replace("/", "-")}`];
+        const result = await this.putRecord(state, paths, { ...note, content: { ...note.content, tags } }, note.revisionId);
+        records.push(result.record);
+      }
+      return { records, backup };
+    });
+  }
+
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, { ...request.record, content: storedNoteContent(request.record.content) })); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, content: carryNoteMarks(current, request.record.content), id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
   private assertSourceDecisionAuthority(current: KnowledgeRecord & { kind: "source" }, next: KnowledgeRecordDraft & { kind: "source" }, producer: string | undefined): void {

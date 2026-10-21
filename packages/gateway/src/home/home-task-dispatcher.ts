@@ -66,6 +66,7 @@ export type HomeTaskDiagnostic =
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
 /** `title` names the worker session; it is never persisted with the task record. */
 export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice {
+  scopes?: string[];
   taskId: string; intent: string; target: string; title?: string; reason?: string;
   /** Internal Home boundary metadata, never accepted by the delegate tool schema. */
   provenance?: { model: Pick<FixedSetting, "via" | "reason">; thinking: Pick<FixedSetting, "via" | "reason"> };
@@ -143,6 +144,8 @@ function resumeBrief(previous: HomeTaskRecord, instructions: readonly string[], 
 }
 /** A started task names its worker and operation. */
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord>;
+  preferencesApplied?: string[];
+  profileDiagnostics?: string[];
   /** The worker choice the delegate boundary resolved, as the brief states it; the `delegate` tool's details carry it. */
   worker?: HomeTaskWorkerSummary;
   /** The subagent queue's availability at delegation, in fallback order. */

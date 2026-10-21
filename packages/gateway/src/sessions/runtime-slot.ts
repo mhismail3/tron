@@ -3,10 +3,9 @@ import * as sessionPages from "../kernel/projection/session-pages.js";
 import { SnapshotProjection } from "../kernel/projection/snapshot.js";
 import { modelQueueSessionExtension } from "./model-queue-session.js";
 import { HOME_OPERATING_CONTEXT } from "../home/tron-home-extension.js";
-import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
-/** Delivery headroom counts the learned profile at its bound: the activation's section is
- * read inside Home's prompt hook, after this estimate, and never exceeds it. */
-const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_BOUND_BYTES + 1_024);
+import { HOME_PROFILE_HEADROOM_BYTES } from "../home/home-profile-files.js";
+/** Reserve core + home + the bounded scope index; legacy overflow is diagnosed at load. */
+const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_HEADROOM_BYTES);
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -3861,6 +3860,11 @@ export class RuntimeSlot {
     if (this.hasBlockedOwnershipWrite) {
       throw uncertainOutcome("Canonical ownership persistence is unresolved; this runtime remains retained and cannot admit mutations, reload, or dispose");
     }
+  }
+
+  /** Owner diagnostics share the canonical session event stream, not prompt-only text. */
+  publishDiagnostic(code: string, message: string): void {
+    this.emit("session.diagnostic", { code, message: message.slice(0, 2_048) });
   }
 
   private emitPersistenceDiagnostic(code: string): void {

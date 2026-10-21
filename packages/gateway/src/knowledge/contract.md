@@ -59,7 +59,7 @@ Records, curation, capture and connectors of `gateway/knowledge`. The module
   scope, freshness, corrections, supersession and contrary evidence; `privacyScope`
   is descriptive only. Optional `tags` (≤ 8, `^[a-z][a-z0-9-]{0,47}$`, owner
   metadata, not the vocabulary; Home's profile uses `home-profile` and
-  `kind-<kind>`), `retired: true`, and `provenance.reason` (≤ 2,000 characters). An
+  `kind-<kind>`, `home-file-*`, `home-confirmed-<date>`), `retired: true`, and `provenance.reason` (≤ 2,000 characters). An
   update omitting `tags` or `retired` keeps them; `retired: false` in a draft
   restores a note. Older Gateways drop these on write, so downgrade is unsupported.
 

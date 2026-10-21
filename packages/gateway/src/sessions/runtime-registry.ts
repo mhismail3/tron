@@ -108,6 +108,8 @@ import { HomeGlobalResources } from "../home/home-global-resources.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
 import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
+import { readHomeProfile } from "../home/home-profile.js";
+import { renderProfileFiles } from "../home/home-profile-files.js";
 import { readHomeSessionEntry } from "../home/home-session-read.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic } from "../home/home-memory.js";
@@ -866,6 +868,7 @@ export class RuntimeRegistry {
       ...(options.machineId ? { machineId: options.machineId } : {}),
       ...(options.homeTaskDiagnostic ? { taskDiagnostic: options.homeTaskDiagnostic } : {}),
       knowledge: () => this.knowledgeService,
+      profileDiagnostic: (sessionId, message) => this.slots.get(sessionId)?.publishDiagnostic("home-profile-load", message),
     });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.readHeapSample = options.heapSample ?? (() => ({
@@ -2989,8 +2992,9 @@ export class RuntimeRegistry {
     const subagentLine = subagentModels
       ? `\n\nSubagent models, in fallback order: ${subagentModels.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ")}. Explicit eligible subagent model choices in this brief take precedence over the default queue: pass the chosen provider/model to the subagent launch. Otherwise, launch subagents with model ${SUBAGENT_QUEUE_MODEL.provider}/${SUBAGENT_QUEUE_MODEL.id}: it runs the first available one and moves along this queue on a usage-limit error. If an explicit choice is unavailable or hits a usage limit, disclose the reason and the chosen fallback; do not silently substitute the queue default.`
       : "";
-    const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.${subagentLine}`;
-    const { model: _model, thinking: _thinking, ...input } = request;
+    const profile = this.knowledgeService ? renderProfileFiles(await readHomeProfile(this.knowledgeService), request.scopes ?? []) : undefined;
+    const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.${subagentLine}\n\n${profile?.text ?? "Profile diagnostic: Knowledge is unavailable; preferences could not be applied."}`;
+    const { model: _model, thinking: _thinking, scopes: _scopes, ...input } = request;
     const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}),
       ...(queued ? { queue: queued } : {}) };
     const handle = await this.home.dispatchTask(sessionId, { ...input, ...choice, modelQueues, intent: brief,
@@ -2998,7 +3002,7 @@ export class RuntimeRegistry {
         model: { via: request.model ? "home-explicit" : queued ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
         thinking: { via: request.thinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
       } }, signal);
-    return { ...handle, worker, ...(subagentModels ? { subagentModels } : {}) };
+    return { ...handle, worker, preferencesApplied: profile?.ids ?? [], profileDiagnostics: profile?.diagnostics ?? ["Profile diagnostic: Knowledge is unavailable; preferences could not be applied."], ...(subagentModels ? { subagentModels } : {}) };
   }
 
   /** Admits a delegation's model and thinking level against the Gateway's own model

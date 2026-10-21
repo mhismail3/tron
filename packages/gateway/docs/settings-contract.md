@@ -210,7 +210,10 @@ uncredentialed models, models with a usage-limit error in the last 15 minutes or
 and moves on after a usage-limit error; captured queues are read-only. Worker thinking is
 `{ "sameAs": "home" }` by default. **Learned-profile changes** (`home.profileChange`, the
 `profile` tool) use `SettingsChangePath.changeProfile`: one quiet `home.profile.item` entry per
-note, grouped and undone together, refused on a stale revision.
+note, grouped and undone together, refused on a stale revision. [Scoped files](../src/home/profile.md)
+are canonical Knowledge note labels, not Settings keys. `migrate` takes the complete approved
+ID/revision/file mapping, backs up before one Knowledge transaction, and records the group
+for Changes undo; identical repetition is a no-op. Queue choices remain typed Settings values.
 
 ## Presentation
 
