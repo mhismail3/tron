@@ -36,7 +36,10 @@ Gateway-owned execution primitives layered on Pi's session loop.
 active-process state and joined abort operation; it does not own prompt admission.
 `compactionPolicyModule` retains its registration position. Its live SessionContext
 compaction port checks Stop before capture and publishes synchronously; policy restore
-runs at session start. Pi remains the canonical settings/compaction owner.
+runs at session start. Settings resolution is injected from the admin settings
+owner; compaction keeps operation capture, validation failures and budget
+application, not an independent layer resolver. Pi remains canonical for files
+and compaction execution.
 Ownership is declared by [`gateway/run`](../../run.module.json).
 
 ## Invariants

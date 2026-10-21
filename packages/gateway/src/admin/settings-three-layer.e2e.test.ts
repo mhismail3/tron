@@ -126,6 +126,83 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(observed).toEqual({ effective: 1, requests: 2 });
   });
 
+  it("Project compaction budget reaches both the real SDK threshold and operation projection", async () => {
+    const f = await setup();
+    const slot = await f.create();
+    await f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
+      changes: [{ key: "context.compaction.reserveTokens", layer: "chat", op: "set", value: 2048 }],
+    });
+    await f.project({ compaction: { reserveTokens: 4096 } });
+    await f.attempts(slot);
+    const observed = { sdk: slot.runtime.session.settingsManager.getCompactionSettings().reserveTokens,
+      projected: slot.snapshot().compactionPolicy?.next.reserveTokens };
+    evidence.push({ case: "single compaction precedence", observed });
+    expect(observed).toEqual({ sdk: 4096, projected: 4096 });
+  });
+
+  it("SDK Project writes preserve ignored fields without admitting them", async () => {
+    const f = await setup();
+    const ignored = { defaultTools: ["write"], futureOwnedField: { keep: "untouched" } };
+    await f.project({ ...ignored, packages: [] });
+    const slot = await f.create();
+    const manager = slot.runtime.session.settingsManager;
+    manager.setProjectPackages(["./fixture-package"]);
+    await manager.flush();
+    const raw = JSON.parse(await readFile(join(f.cwd, ".pi", "settings.json"), "utf8"));
+    const admitted = manager.getProjectSettings();
+    evidence.push({ case: "SDK locked projection write", raw, admitted });
+    expect(raw).toMatchObject({ ...ignored, packages: ["./fixture-package"] });
+    expect(admitted).not.toHaveProperty("defaultTools");
+    expect(admitted).not.toHaveProperty("futureOwnedField");
+  });
+
+  it.each([
+    { defaultProvider: "test-faux" },
+    { defaultModel: "faux-1" },
+    { defaultProvider: 17, defaultModel: "faux-1" },
+  ])("refuses an invalid Project model reference instead of inheriting Global: %j", async invalid => {
+    const f = await setup();
+    await f.project(invalid);
+    await expect(f.create()).rejects.toMatchObject({ code: "conflict" });
+    evidence.push({ case: "invalid Project model refused", fields: Object.keys(invalid) });
+  });
+
+  it("refuses an unavailable Project model instead of admitting the SDK fallback", async () => {
+    const f = await setup();
+    await f.project({ defaultProvider: f.model.provider, defaultModel: "missing-project-model" });
+    await expect(f.create()).rejects.toMatchObject({ code: "conflict" });
+    evidence.push({ case: "unavailable Project model refused" });
+  });
+
+  it("retains a model override through masking and cold resume, then reactivates it after Project removal", async () => {
+    const f = await setup();
+    const slot = await f.create();
+    await f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
+      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID } }],
+    });
+    await f.project({ defaultProvider: f.model.provider, defaultModel: f.model.id });
+    const observed: string[] = [];
+    const respond = () => (_context: unknown, _options: unknown, _state: unknown, model: { id: string }) => {
+      observed.push(model.id); return fauxAssistantMessage("model admitted");
+    };
+    f.faux.setResponses([respond(), respond(), respond()]);
+    await slot.prompt("Read the Project model");
+    await waitFor(() => slot.snapshot().configurationBlocker === null, "first model request settled");
+    const cold = await f.restart();
+    const resumed = await cold.acquire(slot.id);
+    await resumed.prompt("Read the Project model after cold resume");
+    await waitFor(() => resumed.snapshot().configurationBlocker === null, "cold model request settled");
+    await f.project({});
+    await resumed.prompt("Read the retained Session override");
+    await waitFor(() => resumed.snapshot().configurationBlocker === null, "unmasked model request settled");
+    evidence.push({ case: "cold inactive model override", observed });
+    expect(observed).toEqual([f.model.id, f.model.id, TASK_REASONING_MODEL_ID]);
+  });
+
   it.each(["seed", "explicit"])("Project model beats the Home worker %s at the first real request", async mode => {
     const f = await setup();
     const taskId = `three-layer-${mode}-worker`;

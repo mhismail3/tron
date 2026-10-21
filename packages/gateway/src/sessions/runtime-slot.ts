@@ -2,6 +2,9 @@ import * as activityProjection from "../kernel/projection/activity.js";
 import * as sessionPages from "../kernel/projection/session-pages.js";
 import { SnapshotProjection } from "../kernel/projection/snapshot.js";
 import { modelQueueSessionExtension } from "./model-queue-session.js";
+import { createSettingsManager } from "../admin/settings-sdk-manager.js";
+import { applyModelAdmission, compactionAdmission } from "../admin/settings-admission.js";
+import { readWorkerQueueSelection } from "../providers/model-queue-extension.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
@@ -1432,20 +1435,32 @@ export class RuntimeSlot {
       });
   }
 
-  /** This chat's Chat layer as its session record holds it (settings-model.md
-   * 3.2): the model, thinking, explicit context window and active tools. */
+  /** Requested choices come from canonical explicit/delegated evidence, not
+   * an operational Project selection that currently masks those choices. */
   settingsChatLayer(): ChatStore {
     this.assertNoTrustReload();
     const session = this.runtime.session;
     const policy = this.contextPolicies.get(session)?.snapshot();
+    const branch = session.sessionManager.getBranch();
+    const fixed = readChatFixedSettings(branch);
+    const modelChoice = fixed["model.ref[role=chat]"];
+    const choiceIndex = modelChoice ? branch.findIndex(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY
+      && (entry.data as { fixed?: Record<string, { ref: string }> } | null)?.fixed?.["model.ref[role=chat]"]?.ref === modelChoice.ref) : -1;
+    const choice = (key: string, legacy: unknown) => {
+      const recorded = fixed[key];
+      return recorded ? recorded.from === "chat" || recorded.from === "delegate" ? recorded.value : undefined : legacy;
+    };
+    const model = readWorkerQueueSelection(branch, choiceIndex) ?? choice("model.ref[role=chat]",
+      session.model && { provider: session.model.provider, id: session.model.id }) as { provider: string; id: string } | undefined;
+    const thinking = choice("model.thinking[role=chat]", session.thinkingLevel) as string | undefined;
     return {
-      ...(session.model ? { model: { provider: session.model.provider, id: session.model.id } } : {}),
-      thinking: session.thinkingLevel,
+      ...(model ? { model } : {}),
+      ...(thinking ? { thinking } : {}),
       ...(policy && policy.override !== null ? { contextWindow: { model: `${policy.model.provider}/${policy.model.id}`, value: policy.override } } : {}),
       tools: session.getActiveToolNames(),
       settings: readChatSettings(session.sessionManager.getBranch()),
       requestPins: readChatRequestPins(session.sessionManager.getBranch()),
-      fixed: readChatFixedSettings(session.sessionManager.getBranch()),
+      fixed,
     };
   }
 
@@ -1457,7 +1472,7 @@ export class RuntimeSlot {
     const previousPins = readChatRequestPins(branch);
     const explicitSettings = readChatSettings(branch);
     const { requestPins: _pins, ...chat } = this.settingsChatLayer();
-    const { settings, requestPins } = await owners.model.requestSettings(this.id, {
+    const { settings, requestPins, admission } = await owners.model.requestSettings(this.id, {
       cwd: this.cwd, home: this.isHomeChapter,
       chat: { ...chat, settings: explicitSettings }, modelRuntime: session.modelRuntime,
     }, previousPins);
@@ -1466,6 +1481,8 @@ export class RuntimeSlot {
       const receiptId = randomUUID();
       await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings: explicitSettings, requestPins, fixed: readChatFixedSettings(branch) }), receiptId);
     }
+    await applyModelAdmission(session, admission, Boolean(this.taskWorker));
+    if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during model admission");
     session.settingsManager.applyOverrides(settings);
     // These SDK controls are copied when Agent is created, not read from its
     // SettingsManager during queue draining. Never use setters that save defaults.
@@ -2094,9 +2111,9 @@ export class RuntimeSlot {
       const managedSubagents = profile.managedSubagents ? this.dependencies.managedSubagents : undefined;
       // The Project layer is the root's `.pi/` (settings-model decision 31); the
       // chat keeps its cwd for tools, context files and session grouping.
-      const settingsManager = profile.projectSettings ? SettingsManager.create(trust.projectDir, this.dependencies.agentDir, { projectTrusted: trust.trusted }) : undefined;
-      const managedLoaderOptions = settingsManager ? await managedSubagents?.loaderOptions(settingsManager,
-        (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages)) : undefined;
+      const settingsManager = await createSettingsManager(trust.projectDir, this.dependencies.agentDir, profile.projectSettings && trust.trusted);
+      const managedLoaderOptions = await managedSubagents?.loaderOptions(settingsManager,
+        (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
       const extensionFactories = profile.extensions !== "ordinary"
         ? this.dependencies.modules.registrations(profile.extensions, sessionContext)
         : [
@@ -2135,7 +2152,7 @@ export class RuntimeSlot {
             }) }] : []),
           ];
       const services = await createAgentSessionServices({
-        ...(settingsManager ? { settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager } : {}),
+        settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager,
         cwd: trust.cwd,
         projectDir: trust.projectDir,
         agentDir: this.dependencies.agentDir,
@@ -2155,10 +2172,8 @@ export class RuntimeSlot {
       });
       // Only the loader keeps the read-only package view. Session settings
       // mutations keep their canonical owner, never the filtered projection.
-      if (settingsManager) {
-        services.settingsManager = settingsManager;
-        await managedSubagents?.completeLoad(settingsManager, this.cwd, this.dependencies.agentDir, services.resourceLoader.getExtensions().extensions);
-      }
+      services.settingsManager = settingsManager;
+      await managedSubagents?.completeLoad(settingsManager, this.cwd, this.dependencies.agentDir, services.resourceLoader.getExtensions().extensions);
       // A runtime replacement must never strand a process owned by the outgoing
       // tool registry. Session replacement normally aborts Pi first; this exact
       // owner handoff is the independent fail-safe when that signal was stale.
@@ -2252,7 +2267,7 @@ export class RuntimeSlot {
       // to the defaults and the next prompt would persist that (#327). Apply the
       // declared loadout here; a session without one keeps the defaults.
       const toolChoice = readChatToolChoice(sessionManager.getBranch());
-      if (toolChoice) created.session.setActiveToolsByName(toolChoice.tools);
+      if (toolChoice && toolChoice.fixed?.from !== "project") created.session.setActiveToolsByName(toolChoice.tools);
       else if (profile.launchDefaults === "settings-profile-layer") {
         const tools = launchDefaults?.keys.find(row => row.key === "tools.active" && row.layer === "profile")?.value;
         if (Array.isArray(tools)) created.session.setActiveToolsByName(tools.filter((name): name is string => typeof name === "string" && profile.tools?.includes(name) === true));
@@ -2266,7 +2281,7 @@ export class RuntimeSlot {
         : undefined;
       const homeRequestPolicy = this.homeRequestPolicy;
       const compactionSession = created.session;
-      compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir,
+      compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir, compactionAdmission,
         profile.compaction === "disabled" ? { disabled: true } : { chat: () => readChatSettings(compactionSession.sessionManager.getBranch()) });
       const taskWorker = this.taskWorker;
       requestPipeline.install(created.session, {

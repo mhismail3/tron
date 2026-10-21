@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { clampThinkingLevel, getSupportedThinkingLevels, type Model, type ThinkingLevel } from "../kernel/pi/ai.js";
 import { SettingsManager, type ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
+import { validateProjectSettings } from "./settings-sdk-manager.js";
 import { contextWindowLimits, parseContextModelKey, validateContextWindow } from "../providers/context-window-policy.js";
 import { assertNewModelChoice, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
@@ -108,12 +109,12 @@ export class SettingsModel {
    * Absence is meaningful for optional provider fields: the request boundary
    * replaces them after the SDK has composed its initial defaults. */
   async requestSettings(sessionId: string, session: SessionSettingsSource, previousPins: Record<string, FixedSetting>): Promise<{
-    settings: ReturnType<SettingsManager["getSettings"]>; requestPins: Record<string, FixedSetting>;
+    settings: ReturnType<SettingsManager["getSettings"]>; requestPins: Record<string, FixedSetting>; admission: Resolution["keys"];
   }> {
     const keys = KEYS.filter(hasRuntimeRequestApplier);
     // The provider-request boundary reads values only: outside comparison and git
     // state belong to settings reads and file events, not to every model request.
-    const resolved = await this.resolve({ kind: "session", sessionId }, session, keys.map(key => key.id), { storeState: false });
+    const resolved = await this.resolve({ kind: "session", sessionId }, session, [...keys.map(key => key.id), "model.ref[role=chat]", "model.thinking[role=chat]"], { storeState: false });
     const settings: Record<string, unknown> = {};
     const requestPins = structuredClone(previousPins);
     for (const row of resolved.keys) {
@@ -130,7 +131,7 @@ export class SettingsModel {
       }
       if (value !== undefined) setPath(settings, binding.path, await key.type.validate(value, key.id));
     }
-    return { settings, requestPins };
+    return { settings, requestPins, admission: resolved.keys.filter(row => row.key === "model.ref[role=chat]" || row.key === "model.thinking[role=chat]") };
   }
 
   /** `settings.options` (docs/settings-model.md 7.5): the choices a key's control offers. */
@@ -243,6 +244,7 @@ export class SettingsModel {
         ...(storeState ? { git: await stage("settings.store.project-git-state", () => projectGitState(inspection.projectDir, head ?? null)) } : {}),
       };
     }
+    if (project?.applied) await validateProjectSettings(project.document);
     const outside = this.outside && storeState ? {
       mac: {
         ...await stage("settings.store.mac-outside-marks", () => this.outside!.marks({ kind: "mac" })),

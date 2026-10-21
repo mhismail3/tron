@@ -12,6 +12,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | Area | Files |
 |---|---|
 | Settings schema, formatting and validation | `settings-schema.ts` (`KEYS`, `RECORD_SUBJECTS`), `settings-registry.ts` (binding admission from `sessionOverridable`/`projectSettable`), `settings-types.ts`; vocabulary: [kernel settings](../kernel/settings/README.md) |
+| SDK scope admission and operational model selection | `settings-sdk-manager.ts`, `settings-admission.ts` |
 | Resolution and presentation | `settings-resolver.ts`, `settings-model.ts` (`SettingsModel`), `settings-presentation.ts` |
 | Change path and policy | `settings-model.ts` (`SettingsChangePath`), `settings-record.ts`, `settings-approvals.ts`, `settings-risk.ts` |
 | Appliers and outside writers | `project-settings-writer.ts`, `trust-service.ts`, `settings-outside.ts` (`OutsideChanges`) |
@@ -36,18 +37,18 @@ session resolves its actor and settings owner at every call.
 The full settings contract (foundations, layers, the generated key table,
 timing, change path, tiers, outside changes, project writes, Home profile,
 presentation) is [docs/settings-contract.md](../../docs/settings-contract.md).
-The [three-layer proposal](../../docs/settings-three-layer-design.md) defines the
-pending settings redesign; it does not change this runtime contract.
+The [three-layer settings design](../../docs/settings-three-layer-design.md)
+defines scoped permissions and runtime admission.
 In short:
 
 - **One key, declared once on the Gateway** (F1). The schema holds type,
   group, allowed layers, timing, effect point, floor, writers, redaction and
   display. iOS renders keys generically; a new key needs no iOS release.
-- **Uniform layers** (F4): **Chat > Home profile > Project > Mac > Built-in**,
+- **Uniform layers** (F4): **Project > Chat > Home profile > Mac > Built-in**,
   top wins, among the layers the target has and the key allows. Ordinary chats
-  have no Profile; Home's chat has no Project. The effective value is computed,
-  never stored; fixed keys are captured into the Chat layer at start with
-  provenance.
+  have no Profile; Home's chat has no Project. Effective values are computed;
+  canonical fixed evidence retains explicit/delegated choices even while a
+  Project selection masks them.
 - **Each store is the truth** (F2). The change record is audit and undo only.
 - **One change path, three tiers** (F3): quiet, notify, approve;
   `tier = max(floor + web, assessment)`.
@@ -84,7 +85,12 @@ running-worker `announce`; Home supplies `HomeProfileItems` for learned notes.
 - Tron's own writes are bracketed (`begin`/`end`, `adopt`) and never reported as
   outside changes; Tron never re-applies a value on its own.
 - Tron stages Project writes and never commits, pushes or opens a pull request.
-- Changing a model or thinking never persists a default.
+- Changing a model or thinking never persists a default. A masked Chat write
+  refuses without replacing the stored choice. Operational Project selections
+  preserve that inactive choice through cold resume and Project removal.
+- SDK construction filters Project bindings at the public storage seam before
+  tools/resources are admitted; writes preserve ignored fields in the same
+  locked canonical document. Compaction consumes this registry's resolver.
 
 ## Entry points
 

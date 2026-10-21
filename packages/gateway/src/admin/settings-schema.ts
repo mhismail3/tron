@@ -325,8 +325,8 @@ export const KEYS: readonly KeyDeclaration[] = ([
   // Context -------------------------------------------------------------
   {
     id: "context.compaction.enabled", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.boolean(),
-    // The Chat layer is applied by the session's CompactionOperationPolicy, which
-    // overlays this chat's `tron.settings.v1` values on Project and Mac (decision 9).
+    // The compaction owner captures the shared resolver's Project > Session >
+    // Global result at the operation boundary.
     layers: chatPi("compaction", "enabled"), builtin: true, timing: "live", effect: "next-compaction", floor: "quiet",
     writers: ANY_ACTOR, label: "Automatic compaction", help: "Summarize older conversation when the context fills.",
     order: 10, importance: "essential", control: "toggle",
@@ -345,7 +345,7 @@ export const KEYS: readonly KeyDeclaration[] = ([
   },
   {
     id: "context.compaction.instructions", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.text(COMPACTION_POLICY_INSTRUCTION_LIMIT, { raw: true }),
-    layers: chatPi("compaction", "instructions"), timing: "live", effect: "next-compaction", floor: "notify", writers: ["ui", "home"],
+    layers: chatPi("compaction", "instructions"), builtin: "", timing: "live", effect: "next-compaction", floor: "notify", writers: ["ui", "home"],
     label: "Summary instructions", help: "Extra instructions for compaction summaries.", order: 40, importance: "advanced", control: "text",
     entry: { hint: "Plain sentences added to the summary prompt.", example: "Keep file paths and open decisions." },
   },

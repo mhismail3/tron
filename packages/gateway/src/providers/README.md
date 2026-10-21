@@ -79,6 +79,9 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
 
 - Usage adapters: `provider-usage.ts`; eligibility: `OpenAIModelEligibility`.
 - Queue resolution for background and subagent roles: `model-queue.ts`.
+- `readWorkerQueueSelection` projects this owner's canonical fallback entries
+  after the latest explicit choice. Settings can mask that progression with
+  Project without resetting it to the original worker seed.
 
 ## Signals
 

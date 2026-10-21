@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
+import type { ExtensionFactory, SessionEntry } from "../kernel/pi/coding-agent.js";
 
 /**
  * The in-session half of the model fallback queues (settings-model.md 6.3,
@@ -26,6 +26,22 @@ import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 
 export const MODEL_QUEUE_PROJECTION_ENV = "TRON_MODEL_QUEUE_PROJECTION";
 const MODEL_QUEUE_ENTRY = "tron.model-queue";
+
+/** Queue progression after an explicit choice is canonical too. Settings may
+ * mask it with Project, but must not replay the original seed over a fallback. */
+export function readWorkerQueueSelection(entries: readonly SessionEntry[], afterIndex: number): { provider: string; id: string } | undefined {
+  for (let index = entries.length - 1; index > afterIndex; index -= 1) {
+    const entry = entries[index];
+    if (entry?.type !== "custom" || entry.customType !== MODEL_QUEUE_ENTRY) continue;
+    const data = entry.data as { role?: unknown; next?: unknown } | null;
+    if (data?.role !== "worker") continue;
+    const ref = data.next;
+    const slash = typeof ref === "string" ? ref.indexOf("/") : -1;
+    if (typeof ref !== "string" || ref.length > 421 || slash <= 0 || slash === ref.length - 1) throw new Error("Canonical worker queue selection is invalid");
+    return { provider: ref.slice(0, slash), id: ref.slice(slash + 1) };
+  }
+  return undefined;
+}
 export type ModelQueueRole = "worker" | "subagent" | "background";
 
 /** Plan and subscription limits, and throttles: the request may succeed on another
