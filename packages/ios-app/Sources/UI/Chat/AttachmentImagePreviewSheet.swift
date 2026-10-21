@@ -129,7 +129,6 @@ struct AttachmentImagePreviewSheet: View {
             )
             .padding(AttachmentImagePreviewLayout.viewportInset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityLabel(accessibilityLabel)
         } else {
             TronSheetLoadingState(label: "Loading photo…", accent: .tronEmerald)
         }
