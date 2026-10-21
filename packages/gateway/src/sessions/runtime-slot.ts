@@ -78,7 +78,6 @@ import type {
   ExtensionToolOrigin,
   SessionProcessActivity,
   SessionProcessHistoryPage,
-  SessionProcessOverview,
   JsonValue,
   QueuedMessageState,
   RetryState,
@@ -3279,10 +3278,6 @@ export class RuntimeSlot {
     };
   }
 
-  private currentProcessProjection(): { activities: SessionProcessActivity[]; overview: SessionProcessOverview } {
-    return activityProjection.currentProcessProjection(this.activitySource());
-  }
-
   private publishProcessDelta(activity: SessionProcessActivity | undefined, removedProcessIds?: string[]): void {
     if (activity) {
       const installed = this.processActivities.get(activity.processId);
@@ -3297,7 +3292,7 @@ export class RuntimeSlot {
       ...(removedProcessIds && removedProcessIds.length > 0 ? { removedProcessIds } : {}),
       processRevision: this.processRevision,
       processAsOf: this.processAsOf,
-      overview: this.currentProcessProjection().overview,
+      overview: activityProjection.currentProcessProjection(this.activitySource()).overview,
     }));
   }
 
@@ -3332,7 +3327,7 @@ export class RuntimeSlot {
       const candidates = [...this.extensionActivities.entries()];
       const ranked = candidates.sort((left, right) => {
         const bucket = (activity: ExtensionRunActivity): number => {
-          const visibility = this.extensionActivityVisibility(activity);
+          const visibility = activityProjection.extensionActivityVisibility(this.activitySource(), activity);
           return visibility === "recent" || visibility === "historical" ? 0 : 1;
         };
         return bucket(left[1]) - bucket(right[1]) || left[1].updatedAt.localeCompare(right[1].updatedAt);
@@ -6907,7 +6902,7 @@ export class RuntimeSlot {
       if (pending) clearTimeout(pending);
       this.toolProgressTimers.delete(state.toolCallId);
       this.toolProgressPublishedAt.set(state.toolCallId, now);
-      this.emit("session.toolProgress", safeJson(this.toolProgressWire(state)));
+      this.emit("session.toolProgress", safeJson(activityProjection.toolProgressWire(this.activitySource(), state)));
       this.publishProcessesForToolCall(state.toolCallId);
       return;
     }
@@ -6917,15 +6912,11 @@ export class RuntimeSlot {
       const current = this.toolExecutions.get(state.toolCallId);
       if (!current) return;
       this.toolProgressPublishedAt.set(state.toolCallId, Date.now());
-      this.emit("session.toolProgress", safeJson(this.toolProgressWire(current)));
+      this.emit("session.toolProgress", safeJson(activityProjection.toolProgressWire(this.activitySource(), current)));
       this.publishProcessesForToolCall(current.toolCallId);
     }, minimumIntervalMs - (now - last));
     timer.unref();
     this.toolProgressTimers.set(state.toolCallId, timer);
-  }
-
-  private toolProgressWire(state: ToolExecutionState): ToolExecutionState {
-    return activityProjection.toolProgressWire(this.activitySource(), state);
   }
 
   /** Lifecycle updates are compact presentation deltas, not transcript
@@ -6938,7 +6929,7 @@ export class RuntimeSlot {
     this.noteDashboardActivity(activity.updatedAt);
     if (this.hasDetachedDashboardWork() && !this.activityHeartbeat) this.startActivityHeartbeat();
     this.emit("session.extensionActivity", safeJson({
-      activity: this.extensionActivityWire(activity),
+      activity: activityProjection.extensionActivityWire(this.activitySource(), activity),
       liveActivityRevision: this.liveActivityRevision,
       extensionActivityAsOf: this.extensionActivityAsOf,
     }));
@@ -7167,14 +7158,6 @@ export class RuntimeSlot {
       if (!oldest) break;
       store.delete(oldest);
     }
-  }
-
-  private extensionActivityWire(activity: ExtensionRunActivity): ExtensionRunActivity {
-    return activityProjection.extensionActivityWire(this.activitySource(), activity);
-  }
-
-  private extensionActivityVisibility(activity: ExtensionRunActivity): "current" | "recent" | "historical" | "unknown" {
-    return activityProjection.extensionActivityVisibility(this.activitySource(), activity);
   }
 
   /** Recency is the sole expiry owner. At the wall-clock boundary remove the
@@ -7485,7 +7468,7 @@ export class RuntimeSlot {
       get id() { return slot.id; },
       get ui() { return slot.ui; },
       projectedQueue: (...args) => slot.projectedQueue(...args),
-      currentProcessProjection: (...args) => slot.currentProcessProjection(...args),
+      currentProcessProjection: () => activityProjection.currentProcessProjection(slot.activitySource()),
       get isAgentAdmissionSettling() { return slot.isAgentAdmissionSettling; },
       get phase() { return slot.phase; },
       get effectivePhase() { return slot.effectivePhase; },
@@ -7498,10 +7481,10 @@ export class RuntimeSlot {
       get operation() { return slot.operation; },
       get retry() { return slot.retry; },
       get toolExecutions() { return slot.toolExecutions; },
-      toolProgressWire: (...args) => slot.toolProgressWire(...args),
+      toolProgressWire: state => activityProjection.toolProgressWire(slot.activitySource(), state),
       get extensionActivities() { return slot.extensionActivities; },
-      extensionActivityVisibility: (...args) => slot.extensionActivityVisibility(...args),
-      extensionActivityWire: (...args) => slot.extensionActivityWire(...args),
+      extensionActivityVisibility: activity => activityProjection.extensionActivityVisibility(slot.activitySource(), activity),
+      extensionActivityWire: activity => activityProjection.extensionActivityWire(slot.activitySource(), activity),
       get liveActivityRevision() { return slot.liveActivityRevision; },
       get extensionActivityAsOf() { return slot.extensionActivityAsOf; },
     }, sequence);
