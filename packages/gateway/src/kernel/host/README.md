@@ -13,7 +13,9 @@ one Gateway.
 K3 hook table (`KERNEL_HOOKS`) and `ModuleHost`. `settlement-module.ts` owns the
 ordinary profile's first extension and joins canonical receipt writes before input.
 `request-policy.ts` is the neutral activation/request-stage contract; evidence and
-concrete refusal errors stay with the implementing module.
+concrete refusal errors stay with the implementing module. `canonical-append.ts`
+carries live writer facts and an opaque module-issued authority, never a copy of
+chapter state or a second Stop fence.
 
 ## Contract
 
@@ -48,6 +50,9 @@ concrete refusal errors stay with the implementing module.
   `requestPolicy` resolves an existing policy once per selected runtime, preserving
   its inner stream guard and outer context/preparation stages. Refusal recognition
   resolves at the error cut; the kernel never imports a module's concrete error.
+  `appendGuard` surrounds each canonical write synchronously, revalidates admission
+  after its awaits, and receives the committed microtask. Home owns its weakly
+  writer-bound chapter-limit fence; the Pi adapter still binds the sole writer.
 - **Fail at start.** A module composed twice, an unknown hook, a second policy
   implementer or an RPC method served twice refuses `start`, and the modules
   already started are stopped.

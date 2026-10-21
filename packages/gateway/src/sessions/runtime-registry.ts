@@ -107,7 +107,7 @@ import { HomeOwner } from "../home/home-owner.js";
 import { HomeGlobalResources } from "../home/home-global-resources.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
-import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
+import type { HomeDiagnostic } from "../home/home-diagnostic.js";
 import { readHomeSessionEntry } from "../home/home-session-read.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic } from "../home/home-memory.js";
@@ -1295,19 +1295,6 @@ export class RuntimeRegistry {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
-      homeChapterRefused: (reason: "sealed-write") => {
-        this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason });
-      },
-      homeChapterLimitStopped: (details: {
-        chapterOrdinal: number;
-        boundary: HomeHardBoundary;
-        crossingBytes: number;
-        crossingEntries: number;
-        settledBytes: number;
-        settledEntries: number;
-      }) => {
-        this.options.homeDiagnostic?.({ outcome: "chapter-limit-stop", ...details });
-      },
       assistantResponseCompleted: async (
         sessionId: string,
         completion: CanonicalAssistantCompletion,
@@ -1868,8 +1855,6 @@ export class RuntimeRegistry {
       homeInboxRelease: (taskId: string, operationId: string, eventId: string) => this.home.releaseWakeTrigger(taskId, operationId, eventId),
       homeInboxSettlement: (sessionId: string, operationId: string) => this.home.settleTaskResults(sessionId, operationId),
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
-      homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
-      homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeTaskSettings: async (sessionId: string, taskId: string, purpose: "resolve" | "change") => {
         const target = await this.home.taskSettingsTarget(sessionId, taskId, purpose);
         return { ...target, slot: await this.acquire(target.sessionId) };

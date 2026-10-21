@@ -51,9 +51,9 @@ import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { RequestPolicy } from "../kernel/host/request-policy.js";
-import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
-import type { HomeMemoryPort } from "../home/home-owner.js";
-import type { HomeHardBoundary } from "../home/home-diagnostic.js";
+import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, HomeChapterIdentityReplacementError, type HomeChapterState } from "../home/home-chapter-state.js";
+import type { HomeMaterializationAuthority } from "../home/home-append-guard.js";
+import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { openAIModelEligibility, type OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
@@ -250,14 +250,6 @@ type PromptQueueDisplay = {
 
 type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
 
-type HomeMaterializationAuthority = Readonly<{
-  homeId: string;
-  ordinal: number;
-  sessionId: string;
-  attemptId: string;
-  expectedPath: string;
-}>;
-
 type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal"> & {
   redelivery?: boolean;
   resolveDisposition: (disposition: QueueAdmissionDisposition) => void;
@@ -444,15 +436,6 @@ interface RuntimeSlotHooks {
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
-  homeChapterRefused: (reason: "sealed-write") => void;
-  homeChapterLimitStopped: (details: {
-    chapterOrdinal: number;
-    boundary: HomeHardBoundary;
-    crossingBytes: number;
-    crossingEntries: number;
-    settledBytes: number;
-    settledEntries: number;
-  }) => void;
   assistantResponseCompleted: (
     sessionId: string,
     completion: CanonicalAssistantCompletion,
@@ -565,8 +548,6 @@ export interface RuntimeSlotDependencies {
    * begins; a rejection aborts the run retryably. It must be a no-op with no
    * I/O while the session is not archived. */
   beforeRunAdmission: (sessionId: string) => Promise<void>;
-  /** HomeOwner policy, revalidated synchronously after prompt admission awaits. */
-  homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => void;
   /** Gateway-owned archive projection for one session, read at snapshot time.
    * Archive state is registry-owned display state, so a slot neither writes nor
    * caches it: the value is absent while the session is visible. */
@@ -585,9 +566,6 @@ export interface RuntimeSlotDependencies {
   /** Returns a wake trigger that never reached the canonical session to pending. */
   homeInboxRelease: (taskId: string, operationId: string, eventId: string) => Promise<void>;
   homeInboxSettlement: (sessionId: string, operationId: string) => Promise<void>;
-  /** Tron Home's memory. The slot only reports that canonical entries changed;
-   * the memory owns what it reads, how long it waits and how much it spends. */
-  homeMemory: HomeMemoryPort;
   /** Tron Home's memory tools for one session id, for the `zoom`, `date` and
    * `memory_search` tools the tron-home module registers. It answers undefined
    * for any session that is not the enabled Home. */
@@ -923,8 +901,7 @@ export class RuntimeSlot {
    * profile, before the Home record named it. One-shot: cleared by that first
    * runtime creation. */
   private explicitHomeSessionId: string | undefined;
-  private readonly homeMaterializationAuthority: HomeMaterializationAuthority | undefined;
-  private homeLimitStop?: { operationId: string; boundary: HomeHardBoundary; crossingBytes: number; crossingEntries: number };
+  private readonly canonicalAppendContext: CanonicalAppendContext;
   /** The Home wake whose trigger is being sent: its canonical binding and receipt follow its message_end. */
   private homeWakeTrigger: { eventId: string; taskId: string; operationId: string } | undefined;
   /** Whether the admitted operation is a wake, so the activation's idle notice names it. */
@@ -950,9 +927,18 @@ export class RuntimeSlot {
     private taskWorker?: HomeTaskReportOwner,
   ) {
     this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
-    this.homeMaterializationAuthority = homeMaterializationAuthority
-      ? Object.freeze({ ...homeMaterializationAuthority })
-      : undefined;
+    this.canonicalAppendContext = {
+      owner: this,
+      writeAuthority: homeMaterializationAuthority ? Object.freeze({ ...homeMaterializationAuthority }) : undefined,
+      manager: () => this.sessionManager,
+      sessionId: () => this.id,
+      sessionFile: () => this.sessionFile,
+      activeOperationId: () => this.activeOperationId,
+      entryCount: () => this.canonicalEntryCount,
+      guardedProfile: manager => this.isHomeProfile(manager),
+      abort: (operationId, reason) => this.abort("agent", operationId, reason),
+      diagnostic: record => this.emit("session.diagnostic", record),
+    };
     this.phase = interrupted ? "interrupted" : "idle";
     this.unregisterConfigurationWork = dependencies.workRegistry.observeSessions((sessionId) => {
       if (this.published && !this.disposed && sessionId === this.id) this.publishConfiguration();
@@ -968,13 +954,9 @@ export class RuntimeSlot {
     // The guarded method belongs to the manager, not a runtime rebuild. Its
     // immutable owner also rejects sharing one writer instance across slots.
     const guarded = guardCanonicalAppend(sessionManager, this, (append) => {
-      if (this.isHomeProfile(sessionManager)) {
-        const path = sessionManager.getSessionFile();
-        const fileExists = path ? existsSync(path) : false;
-        if (this.activeOperationId !== undefined || fileExists) this.assertChapterWritable(sessionManager);
-      }
-      append();
-      if (sessionManager === this.sessionManager) this.observeHomeChapterGrowth();
+      const policy = this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext);
+      if (policy) policy.append(sessionManager, append);
+      else append();
     });
     if (!guarded) throw new GatewayError("conflict", "Canonical session manager already has a runtime owner");
   }
@@ -3823,7 +3805,7 @@ export class RuntimeSlot {
           if (owner.blocked || performance.now() >= deadline
             || error instanceof RunMarkerCompletionConflictError
             || error instanceof CanonicalCustomEntryConflictError
-            || error instanceof SealedChapterMutationError
+            || this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).isPreAppendRefusal(error)
             || isUncertainOutcome(error)) throw error;
           attempt += 1;
           if (attempt === 1) this.emitPersistenceDiagnostic("canonical-ownership-persistence-retrying");
@@ -3836,7 +3818,7 @@ export class RuntimeSlot {
       if (this.durableWrites.get(key) === owner) this.durableWrites.delete(key);
     }, error => {
       if (!owner.blocked && (error instanceof RunMarkerCompletionConflictError
-        || error instanceof CanonicalCustomEntryConflictError || error instanceof SealedChapterMutationError)) {
+        || error instanceof CanonicalCustomEntryConflictError || this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).isPreAppendRefusal(error))) {
         // These owner-validated conflicts reject before a new effect. Existing
         // canonical evidence remains authoritative; no unresolved write exists.
         if (this.durableWrites.get(key) === owner) this.durableWrites.delete(key);
@@ -6979,8 +6961,7 @@ export class RuntimeSlot {
    */
   private noteCanonicalEntriesCommitted(): void {
     if (this.liveProfile() !== "home") return;
-    const homeMemory = this.dependencies.homeMemory;
-    queueMicrotask(() => { homeMemory.entriesCommitted(this.id); });
+    queueMicrotask(() => { this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).committed(); });
   }
 
   private observeCanonicalToolResultHandoff(
@@ -10643,84 +10624,11 @@ export class RuntimeSlot {
   }
 
   private assertChapterWritable(manager: SessionManager = this.sessionManager): void {
-    const state = this.dependencies.homeChapterState(manager.getSessionId());
-    const authority = this.homeMaterializationAuthority;
-    const ownsMaterialization = Boolean(authority
-      && state.materializing
-      && state.homeId === authority.homeId
-      && state.ordinal === authority.ordinal
-      && state.sessionId === authority.sessionId
-      && state.attemptId === authority.attemptId
-      && state.expectedPath === authority.expectedPath
-      && manager.getSessionId() === authority.sessionId
-      && manager.getSessionFile() === authority.expectedPath);
-    try { assertChapterWritable(state, ownsMaterialization); }
-    catch (error) {
-      if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused("sealed-write");
-      throw error;
-    }
+    this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).assertWritable(manager);
   }
 
   private assertHomePromptAdmission(): void {
-    this.assertHomeLimitNotStopping();
-    this.assertChapterWritable();
-    if (!this.dependencies.homeChapterState(this.id).homeId) return;
-    const path = this.sessionFile;
-    let bytes = 0;
-    if (path) {
-      try { bytes = statSync(path).size; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    }
-    this.dependencies.homeChapterAdmission(this.id, { bytes, entries: this.canonicalEntryCount });
-  }
-
-  private assertHomeLimitNotStopping(): void {
-    if (this.homeLimitStop) throw new GatewayError("conflict", "Home stopped this activation at its chapter limit", true, {
-      reason: "chapter-limit-stop",
-    });
-  }
-
-  private observeHomeChapterGrowth(): void {
-    if (!this.isHomeProfile(this.sessionManager) || this.homeLimitStop) return;
-    const operationId = this.activeOperationId;
-    if (!operationId) return;
-    const path = this.sessionManager.getSessionFile();
-    let bytes = 0;
-    if (path) {
-      try { bytes = statSync(path).size; } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
-      }
-    }
-    const entries = this.canonicalEntryCount;
-    const boundary = bytes >= HOME_HARD_BYTES ? "hard-bytes"
-      : entries >= HOME_HARD_ENTRIES ? "hard-entries" : undefined;
-    if (!boundary) return;
-    const crossing = { operationId, boundary, crossingBytes: bytes, crossingEntries: entries } as const;
-    this.homeLimitStop = crossing;
-    void this.abort("agent", operationId, "chapter-limit").then(() => {
-      try {
-        const settledBytes = path ? statSync(path).size : 0;
-        const settledEntries = this.canonicalEntryCount;
-        this.hooks.homeChapterLimitStopped({
-          chapterOrdinal: this.dependencies.homeChapterState(this.id).ordinal ?? 0,
-          boundary,
-          crossingBytes: crossing.crossingBytes,
-          crossingEntries: crossing.crossingEntries,
-          settledBytes,
-          settledEntries,
-        });
-      } finally {
-        // The Stop has settled, so the fence is no longer needed even if the
-        // crossing record could not be read.
-        if (this.homeLimitStop === crossing) delete this.homeLimitStop;
-      }
-    }, error => {
-      // If exact-operation Stop could not settle, preserve the admission fence.
-      this.emit("session.diagnostic", { code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
-    }).catch(error => {
-      // A failure after the Stop settled must not be an unhandled rejection.
-      this.emit("session.diagnostic", { code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
-    });
+    this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).admission();
   }
 
   /** `exceptWorkToken` is the initiating request's own work entry, which is not

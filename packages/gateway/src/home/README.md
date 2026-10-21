@@ -12,7 +12,7 @@ unaffected by every rule here.
 - **Designation and chapters:** `home-owner.ts` (record, ledger, profile changes, wake
   scheduler), `home-chapter-state.ts`, `home-chapter-contents.ts`, `home-session-*.ts`.
 - **Profile and seam:** `home-runtime-policy.ts`, `home-request-policy.ts`,
-  `home-module.ts` (descriptors, request/settled hooks), `tron-home-extension.ts` (tools/context/cache).
+  `home-module.ts` (descriptors, request/append/settled hooks), `tron-home-extension.ts` (tools/context/cache).
 - **Memory, research, profile:** `home-memory*.ts`, `home-research-tools.ts`, `home-profile.ts`.
 - **Tasks and wake inbox:** `home-task-*.ts`, `home-wake-inbox.ts`; contract in
   [tasks.md](tasks.md). Also `home-diagnostic.ts`, `host-pressure.ts`,
@@ -39,7 +39,7 @@ unaffected by every rule here.
   (200 MiB or 100,000 entries) does the same. Every physical prompt rechecks the hard limit in
   its slot lane and refuses without redirecting. A running activation crossing it is stopped
   with reason `chapter-limit`. The next `home.prompt` or result wake materializes a reserved chapter.
-- **Sealed chapters** refuse every mutation (`conflict` `sealed-chapter`); a bound slot refuses identity replacement (`home-identity-replacement`).
+- **Sealed chapters** refuse every mutation (`conflict` `sealed-chapter`); `home-append-guard.ts` owns writer-bound guards/Stop fences; bound slots refuse identity replacement (`home-identity-replacement`).
 - **Materialization** claims one attempt per reserved chapter, strictly scans candidate JSONL
   and records the exact SDK path first; bad evidence blocks without touching bytes. A ledger
   publication error fences all Home admissions until reload and slot retirement finish.

@@ -280,6 +280,13 @@ async function open(label: string, options: FixtureOptions = {}) {
   return item;
 }
 
+/** Control the real Home state producer, not a retired slot dependency. */
+function sealChapterState(item: Awaited<ReturnType<typeof homeFixture>>): void {
+  const owner = item.registry.homeOwner(), read = owner.chapterStateFor.bind(owner);
+  const state = vi.spyOn(owner, "chapterStateFor").mockImplementation(id => ({ ...read(id), sealed: true }));
+  disposals.push(async () => { state.mockRestore(); });
+}
+
 /** Rationale for the case names: the prototype's numbering (#412) is kept, so
  * this file's rows line up with the qualification evidence it ports. */
 describe("Home request seam inside the Gateway runtime", { concurrent: false }, () => {
@@ -466,15 +473,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     await item.slot.prompt("canonical baseline input");
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
 
-    const runtime = item.slot as unknown as {
-      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
-      runtime: { session: AgentSession };
-    };
-    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: true });
-    const owner = item.registry.homeOwner() as unknown as {
-      chapterStateFor: (sessionId: string) => { sessionId: string; sealed: boolean };
-    };
-    owner.chapterStateFor = runtime.dependencies.homeChapterState;
+    sealChapterState(item);
     const manager = item.session.sessionManager;
     const originalEntries = manager.getEntries();
     const originalLeaf = manager.getLeafId();
@@ -523,11 +522,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
   it("refuses a sealed first activation before the SDK first flush can materialize a file", async () => {
     const item = await open("sealed-first-flush", { home: true, memory: true });
     item.faux.setResponses([item.response("unexpected sealed mutation response")]);
-    const runtime = item.slot as unknown as {
-      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
-      runtime: { session: AgentSession };
-    };
-    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: true });
+    sealChapterState(item);
     const manager = item.session.sessionManager;
     const originalEntries = manager.getEntries();
     const originalLeaf = manager.getLeafId();
@@ -558,12 +553,11 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
 
     const runtime = item.slot as unknown as {
-      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
       persistCanonicalCustomEntry(type: string, data: Record<string, unknown>, identity: string): Promise<void>;
       hasBlockedOwnershipWrite: boolean;
       durableWrites: Map<string, unknown>;
     };
-    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: true });
+    sealChapterState(item);
     const manager = item.session.sessionManager;
     const originalEntries = manager.getEntries();
     const originalLeaf = manager.getLeafId();
@@ -594,12 +588,10 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
 
     const runtime = item.slot as unknown as {
-      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
       persistCanonicalCustomEntry(type: string, data: Record<string, unknown>, identity: string): Promise<void>;
       hasBlockedOwnershipWrite: boolean;
       durableWrites: Map<string, unknown>;
     };
-    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: false });
     const manager = item.session.sessionManager;
     const append = manager.appendCustomEntry.bind(manager);
     const appendAttempt = vi.spyOn(manager, "appendCustomEntry").mockImplementation((...arguments_) => {
@@ -842,21 +834,20 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const slot = item.slot as unknown as {
       sessionManager: AgentSession["sessionManager"] & { _appendEntry: unknown };
       replaceRuntimeForProfile: (commit: () => Promise<void>) => Promise<void>;
-      observeHomeChapterGrowth: () => void;
     };
     const manager = slot.sessionManager;
     const append = manager._appendEntry;
-    const observations = vi.spyOn(slot, "observeHomeChapterGrowth");
+    manager.appendMessage(fauxAssistantMessage("canonical writer flush"));
     for (let rebuild = 0; rebuild < 5; rebuild += 1) {
       await slot.replaceRuntimeForProfile(async () => {});
       await item.slot.reload();
-      observations.mockClear();
       manager.appendCustomEntry("guard-rebuild-proof", { rebuild });
-      expect(observations, `rebuild ${rebuild} stacked canonical observers`).toHaveBeenCalledTimes(1);
+      const persisted = (await item.jsonl()).trimEnd().split("\n").map(line => JSON.parse(line));
+      expect(persisted.filter(entry => entry.type === "custom" && entry.customType === "guard-rebuild-proof")).toHaveLength(rebuild + 1);
       expect(manager._appendEntry).toBe(append);
     }
     expect(manager.getEntries().filter(entry => entry.type === "custom" && entry.customType === "guard-rebuild-proof")).toHaveLength(5);
-    item.record("manager-guard-rebuild", { home, rebuilds: 5, reloads: 5, observersPerAppend: 1 });
+    item.record("manager-guard-rebuild", { home, rebuilds: 5, reloads: 5, canonicalAppends: 5 });
   }, 30_000);
 
   it("C3 steering during the activation keeps the earlier tool exchange", async () => {

@@ -3,6 +3,7 @@ import type { SettingsToolAccess } from "../settings/tool-contract.js";
 import type { JsonValue, TronModuleSummary } from "../../protocol/types.js";
 import type { ToolResultProjection } from "../projection/tool-result.js";
 import type { RequestPolicyHook } from "./request-policy.js";
+import type { CanonicalAppendContext, CanonicalAppendPolicy } from "./canonical-append.js";
 
 export type AgentTerminalOutcome = "completed" | "limited" | "failed" | "stopped" | "unknown" | "interrupted";
 
@@ -108,10 +109,11 @@ export const KERNEL_HOOKS = {
 export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
-export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled" | "requestPolicy">]: (...args: never[]) => unknown } & {
+export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled" | "requestPolicy" | "appendGuard">]: (...args: never[]) => unknown } & {
   toolResultProjection(): ToolResultProjection;
   runSettled(): RunSettledPolicy;
   requestPolicy(): RequestPolicyHook;
+  appendGuard(context: CanonicalAppendContext): CanonicalAppendPolicy;
   /** Resolve optional availability before sampling run-owned facts. */
   runTerminal(): ((input: RunTerminalInput) => Promise<void>) | undefined;
   interactionRequired(): ((input: InteractionRequiredInput) => Promise<void>) | undefined;
