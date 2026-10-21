@@ -69,12 +69,12 @@ probes = [
     ("UI/Probe.swift", "view.actionSheet(isPresented: $show) {}"),
     ("UI/Probe.swift", "let value: ActionSheet?"),
     ("UI/Probe.swift", "let value = UIActionSheet()"),
-    ("State/PresentationActivityCoordinator.swift", "let controller: UIAlertController?"),
+    ("State/ManagedSheetPresentation.swift", "let controller: UIAlertController?"),
     ("UI/SwiftApps/SwiftAppViews.swift", "let action = UIAlertAction(title: title)"),
 ]
 cases = [({relative: source}, "shared Tron confirmation sheet") for relative, source in probes]
 cases += [
-    ({"State/PresentationActivityCoordinator.swift": "view.sheet (item: $route) {}",
+    ({"State/ManagedSheetPresentation.swift": "view.sheet (item: $route) {}",
       "UI/SwiftApps/SwiftAppViews.swift": "view.sheet(item: $route) {}",
       "UI/Probe.swift": '// .sheet(x)\nlet x = ".sheet(x)"\nswitch surface ?? .sheet { case .sheet: break }'}, None),
 ]
