@@ -39,7 +39,7 @@ unaffected by every rule here.
   (200 MiB or 100,000 entries) does the same. Every physical prompt rechecks the hard limit in
   its slot lane and refuses without redirecting. A running activation crossing it is stopped
   with reason `chapter-limit`. The next `home.prompt` or result wake materializes a reserved chapter.
-- **Sealed chapters** refuse every mutation (`conflict` `sealed-chapter`); `home-append-guard.ts` owns writer-bound guards/Stop fences; bound slots refuse identity replacement (`home-identity-replacement`).
+- **Sealed chapters** refuse every mutation (`conflict` `sealed-chapter`); `home-append-guard.ts` owns slot-bound guards/Stop fences; bound slots refuse identity replacement (`home-identity-replacement`).
 - **Materialization** claims one attempt per reserved chapter, strictly scans candidate JSONL
   and records the exact SDK path first; bad evidence blocks without touching bytes. A ledger
   publication error fences all Home admissions until reload and slot retirement finish.

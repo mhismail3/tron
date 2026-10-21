@@ -20,8 +20,8 @@ export interface HomeAppendGuardServices {
   diagnostic: HomeDiagnostic;
 }
 
-/** One fence belongs to one canonical writer, across runtime rebuilds. Weak
- * binding releases the guard with its writer; no second lifecycle map is needed. */
+/** One fence belongs to one slot across runtime rebuilds and rekeys. Weak
+ * binding releases the guard with that slot; no second lifecycle map is needed. */
 export function homeAppendGuardHook(services: () => HomeAppendGuardServices): (context: CanonicalAppendContext) => CanonicalAppendPolicy {
   const guards = new WeakMap<object, HomeAppendGuard>();
   return context => {

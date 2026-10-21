@@ -52,7 +52,7 @@ chapter state or a second Stop fence.
   resolves at the error cut; the kernel never imports a module's concrete error.
   `appendGuard` surrounds each canonical write synchronously, revalidates admission
   after its awaits, and receives the committed microtask. Home owns its weakly
-  writer-bound chapter-limit fence; the Pi adapter still binds the sole writer.
+  slot-bound chapter-limit fence; the Pi adapter still binds the sole writer.
 - **Fail at start.** A module composed twice, an unknown hook, a second policy
   implementer or an RPC method served twice refuses `start`, and the modules
   already started are stopped.
