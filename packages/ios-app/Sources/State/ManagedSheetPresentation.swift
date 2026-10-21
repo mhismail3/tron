@@ -63,6 +63,7 @@ struct PresentationDismissalLease: Equatable {
 private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @Binding var isPresented: Bool
     let identity: String
+    let dependencies: Set<PresentationRefreshDependency>?
     /// The presenting call site: two presenters that share an identity string
     /// still keep separate presentation state.
     let site: String
@@ -73,45 +74,77 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @Environment(\.tronPresentationSurfaceToken) private var parent
     @Environment(\.tronPresentationStateStore) private var sceneStateStore
     @Environment(\.tronPresentationStateScope) private var parentStateScope
-    @State private var lease = PresentationDismissalLease()
-    @State private var localStateStore = PresentationStateStore()
+    @PresentationState private var lease: PresentationDismissalLease
+    @PresentationState private var nativeHost = RetainedNativeSheetHost()
+    @State private var localStateStore = PresentationStateStore() // view-local: standalone fallback outside a scene store
+
+    init(isPresented: Binding<Bool>, identity: String, dependencies: Set<PresentationRefreshDependency>?, site: String, onDismiss: (() -> Void)?,
+         haptic: TronHaptic?, sheetContent: @escaping () -> SheetContent) {
+        _isPresented = isPresented
+        self.identity = identity
+        self.dependencies = dependencies
+        self.site = site
+        self.onDismiss = onDismiss
+        self.haptic = haptic
+        self.sheetContent = sheetContent
+        _lease = PresentationState(wrappedValue: PresentationDismissalLease(), key: "presenter:\(identity)@\(site)")
+        _nativeHost = PresentationState(wrappedValue: RetainedNativeSheetHost(), key: "native:\(identity)@\(site)")
+    }
+
     private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
     private var statePath: String { PresentationStateStore.path(parent: parentStateScope, identity: "\(identity)@\(site)") }
 
     func body(content: Content) -> some View {
         content
-            .sheet(isPresented: $isPresented, onDismiss: didDismiss) {
-                TronPresentationSurface(token: lease.contentToken(identity: identity), parent: parent) {
-                    sheetContent()
-                        // A sheet owns its own scrolls; the covered chat's
-                        // secondary-scroll exclusion must not cross this boundary.
-                        .environment(\.chatOwnsStatusBar, false)
-                        // Outlives SwiftUI rebuilding this content (#1073).
-                        .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
+            .background {
+                if isPresented || nativeHost.isInstalled {
+                    RetainedNativeSheetPresenter(owner: nativeHost) {
+                        Color.clear.sheet(isPresented: $isPresented, onDismiss: didDismiss) {
+                            TronPresentationSurface(token: lease.contentToken(identity: identity), parent: parent) {
+                                sheetContent()
+                                    .environment(\.chatOwnsStatusBar, false)
+                                    .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
+                            }
+                        }
+                    }
+                    .frame(width: 0, height: 0)
                 }
             }
             // Only a live false → true change plays: a sheet already presented
             // when its presenter mounts (launch, reconnect, rebuild) is silent.
             .onChange(of: isPresented, initial: true) { wasPresented, presented in
+                #if HOSTED_TEST
+                ForegroundSheetProbe.record("binding", "\(identity) \(wasPresented)→\(presented) parent=\(parentStateScope?.path ?? "nil")")
+                #endif
                 if presented {
                     registerIfPossible(playHaptic: !wasPresented)
                 } else {
                     lease.beginDismissal()
                 }
             }
-            .onDisappear { retireAllTokens() }
+            .onDisappear {
+                // A removed source must not leave a phantom foremost surface.
+                // Foreground reconstruction retains the native hosting graph.
+                if isPresented { isPresented = false }
+                retireAllTokens()
+                stateStore.retire(path: statePath)
+                if nativeHost.isInstalled {
+                    nativeHost.presentationDidRetire()
+                    nativeHost = RetainedNativeSheetHost()
+                }
+            }
     }
 
     private func registerIfPossible(playHaptic: Bool) {
         if let token = lease.register(identity: identity) {
-            coordinator?.register(token, parent: parent)
+            coordinator?.register(token, parent: parent, dependencies: dependencies)
             if playHaptic, let haptic { TronHaptics.shared.play(haptic) }
         }
     }
 
     private func didDismiss() {
         #if HOSTED_TEST
-        ForegroundSheetProbe.record("native-dismiss", identity)
+        ForegroundSheetProbe.record("native-dismiss", "\(identity) presented=\(isPresented) source-attached=\(nativeHost.isAttached)")
         #endif
         if lease.dismissingToken == nil, !isPresented { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: isPresented ? identity : nil)
@@ -125,7 +158,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     private func apply(_ transition: PresentationDismissalLease.Transition) {
         if let retired = transition.retired { coordinator?.retire(retired) }
         if let registered = transition.registered {
-            coordinator?.register(registered, parent: parent)
+            coordinator?.register(registered, parent: parent, dependencies: dependencies)
         }
     }
 
@@ -136,6 +169,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
 
 private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: View>: ViewModifier {
     @Binding var item: Item?
+    let dependencies: ((Item) -> Set<PresentationRefreshDependency>)?
     let identity: (Item) -> String
     let site: String
     let onDismiss: (() -> Void)?
@@ -145,11 +179,26 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     @Environment(\.tronPresentationSurfaceToken) private var parent
     @Environment(\.tronPresentationStateStore) private var sceneStateStore
     @Environment(\.tronPresentationStateScope) private var parentStateScope
-    @State private var lease = PresentationDismissalLease()
-    @State private var localStateStore = PresentationStateStore()
+    @PresentationState private var lease: PresentationDismissalLease
+    @PresentationState private var nativeHost = RetainedNativeSheetHost()
+    @State private var localStateStore = PresentationStateStore() // view-local: standalone fallback outside a scene store
     /// The identity whose state scope this presenter last showed, so a
     /// replacement or dismissal retires exactly that scope.
-    @State private var presentedStatePath: String?
+    @PresentationState private var presentedStatePath: String?
+
+    init(item: Binding<Item?>, identity: @escaping (Item) -> String, dependencies: ((Item) -> Set<PresentationRefreshDependency>)?, site: String,
+         onDismiss: (() -> Void)?, haptic: TronHaptic?, sheetContent: @escaping (Item) -> SheetContent) {
+        _item = item
+        self.identity = identity
+        self.dependencies = dependencies
+        self.site = site
+        self.onDismiss = onDismiss
+        self.haptic = haptic
+        self.sheetContent = sheetContent
+        _lease = PresentationState(wrappedValue: PresentationDismissalLease(), key: "presenter@\(site)")
+        _nativeHost = PresentationState(wrappedValue: RetainedNativeSheetHost(), key: "native@\(site)")
+        _presentedStatePath = PresentationState(wrappedValue: nil, key: "presented-path@\(site)")
+    }
 
     private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
     /// The item's own identity is part of the path: a presenter whose identity
@@ -160,12 +209,18 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
 
     func body(content: Content) -> some View {
         content
-            .sheet(item: $item, onDismiss: didDismiss) { value in
-                TronPresentationSurface(token: lease.contentToken(identity: identity(value)), parent: parent) {
-                    sheetContent(value)
-                        .environment(\.chatOwnsStatusBar, false)
-                        // Outlives SwiftUI rebuilding this content (#1073).
-                        .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
+            .background {
+                if item != nil || nativeHost.isInstalled {
+                    RetainedNativeSheetPresenter(owner: nativeHost) {
+                        Color.clear.sheet(item: $item, onDismiss: didDismiss) { value in
+                            TronPresentationSurface(token: lease.contentToken(identity: identity(value)), parent: parent) {
+                                sheetContent(value)
+                                    .environment(\.chatOwnsStatusBar, false)
+                                    .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
+                            }
+                        }
+                    }
+                    .frame(width: 0, height: 0)
                 }
             }
             .onChange(of: item.map(identity), initial: true) { previous, current in
@@ -174,7 +229,16 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                 if previous == nil, current != nil, lease.dismissingToken == nil,
                    let haptic { TronHaptics.shared.play(haptic) }
             }
-            .onDisappear { retireAllTokens() }
+            .onDisappear {
+                if item != nil { item = nil }
+                retireAllTokens()
+                if let presentedStatePath { stateStore.retire(path: presentedStatePath) }
+                presentedStatePath = nil
+                if nativeHost.isInstalled {
+                    nativeHost.presentationDidRetire()
+                    nativeHost = RetainedNativeSheetHost()
+                }
+            }
     }
 
     private func itemChanged() {
@@ -189,7 +253,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         let itemIdentity = identity(item)
         if lease.registeredToken == nil {
             if let token = lease.register(identity: itemIdentity) {
-                coordinator?.register(token, parent: parent)
+                coordinator?.register(token, parent: parent, dependencies: dependencies?(item))
             }
         } else {
             apply(lease.replace(identity: itemIdentity))
@@ -198,7 +262,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
 
     private func didDismiss() {
         #if HOSTED_TEST
-        ForegroundSheetProbe.record("native-dismiss", item.map(identity) ?? "nil")
+        ForegroundSheetProbe.record("native-dismiss", "\(item.map(identity) ?? "nil") source-attached=\(nativeHost.isAttached)")
         #endif
         if lease.dismissingToken == nil, item == nil { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: item.map(identity))
@@ -214,7 +278,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     private func apply(_ transition: PresentationDismissalLease.Transition) {
         if let retired = transition.retired { coordinator?.retire(retired) }
         if let registered = transition.registered {
-            coordinator?.register(registered, parent: parent)
+            coordinator?.register(registered, parent: parent, dependencies: item.flatMap { dependencies?($0) })
         }
     }
 
@@ -261,6 +325,7 @@ extension View {
     func tronManagedSheet<SheetContent: View>(
         isPresented: Binding<Bool>,
         identity: String,
+        dependencies: Set<PresentationRefreshDependency>? = nil,
         onDismiss: (() -> Void)? = nil,
         presentationHaptic: TronHaptic? = .sheetPresented,
         fileID: String = #fileID,
@@ -270,6 +335,7 @@ extension View {
         modifier(TronManagedSheetModifier(
             isPresented: isPresented,
             identity: identity,
+            dependencies: dependencies,
             site: "\(fileID):\(line)",
             onDismiss: onDismiss,
             haptic: presentationHaptic,
@@ -280,6 +346,7 @@ extension View {
     func tronManagedSheet<Item: Identifiable, SheetContent: View>(
         item: Binding<Item?>,
         identity: @escaping (Item) -> String,
+        dependencies: ((Item) -> Set<PresentationRefreshDependency>)? = nil,
         onDismiss: (() -> Void)? = nil,
         presentationHaptic: TronHaptic? = .sheetPresented,
         fileID: String = #fileID,
@@ -289,6 +356,7 @@ extension View {
         modifier(TronManagedItemSheetModifier(
             item: item,
             identity: identity,
+            dependencies: dependencies,
             site: "\(fileID):\(line)",
             onDismiss: onDismiss,
             haptic: presentationHaptic,
@@ -308,9 +376,10 @@ extension View {
 
     func tronPresentationSurface(
         id: String,
+        dependencies: Set<PresentationRefreshDependency>? = nil,
         onMount: ((PresentationSurfaceToken) -> Void)? = nil,
         onRetire: ((PresentationSurfaceToken) -> Void)? = nil
     ) -> some View {
-        TronPresentationSurface(id: id, onMount: onMount, onRetire: onRetire) { self }
+        TronPresentationSurface(id: id, dependencies: dependencies, onMount: onMount, onRetire: onRetire) { self }
     }
 }

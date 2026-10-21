@@ -62,12 +62,15 @@ enum PresentationClockPolicy {
     }
 }
 
-/// Owns only the mounted presentation topology. Session authority, transport,
-/// mutations, persistence, and synchronization must never depend on this owner.
+/// Owns mounted topology and disposable read demand. Transport, accepted
+/// mutations and canonical session authority remain with their existing owners.
 @MainActor
 @Observable
 final class PresentationActivityCoordinator {
-    private struct Surface { let parent: PresentationSurfaceToken? }
+    private struct Surface {
+        let parent: PresentationSurfaceToken?
+        let dependencies: Set<PresentationRefreshDependency>
+    }
 
     private static let retiredTokenLimit = 512
     private var surfaces: [PresentationSurfaceToken: Surface] = [:]
@@ -80,14 +83,18 @@ final class PresentationActivityCoordinator {
 
     /// Registration is idempotent so binding intent and mounted content can
     /// both establish the same generation without creating duplicate leases.
-    func register(_ token: PresentationSurfaceToken, parent: PresentationSurfaceToken?) {
+    func register(_ token: PresentationSurfaceToken, parent: PresentationSurfaceToken?,
+                  dependencies: Set<PresentationRefreshDependency>? = nil) {
         guard surfaces[token] == nil,
               !retiredTokens.contains(token),
               parent.map({ !retiredTokens.contains($0) }) ?? true else { return }
         #if HOSTED_TEST
         ForegroundSheetProbe.record("register", "\(token.id)#\(token.generation) parent=\(parent?.id ?? "root")")
         #endif
-        surfaces[token] = Surface(parent: parent)
+        // Session authority is shared down its lineage; catalog demand belongs
+        // only to the surface declaring that it actually consumes the roster.
+        surfaces[token] = Surface(parent: parent, dependencies: dependencies
+            ?? refreshDependencies(for: parent).filter { $0 != .sessionCatalog })
         order.append(token)
     }
 
@@ -124,6 +131,22 @@ final class PresentationActivityCoordinator {
     }
 
     var mountedSurfaceCount: Int { order.count }
+
+    func refreshDependencies(for token: PresentationSurfaceToken?) -> Set<PresentationRefreshDependency> {
+        token.flatMap { surfaces[$0]?.dependencies } ?? []
+    }
+
+    /// Transport recovery always proceeds. Only the foremost presentation's
+    /// declared read dependencies request mounted-session synchronization.
+    func requiresSessionRefresh(_ sessionID: String) -> Bool {
+        guard let topmostToken else { return true }
+        return refreshDependencies(for: topmostToken).contains { $0.requiresSession(sessionID) }
+    }
+
+    func requiresSessionCatalogRefresh() -> Bool {
+        guard let topmostToken else { return true }
+        return refreshDependencies(for: topmostToken).contains(.sessionCatalog)
+    }
 
     private func rememberRetired(_ token: PresentationSurfaceToken) {
         guard retiredTokens.insert(token).inserted else { return }
@@ -196,6 +219,7 @@ struct TronPresentationSurface<Content: View>: View {
     private let id: String
     private let suppliedToken: PresentationSurfaceToken?
     private let registersLifecycle: Bool
+    private let dependencies: Set<PresentationRefreshDependency>?
     private let onMount: ((PresentationSurfaceToken) -> Void)?
     private let onRetire: ((PresentationSurfaceToken) -> Void)?
     @ViewBuilder private let content: () -> Content
@@ -203,16 +227,20 @@ struct TronPresentationSurface<Content: View>: View {
     @Environment(\.tronPresentationSurfaceToken) private var inheritedParent
     @Environment(\.tronPresentationStateStore) private var stateStore
     @Environment(\.tronPresentationStateScope) private var inheritedStateScope
+    @Environment(\.tronPresentationDependencyRead) private var dependencyRead
+    @Environment(\.scenePhase) private var scenePhase
     private let explicitParent: PresentationSurfaceToken?
     @State private var generation = UUID()
 
     init(
         id: String,
+        dependencies: Set<PresentationRefreshDependency>? = nil,
         onMount: ((PresentationSurfaceToken) -> Void)? = nil,
         onRetire: ((PresentationSurfaceToken) -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.id = id
+        self.dependencies = dependencies
         suppliedToken = nil
         registersLifecycle = true
         self.onMount = onMount
@@ -227,6 +255,7 @@ struct TronPresentationSurface<Content: View>: View {
         @ViewBuilder content: @escaping () -> Content
     ) {
         id = token.id
+        dependencies = nil
         suppliedToken = token
         registersLifecycle = false
         onMount = nil
@@ -257,17 +286,25 @@ struct TronPresentationSurface<Content: View>: View {
         #endif
         content()
             .modifier(TronSheetLoadingHostModifier())
+            #if HOSTED_TEST
+            .background { if ForegroundSheetProbe.enabled { ForegroundSheetNativeProbe(identity: token.id) } }
+            #endif
             .environment(\.tronPresentationStateScope, stateScope)
             .environment(\.tronPresentationSurfaceToken, token)
             .environment(
                 \.tronPresentationActivity,
                 coordinator?.activity(for: token) ?? .active
             )
+            .task(id: PresentationActivityTaskID(source: dependencyRead?.id,
+                presentationActive: coordinator?.activity(for: token).allowsPresentationPublication == true && scenePhase == .active)) {
+                guard scenePhase == .active, coordinator?.activity(for: token).allowsPresentationPublication == true else { return }
+                await dependencyRead?.perform()
+            }
             .onAppear {
                 #if HOSTED_TEST
                 ForegroundSheetProbe.record("appear", "\(token.id)#\(token.generation)")
                 #endif
-                coordinator?.register(token, parent: explicitParent ?? inheritedParent)
+                coordinator?.register(token, parent: explicitParent ?? inheritedParent, dependencies: dependencies)
                 if registersLifecycle { onMount?(token) }
             }
             .onDisappear {

@@ -508,13 +508,12 @@ final class HomeSheetReadOwner {
 
     func load(requestID: UUID, identity: HomeSheetReadIdentity, coordinator: PresentationActivityCoordinator,
               isCurrent: @escaping @MainActor () -> Bool,
-              preserveInstalledFrame: Bool = false,
               fetch: @escaping @MainActor () async throws -> HomeSheetContent) async {
         guard isCurrent(), coordinator.activity(for: identity.surfaceToken).allowsPresentationPublication else {
             retire(); return
         }
         let installed: HomeSheetContent?
-        if preserveInstalledFrame, case .loaded(let previous, let content) = state, previous.identity == identity {
+        if case .loaded(let previous, let content) = state, previous.requestID == requestID, identity.retainsContent(from: previous.identity) {
             installed = content
         } else { installed = nil }
         let read = Read(requestID: requestID, loadID: UUID(), identity: identity)
@@ -524,7 +523,7 @@ final class HomeSheetReadOwner {
         catch { outcome = .failure(error) }
         guard case .loading(let current, _) = state, current == read else { return }
         guard !Task.isCancelled, isCurrent(), coordinator.activity(for: identity.surfaceToken).allowsPresentationPublication else {
-            retire(); return
+            retireLoading(); return
         }
         switch outcome {
         case .success(let content): state = .loaded(read, content)

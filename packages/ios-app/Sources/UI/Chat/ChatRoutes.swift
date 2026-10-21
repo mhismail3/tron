@@ -59,7 +59,7 @@ struct ChatRoutes: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .tronManagedSheet(item: $homeSheet, identity: { $0.id }, onDismiss: completeStagedNavigationAfterDismissal) { route in
+            .tronManagedSheet(item: $homeSheet, identity: { $0.id }, dependencies: { _ in [] }, onDismiss: completeStagedNavigationAfterDismissal) { route in
                 HomeSheet(destination: route.destination, profileID: route.profileID, sessionID: route.sessionID,
                           onOpenSession: { openedSessionID in
                               // Read-only open of a chapter or worker chat: stage a profile-fenced
@@ -82,7 +82,8 @@ struct ChatRoutes: ViewModifier {
             }
             .tronManagedSheet(
                 isPresented: $showSettings,
-                identity: "chat.\(sessionID).settings"
+                identity: "chat.\(sessionID).settings",
+                dependencies: []
             ) {
                 SettingsView(
                     onImported: { route in
@@ -94,7 +95,8 @@ struct ChatRoutes: ViewModifier {
             }
             .tronManagedSheet(
                 item: $queuedMessageEditor,
-                identity: { "chat.\(sessionID).queue.\($0.id)" }
+                identity: { "chat.\(sessionID).queue.\($0.id)" },
+                dependencies: { [.queuedMessage(sessionID: sessionID, messageID: $0.id)] }
             ) { route in
                 if let commit = queueCommit,
                    let message = commit.items.first(where: { $0.id == route.id }) {

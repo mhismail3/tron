@@ -176,27 +176,32 @@ Returning to the app, reconnecting, resyncing or reloading never dismisses a pre
 re-presents it, or clears what it holds: drafts, text fields, terminal output and scrollback,
 scroll position, selection, or a nested sheet (#1073). Data updates in place.
 
-On iOS 26.4 and later SwiftUI rebuilds a presented sheet's content on return from background,
-with fresh `@State`, and reruns its `onDisappear` and `task` hooks while the sheet stays up. The
-owner of a presentation's lifetime is therefore the managed sheet modifier, not its content
-(`Sources/State/PresentationScopedState.swift`):
+The managed source owns a presentation, not a disposable rendering of its content. Native
+SwiftUI presentation graphs can otherwise be reconstructed on foregrounding, discarding local
+state and replaying nested transitions. Shared owners keep native lifetime and domain state
+separate:
 
 - `tronManagedSheet` gives each presentation a `PresentationStateScope` in the scene's
   `PresentationStateStore` (`TronPresentationStateRoot`), keyed by the presenter's scope path plus
   the sheet identity (and an item sheet's `id`). Rebuilt content finds the same scope; an actual
   dismissal or replacement item retires it and every scope presented from inside it. Route
   surfaces (dashboard, chat route) are the parent scope of their sheets.
+- `RetainedNativeSheetPresenter` keeps the ordinary SwiftUI `.sheet` node in a scope-owned,
+  zero-layout hosting anchor and forwards its inherited environment. Native chrome, detents,
+  gestures and focus remain platform-owned. Source removal clears intent and retires its scopes;
+  scope or scene retirement empties retained graphs. No second modal stack or replay is installed.
 - Sheet content declares state that must outlive a rebuild with `@PresentationState`; a view
   appearing more than once in one sheet passes `key:`.
-- Dismissal-only teardown goes in `PresentationScopedResource.presentationDidRetire()` or
-  `.onPresentationRetire { }`, never `onDisappear`. Start hooks are idempotent.
+- Sheet-content teardown goes in `PresentationScopedResource.presentationDidRetire()` or
+  `.onPresentationRetire { }`, never the content's `onDisappear`. Start hooks are idempotent.
+  The source's own disappearance ends its presentation, including conditional schema rows.
 - `TerminalEmulatorHost` keeps a sheet's SwiftTerm view, so screen, scrollback, scroll and
   selection survive and no output is replayed.
 
 `packages/ios-app/scripts/presentation-source-policy.py` makes this the default: managed-sheet
-content may not declare `@State` unless the line says `// view-local: <reason>`. A rebuild still
-resigns keyboard focus. `RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent`
-proves the invariant from the real interface.
+content may not declare `@State` unless the line says `// view-local: <reason>`. Native focus
+behavior is not overridden. `RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent`
+exercises the foreground path in the paired-Gateway UI lane.
 
 ## Presentation activity
 
@@ -215,6 +220,17 @@ canonical state, is never persisted, and is not a second state authority.
   cover cancels them, uncover restarts from current inputs. Publication rejects cancellation
   (a sent read may throw `GatewayPossiblySentError`, not `CancellationError`) and stale
   ownership. Keep the last complete data.
+- Foreground transport recovery continues independently of disposable reads. The foremost
+  surface declares required `PresentationRefreshDependency` values: session authority propagates
+  down its lineage, queued editing requires the exact session/message, and catalog demand belongs
+  only to a surface consuming the roster. Independent Home/global settings and immutable details
+  do not restore a covered chat. The dashboard resumes a stale catalog on reveal.
+- A schema editor consumes its shared target snapshot through `PresentationDependencyRead`;
+  the foremost surface admits the refresh and the settings owner deduplicates it. Providers and
+  authorized devices refresh through their visible owners, not an unconditional reconnect pair.
+- Compatible read admission changes retain the last complete frame, cursor and viewport until
+  replacement data is admitted. New sources clear it; new reads and mutations still require
+  current authority. Navigation resets a viewport once per new request, not again on refresh.
 - Cover never cancels Gateway intake, sequence admission, canonical reduction, accepted
   mutations, drafts, receipts, terminal connections or notifications. On uncover each branch's
   owner installs one current aggregate; chat rebases its viewport once against the newest

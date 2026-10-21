@@ -230,8 +230,7 @@ struct HomeSheet: View {
         .environment(\.configurationSliderSignposts, model.performanceSignposts)
         .task(id: HomeSheetTaskID(identity: identity, active: active, request: request)) {
             guard destination.loadsPage else { return }
-            guard let identity, let coordinator else { owner.retire(); return }
-            guard active else { owner.retireLoading(); return }
+            guard active, let identity, let coordinator else { owner.retireLoading(); return }
             let query = request.query
             let requestID = request.id
             // Uncovering a sheet keeps its installed page: returning from a child is not a
@@ -245,8 +244,7 @@ struct HomeSheet: View {
                 }
             }
             await owner.load(requestID: requestID, identity: identity, coordinator: coordinator,
-                             isCurrent: { self.identity == identity && self.request.id == requestID },
-                             preserveInstalledFrame: destination.id == "manage") {
+                             isCurrent: { self.identity == identity && self.request.id == requestID }) {
                 try await fetch(query: query, identity: identity, requestID: requestID)
             }
         }
@@ -286,7 +284,7 @@ struct HomeSheet: View {
             TronPlaceholderState(title: "Home could not be read", detail: error, icon: "exclamationmark.triangle",
                                  actionTitle: "Reload") { reload() }
         case .loaded(let read, let content), .loading(let read, .some(let content)):
-            if read.identity == identity {
+            if read.identity.profileID == profileID && read.identity.surfaceToken == token {
                 switch content {
                 case .manage(let manage): manageSheet(manage)
                 case .chapters(let list): chapters(list)

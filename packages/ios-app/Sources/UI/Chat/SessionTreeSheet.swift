@@ -163,16 +163,16 @@ struct SessionTreeSheet: View {
                 guard active, supported, let identity else { store.suspend(); return }
                 guard store.identity != identity || store.page == nil || installedRevision != pageRequest.revision else { return }
                 let request = pageRequest
-                let changedIdentity = store.identity != identity
+                let changedSource = store.identity?.retainsContent(from: identity) != true
                 let client = model.client
-                let loaded = await store.load(identity: identity, cursor: changedIdentity ? nil : request.cursor,
-                    resetViewport: changedIdentity || request.resetsViewport,
+                let loaded = await store.load(identity: identity, cursor: changedSource ? nil : request.cursor,
+                    resetViewport: changedSource || (request.resetsViewport && installedRevision != request.revision),
                     request: { try await client.requestValue($0, $1) },
                     isCurrent: { active && self.identity == identity && pageRequest.revision == request.revision })
                 guard loaded, !Task.isCancelled, active, self.identity == identity,
                       pageRequest.revision == request.revision else { return }
                 installedRevision = request.revision
-                if changedIdentity { pageRequest.cursor = nil }
+                if changedSource { pageRequest.cursor = nil }
                 await resolveInitialEntryIfPresent(identity: identity)
             }
             #if HOSTED_TEST

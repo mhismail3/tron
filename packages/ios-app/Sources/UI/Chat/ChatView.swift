@@ -835,9 +835,7 @@ struct ChatView: View {
         } else if current == .active,
                   presentationActivity.allowsPresentationPublication {
             if admitsAutomaticOpeningResume {
-                // Foregrounding does not necessarily change connection state or
-                // publish a reconciliation generation. Resume explicitly instead
-                // of waiting for an unrelated model event.
+                // Resume even when foregrounding changes no connection/generation.
                 beginOpeningAfterForegroundWhenConnected()
             } else {
                 scrollCoordinator.foregroundViewportBecameActive(

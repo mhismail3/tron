@@ -65,6 +65,9 @@ struct SettingsRendererView: View {
                     .tronScrollEdgeChrome()
             }
         }
+        .environment(\.tronPresentationDependencyRead, PresentationDependencyRead(
+            id: .init(target: target, freshness: model.settingsFreshness),
+            perform: { try? await model.refreshSettingsSnapshot(for: target) }))
         .tronConfigurationSliderHost(sliderPresentation)
         .environment(\.configurationSliderSignposts, model.performanceSignposts)
         .tronConfirmation(
