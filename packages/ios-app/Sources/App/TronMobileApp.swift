@@ -171,7 +171,9 @@ private struct RootView: View {
         SessionShellView()
         .tronManagedSheet(
             isPresented: $showOnboarding,
-            identity: "app.onboarding"
+            identity: "app.onboarding",
+            // Launch and connection state present it, never a user's tap.
+            presentationHaptic: nil
         ) {
             OnboardingView(selectedDetent: $onboardingDetent) {
                 showOnboarding = false

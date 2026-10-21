@@ -659,7 +659,7 @@ struct SwiftAppModifiedView: View {
         case "sheet":
             guard case .binding(let binding)? = argument(arguments, "isPresented") else { return view }
             let content = arguments.last?.value
-            return AnyView(view.sheet(isPresented: boolBinding(binding)) { SwiftAppPresentedContent(runtime: runtime, value: content) })
+            return AnyView(view.tronManagedSheet(isPresented: boolBinding(binding), identity: "swift-app.sheet") { SwiftAppPresentedContent(runtime: runtime, value: content) })
         case "alert":
             guard case .binding(let binding)? = argument(arguments, "isPresented") else { return view }
             let actions = arguments.first(where: { $0.label == nil && { if case .closure = $0.value { true } else { false } }($0) })?.value

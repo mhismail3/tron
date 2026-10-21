@@ -64,6 +64,11 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   managed presentation modifiers (`tronManagedSheet`, progressive links); `packages/ios-app/scripts/test-source-policy.sh`
   rejects raw native sheet calls. Their state rules are in
   [Presentation-scoped state](#presentation-scoped-state).
+- **Presentation haptics.** Managed sheets (including nested and interpreted Swift-app sheets)
+  and system pickers play one soft, light tap through `TronHaptics`, respecting System Haptics.
+  Presenters adopt already-presented state silently; detent changes, replacements, re-renders and
+  dismissals do not tap. The question interaction keeps only its existing live attention cue;
+  state-driven onboarding and pending editor confirmations remain silent across launch/reconnect.
 - **Toolbar tint.** Every sheet a row opens inherits its card's accent through
   `TronProgressiveSheetLink`. Every toolbar action uses `tronToolbarAction(accent:role:)` with the
   accent the sheet gives `TronSheetTitle`; both resolve through `TronSheetTint` (inherited Settings

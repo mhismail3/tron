@@ -42,6 +42,10 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
 - Toolbar icons resolve tint through `TronSheetTint`; nothing paints them directly.
 - Every app-owned sheet goes through the managed modifiers; raw `.sheet` calls fail
   `packages/ios-app/scripts/test-source-policy.sh`.
+- Managed sheets and system pickers dispatch one soft, half-intensity impact through
+  `TronHaptics` on a live presentation, including nested sheets. Existing-at-mount sheets,
+  replacements, detent changes, re-renders and dismissals are silent. Question interactions
+  keep only their live attention cue; automatic onboarding and pending editor requests are silent.
 
 ## Entry points
 
@@ -60,6 +64,7 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSheetTintUITests \
   --only-testing TronMobileUITests/TronAccessibilityUITests
 packages/ios-app/scripts/test-source-policy.sh
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronChatHapticsUITests
 ```
 
 The loading journey samples rendered material, not accessibility geometry; the paged-list journey

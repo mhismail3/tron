@@ -15,26 +15,14 @@ struct PresentationSurfaceActivity: Equatable, Sendable {
     let allowsContinuousAnimation: Bool
     let allowsViewportObservation: Bool
 
-    static let active = Self(
-        allowsDataPublication: true,
-        allowsPresentationPublication: true,
-        allowsContinuousAnimation: true,
-        allowsViewportObservation: true
-    )
+    static let active = Self(allowsDataPublication: true, allowsPresentationPublication: true,
+                             allowsContinuousAnimation: true, allowsViewportObservation: true)
 
-    static let presentingDescendant = Self(
-        allowsDataPublication: true,
-        allowsPresentationPublication: false,
-        allowsContinuousAnimation: false,
-        allowsViewportObservation: false
-    )
+    static let presentingDescendant = Self(allowsDataPublication: true, allowsPresentationPublication: false,
+                                           allowsContinuousAnimation: false, allowsViewportObservation: false)
 
-    static let covered = Self(
-        allowsDataPublication: false,
-        allowsPresentationPublication: false,
-        allowsContinuousAnimation: false,
-        allowsViewportObservation: false
-    )
+    static let covered = Self(allowsDataPublication: false, allowsPresentationPublication: false,
+                              allowsContinuousAnimation: false, allowsViewportObservation: false)
 }
 
 struct PresentationSurfaceToken: Hashable, Sendable {
@@ -79,12 +67,9 @@ enum PresentationClockPolicy {
 @MainActor
 @Observable
 final class PresentationActivityCoordinator {
-    private struct Surface {
-        let parent: PresentationSurfaceToken?
-    }
+    private struct Surface { let parent: PresentationSurfaceToken? }
 
     private static let retiredTokenLimit = 512
-
     private var surfaces: [PresentationSurfaceToken: Surface] = [:]
     private var order: [PresentationSurfaceToken] = []
     /// A dismissal can retire binding intent before delayed SwiftUI content
@@ -349,6 +334,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     /// still keep separate presentation state.
     let site: String
     let onDismiss: (() -> Void)?
+    let haptic: TronHaptic?
     @ViewBuilder let sheetContent: () -> SheetContent
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var parent
@@ -356,7 +342,6 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @Environment(\.tronPresentationStateScope) private var parentStateScope
     @State private var lease = PresentationDismissalLease()
     @State private var localStateStore = PresentationStateStore()
-
     private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
     private var statePath: String { PresentationStateStore.path(parent: parentStateScope, identity: "\(identity)@\(site)") }
 
@@ -372,9 +357,11 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
                         .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
                 }
             }
-            .onChange(of: isPresented, initial: true) { _, presented in
+            // Only a live false → true change plays: a sheet already presented
+            // when its presenter mounts (launch, reconnect, rebuild) is silent.
+            .onChange(of: isPresented, initial: true) { wasPresented, presented in
                 if presented {
-                    registerIfPossible()
+                    registerIfPossible(playHaptic: !wasPresented)
                 } else {
                     lease.beginDismissal()
                 }
@@ -382,9 +369,10 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
             .onDisappear { retireAllTokens() }
     }
 
-    private func registerIfPossible() {
+    private func registerIfPossible(playHaptic: Bool) {
         if let token = lease.register(identity: identity) {
             coordinator?.register(token, parent: parent)
+            if playHaptic, let haptic { TronHaptics.shared.play(haptic) }
         }
     }
 
@@ -392,6 +380,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         if lease.dismissingToken == nil, !isPresented { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: isPresented ? identity : nil)
         apply(transition)
+        if transition.registered != nil, let haptic { TronHaptics.shared.play(haptic) }
         // Only an actual dismissal ends the presentation's state.
         if !isPresented { stateStore.retire(path: statePath) }
         if !isPresented, transition.retired != nil { onDismiss?() }
@@ -414,6 +403,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     let identity: (Item) -> String
     let site: String
     let onDismiss: (() -> Void)?
+    let haptic: TronHaptic?
     @ViewBuilder let sheetContent: (Item) -> SheetContent
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var parent
@@ -426,7 +416,6 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     @State private var presentedStatePath: String?
 
     private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
-
     /// The item's own identity is part of the path: a presenter whose identity
     /// string is constant still gives a different item a fresh state.
     private func statePath(_ value: Item) -> String {
@@ -443,7 +432,12 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                         .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
                 }
             }
-            .onChange(of: item.map(identity), initial: true) { _, _ in itemChanged() }
+            .onChange(of: item.map(identity), initial: true) { previous, current in
+                itemChanged()
+                // Replacing a presented item is not a new presentation.
+                if previous == nil, current != nil, lease.dismissingToken == nil,
+                   let haptic { TronHaptics.shared.play(haptic) }
+            }
             .onDisappear { retireAllTokens() }
     }
 
@@ -470,6 +464,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         if lease.dismissingToken == nil, item == nil { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: item.map(identity))
         apply(transition)
+        if transition.registered != nil, let haptic { TronHaptics.shared.play(haptic) }
         if item == nil, let presentedStatePath {
             stateStore.retire(path: presentedStatePath)
             self.presentedStatePath = nil
@@ -505,10 +500,11 @@ private struct TronManagedSystemPresentationModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: isPresented, initial: true) { _, presented in
+            .onChange(of: isPresented, initial: true) { wasPresented, presented in
                 if presented {
                     coordinator?.register(token, parent: parent)
                     registered = true
+                    if !wasPresented { TronHaptics.shared.play(.sheetPresented) }
                 } else if registered {
                     coordinator?.retire(token)
                     registered = false
@@ -527,6 +523,7 @@ extension View {
         isPresented: Binding<Bool>,
         identity: String,
         onDismiss: (() -> Void)? = nil,
+        presentationHaptic: TronHaptic? = .sheetPresented,
         fileID: String = #fileID,
         line: Int = #line,
         @ViewBuilder content: @escaping () -> SheetContent
@@ -536,6 +533,7 @@ extension View {
             identity: identity,
             site: "\(fileID):\(line)",
             onDismiss: onDismiss,
+            haptic: presentationHaptic,
             sheetContent: content
         ))
     }
@@ -544,6 +542,7 @@ extension View {
         item: Binding<Item?>,
         identity: @escaping (Item) -> String,
         onDismiss: (() -> Void)? = nil,
+        presentationHaptic: TronHaptic? = .sheetPresented,
         fileID: String = #fileID,
         line: Int = #line,
         @ViewBuilder content: @escaping (Item) -> SheetContent
@@ -553,6 +552,7 @@ extension View {
             identity: identity,
             site: "\(fileID):\(line)",
             onDismiss: onDismiss,
+            haptic: presentationHaptic,
             sheetContent: content
         ))
     }

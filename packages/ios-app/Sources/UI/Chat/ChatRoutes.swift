@@ -139,7 +139,9 @@ struct ChatRoutes: ViewModifier {
             }
             .tronManagedSheet(
                 item: $interaction,
-                identity: { ExtensionInteractionPresentationIdentity.value(sessionID: sessionID, interaction: $0) }
+                identity: { ExtensionInteractionPresentationIdentity.value(sessionID: sessionID, interaction: $0) },
+                // The chat's live haptics play this question's own attention haptic.
+                presentationHaptic: nil
             ) { value in
                 if value.method == .form {
                     ExtensionFormSheet(
@@ -175,7 +177,9 @@ struct ChatRoutes: ViewModifier {
             }
             .tronManagedSheet(
                 item: $editorRequest,
-                identity: { "chat.\(sessionID).editor.\($0.id)" }
+                identity: { "chat.\(sessionID).editor.\($0.id)" },
+                // A pending request re-presents once the reopened chat settles.
+                presentationHaptic: nil
             ) { request in
                 TronConfirmationSheet(
                     title: ComposerEditorRequestPolicy.confirmationTitle,
