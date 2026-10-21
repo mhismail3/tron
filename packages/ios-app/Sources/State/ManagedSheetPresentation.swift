@@ -99,7 +99,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
             .background {
                 if isPresented || nativeHost.isInstalled {
                     RetainedNativeSheetPresenter(owner: nativeHost) {
-                        Color.clear.sheet(isPresented: $isPresented, onDismiss: didDismiss) {
+                        Color.clear.accessibilityHidden(true).sheet(isPresented: $isPresented, onDismiss: didDismiss) {
                             TronPresentationSurface(token: lease.contentToken(identity: identity), parent: parent) {
                                 sheetContent()
                                     .environment(\.chatOwnsStatusBar, false)
@@ -108,6 +108,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
                         }
                     }
                     .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
                 }
             }
             // Only a live false → true change plays: a sheet already presented
@@ -212,7 +213,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
             .background {
                 if item != nil || nativeHost.isInstalled {
                     RetainedNativeSheetPresenter(owner: nativeHost) {
-                        Color.clear.sheet(item: $item, onDismiss: didDismiss) { value in
+                        Color.clear.accessibilityHidden(true).sheet(item: $item, onDismiss: didDismiss) { value in
                             TronPresentationSurface(token: lease.contentToken(identity: identity(value)), parent: parent) {
                                 sheetContent(value)
                                     .environment(\.chatOwnsStatusBar, false)
@@ -221,6 +222,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                         }
                     }
                     .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
                 }
             }
             .onChange(of: item.map(identity), initial: true) { previous, current in

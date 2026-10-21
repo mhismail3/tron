@@ -187,7 +187,8 @@ separate:
   dismissal or replacement item retires it and every scope presented from inside it. Route
   surfaces (dashboard, chat route) are the parent scope of their sheets.
 - `RetainedNativeSheetPresenter` keeps the ordinary SwiftUI `.sheet` node in a scope-owned,
-  zero-layout hosting anchor and forwards its inherited environment. Native chrome, detents,
+  zero-layout hosting anchor and forwards its inherited environment and transaction. The anchor,
+  not its presented content, is accessibility-hidden. Native chrome, detents,
   gestures and focus remain platform-owned. Source removal clears intent and retires its scopes;
   scope or scene retirement empties retained graphs. No second modal stack or replay is installed.
 - Sheet content declares state that must outlive a rebuild with `@PresentationState`; a view
