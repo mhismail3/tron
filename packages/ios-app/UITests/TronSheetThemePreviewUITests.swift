@@ -7,7 +7,7 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review"]
+            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-settings-sheet-theme-review"]
             if mode == "dark" { app.launchArguments.append("-settings-renderer-dark") }
             app.launch()
             defer { app.terminate() }
@@ -34,6 +34,11 @@ final class TronSheetThemePreviewUITests: XCTestCase {
             capture(app, "server-top-\(mode)")
             app.swipeUp(); app.swipeUp()
             capture(app, "server-bottom-\(mode)")
+            open(app, "Configure source repository")
+            XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
+            capture(app, "workspace-server-\(mode)")
+            app.navigationBars.staticTexts["/fixture/projects"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
             close(app); close(app)
             open(app, "settings-link-Trusted Projects")
             expand(app, title: "Trusted Projects")

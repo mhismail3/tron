@@ -284,6 +284,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 ])
             }
             result = .object(["models": .array(models), "nextCursor": .null])
+        case "gateway.update.config.status":
+            result = .object(["schema": .number(1), "kind": .string("tron-gateway-update-config"), "sourceRoot": .string("/fixture/projects"), "updatedAt": .string("2026-10-20T00:00:00Z")])
+        case "gateway.update.status":
+            result = .object(["state": .string("idle"), "channel": .string("stable"), "candidateAvailable": .bool(false), "rollbackAvailable": .bool(false)])
         case "filesystem.list":
             result = .object(["path": params["path"] ?? .string("/fixture/projects"), "parent": .string("/fixture"), "entries": .array([
                 .object(["name": .string("Example"), "path": .string("/fixture/projects/Example"), "kind": .string("directory"), "hidden": .bool(false)])
@@ -418,6 +422,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         if ProcessInfo.processInfo.arguments.contains("-settings-expanded-review") {
             let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model", "catalog", essential: true)]
                 + HostedSettingsReviewSchema.additionalKeys
+                + (ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
                 + [HostedSettingsReviewSchema.key("setup.sessionDir", "setup", "Session folder", .string("/workspace/sessions"), "/workspace/sessions", "readOnly", help: "Where chats are stored. Applies after a restart."),
                    HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
             let keys = rows.compactMap { value -> JSONValue? in
@@ -647,7 +652,11 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+            let capabilities = ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review")
+                ? #"["sessions.v1","gateway-update.v1","restart-supervised.v1"]"# : #"["sessions.v1"]"#
+            return Data("""
+                {"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":\(capabilities)}
+                """.utf8)
         }
         if !pending.isEmpty { return pending.removeFirst() }
         return try await withCheckedThrowingContinuation { receiver = $0 }
@@ -699,6 +708,21 @@ enum HostedSettingsReviewSchema {
         if let subgroup { row["subgroup"] = .string(subgroup) }
         return .object(row)
     }
+
+    static let sheetThemeKeys: [JSONValue] = {
+        let approvals: [JSONValue] = additionalKeys.prefix(12).compactMap { value in
+            guard let governed = value.objectValue?["key"]?.stringValue,
+                  var row = key("permissions.floor", "advanced", "Agent approvals", .string("quiet"), "Quiet", "choice", order: 90,
+                    help: "How much of your attention an agent's change to each setting gets: Quiet applies it, Notify also tells you, Approve waits for you.",
+                    options: [.object(["value": .string("quiet"), "label": .string("Quiet"), "detail": .string("The change applies without telling you")]),
+                              .object(["value": .string("notify"), "label": .string("Notify"), "detail": .string("The change applies and tells you")]),
+                              .object(["value": .string("approve"), "label": .string("Approve"), "detail": .string("The change waits for your approval")])]).objectValue else { return nil }
+            row["qualifiers"] = .object(["key": .string(governed)])
+            return .object(row)
+        }
+        return approvals + [key("permissions.macTerminalKey", "advanced", "Mac Terminal key", .null, "Not set", "readOnly", order: 15,
+            help: "Lets this paired iPhone open a shell on the Mac over Tailscale through Remote Login, even when the Gateway is not running.")]
+    }()
 
     static let tools = ["ask_user", "display", "notify", "read", "bash", "edit", "write", "web_search", "fetch_content", "knowledge", "computer", "schedule", "connections", "settings", "zoom"]
     static let additionalKeys: [JSONValue] = [
