@@ -1,6 +1,7 @@
 import { Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import type { NotificationAdmissionStatus } from "./notification-service.js";
+import type { AgentTerminalOutcome } from "../kernel/host/module-host.js";
 
 export interface TronNotificationEnqueue {
   (input: {
@@ -14,8 +15,6 @@ export interface TronNotificationEnqueue {
     readOnAdmission?: boolean;
   }): Promise<NotificationAdmissionStatus>;
 }
-
-export type AgentTerminalOutcome = "completed" | "limited" | "failed" | "stopped" | "unknown" | "interrupted";
 
 const terminalMessages: Record<AgentTerminalOutcome, string> = {
   completed: "The agent finished responding.",

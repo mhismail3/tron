@@ -151,7 +151,7 @@ import {
 } from "../kernel/projection/process-activity.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
-import { notifyTronAgentTerminal, type AgentTerminalOutcome } from "../notifications/tron-notify-extension.js";
+import { notifyTronAgentTerminal } from "../notifications/tron-notify-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { tronContext } from "../workspace/tron-core-extension.js";
@@ -162,7 +162,7 @@ import { trustedExtensionOriginKind } from "../kernel/projection/extension-origi
 import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "../kernel/run/direct-bash-process-owner.js";
-import type { ModuleHost, SessionContext } from "../kernel/host/module-host.js";
+import type { AgentTerminalOutcome, ModuleHost, SessionContext } from "../kernel/host/module-host.js";
 import { projectHookRegistrations } from "../kernel/projection/hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
 import { skillTitle } from "./skill-title.js";

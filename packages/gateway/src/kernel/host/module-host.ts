@@ -3,6 +3,8 @@ import type { SettingsToolAccess } from "../settings/tool-contract.js";
 import type { JsonValue, TronModuleSummary } from "../../protocol/types.js";
 import type { ToolResultProjection } from "../projection/tool-result.js";
 
+export type AgentTerminalOutcome = "completed" | "limited" | "failed" | "stopped" | "unknown" | "interrupted";
+
 /** One log line from a module, in the Gateway logger's shape. */
 export interface ModuleLog {
   log(level: "debug" | "info" | "warning" | "error", message: string, metadata?: Record<string, unknown>): void;
