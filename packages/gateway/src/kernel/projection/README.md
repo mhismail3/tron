@@ -6,9 +6,12 @@ or history store. Runtime mutations and activity producers remain with their run
 and delegation owners.
 
 Transcript page cursors fence the runtime generation, leaf and adjacent anchor.
-Snapshots retain one synchronous branch cut for both bounded transcript and
-canonical tool-result ownership. Archive and live presentation facts are read
-from their owners for each projection.
+`SnapshotProjection` owns only the disposable revision/model-derived scan cache;
+its synchronous source port reads live facts in the original call order. Snapshot
+assembly retains one branch cut for bounded transcript and canonical tool-result
+ownership. `session-pages` owns runtime/leaf/anchor fencing and canonical history
+reads; `activity` bounds delivery-time wire views. Archive, recency, stream identity,
+queue and lifecycle facts remain with their authoritative owners.
 
 The attention lock runs through the real Gateway/Pi boundary. Reconnect,
 run-event and delegation locks also protect this owner's wire projections.

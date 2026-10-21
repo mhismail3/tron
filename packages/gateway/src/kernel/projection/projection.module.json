@@ -13,7 +13,10 @@
     "session-attention.lock.integration.test.ts",
     "locks/session-attention-paths.golden.json",
     "session-presentation-presence.ts",
-    "README.md"
+    "README.md",
+    "snapshot.ts",
+    "session-pages.ts",
+    "activity.ts"
   ],
   "dependsOn": [
     "gateway/pi"

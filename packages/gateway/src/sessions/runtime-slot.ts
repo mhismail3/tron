@@ -1,3 +1,6 @@
+import * as activityProjection from "../kernel/projection/activity.js";
+import * as sessionPages from "../kernel/projection/session-pages.js";
+import { SnapshotProjection } from "../kernel/projection/snapshot.js";
 import { modelQueueSessionExtension } from "./model-queue-session.js";
 import { HOME_OPERATING_CONTEXT } from "../home/tron-home-extension.js";
 import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
@@ -111,7 +114,6 @@ import {
   admitCommandCatalog,
   boundCommandContent,
   boundStreamingProgressItem,
-  fitSessionSnapshot,
   NESTED_ARGUMENT_CALL_BYTES,
   NESTED_ARGUMENT_TOTAL_BYTES,
   NESTED_CALL_LIMIT,
@@ -120,10 +122,7 @@ import {
   mergeLiveToolOutput,
   projectToolOutput,
   projectToolResult,
-  projectTranscriptPage,
-  projectTranscriptPageAfter,
   canonicalToolResultCallIDs,
-  canonicalToolResultCallIDsFromBranch,
   projectTree,
   toolSegmentId,
   safeJson,
@@ -134,9 +133,9 @@ import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
 import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "./child-session-admission.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "./extension-activity-history.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection, type InvokedResource } from "./invocation-receipts.js";
 import type { HomeWakeTrigger } from "../home/home-wake-inbox.js";
@@ -146,10 +145,7 @@ import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibi
 import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "../kernel/projection/process-activity-recency.js";
 import { redactProcessText } from "../kernel/projection/process-activity.js";
 import {
-  boundProcessActivities,
-  listProcessHistory,
   processHistoryDetail,
-  processOverview,
   subagentAbortRoute,
   subagentProcessId,
   subagentProcessesFromActivity,
@@ -881,16 +877,6 @@ export class RuntimeSlot {
     updatedAt: string | undefined;
     entryCount: number;
     lastEntryId: string | undefined;
-  } | undefined;
-  /** Snapshot-derived SDK scans are exact but need not repeat while the
-   * RuntimeSlot revision is unchanged. A canonical event/rebind/branch change
-   * increments revision before publication, naturally invalidating this cut. */
-  private cachedSnapshotDerived: {
-    revision: number;
-    model: AgentSession["model"];
-    contextWindow: number | undefined;
-    stats: ReturnType<AgentSession["getSessionStats"]>;
-    latestCacheHitRate?: number;
   } | undefined;
   private lastTouchedAt = Date.now();
   private queueRevision = 0;
@@ -3276,31 +3262,22 @@ export class RuntimeSlot {
     }
   }
 
-  private currentProcessProjection(): { activities: SessionProcessActivity[]; overview: SessionProcessOverview } {
-    const visible = [...this.processActivities.values()]
-      .map((activity) => this.dependencies.processActivityRecency.wire(activity))
-      .filter((activity) => activity.visibility === "active" || activity.visibility === "recent");
-    const bounded = boundProcessActivities(visible);
-    const omissions = bounded.omittedCount > 0 ? {
-      count: bounded.omittedCount,
-      bytes: bounded.omittedBytes,
-      reason: bounded.hitCount && bounded.hitBytes ? "countAndBytes" as const : bounded.hitCount ? "count" as const : "bytes" as const,
-    } : undefined;
-    const extensionChildOmissions = [...this.extensionActivities.values()].reduce<{ children: number; byteLimitExceeded: boolean } | undefined>((total, activity) => {
-      const current = activity.lifecycleOmissions;
-      if (!current) return total;
-      return {
-        children: (total?.children ?? 0) + current.children,
-        byteLimitExceeded: Boolean(total?.byteLimitExceeded || current.byteLimitExceeded),
-      };
-    }, undefined);
+  private activitySource(): activityProjection.ActivitySource {
+    const slot = this;
     return {
-      activities: bounded.activities,
-      overview: {
-        ...processOverview(visible, this.processRevision, this.processAsOf, omissions),
-        ...(extensionChildOmissions ? { extensionChildOmissions } : {}),
-      },
+      get processActivities() { return slot.processActivities; },
+      get dependencies() { return slot.dependencies; },
+      get extensionActivities() { return slot.extensionActivities; },
+      get processRevision() { return slot.processRevision; },
+      get processAsOf() { return slot.processAsOf; },
+      measureToolDuration: (...args) => slot.measureToolDuration(...args),
+      get liveActivityRevision() { return slot.liveActivityRevision; },
+      get extensionActivityAsOf() { return slot.extensionActivityAsOf; },
     };
+  }
+
+  private currentProcessProjection(): { activities: SessionProcessActivity[]; overview: SessionProcessOverview } {
+    return activityProjection.currentProcessProjection(this.activitySource());
   }
 
   private publishProcessDelta(activity: SessionProcessActivity | undefined, removedProcessIds?: string[]): void {
@@ -6945,26 +6922,7 @@ export class RuntimeSlot {
   }
 
   private toolProgressWire(state: ToolExecutionState): ToolExecutionState {
-    // Running duration is sampled at delivery time. This keeps reconnect and
-    // delayed/coalesced frames current even when the tool emits no output;
-    // clients then advance the sample locally with a monotonic clock.
-    const sampled = state.status === "running"
-      ? {
-          ...state,
-          durationMs: Math.max(
-            state.durationMs ?? 0,
-            this.measureToolDuration(
-              state.toolCallId,
-              state.startedAt,
-              new Date().toISOString(),
-              performance.now()
-            )
-          ),
-        }
-      : state;
-    return sampled.extensionActivity
-      ? { ...sampled, liveActivityRevision: this.liveActivityRevision, extensionActivityAsOf: this.extensionActivityAsOf }
-      : sampled;
+    return activityProjection.toolProgressWire(this.activitySource(), state);
   }
 
   /** Lifecycle updates are compact presentation deltas, not transcript
@@ -7209,20 +7167,11 @@ export class RuntimeSlot {
   }
 
   private extensionActivityWire(activity: ExtensionRunActivity): ExtensionRunActivity {
-    if (!activity.lifecycle) return activity;
-    const recency = this.dependencies.extensionActivityRecency.visibility(activity);
-    return {
-      ...activity,
-      lifecycle: {
-        ...activity.lifecycle,
-        visibility: recency.visibility,
-        ...(recency.remainingMs === undefined ? {} : { remainingMs: recency.remainingMs }),
-      },
-    };
+    return activityProjection.extensionActivityWire(this.activitySource(), activity);
   }
 
   private extensionActivityVisibility(activity: ExtensionRunActivity): "current" | "recent" | "historical" | "unknown" {
-    return this.dependencies.extensionActivityRecency.visibility(activity).visibility;
+    return activityProjection.extensionActivityVisibility(this.activitySource(), activity);
   }
 
   /** Recency is the sole expiry owner. At the wall-clock boundary remove the
@@ -7504,311 +7453,95 @@ export class RuntimeSlot {
     return stage("snapshot.build", () => this.buildSnapshot(sequence));
   }
 
-  /** The snapshot body. `snapshot` attributes it to the request that asked for
-   * it; a state change with no request measures it where it publishes. */
+  private readonly snapshotProjection = new SnapshotProjection();
+
   private buildSnapshot(sequence: number): SessionSnapshot {
-    this.assertNoTrustReload();
-    const session = this.runtime.session;
-    this.ensureAgentProjection();
-    const derived = this.cachedSnapshotDerived?.revision === this.revision
-      && this.cachedSnapshotDerived.model === session.model
-      && this.cachedSnapshotDerived.contextWindow === session.model?.contextWindow
-      ? this.cachedSnapshotDerived
-      : (() => {
-          const stats = session.getSessionStats();
-          const latestCacheHitRate = this.latestCacheHitRate();
-          const computed = {
-            revision: this.revision,
-            model: session.model,
-            contextWindow: session.model?.contextWindow,
-            stats,
-            ...(latestCacheHitRate === undefined ? {} : { latestCacheHitRate }),
-          };
-          this.cachedSnapshotDerived = computed;
-          return computed;
-        })();
-    const contextUsage = derived.stats.contextUsage;
-    const contextWindowPolicy = this.contextPolicies.get(session)?.snapshot();
-    const compactionPolicy = this.compactionPolicies.get(session)?.snapshot();
-    const stats = derived.stats;
-    const latestCacheHitRate = derived.latestCacheHitRate;
-    // Pi exposes streamingMessage before an async message_start hook returns,
-    // so the SDK object may establish the initial Gateway identity. Once that
-    // exact object is canonically bound, however, Pi can retain it briefly;
-    // never let a snapshot recreate a second stream ID from that stale value.
-    const sdkStreamingMessage = session.state.streamingMessage;
-    const streamingMessage = this.streamPresentationId
-      ? (sdkStreamingMessage ?? this.latestStreamingMessage)
-      : sdkStreamingMessage && !this.canonicalizedStreamingMessages.has(sdkStreamingMessage)
-        ? sdkStreamingMessage
-        : undefined;
-    const streaming = streamingMessage
-      ? (() => {
-        this.captureStreamIdentity(streamingMessage);
-        return projectMessage(
-          "streaming",
-          this.streamAnchorId ?? null,
-          this.streamStartedAt ?? new Date().toISOString(),
-          streamingMessage,
-          this.dependencies.blobs,
-          undefined,
-          this.streamPresentationId,
-          this.finalizedStreamPresentationId === this.streamPresentationId,
-          this.toolLabels(),
-          undefined,
-          this.activeToolSegmentId(),
-        );
-      })()
-      : undefined;
-    // One synchronous branch cut supplies both the bounded page and the
-    // paged-out tool-result ownership check. Neither projection is cached; Pi
-    // remains authoritative and the cut is discarded after this snapshot.
-    const canonicalBranch = session.sessionManager.getBranch();
-    const canonicalTranscriptPage = this.transcriptPage(undefined, undefined, undefined, undefined, canonicalBranch);
-    // A replacement keeps its origin's live command, and the fork copies that
-    // command's start row under the origin's identity. Only a start receipt this
-    // session wrote may project the live lifecycle; the inherited row keeps its
-    // stored state while the origin owns the terminal receipt.
-    const liveCommand = this.pendingExtensionCommand;
-    const liveCommandOwned = liveCommand !== undefined && invocationReceipts(canonicalBranch, this.id)
-      .some(receipt => receipt.receiptKind === "start" && receipt.operationId === liveCommand.id);
-    const liveCommandLifecycle = this.ui.presentation.state().pendingInteractions.length > 0
-      ? "waitingForInput" as const
-      : "running" as const;
-    const transcriptPage: TranscriptPage = liveCommand && liveCommandOwned
-      ? {
-          ...canonicalTranscriptPage,
-          items: canonicalTranscriptPage.items.map(item =>
-            item.semantic?.kind === "command"
-              && item.semantic.operationId === liveCommand.id
-              ? { ...item, semantic: { ...item.semantic, lifecycle: liveCommandLifecycle } }
-              : item),
-        }
-      : canonicalTranscriptPage;
-    // transcriptPage is intentionally bounded; use the same full canonical
-    // branch cut for ownership so paged-out results cannot leave a duplicate
-    // runtime row.
-    const canonicalToolResultIDs = canonicalToolResultCallIDsFromBranch(canonicalBranch);
-    const queuedItems = this.projectedQueue();
-    const processProjection = this.currentProcessProjection();
-    // Compaction cannot take Agent input, but the Gateway queues it until the
-    // summary settles, so clients may still request steer/follow-up delivery.
-    const acceptsQueuedPrompts = (session.isStreaming && !this.isAgentAdmissionSettling)
-      || this.phase === "compacting";
-    const activeToolSegmentId = acceptsQueuedPrompts && this.effectivePhase === "running"
-      ? this.activeToolSegmentId()
-      : undefined;
-    // Archive state is not canonical session content: it is read from its owner
-    // for each snapshot so an archive commit never has to reach into the slot.
-    const archivedAt = this.dependencies.archivedAt(this.id);
-    // Canonical receipts are authoritative after runtime recreation; live maps
-    // only enrich the current projection and never replace persisted facts.
-    return fitSessionSnapshot({
-      sessionId: session.sessionId,
-      runtimeGeneration: this.runtimeGeneration,
-      revision: this.revision,
-      eventSequence: sequence,
-      phase: this.effectivePhase,
-      // Phase is presentation state; Pi streaming is the exact authority for
-      // whether a new prompt can request steer/follow-up delivery right now.
-      acceptsQueuedPrompts,
-      configurationBlocker: this.configurationBlocker(),
-      // Home is a role, not a generated conversation title. Never rewrite its canonical name or ID.
-      ...(this.isHomeChapter ? { name: "Home" } : session.sessionName ? { name: session.sessionName } : {}),
-      cwd: session.sessionManager.getCwd(),
-      ...(session.sessionManager.getHeader()?.parentSession ? { parentSessionId: session.sessionManager.getHeader()!.parentSession } : {}),
-      ...(session.model ? { model: { provider: session.model.provider, id: session.model.id } } : {}),
-      thinkingLevel: session.thinkingLevel,
-      availableThinkingLevels: session.getAvailableThinkingLevels(),
-      ...(contextUsage ? { contextUsage } : {}),
-      ...(contextWindowPolicy ? { contextWindowPolicy } : {}),
-      ...(compactionPolicy ? { compactionPolicy } : {}),
-      stats: {
-        userMessages: stats.userMessages,
-        assistantMessages: stats.assistantMessages,
-        toolCalls: stats.toolCalls,
-        toolResults: stats.toolResults,
-        totalMessages: stats.totalMessages,
-        tokens: stats.tokens,
-        ...(latestCacheHitRate === undefined ? {} : { latestCacheHitRate }),
-        cost: stats.cost,
-      },
-      queueRevision: this.queueRevision,
-      queuedItems,
-      ...(this.pendingPrompt ? { pendingPrompt: this.pendingPrompt } : {}),
-      compactionQueued: this.pendingManualCompaction !== undefined,
-      automaticCompactionEnabled: session.autoCompactionEnabled,
-      transcript: transcriptPage.items,
-      transcriptStart: transcriptPage.start,
-      transcriptTotal: transcriptPage.total,
-      ...(streaming ? { streaming } : {}),
-      ...(session.sessionManager.getLeafId() ? { leafEntryId: session.sessionManager.getLeafId()! } : {}),
-      ...(archivedAt === undefined ? {} : { archivedAt }),
-      ...(this.operation ? { operation: this.operation } : {}),
-      ...(this.retry ? { retry: this.retry } : {}),
-      ...(canonicalTranscriptPage.forkBoundary ? { forkBoundary: canonicalTranscriptPage.forkBoundary } : {}),
-      ...(activeToolSegmentId ? { activeToolSegmentId } : {}),
-      toolExecutions: [...this.toolExecutions.values()]
-        .filter((tool) => !canonicalToolResultIDs.has(tool.toolCallId))
-        .filter((tool) => this.effectivePhase === "running" || tool.status !== "running")
-        .sort((left, right) => left.order - right.order)
-        .map((tool) => this.toolProgressWire(tool)),
-      ...(() => {
-        const visible = [...this.extensionActivities.values()]
-          .map((activity) => ({ activity, visibility: this.extensionActivityVisibility(activity) }))
-          .filter(({ visibility }) => visibility === "current" || visibility === "recent")
-          // Current work is always retained ahead of recent terminal rows when
-          // count or byte bounds force omission.
-          .sort((left, right) => {
-            const bucket = (visibility: string) => visibility === "current" ? 0 : 1;
-            return bucket(left.visibility) - bucket(right.visibility)
-              || right.activity.updatedAt.localeCompare(left.activity.updatedAt);
-          })
-          .map(({ activity }) => this.extensionActivityWire(activity));
-        const bounded = boundExtensionActivities(visible);
-        return bounded.activities.length > 0 || bounded.omittedCount > 0
-          ? {
-              ...(bounded.activities.length > 0 ? { extensionActivities: bounded.activities } : {}),
-              ...(bounded.omittedCount > 0 ? { extensionActivityOmissions: {
-                count: bounded.omittedCount,
-                bytes: bounded.omittedBytes,
-                reason: bounded.hitCount && bounded.hitBytes ? "countAndBytes" : bounded.hitCount ? "count" : "bytes",
-              } } : {}),
-            }
-          : {};
-      })(),
-      liveActivityRevision: this.liveActivityRevision,
-      extensionActivityAsOf: this.extensionActivityAsOf,
-      ...(processProjection.activities.length > 0 ? { processActivities: processProjection.activities } : {}),
-      processOverview: processProjection.overview,
-      extensionPresentation: this.ui.state(),
-      diagnostics: this.runtime.diagnostics.map((diagnostic) => ({ type: diagnostic.type, message: diagnostic.message })),
-    });
+    const slot = this;
+    return this.snapshotProjection.build({
+      assertNoTrustReload: (...args) => slot.assertNoTrustReload(...args),
+      get runtime() { return slot.runtime; },
+      ensureAgentProjection: (...args) => slot.ensureAgentProjection(...args),
+      get revision() { return slot.revision; },
+      latestCacheHitRate: (...args) => slot.latestCacheHitRate(...args),
+      get contextPolicies() { return slot.contextPolicies; },
+      get compactionPolicies() { return slot.compactionPolicies; },
+      get streamPresentationId() { return slot.streamPresentationId; },
+      get latestStreamingMessage() { return slot.latestStreamingMessage; },
+      get canonicalizedStreamingMessages() { return slot.canonicalizedStreamingMessages; },
+      captureStreamIdentity: (...args) => slot.captureStreamIdentity(...args),
+      get streamAnchorId() { return slot.streamAnchorId; },
+      get streamStartedAt() { return slot.streamStartedAt; },
+      get dependencies() { return slot.dependencies; },
+      get finalizedStreamPresentationId() { return slot.finalizedStreamPresentationId; },
+      toolLabels: (...args) => slot.toolLabels(...args),
+      activeToolSegmentId: (...args) => slot.activeToolSegmentId(...args),
+      transcriptPage: (...args) => slot.transcriptPage(...args),
+      get pendingExtensionCommand() { return slot.pendingExtensionCommand; },
+      get id() { return slot.id; },
+      get ui() { return slot.ui; },
+      projectedQueue: (...args) => slot.projectedQueue(...args),
+      currentProcessProjection: (...args) => slot.currentProcessProjection(...args),
+      get isAgentAdmissionSettling() { return slot.isAgentAdmissionSettling; },
+      get phase() { return slot.phase; },
+      get effectivePhase() { return slot.effectivePhase; },
+      get runtimeGeneration() { return slot.runtimeGeneration; },
+      configurationBlocker: (...args) => slot.configurationBlocker(...args),
+      get isHomeChapter() { return slot.isHomeChapter; },
+      get queueRevision() { return slot.queueRevision; },
+      get pendingPrompt() { return slot.pendingPrompt; },
+      get pendingManualCompaction() { return slot.pendingManualCompaction; },
+      get operation() { return slot.operation; },
+      get retry() { return slot.retry; },
+      get toolExecutions() { return slot.toolExecutions; },
+      toolProgressWire: (...args) => slot.toolProgressWire(...args),
+      get extensionActivities() { return slot.extensionActivities; },
+      extensionActivityVisibility: (...args) => slot.extensionActivityVisibility(...args),
+      extensionActivityWire: (...args) => slot.extensionActivityWire(...args),
+      get liveActivityRevision() { return slot.liveActivityRevision; },
+      get extensionActivityAsOf() { return slot.extensionActivityAsOf; },
+    }, sequence);
   }
 
-  transcriptPageAfter(
-    after: number,
-    expectedPreviousEntryId?: string,
-    expectedRuntimeGeneration?: string,
-    expectedLeafEntryId?: string,
-  ): TranscriptPage {
-    this.assertNoTrustReload();
-    if (expectedRuntimeGeneration !== undefined && expectedRuntimeGeneration !== this.runtimeGeneration) {
-      throw new GatewayError("conflict", "The session runtime changed while loading history. Refresh the session and try again.", true);
-    }
-    const leafEntryId = this.runtime.session.sessionManager.getLeafId();
-    if (expectedLeafEntryId !== undefined && expectedLeafEntryId !== leafEntryId) {
-      throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
-    }
-    try {
-      return {
-        ...projectTranscriptPageAfter(this.runtime.session.sessionManager, this.dependencies.blobs, after,
-          undefined, expectedPreviousEntryId, this.toolMetadata, this.presentationIDs, this.toolLabels(),
-          this.bashMetadata, this.forkBoundary),
-        runtimeGeneration: this.runtimeGeneration,
-        ...(leafEntryId ? { leafEntryId } : {}),
-      };
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("anchor changed")) {
-        throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
-      }
-      throw error;
-    }
+  transcriptPageAfter(after: number, expectedPreviousEntryId?: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): TranscriptPage {
+    return sessionPages.transcriptPageAfter(this.pageSource(), after, expectedPreviousEntryId, expectedRuntimeGeneration, expectedLeafEntryId);
   }
 
-  transcriptPage(
-    before?: number,
-    expectedNextEntryId?: string,
-    expectedRuntimeGeneration?: string,
-    expectedLeafEntryId?: string,
-    branchCut?: import("../kernel/pi/coding-agent.js").SessionEntry[],
-  ): TranscriptPage {
-    this.assertNoTrustReload();
-    if (expectedRuntimeGeneration !== undefined && expectedRuntimeGeneration !== this.runtimeGeneration) {
-      throw new GatewayError("conflict", "The session runtime changed while loading history. Refresh the session and try again.", true);
-    }
-    const leafEntryId = this.runtime.session.sessionManager.getLeafId();
-    if (expectedLeafEntryId !== undefined && expectedLeafEntryId !== leafEntryId) {
-      throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
-    }
-    try {
-      const page = projectTranscriptPage(
-          this.runtime.session.sessionManager,
-          this.dependencies.blobs,
-          before,
-          undefined,
-          expectedNextEntryId,
-          this.toolMetadata,
-          this.presentationIDs,
-          this.toolLabels(),
-          this.bashMetadata,
-          this.forkBoundary,
-          branchCut,
-        );
-      return {
-        ...page,
-        // Exact presentation binding precedes receipt I/O. Retain the owning
-        // invocation's semantics in that interval without a second binding map.
-        items: page.items.map(item => {
-          const semantic = item.kind === "message" && item.role === "user" && !item.semantic?.invocationId
-            ? this.internalWakeSemantic(this.presentationIDs.get(item.id) ?? item.id) : undefined;
-          return semantic ? { ...item, semantic } : item;
-        }),
-        runtimeGeneration: this.runtimeGeneration,
-        ...(leafEntryId ? { leafEntryId } : {}),
-      };
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("anchor changed")) {
-        throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
-      }
-      throw error;
-    }
+  transcriptPage(before?: number, expectedNextEntryId?: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string, branchCut?: import("../kernel/pi/coding-agent.js").SessionEntry[]): TranscriptPage {
+    return sessionPages.transcriptPage(this.pageSource(), before, expectedNextEntryId, expectedRuntimeGeneration, expectedLeafEntryId, branchCut);
   }
 
-  /** Canonical reserved receipts are read independently of transcript/tree
-   * projection. The page revision includes entry/parent identity so branch
-   * changes invalidate cursors without creating a second history store. */
   extensionActivityHistory(cursor?: string, limit = 25, filter?: { ownerId?: string; runId?: string; state?: "completed" | "failed" | "stopped" | "rejected" }): ExtensionActivityHistoryPage {
-    this.assertNoTrustReload();
-    return listExtensionActivityHistory(
-      this.runtime.session.sessionManager.getEntries(),
-      this.id,
-      cursor,
-      limit,
-      this.runtime.session.sessionManager.getLeafId() ?? "root",
-      filter,
-    );
+    return sessionPages.extensionActivityHistory(this.pageSource(), cursor, limit, filter);
   }
 
   extensionActivityDetail(activityId: string, expectedHistoryRevision?: string): ExtensionRunActivity | undefined {
-    this.assertNoTrustReload();
-    if (expectedHistoryRevision !== undefined) {
-      const actual = extensionActivityHistoryRevision(this.runtime.session.sessionManager.getEntries(), this.id, this.runtime.session.sessionManager.getLeafId() ?? "root");
-      if (actual !== expectedHistoryRevision) throw new GatewayError("conflict", "Extension activity generation changed; refresh history", true);
-    }
-    const receipts = extensionActivityReceipts(this.runtime.session.sessionManager.getEntries(), this.id);
-    const receipt = receipts.find((entry) => entry.receipt.activityId === activityId)?.receipt;
-    if (receipt) return extensionReceiptActivity(receipt);
-    return [...this.extensionActivities.values()].find((activity) => (activity.activityId ?? activity.id) === activityId);
+    return sessionPages.extensionActivityDetail(this.pageSource(), activityId, expectedHistoryRevision);
   }
 
   processHistory(cursor?: string, limit = 25, filter?: { kind?: "command" | "subagent"; state?: SessionProcessActivity["lifecycle"]["state"] }): SessionProcessHistoryPage {
-    this.assertNoTrustReload();
-    return listProcessHistory(this.runtime.session.sessionManager, cursor, limit, filter);
+    return sessionPages.processHistory(this.pageSource(), cursor, limit, filter);
   }
 
   processDetail(processId: string, expectedHistoryRevision?: string): SessionProcessActivity | undefined {
-    this.assertNoTrustReload();
-    try {
-      // History detail is canonical-only. Mutable mounted state has its own
-      // process revision and must never be returned under a history revision.
-      return processHistoryDetail(this.runtime.session.sessionManager, processId, expectedHistoryRevision);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("generation conflict")) {
-        throw new GatewayError("conflict", "Process history generation changed; refresh history", true);
-      }
-      throw error;
-    }
+    return sessionPages.processDetail(this.pageSource(), processId, expectedHistoryRevision);
+  }
+
+  private pageSource(): sessionPages.PageSource {
+    const slot = this;
+    return {
+      assertNoTrustReload: (...args) => slot.assertNoTrustReload(...args),
+      get runtimeGeneration() { return slot.runtimeGeneration; },
+      get runtime() { return slot.runtime; },
+      get dependencies() { return slot.dependencies; },
+      get toolMetadata() { return slot.toolMetadata; },
+      get presentationIDs() { return slot.presentationIDs; },
+      toolLabels: (...args) => slot.toolLabels(...args),
+      get bashMetadata() { return slot.bashMetadata; },
+      get forkBoundary() { return slot.forkBoundary; },
+      internalWakeSemantic: (...args) => slot.internalWakeSemantic(...args),
+      get id() { return slot.id; },
+      get extensionActivities() { return slot.extensionActivities; },
+    };
   }
 
   private processForViewer(processId: string): SessionProcessActivity | undefined {
