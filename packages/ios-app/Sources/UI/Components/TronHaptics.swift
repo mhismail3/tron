@@ -1,9 +1,8 @@
 import Observation
 import UIKit
 
-/// Every haptic the app plays, one UIKit pattern each. Live chat events are
-/// subtle and mutually distinct; the Home button's menu hold is the firmest and
-/// a sheet's presentation the lightest.
+/// Semantic intent, not a generator choice at each call site. Selection ticks
+/// mark deliberate value changes; notifications mark accepted outcomes.
 enum TronHaptic: String, CaseIterable, Sendable {
     /// The Home button's hold opened the dashboard menu (#1480).
     case menuOpened
@@ -19,6 +18,12 @@ enum TronHaptic: String, CaseIterable, Sendable {
     case questionPresented
     /// Any other sheet or system picker presented through the shared presenter.
     case sheetPresented
+    case toggleChanged
+    case selectionChanged
+    case copied
+    case answerSubmitted
+    case actionFailed
+    case terminalBell
 }
 
 /// The one haptic seam. UIKit's view-bound feedback generators honor the
@@ -57,14 +62,12 @@ final class TronHaptics {
         TronHapticsProbe.shared.played.append(haptic)
         #endif
         switch generator {
-        case let impact as UIImpactFeedbackGenerator where haptic == .sheetPresented:
-            impact.impactOccurred(intensity: 0.5)
         case let impact as UIImpactFeedbackGenerator:
             if let location { impact.impactOccurred(at: location) } else { impact.impactOccurred() }
         case let selection as UISelectionFeedbackGenerator:
             selection.selectionChanged()
         case let notification as UINotificationFeedbackGenerator:
-            notification.notificationOccurred(.success)
+            notification.notificationOccurred(haptic == .actionFailed ? .error : haptic == .terminalBell ? .warning : .success)
         default:
             break
         }
@@ -100,7 +103,10 @@ final class TronHaptics {
         case .runFinished: UINotificationFeedbackGenerator(view: anchor)
         case .workerMessage: UIImpactFeedbackGenerator(style: .soft, view: anchor)
         case .questionPresented: UIImpactFeedbackGenerator(style: .rigid, view: anchor)
-        case .sheetPresented: UIImpactFeedbackGenerator(style: .soft, view: anchor)
+        case .sheetPresented: UIImpactFeedbackGenerator(style: .medium, view: anchor)
+        case .toggleChanged, .selectionChanged: UISelectionFeedbackGenerator(view: anchor)
+        case .copied: UIImpactFeedbackGenerator(style: .light, view: anchor)
+        case .answerSubmitted, .actionFailed, .terminalBell: UINotificationFeedbackGenerator(view: anchor)
         }
         generators[haptic] = Bound(view: anchor, generator: generator)
         return generator

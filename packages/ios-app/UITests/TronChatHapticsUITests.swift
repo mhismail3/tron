@@ -7,8 +7,8 @@ import XCTest
 final class TronChatHapticsUITests: XCTestCase {
     /// Each live event plays its own haptic exactly once: one tick per pasted
     /// photo, the accepted send, the settled run, a worker result and a
-    /// presented question. A rejected send, a re-presented or answered
-    /// question and a stopped run play none.
+    /// presented question. A rejected send plays an error; re-presentation,
+    /// form cancellation and a stopped run play none.
     @MainActor func testLiveEventsPlayTheirHapticOnce() {
         continueAfterFailure = false
         let app = launch(photos: 3); defer { app.terminate() }
@@ -44,13 +44,14 @@ final class TronChatHapticsUITests: XCTestCase {
         keep(app, "1562-answered-question-read-only")
         app.buttons["Done"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForNonExistence(timeout: 10), app.debugDescription)
-        // The answered question's tool sheet is an ordinary sheet: one soft tap (#1599).
+        // The answered question's tool sheet gets the shared medium impact.
         expected += ",sheetPresented"
         assertHaptics(app, expected, "re-presenting and answering the question play nothing; its tool sheet taps once")
 
         send("fail", app, composer)
         XCTAssertTrue(waitGateway(app, "rejected:1"), gateway(app))
-        assertHaptics(app, expected, "a rejected send plays nothing")
+        expected += ",actionFailed"
+        assertHaptics(app, expected, "a rejected send plays one error, never a success tap")
 
         // The rejected draft is restored, so this sends it with `slow` added.
         send("slow", app, composer)
@@ -101,9 +102,9 @@ final class TronChatHapticsUITests: XCTestCase {
         assertHaptics(app, "promptSent", "a run settled in the background plays nothing on return")
     }
 
-    /// A tool detail sheet plays one soft tap per presentation (#1599), never
+    /// A tool detail sheet plays one impact per presentation, never
     /// on dismissal, and the restored question beneath it plays nothing.
-    @MainActor func testToolSheetPlaysOneSoftTapPerPresentation() {
+    @MainActor func testToolSheetPlaysOneImpactPerPresentation() {
         continueAfterFailure = false
         let app = launch(photos: 0, ["-chat-haptics-history"]); defer { app.terminate() }
         let cancel = app.buttons["Cancel form"]
@@ -127,9 +128,9 @@ final class TronChatHapticsUITests: XCTestCase {
     }
 
     /// A Settings section sheet and the Value & Source sheet nested on it each
-    /// play one soft tap per presentation (#1599); a detent change and each
+    /// play one impact per presentation; a detent change and each
     /// dismissal play nothing.
-    @MainActor func testSettingsAndNestedSheetsPlayOneSoftTapEach() {
+    @MainActor func testSettingsAndNestedSheetsPlayOneImpactEach() {
         continueAfterFailure = false
         let app = launchSettings(["-settings-renderer-source-actions"]); defer { app.terminate() }
         let section = app.buttons["settings-section-model-open"]
@@ -177,6 +178,34 @@ final class TronChatHapticsUITests: XCTestCase {
         closeTopSheet(app)
         XCTAssertTrue(app.buttons["Release preview"].waitForNonExistence(timeout: 10), app.debugDescription)
         assertHaptics(app, "none", "its dismissal plays nothing")
+    }
+
+    @MainActor func testRendererToggleTicksOnceWithoutLoadFeedback() {
+        continueAfterFailure = false
+        let app = launchSettings(["-settings-renderer-haptics"]); defer { app.terminate() }
+        let toggle = app.switches["Block images"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 30), app.debugDescription)
+        assertHaptics(app, "none", "loading settings is silent")
+        toggle.tap()
+        XCTAssertTrue(waitHaptics(app, "toggleChanged"))
+        assertHaptics(app, "toggleChanged", "the server response does not echo the user's tick")
+    }
+
+    @MainActor func testAcceptedFormAnswerPlaysSuccessOnce() {
+        continueAfterFailure = false
+        let app = launch(photos: 0); defer { app.terminate() }
+        _ = openComposer(app)
+        app.buttons["fixture.ask-question"].tap()
+        XCTAssertTrue(app.buttons["Cancel form"].waitForExistence(timeout: 10))
+        XCTAssertTrue(waitHaptics(app, "questionPresented"))
+        let staging = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Staging")).firstMatch
+        XCTAssertTrue(staging.waitForExistence(timeout: 5), app.debugDescription)
+        staging.tap()
+        app.buttons["Submit all answers"].tap()
+        XCTAssertTrue(app.buttons["Cancel form"].waitForNonExistence(timeout: 10))
+        assertHaptics(app, "questionPresented,answerSubmitted", "only an accepted answer confirms success; sheet dismissal stays silent")
+        app.buttons["fixture.reopen-chat"].tap()
+        assertHaptics(app, "questionPresented,answerSubmitted", "replayed answers are silent")
     }
 
     // MARK: - Helpers

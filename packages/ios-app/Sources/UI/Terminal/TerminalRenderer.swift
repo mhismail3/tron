@@ -314,7 +314,7 @@ struct NativeTerminal: UIViewRepresentable {
         func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
         nonisolated func bell(source: TerminalView) {
             Task { @MainActor in
-                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                TronHaptics.shared.play(.terminalBell)
             }
         }
         func clipboardCopy(source: TerminalView, content: Data) { UIPasteboard.general.setData(content, forPasteboardType: "public.data") }

@@ -581,6 +581,7 @@ struct ExtensionFormSheet: View {
                 try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: cancelled)
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
+                if !cancelled { TronHaptics.shared.play(.answerSubmitted) }
                 onResolved()
                 dismiss()
             } catch is CancellationError {

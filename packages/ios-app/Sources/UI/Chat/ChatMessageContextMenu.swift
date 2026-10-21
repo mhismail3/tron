@@ -18,7 +18,10 @@ struct ChatMessageCopyMenu: ViewModifier {
     func body(content: Content) -> some View {
         ChatMessageContextMenuSurface(content: content, text: text, mutationIdentity: mutationIdentity, actions: actions)
             .accessibilityActions {
-                if !text.isEmpty { Button("Copy") { UIPasteboard.general.string = text } }
+                if !text.isEmpty { Button("Copy") {
+                    UIPasteboard.general.string = text
+                    TronHaptics.shared.play(.copied)
+                } }
                 ForEach(actions) { action in
                     Button(action.title, role: action.destructive ? .destructive : nil, action: action.perform)
                 }
@@ -102,6 +105,7 @@ final class ChatMessageContextMenuOwner: NSObject, UIContextMenuInteractionDeleg
         if !copiedText.isEmpty {
             items.append(UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
                 UIPasteboard.general.string = copiedText
+                TronHaptics.shared.play(.copied)
             })
         }
         for action in actions {

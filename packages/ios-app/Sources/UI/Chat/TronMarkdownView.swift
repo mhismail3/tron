@@ -271,6 +271,7 @@ private struct CodeBlock: View {
                 if streaming { TronPulseLoadingIndicator(accent: .tronEmerald, size: 16) }
                 Button {
                     UIPasteboard.general.string = code
+                    TronHaptics.shared.play(.copied)
                     copyFeedback.markCopied()
                 } label: {
                     Label(copyFeedback.copied ? "Copied" : "Copy", systemImage: copyFeedback.copied ? "checkmark" : "doc.on.doc")

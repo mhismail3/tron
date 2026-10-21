@@ -3528,6 +3528,8 @@ struct ChatView: View {
                         context: traceContext,
                         state: interactionTraceState()
                     )
+                    if presentationTarget == target, presentationActivity.allowsPresentationPublication,
+                       !(error is CancellationError) { TronHaptics.shared.play(.actionFailed) }
                     model.presentComposerActionError(error, target: target)
                 }
             }

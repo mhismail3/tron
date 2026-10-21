@@ -65,7 +65,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   rejects raw native sheet calls. Their state rules are in
   [Presentation-scoped state](#presentation-scoped-state).
 - **Presentation haptics.** Managed sheets (including nested and interpreted Swift-app sheets)
-  and system pickers play one soft, light tap through `TronHaptics`, respecting System Haptics.
+  and system pickers play one medium, full-intensity impact through `TronHaptics`, respecting System Haptics.
+  Semantic interaction patterns and exclusions are in the [UI haptic map](../Sources/UI/README.md#haptic-map).
   Presenters adopt already-presented state silently; detent changes, replacements, re-renders and
   dismissals do not tap. The question interaction keeps only its existing live attention cue;
   state-driven onboarding and pending editor confirmations remain silent across launch/reconnect.

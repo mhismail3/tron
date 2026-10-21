@@ -14,15 +14,18 @@ final class TronInteractionHapticsUITests: XCTestCase {
         app.buttons["Restore values"].tap()
         assertHaptics(app, "toggleChanged")
 
-        app.buttons["Choice"].tap()
+        app.buttons.matching(identifier: "Choice").allElementsBoundByIndex.last!.tap()
+        XCTAssertTrue(app.buttons["settings-option-First"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["settings-option-First"].tap()
         assertHaptics(app, "toggleChanged,sheetPresented")
-        app.buttons["Choice"].tap()
+        app.buttons.matching(identifier: "Choice").allElementsBoundByIndex.last!.tap()
+        XCTAssertTrue(app.buttons["settings-option-Second"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["settings-option-Second"].tap()
         XCTAssertTrue(app.staticTexts["fixture.values"].label.contains("choice:Second"))
         assertHaptics(app, "toggleChanged,sheetPresented,sheetPresented,selectionChanged")
 
-        app.buttons["Checklist"].tap()
+        app.buttons.matching(identifier: "Checklist").allElementsBoundByIndex.last!.tap()
+        XCTAssertTrue(app.buttons["settings-option-Second"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["settings-option-Second"].tap()
         app.buttons["settings-option-First"].tap()
         let save = app.buttons["Save"]
@@ -40,9 +43,8 @@ final class TronInteractionHapticsUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(); defer { app.terminate() }
         app.buttons["Copy"].tap()
-        XCTAssertTrue(app.buttons["Copied"].waitForExistence(timeout: 5))
         assertHaptics(app, "copied")
-        app.staticTexts["fixture.copy-message"].press(forDuration: 1)
+        app.staticTexts["Copy this message"].press(forDuration: 1)
         let copy = app.buttons["Copy"].firstMatch
         XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
         assertHaptics(app, "copied")

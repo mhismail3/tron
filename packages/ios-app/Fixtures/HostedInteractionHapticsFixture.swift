@@ -4,11 +4,18 @@ import SwiftUI
 /// Real shared interaction controls, not buttons that invoke the haptic seam.
 /// Changing a binding externally proves that restoration is not user intent.
 struct HostedInteractionHapticsFixture: View {
+    @State private var activity = PresentationActivityCoordinator()
     @State private var enabled = false
     @State private var choice = "First"
     @State private var selected = ["First"]
 
     var body: some View {
+        TronPresentationSurface(id: "fixture.interaction-haptics") { controls }
+            .environment(\.tronPresentationActivityCoordinator, activity)
+            .tronPresentation()
+    }
+
+    private var controls: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 12) {

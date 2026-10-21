@@ -129,7 +129,7 @@ struct HostedSettingsRendererFixture: View {
                         SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
                             onOpenSession: { openedRoute = $0 })
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm") {
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-haptics") {
                         // The Context sheet itself, so the fixture's cover control stays reachable.
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("context"))
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-nested") {

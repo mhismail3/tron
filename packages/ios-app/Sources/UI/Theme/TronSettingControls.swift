@@ -113,6 +113,7 @@ struct TronChoicePicker<ID: Hashable>: View {
                     TronCatalogOptionRow(title: choice.label, summary: choice.disabledReason, detail: choice.detail,
                                          icon: "circle", isSelected: choice.id == selected,
                                          isEnabled: choice.disabledReason == nil) {
+                        if choice.id != selected { TronHaptics.shared.play(.selectionChanged) }
                         onChoose(choice.id)
                         dismiss()
                     }
@@ -159,6 +160,7 @@ struct TronChecklistPicker<ID: Hashable>: View {
                     TronCatalogOptionRow(title: choice.label, summary: choice.disabledReason, detail: choice.detail,
                                          icon: "circle", isSelected: isChosen,
                                          isEnabled: choice.disabledReason == nil || isChosen) {
+                        TronHaptics.shared.play(.selectionChanged)
                         if isChosen { chosen.removeAll { $0 == choice.id } } else { chosen.append(choice.id) }
                     }
                     .accessibilityIdentifier(optionIdentifierPrefix + choice.label)

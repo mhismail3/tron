@@ -42,10 +42,37 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
 - Toolbar icons resolve tint through `TronSheetTint`; nothing paints them directly.
 - Every app-owned sheet goes through the managed modifiers; raw `.sheet` calls fail
   `packages/ios-app/scripts/test-source-policy.sh`.
-- Managed sheets and system pickers dispatch one soft, half-intensity impact through
+- Managed sheets and system pickers dispatch one medium, full-intensity impact through
   `TronHaptics` on a live presentation, including nested sheets. Existing-at-mount sheets,
   replacements, detent changes, re-renders and dismissals are silent. Question interactions
   keep only their live attention cue; automatic onboarding and pending editor requests are silent.
+
+## Haptic map
+
+`Components/TronHaptics.swift` owns all generators. View-bound feedback respects System Haptics
+and foreground activity. User-intent closures, not value observers, own control feedback.
+
+| Event | Interaction | Generator / intensity | Why |
+| --- | --- | --- | --- |
+| `sheetPresented` | Shared live sheet/picker presentation | Medium impact / full | A perceptible lift, without a sharp rigid snap |
+| `toggleChanged` | Shared toggle rows and schema renderer switches | Selection | One mechanical flip; no ticks on server/restored values |
+| `selectionChanged` | Choice picker change; checklist add/remove | Selection | A detent, not a completion; choosing the current value is silent |
+| `copied` | Message Copy (menu/AX); code-block Copy | Light impact / full | A small confirmation after the clipboard write |
+| `answerSubmitted` | Accepted Ask form answer | Success notification | Confirms the Gateway accepted the atomic response; cancel stays silent |
+| `actionFailed` | Rejected composer transport in the active chat | Error notification | Distinguishes refusal from an accepted send; cancellation stays silent |
+| `terminalBell` | Existing terminal bell | Warning notification | Preserves the bell through the shared seam, foreground only |
+| `menuOpened` | Tron-button hold opens menu | Medium impact / full | Marks the hold threshold, not the initial touch |
+| `promptSent` | Gateway accepts prompt | Light impact / full | Marks acceptance |
+| `attachmentAdded` | Newly attached items | Selection, up to six 70 ms apart | A bounded insertion cascade |
+| `runFinished` | Live normal run completion | Success notification | Distinct completion |
+| `workerMessage` | Live worker result in the open chat | Soft impact / full | Subtler than the main agent completion |
+| `questionPresented` | Live input-needed sheet | Rigid impact / full | Attention only, never stacked with a presentation impact |
+
+Scrolling, loads, reconnects, restored/replayed/background events, duplicate arrivals, sheet
+resize/dismiss/restore and checklist Save are silent. Save only forwards a draft, so it must not
+claim durable success. Destructive warnings and Home arrival cues are intentionally not added:
+confirmations already communicate risk and another arrival cue could duplicate chat attention.
+Physical feel and System Haptics off require a device; simulator journeys observe semantic output.
 
 ## Entry points
 
@@ -64,7 +91,8 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSheetTintUITests \
   --only-testing TronMobileUITests/TronAccessibilityUITests
 packages/ios-app/scripts/test-source-policy.sh
-scripts/tron-ios-test run --only-testing TronMobileUITests/TronChatHapticsUITests
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronChatHapticsUITests \
+  --only-testing TronMobileUITests/TronInteractionHapticsUITests
 ```
 
 The loading journey samples rendered material, not accessibility geometry; the paged-list journey
