@@ -37,7 +37,7 @@ interface AbortContext {
 }
 
 /** Owns foreground cancellation intent and the accepted Stop continuation.
- * Context reads remain live at each original SDK and post-await cut. */
+ * Reads stay live across SDK calls and awaits so successor ownership is rechecked. */
 export class RunAbortOwner {
   readonly stopSteeringRecoveryIDs = new Set<string>();
   readonly stopRecoveryHoldIDs = new Set<string>();
@@ -263,7 +263,6 @@ export class RunAbortOwner {
     }
     return !stillActive();
   }
-
 
   consumeStopSteeringRecoveryOwner(operationId: string): void {
     if (!this.stopSteeringRecoveryIDs.delete(operationId)) return;

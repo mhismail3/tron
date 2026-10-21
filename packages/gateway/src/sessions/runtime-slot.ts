@@ -6877,7 +6877,6 @@ export class RuntimeSlot {
     }, 20);
   }
 
-
   private reconcileQueuedMessages(): void {
     const session = this.runtime.session;
     const actual: Record<QueueBehavior, readonly string[]> = {
@@ -8499,7 +8498,6 @@ export class RuntimeSlot {
   ): Promise<void> {
     return this.runAbort.abort(kind, expectedOperationId, terminalErrorCode);
   }
-
 
   /** Republish this snapshot because the Gateway-owned archive projection
    * changed. Archive commits happen outside the run-admission lane, so this
