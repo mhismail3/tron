@@ -5,6 +5,8 @@ import type { HomeMemoryToolAccess } from "./home-memory.js";
 import type { HomeProfileChangeAccess } from "./home-profile.js";
 import type { SettingsChangePath } from "../admin/settings-model.js";
 import type { HomeOwner } from "./home-owner.js";
+import { HomeRequestPolicyError } from "./home-request-policy.js";
+import type { RequestPolicyHook } from "../kernel/host/request-policy.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
 import type { HomeSessionReader } from "./home-session-read.js";
@@ -13,6 +15,7 @@ import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/se
 
 export interface HomeModuleServices {
   runSettled: RunSettledPolicy;
+  requestPolicy: RequestPolicyHook;
   memory(sessionId: string): HomeMemoryToolAccess | undefined;
   delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal): Promise<HomeTaskHandle>;
   task(sessionId: string, request: unknown): Promise<unknown>;
@@ -32,6 +35,10 @@ export function homeModuleServices(owner: HomeOwner,
 ): HomeModuleServices {
   return {
     knowledge: ports.knowledge, search: ports.search, read: ports.read, delegate: ports.delegate,
+    requestPolicy: {
+      forSession: sessionId => owner.requestPolicyFor(sessionId),
+      isRefusal: (error): error is Error => error instanceof HomeRequestPolicyError,
+    },
     runSettled: {
       quiescent: sessionId => owner.chapterQuiescent(sessionId),
       idle: (sessionId, by) => { owner.noteHomeIdle(sessionId, by); ports.resourcesIdle(sessionId); },
@@ -60,7 +67,7 @@ export function createHomeModule(services: () => HomeModuleServices): ModuleDesc
     name: "tron-home",
     purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
     tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"], commands: [],
-    start: () => ({ hooks: { runSettled: () => services().runSettled }, extension: session => {
+    start: () => ({ hooks: { runSettled: () => services().runSettled, requestPolicy: () => services().requestPolicy }, extension: session => {
       const owners = services();
       return createTronHomeExtension(() => owners.memory(session.sessionId()),
         (request, signal) => owners.delegate(session.sessionId(), request, signal),

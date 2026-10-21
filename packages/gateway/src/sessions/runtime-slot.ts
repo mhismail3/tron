@@ -50,7 +50,7 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
-import { HomeRequestPolicyError, type HomeRequestPolicy } from "../home/home-request-policy.js";
+import type { RequestPolicy } from "../kernel/host/request-policy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeHardBoundary } from "../home/home-diagnostic.js";
@@ -579,9 +579,6 @@ export interface RuntimeSlotDependencies {
   /** Recorded chat model for an enabled Home, applied when reconstructing an
    * unloaded runtime instead of restoring the transcript's incidental model. */
   homeModel: (sessionId: string) => { provider: string; id: string } | undefined;
-  /** Tron Home's request seam for one session id. Asked once per runtime
-   * creation, never for a fork or an ordinary session. */
-  homeRequestPolicy: (sessionId: string) => HomeRequestPolicy | undefined;
   /** Admits pending Home results for one activation. A `wake` returns the trigger
    * result the run starts with, not yet appended; otherwise the results are appended. */
   homeInboxAdmission: (sessionId: string, operationId: string, delivery: import("../home/home-wake-inbox.js").HomeWakeDelivery, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => Promise<import("../home/home-wake-inbox.js").HomeWakeTrigger | undefined>;
@@ -644,7 +641,7 @@ export class RuntimeSlot {
   /** The open Home activation of the live runtime, undefined for every ordinary
    * runtime. Re-resolved in `runtimeFactory`, so a profile change takes effect
    * with the runtime it applies to. */
-  private homeRequestPolicy: HomeRequestPolicy | undefined;
+  private homeRequestPolicy: RequestPolicy | undefined;
   private detachOpenAIEligibility: (() => void) | undefined;
   private runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
@@ -2389,7 +2386,7 @@ export class RuntimeSlot {
       }
       this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
       this.homeRequestPolicy = home
-        ? this.dependencies.homeRequestPolicy(sessionManager.getSessionId())
+        ? this.dependencies.modules.policy("requestPolicy")?.().forSession(sessionManager.getSessionId())
         : undefined;
       const homeRequestPolicy = this.homeRequestPolicy;
       const compactionSession = created.session;
@@ -8541,7 +8538,7 @@ export class RuntimeSlot {
         // A Home refusal names its own cause, so the client reads it first. It stays an
         // unknown outcome: the start receipt is durable, so the prompt must not replay.
         throw startPersisted
-          ? asUncertainOutcome(error instanceof HomeRequestPolicyError ? new GatewayError("conflict", error.message) : error,
+          ? asUncertainOutcome(this.dependencies.modules.policy("requestPolicy")?.().isRefusal(error) ? new GatewayError("conflict", error.message) : error,
             "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
           : error;
       }
