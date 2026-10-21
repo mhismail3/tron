@@ -8,6 +8,8 @@
   ],
   "dependsOn": [
     "gateway/apps",
+    "gateway/display",
+    "gateway/extensions",
     "gateway/host",
     "gateway/pi",
     "gateway/workspace"
