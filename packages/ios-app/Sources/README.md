@@ -28,6 +28,9 @@ module.
   icons. Each separates the original raster deer silhouette (including antialiased edges) from
   its cream/green or amber/white background and color. Icon Composer supplies glass, specular
   lighting, shadow and translucency, with dark backgrounds and system tinted/clear renditions.
+  The shipping icon's light-only material specialization disables specular lighting and reduces
+  shadow and translucency to 0.2 while retaining glass. Base material values remain unchanged
+  for dark, tinted and clear renditions; the development/test icon is independent.
   The existing xcconfig icon names select these bundles; there is no duplicate flat app-icon set.
   Mac icons remain independent and unchanged.
 - Directory sources exclude `**/*.module.json` and `**/README.md`, so manifests and owner docs never
