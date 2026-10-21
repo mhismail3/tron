@@ -444,7 +444,6 @@ interface RuntimeSlotHooks {
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
-  /** A completed, quiescent Home turn may durably seal its chapter before the next admission. */
   homeChapterRefused: (reason: "sealed-write") => void;
   homeChapterLimitStopped: (details: {
     chapterOrdinal: number;
