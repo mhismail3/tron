@@ -6,6 +6,11 @@ import UIKit
 /// Opt-in investigation instrumentation, never compiled into the shipping app.
 @MainActor enum ForegroundSheetProbe {
     private static var count = 0
+    private static var stack: [String] = []
+    private static var stackChanges = 0
+    private static var frames = 0
+    private static var liveAnchors = Set<String>()
+    private static var rpcCounts: [String: Int] = [:]
     static let enabled = ProcessInfo.processInfo.arguments.contains("-foreground-sheet-probe")
     private static let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("foreground-sheet-probe.jsonl")
@@ -24,6 +29,9 @@ import UIKit
     static func record(_ event: String, _ identity: String) {
         guard enabled, count < 20_000 else { return }
         count += 1
+        if event == "rpc" { rpcCounts[identity, default: 0] += 1 }
+        if event == "anchor-create" { liveAnchors.insert(identity) }
+        if event == "anchor-deinit" { liveAnchors.remove(identity) }
         let value: [String: Any] = ["at": Date().timeIntervalSince1970, "pid": ProcessInfo.processInfo.processIdentifier,
                                     "event": event, "identity": identity]
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return }
@@ -32,6 +40,74 @@ import UIKit
         defer { try? file.close() }
         try? file.seekToEnd()
         try? file.write(contentsOf: data + Data([10]))
+    }
+
+    static func nativeSummary(foreground: Int) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: [
+            "stack": stack, "changes": stackChanges, "liveAnchors": liveAnchors.count,
+            "rpc": rpcCounts, "frames": frames, "foreground": foreground,
+        ], options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    static func sampleNativeStack(in window: UIWindow) {
+        guard enabled, window.windowScene?.activationState == .foregroundActive else { return }
+        frames += 1
+        var current = window.rootViewController
+        var next: [String] = []
+        while let controller = current, next.count < 16 {
+            next.append(String(describing: ObjectIdentifier(controller)))
+            current = controller.presentedViewController
+        }
+        guard next != stack else { return }
+        stack = next
+        stackChanges += 1
+        record("native-stack", next.joined(separator: ">"))
+    }
+}
+
+/// Passive, test-only observation of the actual UIKit presentation chain on
+/// rendered frames. AX reads the live value without causing SwiftUI renders.
+struct ForegroundNativeStackProbe: UIViewRepresentable {
+    let foreground: @MainActor () -> Int
+    func makeUIView(context: Context) -> Probe { Probe(foreground: foreground) }
+    func updateUIView(_ view: Probe, context: Context) { view.foreground = foreground }
+    static func dismantleUIView(_ view: Probe, coordinator: ()) { view.stop() }
+
+    final class Probe: UIView {
+        private var link: CADisplayLink?
+        var foreground: @MainActor () -> Int
+        init(foreground: @escaping @MainActor () -> Int) {
+            self.foreground = foreground
+            super.init(frame: .zero)
+            isAccessibilityElement = true
+            accessibilityIdentifier = "fixture.foreground-native"
+            accessibilityLabel = "Foreground native presentation observation"
+        }
+        required init?(coder: NSCoder) { fatalError("not used") }
+        override var accessibilityValue: String? {
+            get { ForegroundSheetProbe.nativeSummary(foreground: foreground()) }
+            set { }
+        }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            let link = CADisplayLink(target: WeakTarget(self), selector: #selector(WeakTarget.tick(_:)))
+            self.link = link
+            link.add(to: .main, forMode: .common)
+        }
+        func stop() { link?.invalidate(); link = nil }
+        func sample() { if let window { ForegroundSheetProbe.sampleNativeStack(in: window) } }
+    }
+
+    @MainActor private final class WeakTarget: NSObject {
+        weak var view: Probe?
+        init(_ view: Probe) { self.view = view }
+        @objc func tick(_ link: CADisplayLink) {
+            guard let view else { link.invalidate(); return }
+            view.sample()
+        }
     }
 }
 

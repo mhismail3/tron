@@ -246,6 +246,7 @@ struct ConnectionsSettingsView: View {
     }
 
     private func reload() async {
+        guard model.admitsForegroundPresentationRead else { return }
         dataLoadGeneration &+= 1
         let generation = dataLoadGeneration
         do {

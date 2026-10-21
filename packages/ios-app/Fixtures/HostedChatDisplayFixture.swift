@@ -256,6 +256,11 @@ struct HostedHomeDashboardFixture: View {
                     .background {
                         InAppNoticeWindowInstaller(model: model, colorScheme: .light, presentationActivity: homeActivity)
                             .frame(width: 0, height: 0).allowsHitTesting(false)
+                        if ForegroundSheetProbe.enabled {
+                            ForegroundNativeStackProbe(foreground: { [weak model] in
+                                model?.foregroundReconciliationGeneration ?? -1
+                            }).frame(width: 1, height: 1).allowsHitTesting(false)
+                        }
                     }
                     .tronPresentation()
                     .tronSettingsLayout()
@@ -713,9 +718,9 @@ private actor HostedHomeShellGateway {
             return (.object(["sessions": .array(([row] + workers).map { try! JSONValue.encode($0) }), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
         case "device.list":
-            return (.object(["devices": .array([])]), nil)
+            return (foreground.devices, nil)
         case "provider.list" where sheetState == "dashboard-workers":
-            return (HostedHomeDashboardWorkers.providers, nil)
+            return (foreground.providers(HostedHomeDashboardWorkers.providers), nil)
         case "provider.usage":
             // Holds the usage card on its loading pulse long enough to see it.
             if ProcessInfo.processInfo.arguments.contains("-home-dashboard-usage-delay") {
@@ -723,8 +728,8 @@ private actor HostedHomeShellGateway {
             }
             return (HostedHomeDashboardWorkers.usage, nil)
         case "provider.list":
-            return (.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
-                "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(3)])])]), nil)
+            return (foreground.providers(.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
+                "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(3)])])])), nil)
         case "model.list":
             return (.object(["models": .array(sheetState == "empty-models" ? [] : [anthropicModel("claude-opus-5-5", name: "Claude Opus 5.5", window: 1_000_000),
                 anthropicModel("claude-haiku-5-5", name: "Claude Haiku 5.5", window: 200_000), model("memory-a", name: "Memory Model A"),
