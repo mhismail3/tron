@@ -43,7 +43,7 @@ private data. Keep source text and identifiers out of public issues.
 
 ## 2. Reconstruct activations before counting
 
-Start at `packages/gateway/src/sessions/invocation-receipts.ts`, Home's request
+Start at `packages/gateway/src/kernel/run/invocation-receipts.ts`, Home's request
 policy and the current canonical session format. Do not hard-code an old receipt
 schema. Join start/accepted/binding/terminal receipts by exact invocation identity;
 deduplicate receipt identities and follow canonical branch ancestry. A retry,
