@@ -1,10 +1,11 @@
-import type { ExtensionFactory, SessionBeforeCompactEvent } from "../kernel/pi/coding-agent.js";
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import type { TronModuleSummary } from "../protocol/types.js";
-import { compactionPolicyExtension, type CompactionOperationPolicy } from "../runtime/compaction-policy.js";
-import { contextWindowExtension, type SessionContextWindowPolicy } from "../providers/context-window-policy.js";
+import { compactionPolicyModule } from "../runtime/compaction-policy.js";
+import { contextWindowModule } from "../providers/context-window-policy.js";
 import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
 import { appsModule } from "../modules/apps/module.js";
 import type { ModuleHost, SessionContext } from "../kernel/host/module-host.js";
+import { settlementModule } from "../kernel/host/settlement-module.js";
 import { askUserModule } from "./ask-user-module.js";
 import { createTronDisplayExtension } from "../display/tron-display-extension.js";
 import { createTronNativeCaptureExtension } from "../display/tron-native-capture-extension.js";
@@ -29,19 +30,9 @@ import type { NotificationService } from "../notifications/notification-service.
 /** What one session runtime offers Tron's built-in extensions. Every field is
  * owned by the session runtime; a module's factory closes over this host rather
  * than reaching into the slot. */
-export interface TronModuleHost {
-  sessionId: () => string;
-  cwd: () => string;
+export interface TronModuleHost extends SessionContext {
   workspace: TronWorkspace;
   displayArtifacts: DisplayArtifactStore;
-  notificationTitle: () => string;
-  /** Whether the user is currently viewing this session's chat. */
-  isSessionPresented: () => boolean;
-  contextPolicy: () => SessionContextWindowPolicy | undefined;
-  compactionPolicy: () => CompactionOperationPolicy | undefined;
-  compactionStopped: (event: SessionBeforeCompactEvent) => boolean;
-  compactionChanged: () => void;
-  joinTerminalReceiptWrites: () => Promise<void>;
   knowledge?: KnowledgeService;
   /** The started modules (K3) whose extensions hold a position in this list. */
   modules: ModuleHost;
@@ -93,7 +84,8 @@ export interface TronModule {
 
 /** The per-runtime facts a module descriptor's extension reads (K3). */
 function sessionContext(host: TronModuleHost): SessionContext {
-  return { sessionId: host.sessionId, cwd: host.cwd, title: host.notificationTitle, presented: host.isSessionPresented };
+  return { sessionId: host.sessionId, cwd: host.cwd, title: host.title, presented: host.presented,
+    joinTerminalReceiptWrites: host.joinTerminalReceiptWrites, contextPolicy: host.contextPolicy, compaction: host.compaction };
 }
 
 export interface TronModuleRegistration {
@@ -106,38 +98,25 @@ export interface TronModuleRegistration {
  * and sessions cannot drift. */
 export const TRON_MODULES: readonly TronModule[] = [
   {
-    name: "tron-invocation-settlement",
-    purpose: "Keeps each chat's completion receipts in order before the next message",
-    tools: [],
-    commands: [],
-    factory: (host) => (pi) => {
-      // Pi awaits these public hooks before the next run/input can append.
-      // Join receipt I/O only: attention must not hold up accepted continuations.
-      pi.on("turn_start", async () => {
-        await host.joinTerminalReceiptWrites();
-      });
-      pi.on("message_end", async (event) => {
-        if (event.message.role === "user") await host.joinTerminalReceiptWrites();
-      });
-    },
+    name: settlementModule.name,
+    purpose: settlementModule.purpose,
+    tools: settlementModule.tools,
+    commands: settlementModule.commands,
+    factory: (host) => host.modules.extension(settlementModule, sessionContext(host)),
   },
   {
-    name: "tron-context-window",
-    purpose: "Keeps the session's model context window applied as the model changes.",
-    tools: [],
-    commands: [],
-    factory: (host) => contextWindowExtension(() => host.contextPolicy()),
+    name: contextWindowModule.name,
+    purpose: contextWindowModule.purpose,
+    tools: contextWindowModule.tools,
+    commands: contextWindowModule.commands,
+    factory: (host) => host.modules.extension(contextWindowModule, sessionContext(host)),
   },
   {
-    name: "tron-compaction-policy",
-    purpose: "Applies Tron's compaction policy and cancels the compaction a stop aborted.",
-    tools: [],
-    commands: [],
-    factory: (host) => compactionPolicyExtension(
-      () => host.compactionPolicy(),
-      (event) => host.compactionStopped(event),
-      () => host.compactionChanged(),
-    ),
+    name: compactionPolicyModule.name,
+    purpose: compactionPolicyModule.purpose,
+    tools: compactionPolicyModule.tools,
+    commands: compactionPolicyModule.commands,
+    factory: (host) => host.modules.extension(compactionPolicyModule, sessionContext(host)),
   },
   {
     name: "tron-core",
@@ -215,8 +194,8 @@ export const TRON_MODULES: readonly TronModule[] = [
       if (!notifications) return undefined;
       return createTronNotifyExtension({
         sessionId: () => host.sessionId(),
-        sessionTitle: () => host.notificationTitle(),
-        observed: () => host.isSessionPresented(),
+        sessionTitle: () => host.title(),
+        observed: () => host.presented(),
         ...(host.machineId ? { machineId: host.machineId } : {}),
         enqueue: (input) => notifications.enqueue(input),
       });

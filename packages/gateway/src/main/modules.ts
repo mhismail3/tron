@@ -1,4 +1,7 @@
 import { ModuleHost, type GatewayHost, type ModuleDescriptor } from "../kernel/host/module-host.js";
+import { settlementModule } from "../kernel/host/settlement-module.js";
+import { contextWindowModule } from "../providers/context-window-policy.js";
+import { compactionPolicyModule } from "../runtime/compaction-policy.js";
 import { initTheme } from "../kernel/pi/adapters.js";
 import { askUserModule } from "../extensions/ask-user-module.js";
 import { computerModule } from "../display/computer-module.js";
@@ -9,6 +12,9 @@ import { workspaceModule } from "../workspace/workspace-module.js";
  * started in this order and stopped in reverse. */
 export const GATEWAY_MODULES: readonly ModuleDescriptor<unknown>[] = [
   workspaceModule,
+  settlementModule,
+  contextWindowModule,
+  compactionPolicyModule,
   askUserModule,
   appsModule,
   computerModule,

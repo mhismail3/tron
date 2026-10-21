@@ -62,6 +62,9 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
   `max_completion_tokens` (Moonshot TPM counts the reservation). Account and org quota
   errors are non-retryable; max-concurrency with explicit guidance gets one bounded
   retry; transient overload stays retryable.
+- **Context extension descriptor.** `contextWindowModule` registers the existing
+  context-window hooks through SessionContext's `restore`/`apply` port. The concrete
+  session policy remains the sole owner of budgets and canonical overrides.
 - Context windows, recents and release dates:
   [runtime configuration](../admin/runtime-configuration.md#context-windows).
   Model fallback queues: [settings contract](../../docs/settings-contract.md).

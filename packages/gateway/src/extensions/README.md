@@ -27,7 +27,9 @@ component registry, presentation store, terminal sanitizer).
 - **`modules.list`** reports Tron's built-in modules for Settings without a session:
   one row per `TRON_MODULES` entry (name, purpose, tool and command names), the same
   definition `RuntimeSlot` registers, so the list cannot disagree with a session.
-  `tron-invocation-settlement` comes first and has no tools or commands.
+  `tron-invocation-settlement` comes first and has no tools or commands. Settlement,
+  context-window and compaction-policy use started descriptors at those same positions;
+  the per-runtime host extends SessionContext rather than exposing concrete policies.
 - **Session-free inventory** (served by admin's package and hook services with this
   composition): `hooks.list` (`hooks.v1`) returns the hook fields `session.resources`
   returns for one scope. No `cwd` is the global scope against an untrusted home;

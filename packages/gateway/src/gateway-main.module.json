@@ -12,6 +12,8 @@
     "gateway/extensions",
     "gateway/host",
     "gateway/pi",
+    "gateway/providers",
+    "gateway/runtime",
     "gateway/workspace"
   ],
   "exceptions": [

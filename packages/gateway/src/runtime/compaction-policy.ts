@@ -1,3 +1,4 @@
+import type { CompactionPolicyLifecycle, ModuleDescriptor } from "../kernel/host/module-host.js";
 import { clampThinkingLevel, normalizeContext, type AssistantMessage } from "../kernel/pi/ai.js";
 import type { StreamFn } from "../kernel/pi/agent-core.js";
 import { SettingsManager, type AgentSession, type ExtensionFactory, type SessionBeforeCompactEvent } from "../kernel/pi/coding-agent.js";
@@ -253,7 +254,19 @@ function oversizedRequestOverflow(message: AssistantMessage): AssistantMessage |
 const OVERSIZED_REQUEST = /^413(?::| (?:Request Entity Too Large|Content Too Large)\b)/u;
 const CONTEXT_OVERFLOW_PHRASE = /context[_ ]length[_ ]exceeded/iu;
 
-export function compactionPolicyExtension(policy: () => CompactionOperationPolicy | undefined, stopped: (event: SessionBeforeCompactEvent) => boolean, changed: () => void): ExtensionFactory {
+export const compactionPolicyModule: ModuleDescriptor = {
+  name: "tron-compaction-policy",
+  purpose: "Applies Tron's compaction policy and cancels the compaction a stop aborted.",
+  tools: [],
+  commands: [],
+  start: () => ({ extension: (session) => compactionPolicyExtension(
+    () => session.compaction.policy(),
+    (event) => session.compaction.stopped(event),
+    () => session.compaction.changed(),
+  ) }),
+};
+
+export function compactionPolicyExtension(policy: () => CompactionPolicyLifecycle | undefined, stopped: (event: SessionBeforeCompactEvent) => boolean, changed: () => void): ExtensionFactory {
   return pi => {
     pi.on("message_end", (event) => {
       if (event.message.role !== "assistant") return;

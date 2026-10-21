@@ -1,4 +1,4 @@
-import type { ExtensionFactory } from "../pi/coding-agent.js";
+import type { ExtensionFactory, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
 import type { JsonValue } from "../../protocol/types.js";
 
 /** One log line from a module, in the Gateway logger's shape. */
@@ -16,6 +16,18 @@ export interface GatewayHost {
   contract<C>(module: ModuleDescriptor<C>): C;
 }
 
+/** Lifecycle operations used by the context extension, not its concrete owner. */
+export interface ContextPolicyLifecycle {
+  restore(): void;
+  apply(): void;
+}
+
+/** Lifecycle operations used by the compaction extension. */
+export interface CompactionPolicyLifecycle {
+  restore(): void;
+  capture(event: SessionBeforeCompactEvent): void;
+}
+
 /** Per-runtime facts a module's extension reads at call time. */
 export interface SessionContext {
   sessionId(): string;
@@ -24,6 +36,13 @@ export interface SessionContext {
   title(): string;
   /** Whether the user is viewing this chat now. */
   presented(): boolean;
+  joinTerminalReceiptWrites(): Promise<void>;
+  contextPolicy(): ContextPolicyLifecycle | undefined;
+  compaction: {
+    policy(): CompactionPolicyLifecycle | undefined;
+    stopped(event: SessionBeforeCompactEvent): boolean;
+    changed(): void;
+  };
 }
 
 /** One RPC method a module serves, routed before `GatewayService`'s own switch

@@ -1,3 +1,4 @@
+import type { ContextPolicyLifecycle, ModuleDescriptor } from "../kernel/host/module-host.js";
 import { existsSync } from "node:fs";
 import type { Model } from "../kernel/pi/ai.js";
 import { estimateTokens, type AgentSession, type ExtensionFactory, type ModelRuntime, type SessionEntry, type SessionManager } from "../kernel/pi/coding-agent.js";
@@ -253,9 +254,17 @@ export class SessionContextWindowPolicy {
   }
 }
 
+export const contextWindowModule: ModuleDescriptor = {
+  name: "tron-context-window",
+  purpose: "Keeps the session's model context window applied as the model changes.",
+  tools: [],
+  commands: [],
+  start: () => ({ extension: (session) => contextWindowExtension(() => session.contextPolicy()) }),
+};
+
 /** Hook the owner, not SDK private lifecycle fields. Factories survive resource
  * reload; each replacement session receives a distinct policy closure. */
-export function contextWindowExtension(policy: () => SessionContextWindowPolicy | undefined): ExtensionFactory {
+export function contextWindowExtension(policy: () => ContextPolicyLifecycle | undefined): ExtensionFactory {
   return pi => {
     pi.on("session_start", () => { policy()?.restore(); });
     pi.on("session_tree", () => { policy()?.restore(); });

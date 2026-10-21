@@ -9,7 +9,9 @@ one Gateway.
 ## Owns
 
 `module-host.ts`: `ModuleDescriptor`, `ModuleInstance`, `GatewayHost`,
-`SessionContext`, `RpcHandler`, the K3 hook table (`KERNEL_HOOKS`) and `ModuleHost`.
+`SessionContext`, its narrow context/compaction lifecycle ports, `RpcHandler`, the
+K3 hook table (`KERNEL_HOOKS`) and `ModuleHost`. `settlement-module.ts` owns the
+ordinary profile's first extension and joins canonical receipt writes before input.
 
 ## Contract
 
@@ -22,7 +24,9 @@ one Gateway.
   `ModuleHost.contract` is composition's read.
 - **Session extensions.** `extension(m, session)` asks module `m` for its Pi
   extension for one runtime; its position in each profile's extension list is
-  the kernel's (K-0 §3), so the model-visible order is unchanged.
+  the kernel's (K-0 §3), so the model-visible order is unchanged. SessionContext
+  carries per-runtime identity, presentation, receipt joining and policy operations;
+  concrete policy owners remain outside the host and are resolved at each callback.
 - **RPC (D5).** A module's `rpc` methods are routed before `GatewayService`'s
   switch. `read` handlers are admitted while the Gateway drains; `mutation`
   handlers run under the command receipt and are refused while draining.
