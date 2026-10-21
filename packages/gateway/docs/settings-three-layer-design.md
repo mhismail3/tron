@@ -1,7 +1,8 @@
-# Three-layer settings proposal
+# Three-layer settings design
 
-Design proposal for #1634, not the current contract. Product edits require maintainer approval;
-visuals and changed goldens require separate approval. Current behavior: [settings contract](settings-contract.md).
+Approved implementation and visual direction for #1634, not the current contract. Production
+implementation, migration validation and final candidate/golden review remain required.
+Current behavior: [settings contract](settings-contract.md).
 
 ## Resolution and ownership
 
