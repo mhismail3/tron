@@ -209,9 +209,6 @@ struct HostedHomeDashboardFixture: View {
     @State private var dashboardChanged = false
     @State private var dashboardReads = "none"
     @State private var firstRevealAt: Date?
-    @State private var backgrounded = false
-    @State private var openCount = 0
-    @State private var pushRequested = false
     private let actionProbe = HostedHomeActionProbe()
     private let arguments = ProcessInfo.processInfo.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
@@ -240,11 +237,9 @@ struct HostedHomeDashboardFixture: View {
             let secondary = arguments.contains("-home-dashboard-secondary") && request.url?.host == "other.example.test"
             return HostedHomeShellSocket(gateway: gateway, machineID: secondary ? "other-machine" : "home-shell-fixture")
         })
-        // Each launch is a different scripted catalog. A secondary profile's
-        // retained offline cache from a prior journey is valid production state,
-        // but must not seed this unrelated synthetic scenario.
-        // Composer drafts likewise: a draft one journey typed must not appear in
-        // the next launch's composer (#1669).
+        // Each launch is a different scripted catalog. A secondary profile's retained offline
+        // cache from a prior journey is valid production state, but must not seed this unrelated
+        // synthetic scenario; nor may a draft one journey typed appear in the next launch (#1669).
         let cacheRoot = FileManager.default.temporaryDirectory.appending(path: "home-shell-fixture")
         try? FileManager.default.removeItem(at: cacheRoot)
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
@@ -265,7 +260,7 @@ struct HostedHomeDashboardFixture: View {
                         ForegroundSheetProbeOverlay(model: model)
                     }
                     .tronPresentation()
-                    .tronSettingsLayout()
+                    .tronSettingsLayout().modifier(HostedHomePushTap(model: model, machineID: profile.machineId))
                     .overlay(alignment: .top) {
                         VStack {
                             if staleActionFinished {
@@ -277,7 +272,6 @@ struct HostedHomeDashboardFixture: View {
                             Text("settings-decisions:\(settingsDecisionState)").accessibilityIdentifier("fixture.settings-decisions")
                             Text("prompt-route:\(promptRoute)").accessibilityIdentifier("fixture.home-prompt-route")
                             Text("opened-session:\(openedSession)").accessibilityIdentifier("fixture.home-opened-session")
-                            Text("push:\(!pushRequested ? "none" : model.pushNavigationRequest == nil ? "consumed" : "pending") opens:\(openCount)").accessibilityIdentifier("fixture.home-push")
                             Text(configuredModel).accessibilityIdentifier("fixture.home-configured-model")
                             Text("abort-count:\(abortCount)").accessibilityIdentifier("fixture.home-abort-count")
                             Text("home-status-count:\(homeStatusCount)")
@@ -328,30 +322,14 @@ struct HostedHomeDashboardFixture: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .inactive: model.becameInactive()
-            case .background:
-                backgrounded = true
-                model.enteredBackground()
-            case .active:
-                model.becameActive()
-                // The production tap handler delivers a notification response
-                // while the scene activates (ProductionSceneRoot), for the Home
-                // chapter (or, with `-home-push-ordinary`, the ordinary chat) the push names.
-                if backgrounded, arguments.contains("-home-push-tap-on-foreground") {
-                    pushRequested = true
-                    model.requestPushNavigation(PushNotificationTap.admit([
-                        "tron": ["kind": "agent_notification", "requestId": "fixture-home-push-0001"],
-                        "sessionId": arguments.contains("-home-push-ordinary") ? "ordinary-session" : "home-session",
-                        "machineId": profile.machineId,
-                    ]))
-                }
+            case .background: model.enteredBackground()
+            case .active: model.becameActive()
             @unknown default: break
             }
         }
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
-                // Push navigation admits taps only after the app has started.
-                if arguments.contains("-home-push-tap-on-foreground") { await model.start() }
                 if arguments.contains("-home-dashboard-behavior") {
                     await model.refreshSessions()
                 } else {
@@ -383,7 +361,6 @@ struct HostedHomeDashboardFixture: View {
                 configuredModel = await gateway.configuredModelIdentity()
                 promptRoute = await gateway.lastPromptRoute()
                 openedSession = await gateway.lastOpenedSession()
-                openCount = await gateway.openCount()
                 settingsDecisionState = await gateway.settingsDecisionSummary()
                 dashboardReads = await gateway.dashboardReadSummary()
                 if arguments.contains("-home-dashboard-live-change"), !dashboardChanged,
@@ -605,7 +582,6 @@ private actor HostedHomeShellGateway {
     func configuredModelIdentity() -> String { configuredModels.isEmpty ? "none" : configuredModels.joined(separator: ",") }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
-    func openCount() -> Int { openedSessions.count }
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
     func capabilities() -> [String] { foreground.capabilities(capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"]) }
 
@@ -983,11 +959,7 @@ private actor HostedHomeShellGateway {
         case "session.open":
             let sessionID = params["sessionId"]?.stringValue ?? "home-session"
             openedSessions.append(sessionID)
-            // A device-sized Home snapshot takes a few hundred milliseconds to
-            // open, so a push replacement overlaps the restoring chat's open.
-            if ProcessInfo.processInfo.arguments.contains("-home-push-tap-on-foreground") {
-                try? await Task.sleep(for: .milliseconds(300))
-            }
+            if let latency = HostedHomePushTap.openLatency { try? await Task.sleep(for: latency) }
             var snapshot = SessionSnapshot(sessionId: sessionID, runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
                 phase: foreground.queueEnabled || phase == "active" ? .running : .idle, name: sessionID.hasPrefix("home-") ? "Home fixture chat" : "Ordinary session chat", cwd: "/workspace",
                 parentSessionId: nil, model: nil, thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,

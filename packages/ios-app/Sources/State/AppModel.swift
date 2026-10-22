@@ -962,8 +962,6 @@ extension AppModel {
         try await lifecycle.connectHosted(profile: profile, token: token)
     }
 
-
-
     func installHostedProviderCatalog(_ catalog: ProviderCatalog?, for target: ProviderCatalogTarget) {
         providerAuth.installHostedCatalog(catalog, for: target)
     }
@@ -971,12 +969,6 @@ extension AppModel {
     func installHostedRecentModels(_ models: [RecentModelRef]) {
         providerAuth.installHostedRecentModels(models)
     }
-
-
-
-
-
-
     #endif
 
     func presentationGeneration(for sessionID: String) -> Int? {
