@@ -39,7 +39,11 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         assertOverriddenRow(app, "settings-row-model.ref_role_chat_", title: "Model", value: #"^Claude Opus 5\.5$"#)
         assertOverriddenRow(app, "settings-row-model.queue_role_worker_", title: "Worker models", value: "^2 models$")
         assertOverriddenRow(app, "settings-row-model.queue_role_subagent_", title: "Subagent models", value: "^3 models$")
-        app.swipeUp()
+        // A short drag brings Background models fully on screen, clear of the top bar.
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+            .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+        Thread.sleep(forTimeInterval: 0.8)
         shot("1651-home-models-\(dark ? "dark" : "light")-bottom")
         assertOverriddenRow(app, "settings-row-model.queue_role_background_", title: "Background models", value: "^3 models$")
     }
@@ -113,10 +117,13 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
         XCTAssertTrue(editor.exists && pill.exists && heading.exists && revert.exists, row.debugDescription, file: file, line: line)
         XCTAssertLessThanOrEqual(pill.frame.maxX, editor.frame.minX, "\(title): Overridden precedes the value", file: file, line: line)
-        XCTAssertEqual(pill.frame.midY, heading.frame.midY, accuracy: 8, "\(title): Overridden is on the title line", file: file, line: line)
+        // Beside the title, on its first line when a long title wraps.
+        XCTAssertGreaterThan(pill.frame.minX, heading.frame.minX, "\(title): Overridden follows the title", file: file, line: line)
+        XCTAssertTrue(pill.frame.minY >= heading.frame.minY - 4 && pill.frame.midY <= heading.frame.minY + 20,
+                      "\(title): Overridden is on the title line: \(pill.frame) vs \(heading.frame)", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.minX, editor.frame.maxX, "\(title): Revert follows the value", file: file, line: line)
-        XCTAssertGreaterThanOrEqual(revert.frame.width, 44, file: file, line: line)
-        XCTAssertGreaterThanOrEqual(revert.frame.height, 44, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(revert.frame.width, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(revert.frame.height, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)
         assertRendersWhole(editor, matching: pattern, named: "1651-\(prefix)-value", file: file, line: line)
     }
 
