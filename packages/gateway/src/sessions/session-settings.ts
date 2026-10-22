@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getCurrentTools } from "../kernel/pi/ai.js";
 import type { SessionEntry, SessionManager } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
-import type { FixedSetting } from "../kernel/settings/tool-contract.js";
+import { RETIRED_SCOPES, type FixedSetting } from "../kernel/settings/tool-contract.js";
 import { hasSessionSettingsApplier, schemaKey } from "../admin/settings-schema.js";
 
 export const SESSION_SETTINGS_ENTRY = "tron.settings.v1";
@@ -57,15 +57,6 @@ export function readSessionRequestPins(entries: readonly SessionEntry[]): Record
 export function readSessionFixedSettings(entries: readonly SessionEntry[]): Record<string, FixedSetting> {
   return readChatSnapshots(entries, "fixed");
 }
-
-/** Scope names #1634 retired, as old session entries recorded them. Session JSONL
- * is never rewritten (#1649), so this reader is where they become current names;
- * the next settings write persists the current name. The startup migration of the
- * shared stores (approvals, audit) uses the same map. Exit condition: delete it
- * once no retained session predates #1634 (none carries one of these names). */
-export const RETIRED_SCOPES: Readonly<Record<string, "global" | "session">> = Object.freeze({
-  mac: "global", builtin: "global", chat: "session", profile: "session",
-});
 
 function readChatSnapshots(entries: readonly SessionEntry[], field: "fixed" | "requestPins"): Record<string, FixedSetting> {
   const entry = entries.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY);

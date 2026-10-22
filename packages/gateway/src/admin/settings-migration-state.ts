@@ -1,5 +1,5 @@
 import { GatewayError } from "../errors.js";
-import { RETIRED_SCOPES } from "../sessions/session-settings.js";
+import { RETIRED_SCOPES } from "../kernel/settings/tool-contract.js";
 import { approvalDigest } from "./settings-approvals.js";
 
 type Document = Record<string, unknown>;

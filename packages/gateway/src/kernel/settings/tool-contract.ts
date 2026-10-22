@@ -4,6 +4,15 @@ export const LAYERS = ["project", "session", "global"] as const;
 
 export type LayerId = typeof LAYERS[number];
 
+/** Scope names #1634 retired, as old session entries recorded them. Session JSONL
+ * is never rewritten (#1649), so this reader is where they become current names;
+ * the next settings write persists the current name. The startup migration of the
+ * shared stores (approvals, audit) uses the same map. Exit condition: delete it
+ * once no retained session predates #1634 (none carries one of these names). */
+export const RETIRED_SCOPES: Readonly<Record<string, "global" | "session">> = Object.freeze({
+  mac: "global", builtin: "global", chat: "session", profile: "session",
+});
+
 export const TIERS = ["quiet", "notify", "approve"] as const;
 
 export type Tier = typeof TIERS[number];
