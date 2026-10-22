@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The one capsule text tag for a resource row. Pi's User/Project scope badge
-/// and the Gateway's External/Module/Local distribution tag share it so the two
+/// and the Gateway's External/Module/Global distribution tag share it so the two
 /// cannot drift apart.
 struct ResourceTagLabel: View {
     let title: String

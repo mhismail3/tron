@@ -41,7 +41,10 @@ final class TronManageSessionReviewUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.6)
         shot("session-settings-bottom-\(mode)")
         let models = app.buttons["settings-section-model-open"]
-        for _ in 0..<6 where !models.isHittable { app.swipeDown() }
+        // Back to the top: a row under the top bar still reads as hittable, and
+        // a pull past the top would collapse the sheet.
+        for _ in 0..<6 where !(models.exists && models.frame.minY > 140) { app.swipeDown() }
+        Thread.sleep(forTimeInterval: 0.6)
         models.tap()
         expandSheet(app, title: "Models")
         shot("session-models-\(mode)")

@@ -91,11 +91,11 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   running, retained and recent work; Manage Session › Subagent History pages terminal receipts.
   A child transcript is a read-only `ReadOnlySubagentSessionStore` lease whose only mutation is the
   capability-gated stop (`process-transcript-abort.v1`).
-- **Manage Session.** Usage card, purple model card (Switch Model opens `ModelPicker`; Context Window
-  and Thinking morph into one anchored slider that commits at most once on collapse), then the blue
-  Session container: Current Branch (`workspace-inspector.v1` Files/Changes/History), Agent
-  Instructions, Available Tools (Chat-layer `tools.active`), Project Resources, Session History
-  (100-row pages, `session-history-pages.v1`), Subagent History, then Export as HTML/JSON.
+- **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing); Session
+  container: Workspace (`workspace-inspector.v1`), Instructions, Resources (tags Global, Project or
+  External; Commands and Subagents preview a body whose View All opens the shared reader), Session
+  History (`session-history-pages.v1`), Subagent History; Session Settings (Project section last);
+  Terminal and Export as HTML/JSON.
 - **Home.** The pinned row routes the `openSessionId` from `home.status`; Home's composer sends
   `home.prompt` and follows a successor chapter carrying the unsent draft. A chat claiming Home has
   no header bar (#740) and its title reads **Home**: its ring opens Manage Home, its gear opens

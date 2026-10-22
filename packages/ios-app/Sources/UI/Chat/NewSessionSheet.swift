@@ -83,7 +83,7 @@ struct NewSessionSheet: View {
                     ) { showBrowser = true }
 
                     if !workspace.isEmpty, let profileID = activeProfileID {
-                        ProjectSettingsLink(cwd: workspace, profileID: profileID, style: .setupCard)
+                        ProjectSettingsLink(cwd: workspace, profileID: profileID)
                     }
 
                     setupCard(

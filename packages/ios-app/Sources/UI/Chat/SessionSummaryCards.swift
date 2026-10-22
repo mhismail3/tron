@@ -9,6 +9,8 @@ enum SessionSummaryTypography {
     static var headline: Font { TronTypography.sans(size: TronTypography.sizeXL, weight: .bold) }
     static var detail: Font { TronTypography.sans(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
     static var usageValue: Font { TronTypography.code(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
+    /// The used/window line under the headline, a step below the usage values.
+    static var usageDetail: Font { TronTypography.code(size: TronTypography.sizeCaption + metadataSizeAdjustment) }
     static var metric: Font { TronTypography.code(size: TronTypography.sizeSecondary + metadataSizeAdjustment, weight: .semibold) }
     static var metricLabel: Font { TronTypography.sans(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
 }
@@ -23,13 +25,13 @@ struct SessionWorkspaceSummaryRow: View {
         switch presentation {
         case .loading:
             TronSettingsRow(
-                icon: "arrow.triangle.branch", title: "Current Branch",
+                icon: "arrow.triangle.branch", title: "Workspace",
                 subtitle: "Checking workspace…", accent: accent
             ) {
                 TronPulseLoadingIndicator(size: 18)
             }
         case .notRepository:
-            TronSettingsRow(icon: "folder", title: "Current Branch", subtitle: "Browse workspace files", accent: accent) {
+            TronSettingsRow(icon: "folder", title: "Workspace", subtitle: "Browse workspace files", accent: accent) {
                 Text("No Git")
                     .font(TronTypography.code(size: TronTypography.sizeCaption + SessionSummaryTypography.metadataSizeAdjustment))
                     .foregroundStyle(Color.tronTextSecondary)
@@ -39,7 +41,7 @@ struct SessionWorkspaceSummaryRow: View {
                 ? "\(changeCount) uncommitted \(changeCount == 1 ? "change" : "changes")"
                 : "Working tree clean"
             TronSettingsRow(
-                icon: "arrow.triangle.branch", title: "Current Branch",
+                icon: "arrow.triangle.branch", title: "Workspace",
                 subtitle: branch, subtitleLineLimit: 1, accent: accent
             ) {
                 Text(workingTreeStatus)
@@ -52,7 +54,7 @@ struct SessionWorkspaceSummaryRow: View {
             }
         case .failed:
             TronSettingsRow(
-                icon: "exclamationmark.triangle", title: "Current Branch",
+                icon: "exclamationmark.triangle", title: "Workspace",
                 subtitle: "Tap to retry workspace inspection", accent: accent
             ) {
                 Text("Unavailable")
@@ -82,16 +84,19 @@ struct SessionContextSegments: Equatable {
 /// The stats card Manage Session and Manage Home show. Manage Home supplies an
 /// accessory (its state pill and last activation), placed on a header row above
 /// the usage, and segments, which replace the plain bar with one segment per
-/// section and a compact legend above the metrics.
-struct SessionContextUsageCard<Accessory: View>: View {
+/// section and a compact legend above the metrics. Manage Session supplies an
+/// action (Compact Now), trailing and centered on the headline and usage lines.
+struct SessionContextUsageCard<Accessory: View, Action: View>: View {
     let snapshot: SessionContextPresentation
     let accessory: Accessory?
+    let action: Action?
     var segments: SessionContextSegments?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(snapshot: SessionContextPresentation, accessory: Accessory?, segments: SessionContextSegments? = nil) {
+    init(snapshot: SessionContextPresentation, accessory: Accessory?, action: Action?, segments: SessionContextSegments? = nil) {
         self.snapshot = snapshot
         self.accessory = accessory
+        self.action = action
         self.segments = segments
     }
 
@@ -123,19 +128,17 @@ struct SessionContextUsageCard<Accessory: View>: View {
             case .available(let used, let window, let percent):
                 let headline = "\(max(0, window - used).formatted(.number.notation(.compactName))) tokens left"
                 let detail = usage.usedSummary ?? ""
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text(headline).font(SessionSummaryTypography.headline).fixedSize()
-                        Spacer(minLength: 0)
-                        Text(detail).font(SessionSummaryTypography.usageValue).fixedSize()
-                            .foregroundStyle(Color.tronTextPrimary)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(headline).font(SessionSummaryTypography.headline)
-                        Text(detail).font(SessionSummaryTypography.detail)
+                            .accessibilityIdentifier("session-usage-headline")
+                        Text(detail).font(SessionSummaryTypography.usageDetail)
                             .foregroundStyle(Color.tronTextPrimary)
+                            .accessibilityIdentifier("session-usage-detail")
                     }
                     .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    if let action { action }
                 }
                 if let segments {
                     SessionContextSegmentedBar(segments: segments)
@@ -147,15 +150,21 @@ struct SessionContextUsageCard<Accessory: View>: View {
                         .accessibilityValue("\(Int(percent.rounded())) percent")
                 }
             case .unavailable:
-                Text("0% used")
-                    .font(SessionSummaryTypography.headline)
-                Text(SessionContextUsageRefreshPresentation(
-                    lastTranscriptKind: snapshot.lastTranscriptKind,
-                    assistantMessages: snapshot.stats.assistantMessages
-                ).detail)
-                    .font(SessionSummaryTypography.detail)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("0% used")
+                            .font(SessionSummaryTypography.headline)
+                        Text(SessionContextUsageRefreshPresentation(
+                            lastTranscriptKind: snapshot.lastTranscriptKind,
+                            assistantMessages: snapshot.stats.assistantMessages
+                        ).detail)
+                            .font(SessionSummaryTypography.detail)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    if let action { action }
+                }
                 ProgressView(value: 0, total: 100)
                     .tint(Color.tronEmerald)
                     .accessibilityLabel("Context estimate pending")
@@ -267,8 +276,14 @@ struct SessionContextSegmentLegend: View {
     }
 }
 
+extension SessionContextUsageCard where Action == EmptyView {
+    init(snapshot: SessionContextPresentation, accessory: Accessory?, segments: SessionContextSegments? = nil) {
+        self.init(snapshot: snapshot, accessory: accessory, action: nil, segments: segments)
+    }
+}
+
 extension SessionContextUsageCard where Accessory == EmptyView {
-    init(snapshot: SessionContextPresentation) {
-        self.init(snapshot: snapshot, accessory: nil)
+    init(snapshot: SessionContextPresentation, action: Action?) {
+        self.init(snapshot: snapshot, accessory: nil, action: action)
     }
 }
