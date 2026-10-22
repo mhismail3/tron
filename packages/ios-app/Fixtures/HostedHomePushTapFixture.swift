@@ -7,7 +7,7 @@ import SwiftUI
 /// `session.open` with a device-sized latency, so the push target overlaps the
 /// restoring Home chat's open.
 struct HostedHomePushTap: ViewModifier {
-    static let openLatency: Duration? = ProcessInfo.processInfo.arguments.contains("-home-push-tap-on-foreground")
+    nonisolated static let openLatency: Duration? = ProcessInfo.processInfo.arguments.contains("-home-push-tap-on-foreground")
         ? .milliseconds(300) : nil
 
     let model: AppModel
