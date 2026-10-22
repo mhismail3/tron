@@ -18,12 +18,8 @@ struct ProcessHistorySheet: View {
         NavigationStack {
             Group {
                 if let store { history(store) }
-                else { TronSheetLoadingState(label: "Preparing subagent history…", accent: .tronEmerald)
-                    // Match the title, which sits outside the subagent content theme.
-                    .tronSettingsVisualTheme(accent: .tronEmerald) }
+                else { TronSheetLoadingState(label: "Preparing subagent history…", accent: .tronEmerald) }
             }
-            // The history header inherits Manage Session; only its content is subagent themed.
-            .tronSettingsVisualTheme(accent: .tronSubagent)
             .tronNavigationTitle(Self.title, accent: .tronEmerald)
             .toolbar { doneToolbar }
             .tint(Color.tronEmerald)
@@ -130,7 +126,6 @@ struct ProcessHistorySheet: View {
                 case .idle where earlier.isEmpty && !hasMounted,
                      .loading where earlier.isEmpty && !hasMounted:
                     TronSheetLoadingState(label: "Loading subagent history…", accent: .tronEmerald)
-                        .tronSettingsVisualTheme(accent: .tronEmerald)
                 case .loaded where earlier.isEmpty && !hasMounted:
                     SessionProcessPlaceholder(
                         title: "No recorded subagents",
@@ -142,7 +137,7 @@ struct ProcessHistorySheet: View {
                 }
 
                 if store.nextCursor != nil, store.status != .conflict {
-                    TronPaginationButton(label: "Load More", loadingLabel: "Loading…", icon: "arrow.down", isLoading: store.status == .loading, accent: .tronSubagent) {
+                    TronPaginationButton(label: "Load More", loadingLabel: "Loading…", icon: "arrow.down", isLoading: store.status == .loading, accent: .tronEmerald) {
                         store.loadNext(sessionID: sessionID, presentationGeneration: generation)
                     }
                     .frame(maxWidth: .infinity)
@@ -190,7 +185,7 @@ private struct SessionProcessPlaceholder: View {
 
     var body: some View {
         TronGlassCard(accent: .tronSlate) {
-            TronPlaceholderState(title: title, detail: detail, icon: icon, accent: .tronSubagent,
+            TronPlaceholderState(title: title, detail: detail, icon: icon, accent: .tronEmerald,
                                  actionTitle: actionTitle, action: action)
         }
     }
@@ -206,8 +201,9 @@ enum SessionProcessRowStyle {
         // both sheets instead of the in-progress running accent.
         case .pausedSettled: .tronTextMuted
         case .inProgress: .tronAmber
-        case .succeeded: self == .history ? .tronSubagent : .tronSuccess
-        case .unsuccessful: self == .history ? .tronSubagent : .tronError
+        // Subagent History settles into Manage Session's emerald theme.
+        case .succeeded: self == .history ? .tronEmerald : .tronSuccess
+        case .unsuccessful: .tronError
         }
     }
 }
