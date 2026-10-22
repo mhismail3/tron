@@ -12,31 +12,5 @@
     "tron_mac_replace_rpc.py",
     "validate-native-host.py",
     "verify-mac-install.sh"
-  ],
-  "exceptions": [
-    {
-      "path": "test-tron-mac-replace.py",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "tron_mac_reinstall.py",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "tron_mac_replace.py",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "verify-mac-install.sh",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    }
   ]
 }

@@ -5,31 +5,5 @@
     "scripts/test-work-*.py",
     "tools/work/**",
     "work.module.json"
-  ],
-  "exceptions": [
-    {
-      "path": "scripts/test-work-close.py",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "tools/work/README.md",
-      "budget": "doc",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Decomposed into module docs (plan Phase 1)"
-    },
-    {
-      "path": "tools/work/dashboard.py",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "tools/work/tracking.py",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    }
   ]
 }

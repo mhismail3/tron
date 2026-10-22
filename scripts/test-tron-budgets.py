@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 """CLI tests for `scripts/tron budgets` (tools/budgets/README.md).
 
-Each case copies the real `scripts/tron`, `tools/budgets`, `tools/metrics` and
-`tools/ownership` into a disposable Git repository and commits fixture files:
+Each case copies the real `scripts/tron`, `tools/budgets` and `tools/metrics`
+into a disposable Git repository, commits a base, then a change over it:
 
-1. The change that introduces the checker may seed exceptions; later changes may not.
-2. Known-bad: a grown excepted file, a new oversized file, and an exception added
-   for it all fail; 500 lines passes and 501 fails (the metrics threshold).
-3. Shrinking is allowed, a file back within budget makes its exception stale,
-   and removing the exception passes. A renamed excepted file keeps its
-   exception and its size bound.
-4. Doc budgets: package README 200, other README 150, other docs 300; the root
-   README is left to the documentation policy.
-5. An unknown base or an ownership violation is an error (exit 2), never clean.
+1. Known-bad: a change that creates a production file over 800 lines fails;
+   800 lines passes, and a new test or tooling file of any size only reports.
+2. Existing files only report: an over-500 file growing, and an over-800 file
+   renamed (a move, not a new file), pass.
+3. Docs fail only above twice their budget (package README 200, other README
+   150, other docs 300); the root README and the plan are not this checker's.
+4. An unknown base is an error (exit 2), never clean.
 
 The last run's output is kept in `test-results/budgets-cli/`.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -29,13 +26,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "test-results" / "budgets-cli"
-TOOLS = ("scripts/tron", "tools/metrics/metrics.py", "tools/ownership/ownership.py")
+TOOLS = ("scripts/tron", "tools/metrics/metrics.py", "tools/budgets/budgets.py")
 APP = "packages/gateway/src/app"
-EXIT = {"reason": "fixture", "exit": "split it"}
 
 
-def lines(count: int) -> str:
-    return "".join(f"line {i}\n" for i in range(count))
+def lines(count: int, prefix: str = "line") -> str:
+    return "".join(f"{prefix} {i}\n" for i in range(count))
 
 
 class Repo:
@@ -50,18 +46,14 @@ class Repo:
                     "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
         self.git("init", "-q", "-b", "main")
         for relative in TOOLS:
-            self.copy(relative)
-        self.manifest("tooling.module.json", {"layer": "L5", "owns": ["scripts/**", "tools/**", "tooling.module.json",
-                                                                      "README.md"]})
-        self.write("README.md", lines(400))  # root README: documentation policy's budget, not this checker's
-        self.app([])
+            (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, self.path / relative)
+        self.write("README.md", lines(400))  # root README: the documentation policy's budget
+        self.write("docs/restructure/plan.md", lines(1400))  # exempt until epic exit
         self.write(f"{APP}/big.ts", lines(600))
-        self.write(f"{APP}/small.ts", lines(10))
-        self.commit("base without the checker")
-
-    def copy(self, relative: str) -> None:
-        (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / relative, self.path / relative)
+        self.write(f"{APP}/huge.ts", lines(900))
+        self.commit("base")
+        self.git("checkout", "-q", "-b", "change")
 
     def git(self, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=self.path, env=self.env, check=True,
@@ -70,13 +62,6 @@ class Repo:
     def write(self, relative: str, text: str) -> None:
         (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
         (self.path / relative).write_text(text)
-
-    def manifest(self, relative: str, data: dict) -> None:
-        self.write(relative, json.dumps(data))
-
-    def app(self, exceptions: list) -> None:
-        self.manifest(f"{APP}/app.module.json", {"layer": "L3", "owns": ["**"],
-                                                 "exceptions": [{"path": p, "budget": b, **EXIT} for p, b in exceptions]})
 
     def commit(self, message: str) -> None:
         self.git("add", "-A")
@@ -103,122 +88,72 @@ class BudgetCase(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def problems(self, code: int, *args: str) -> list[str]:
-        result = self.repo.budgets("--base", "main", *args)
+    def problems(self, code: int) -> list[str]:
+        result = self.repo.budgets("--base", "main")
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
         return [line for line in result.stdout.splitlines() if not line.startswith("budgets:")]
 
-    def seeded(self) -> None:
-        """Introduce the checker with big.ts excepted, then make that the base."""
+
+class NewFileTests(BudgetCase):
+    def test_a_new_production_file_over_800_lines_fails(self) -> None:
         r = self.repo
-        r.git("checkout", "-q", "-B", "slice")
-        r.copy("tools/budgets/budgets.py")
-        r.app([("big.ts", "lines")])
-        r.commit("introduce budgets")
-        self.assertIn("(seeded; main has no budget checker); every file within budget or excepted",
-                      r.budgets("--base", "main").stdout)
-        r.git("checkout", "-q", "main")
-        r.git("merge", "-q", "--ff-only", "slice")
-        r.git("checkout", "-q", "slice")  # later commits are a slice over that base
-
-
-class SeedTests(BudgetCase):
-    def test_only_the_introducing_change_seeds_and_unexcepted_files_fail(self) -> None:
-        r = self.repo
-        r.git("checkout", "-q", "-b", "unexcepted")
-        r.copy("tools/budgets/budgets.py")
-        r.commit("checker without exceptions")
-        self.assertEqual(self.problems(1), [
-            f"over budget: {APP}/big.ts has 600 lines; lines budget is 500 (split it; exceptions are never added)"])
-        self.seeded()
-        self.assertEqual(self.problems(0), [])
-
-
-class KnownBadTests(BudgetCase):
-    def test_growth_new_oversized_files_and_new_exceptions_fail(self) -> None:
-        self.seeded()
-        r = self.repo
-        r.write(f"{APP}/big.ts", lines(601))
-        r.write(f"{APP}/edge.ts", lines(500))
-        r.write(f"{APP}/new.ts", lines(501))
+        r.write(f"{APP}/edge.ts", lines(800))
+        r.write(f"{APP}/new.ts", lines(801))
+        r.write(f"{APP}/big.test.ts", lines(1200))  # tests only report
+        r.write("scripts/tool.py", lines(1200))  # tooling only reports
         r.commit("known-bad")
         self.assertEqual(self.problems(1), [
-            f"over budget: {APP}/new.ts has 501 lines; lines budget is 500 (split it; exceptions are never added)",
-            f"grew: {APP}/big.ts (lines) 600 -> 601 lines (excepted files may only shrink)",
-        ])
-        r.app([("big.ts", "lines"), ("new.ts", "lines")])
-        r.commit("relax")
-        self.assertEqual(self.problems(1), [
-            f"grew: {APP}/big.ts (lines) 600 -> 601 lines (excepted files may only shrink)",
-            f"new exception: {APP}/new.ts (lines) in gateway/app is not excepted at main; split the file instead",
-        ])
-        # A pre-checker --base cannot reopen seeding once origin/main has the checker.
-        r.git("update-ref", "refs/remotes/origin/main", "main")
-        before = r.git("rev-list", "--max-parents=0", "HEAD")
-        old = r.budgets("--base", before)
-        self.assertEqual(old.returncode, 1, old.stdout)
-        self.assertIn(f"new exception: {APP}/new.ts (lines) in gateway/app is not excepted at {before}", old.stdout)
+            f"new production file over 800 lines: {APP}/new.ts has 801 lines (split it by cohesive operation)"])
+        r.write(f"{APP}/new.ts", lines(800))
+        r.commit("split")
+        self.assertEqual(self.problems(0), [])
+        self.assertIn("6 code files over 500 lines", r.budgets("--base", "main").stdout)
 
 
-class ShrinkTests(BudgetCase):
-    def test_shrink_stale_removal_and_rename(self) -> None:
-        self.seeded()
+class ExistingFileTests(BudgetCase):
+    def test_existing_oversized_files_grow_and_move_without_failing(self) -> None:
         r = self.repo
-        r.write(f"{APP}/big.ts", lines(550))
-        r.commit("shrink")
+        r.write(f"{APP}/big.ts", lines(741))
+        (r.path / APP / "moved").mkdir()
+        r.git("mv", f"{APP}/huge.ts", f"{APP}/moved/huge.ts")
+        r.write(f"{APP}/moved/huge.ts", lines(950))
+        r.commit("grow and move")
         self.assertEqual(self.problems(0), [])
-        r.git("mv", f"{APP}/big.ts", f"{APP}/huge.ts")
-        r.app([("huge.ts", "lines")])
-        r.commit("rename")
-        self.assertEqual(self.problems(0), [])
-        # A new file at the renamed-away path inherits no exception or size bound.
-        r.git("checkout", "-q", "-b", "recreate")
-        r.write(f"{APP}/big.ts", "".join(f"other {i}\n" for i in range(520)))
-        r.app([("huge.ts", "lines"), ("big.ts", "lines")])
-        r.commit("recreate big.ts")
+        # A new file at a path whose old file moved away is new, and is bounded.
+        r.write(f"{APP}/huge.ts", lines(900, "other"))
+        r.commit("recreate")
         self.assertEqual(self.problems(1), [
-            f"new exception: {APP}/big.ts (lines) in gateway/app is not excepted at main; split the file instead"])
-        r.git("checkout", "-q", "slice")
-        r.write(f"{APP}/huge.ts", lines(500))
-        r.commit("within budget")
-        self.assertEqual(self.problems(1), [
-            f"stale exception: {APP}/huge.ts (lines) in gateway/app is within budget (500 lines); remove it"])
-        r.app([])
-        r.commit("remove the exception")
-        self.assertEqual(self.problems(0), [])
+            f"new production file over 800 lines: {APP}/huge.ts has 900 lines (split it by cohesive operation)"])
 
 
 class DocTests(BudgetCase):
-    def test_doc_budgets_by_kind(self) -> None:
-        self.seeded()
+    def test_docs_fail_only_above_twice_their_budget(self) -> None:
         r = self.repo
-        r.manifest("docs.module.json", {"layer": "L5", "owns": ["docs/**", "packages/gateway/README.md",
-                                                                "docs.module.json"]})
-        r.write("packages/gateway/README.md", lines(201))
-        r.write("docs/tool/README.md", lines(151))
-        r.write("docs/contract.md", lines(301))
-        r.write("docs/fine.md", lines(300))
-        r.commit("docs")
+        r.write("packages/gateway/README.md", lines(400))
+        r.write("docs/tool/README.md", lines(300))
+        r.write("docs/fine.md", lines(600))
+        r.write("README.md", lines(900))
+        r.write("docs/restructure/plan.md", lines(2000))
+        r.commit("docs within twice their budget")
+        self.assertEqual(self.problems(0), [])
+        self.assertIn("3 docs over budget (reported)", r.budgets("--base", "main").stdout)
+        r.write("packages/gateway/README.md", lines(401))
+        r.write("docs/tool/README.md", lines(301))
+        r.write("docs/fine.md", lines(601))
+        r.commit("docs over twice their budget")
         self.assertEqual(self.problems(1), [
-            "over budget: docs/contract.md has 301 lines; doc budget is 300 (split it; exceptions are never added)",
-            "over budget: docs/tool/README.md has 151 lines; doc budget is 150 (split it; exceptions are never added)",
-            "over budget: packages/gateway/README.md has 201 lines; doc budget is 200 (split it; exceptions are never "
-            "added)",
+            "doc over 2x budget: docs/fine.md has 601 lines; budget is 300, limit 600 (split it by owner)",
+            "doc over 2x budget: docs/tool/README.md has 301 lines; budget is 150, limit 300 (split it by owner)",
+            "doc over 2x budget: packages/gateway/README.md has 401 lines; budget is 200, limit 400 (split it by "
+            "owner)",
         ])
 
 
 class ErrorTests(BudgetCase):
-    def test_unknown_base_and_ownership_violations_are_errors(self) -> None:
-        self.seeded()
-        r = self.repo
-        unknown = r.budgets("--base", "nope")
+    def test_unknown_base_is_an_error(self) -> None:
+        unknown = self.repo.budgets("--base", "nope")
         self.assertEqual(unknown.returncode, 2)
         self.assertIn("base nope cannot be measured", unknown.stderr)
-        r.write("stray.ts", "x\n")
-        r.commit("unowned")
-        stray = r.budgets("--base", "main")
-        self.assertEqual(stray.returncode, 2)
-        self.assertIn("ownership at HEAD has 1 violation(s)", stray.stderr)
 
 
 if __name__ == "__main__":

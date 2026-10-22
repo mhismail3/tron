@@ -26,43 +26,5 @@
     "tron-xcodebuild",
     "validate-ios-artifact.py",
     "validate-push-service-config.sh"
-  ],
-  "exceptions": [
-    {
-      "path": "ios-gateway-e2e-test",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "ios-gateway-fault-proxy.mjs",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "ios-test-simulator.py",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "test-ios-test-infrastructure.py",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "tron-ios-device",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "tron-ios-test",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    }
   ]
 }

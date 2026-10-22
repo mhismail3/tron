@@ -20,13 +20,5 @@
     "gateway/automations",
     "gateway/notifications",
     "gateway/run"
-  ],
-  "exceptions": [
-    {
-      "path": "gateway-main.ts",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    }
   ]
 }

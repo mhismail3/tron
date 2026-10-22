@@ -110,7 +110,6 @@ class ValidLayoutTests(OwnershipCase):
         r.manifest("packages/gw/src/sessions/run.module.json",
                    {"layer": "L2", "owns": ["run*.ts", "fixtures/**", "run.module.json"],
                     "dependsOn": ["gw/catalog"], "riskClass": ["kernel"], "verify": ["scripts/tron test gateway"],
-                    "exceptions": [{"path": "run.ts", "budget": "lines", "reason": "god object", "exit": "Phase 2"}],
                     "dynamicEdges": [{"to": "gw/home", "kind": "registration", "via": "packages/gw/src/home/a.ts",
                                       "why": "registered at startup"}], "capabilities": ["runs.prompt"]})
         r.manifest("packages/gw/src/sessions/catalog.module.json",
@@ -201,7 +200,6 @@ class SchemaTests(OwnershipCase):
         self.repo.manifest("t/t.module.json", {
             "layer": ["L3"], "owns": ["**", 3], "dependsOn": "repo/tooling", "riskClass": [["kernel"]],
             "dynamicEdges": [{"to": ["repo/tooling"], "kind": {"k": 1}, "via": ["x"], "why": 1}],
-            "exceptions": [{"path": 5, "budget": ["lines"], "reason": "r", "exit": "e"}],
         })
         m = "t/t.module.json: "
         self.assertReported([
@@ -210,8 +208,6 @@ class SchemaTests(OwnershipCase):
             m + "dynamicEdges to ['repo/tooling'] is not another module id",
             m + "dynamicEdges via ['x'] is not a tracked repo-relative path",
             m + "dynamicEdges why must be a non-empty string",
-            m + "exceptions budget must be lines or doc",
-            m + "exceptions path 5 is not a file this module owns",
             m + "layer must be one of L0..L5",
             m + "owns entry 3 must be a non-empty string",
             m + "riskClass ['kernel'] must be one of contracts, ios-ui, kernel, lifecycle, mac-installer, persistence, security",
@@ -228,7 +224,8 @@ class SchemaTests(OwnershipCase):
             "dynamicEdges": [{"to": "p/gone", "kind": "magic", "via": "nowhere.ts", "why": " ", "extra": 1},
                              {"to": "p/x"}, "edge"],
             "capabilities": [""], "verify": ["npm test"], "riskClass": ["scary"],
-            "exceptions": [{"path": "missing.ts", "budget": "words", "reason": "r", "exit": ""}, {"path": "f.ts"}],
+            # Budgets read no manifest exceptions, so the field is not part of the schema.
+            "exceptions": [{"path": "f.ts", "budget": "lines", "reason": "r", "exit": "e"}],
         })
         m = "packages/p/c/c.module.json: "
         self.assertReported([
@@ -246,11 +243,8 @@ class SchemaTests(OwnershipCase):
             m + "dynamicEdges to 'p/gone' is not another module id",
             m + "dynamicEdges via 'nowhere.ts' is not a tracked repo-relative path",
             m + "dynamicEdges why must be a non-empty string",
-            m + "exceptions budget must be lines or doc",
-            m + "exceptions entries need exactly path, budget, reason and exit",
-            m + "exceptions path 'missing.ts' is not a file this module owns",
-            m + "exceptions reason and exit must be non-empty strings",
             m + "riskClass 'scary' must be one of contracts, ios-ui, kernel, lifecycle, mac-installer, persistence, security",
+            m + "unknown key 'exceptions'",
             m + "verify 'npm test' must be a 'scripts/tron …' command",
         ])
 

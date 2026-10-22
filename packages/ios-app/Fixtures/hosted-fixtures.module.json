@@ -5,37 +5,5 @@
     "HostedSettingsReviewSchema.swift",
     "HostedSettingsThreeLayerPreview.swift",
     "hosted-fixtures.module.json"
-  ],
-  "exceptions": [
-    {
-      "path": "HostedChatDisplayFixture.swift",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "HostedHomeToolFixture.swift",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "HostedIntegrationsFixture.swift",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "HostedKnowledgeDetailFixture.swift",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "HostedSettingsRendererFixture.swift",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    }
   ]
 }

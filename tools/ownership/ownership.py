@@ -16,10 +16,8 @@ STEM = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LAYERS = {f"L{n}" for n in range(6)}
 EDGE_KINDS = {"registration", "spawn", "fs-read", "generated", "wire"}
 RISK_CLASSES = {"kernel", "contracts", "persistence", "security", "lifecycle", "ios-ui", "mac-installer"}
-BUDGETS = {"lines", "doc"}
-FIELDS = {"layer", "owns", "dependsOn", "dynamicEdges", "capabilities", "verify", "riskClass", "exceptions"}
+FIELDS = {"layer", "owns", "dependsOn", "dynamicEdges", "capabilities", "verify", "riskClass"}
 EDGE_FIELDS = {"to", "kind", "via", "why"}
-EXCEPTION_FIELDS = {"path", "budget", "reason", "exit"}
 FORBIDDEN = set("[]{}\\")
 
 
@@ -248,17 +246,6 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
         for risk in unique_list(data.get("riskClass", []), "riskClass", problems):
             if not one_of(risk, RISK_CLASSES):
                 problems.append(f"riskClass {risk!r} must be one of {', '.join(sorted(RISK_CLASSES))}")
-        prefix = "" if module["folder"] == "." else module["folder"] + "/"
-        for item in unique_list(data.get("exceptions", []), "exceptions", problems):
-            if not isinstance(item, dict) or set(item) != EXCEPTION_FIELDS:
-                problems.append("exceptions entries need exactly path, budget, reason and exit")
-                continue
-            if not one_of(item["budget"], BUDGETS):
-                problems.append("exceptions budget must be lines or doc")
-            if not all(isinstance(item[k], str) and item[k].strip() for k in ("reason", "exit")):
-                problems.append("exceptions reason and exit must be non-empty strings")
-            if pattern_problem(item["path"]) or prefix + str(item["path"]) not in module["owned"]:
-                problems.append(f"exceptions path {item['path']!r} is not a file this module owns")
         errors.extend(f"{manifest}: {p}" for p in problems)
 
     def listed(module: dict, key: str) -> list:
@@ -268,12 +255,7 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
     summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "owned": m["owned"],
                          "dependsOn": [d for d in listed(m, "dependsOn") if isinstance(d, str)],
                          "dynamicTargets": [e["to"] for e in listed(m, "dynamicEdges")
-                                            if isinstance(e, dict) and isinstance(e.get("to"), str)],
-                         # Repo-relative, for the budget checker; malformed entries are already errors above.
-                         "exceptions": [{**e, "path": ("" if m["folder"] == "." else m["folder"] + "/") + e["path"]}
-                                        for e in listed(m, "exceptions")
-                                        if isinstance(e, dict) and set(e) == EXCEPTION_FIELDS
-                                        and isinstance(e["path"], str)]}
+                                            if isinstance(e, dict) and isinstance(e.get("to"), str)]}
                for k, m in modules.items()}
     return {"tracked": paths, "modules": dict(sorted(summary.items()))}, sorted(set(errors))
 
