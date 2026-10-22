@@ -1065,22 +1065,15 @@
                       "layer": {
                         "anyOf": [
                           {
-                            "const": "chat",
+                            "const": "session",
                             "type": "string"
                           },
                           {
-                            "const": "profile",
-                            "type": "string"
-                          },
-                          {
-                            "const": "project",
-                            "type": "string"
-                          },
-                          {
-                            "const": "mac",
+                            "const": "global",
                             "type": "string"
                           }
-                        ]
+                        ],
+                        "description": "Session/Home override or Global. Project is read-only."
                       },
                       "op": {
                         "anyOf": [
