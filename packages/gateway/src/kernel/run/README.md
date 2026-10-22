@@ -12,7 +12,7 @@ Gateway-owned execution primitives layered on Pi's session loop.
   cleanup, output settlement and private-environment filtering.
 
 - `invocation-receipts.ts` and `context-delivery-receipts.ts`: canonical receipt
-  parsing, folding and delivery causality; persisted names and bytes remain stable.
+  parsing, folding, owned terminal facts and canonical inbox delivery; persisted bytes remain stable.
 - `run-markers.ts`: durable per-operation crash/interruption evidence.
 - `run-persistence.ts`: sole pending-receipt join and durable-write fence, bounded
   retry/retention and conflict handling; the slot supplies live Pi stop/diagnostic cuts.
@@ -30,6 +30,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
   and shared text/resource/queue bounds; public Slot ports return its promises directly.
 - `held-prompt-queue.ts`: accepted compaction/Stop-time input and its ordered deferred
   admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types/bounds.
+- `prompt-admission.ts` and `prompt-input.ts`: serialized ordinary admission,
+  exact SDK disposition, resource/intent preparation and opaque caller fences.
 - `prompt-attempt.ts`: each SDK prompt/command promise, admission finalization and
   no-agent/command settlement, preserving live successor ownership across receipt I/O.
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option

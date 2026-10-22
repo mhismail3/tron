@@ -1,8 +1,27 @@
-import type { SessionEntry } from "../pi/coding-agent.js";
+import type { SessionEntry, AgentSession } from "../pi/coding-agent.js";
+import type { InputMessage } from "../host/input-admission.js";
+import type { JsonValue } from "../../protocol/types.js";
+import { safeJson } from "../projection/projection.js";
+import { GatewayError } from "../../errors.js";
 import type { ContextDeliveryMetadata, ExtensionToolOrigin } from "../../protocol/types.js";
 
 import { invocationProjection, invocationReceipts } from "./invocation-receipts.js";
 import { classifyCapturedExtensionOwner } from "../../sessions/extension-activity-history.js";
+
+export async function deliverPromptInput(
+  context: { readonly inboxAttributedMessages: Set<string>; persistCanonicalCustomEntry(type: string, data: JsonValue, identity: string): Promise<void> },
+  session: AgentSession, message: InputMessage,
+): Promise<void> {
+  context.inboxAttributedMessages.add(message.details.eventId);
+  try { await session.sendCustomMessage(message, { triggerTurn: false }); }
+  finally { context.inboxAttributedMessages.delete(message.details.eventId); }
+  const entry = session.sessionManager.getLeafEntry();
+  if (entry?.type !== "custom_message" || entry.customType !== message.customType
+    || (entry.details as { eventId?: string })?.eventId !== message.details.eventId) throw new GatewayError("conflict", "Home task message lost its exact canonical identity");
+  await context.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
+    safeJson(makeContextDeliveryReceipt(entry.id, "stored", { source: "gateway:home-task",
+      owner: { id: message.details.taskId, title: "Home task", source: "gateway:home-task" } })), entry.id);
+}
 
 export const CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.context-delivery.v4";
 const HISTORICAL_CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.session-input.v1";

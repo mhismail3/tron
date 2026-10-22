@@ -52,7 +52,7 @@ export interface PromptAttemptContext<Completion> {
   emit(topic: string, data: JsonValue): void;
 }
 
-interface PromptAttemptInput {
+export interface PromptAttemptInput {
   operationId: string;
   invocationId: string;
   invocationSource: InvocationProjection["source"];

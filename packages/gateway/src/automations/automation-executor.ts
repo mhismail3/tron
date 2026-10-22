@@ -4,7 +4,7 @@ import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gatew
 import { canonicalResourceName } from "../sessions/resource-invocation.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
-import type { OwnedOperationTerminal } from "../sessions/runtime-slot.js";
+import type { OwnedOperationTerminal } from "../kernel/run/invocation-receipts.js";
 import {
   AutomationAdmissionError,
   type AutomationExecutionHandle,

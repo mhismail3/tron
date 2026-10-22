@@ -5,7 +5,10 @@ import type { AgentSession } from "../pi/coding-agent.js";
 import type { RequestPolicy } from "../host/request-policy.js";
 import type { RunWorkOwner } from "./run-work-owner.js";
 import type { RunAbortOwner } from "./run-abort-owner.js";
-import type { HeldPrompt, PendingQueueAdmission, QueueBehavior, RuntimeQueuedMessage } from "./queue-input.js";
+import type { HeldPrompt, PendingQueueAdmission, QueueBehavior, RuntimeQueuedMessage, PromptQueueDisplay, QueueAdmissionDisposition } from "./queue-input.js";
+import type { ImageContent } from "../pi/ai.js";
+import { GatewayError } from "../../errors.js";
+import { validateQueue } from "./queue-commands.js";
 
 interface RunQueueContext {
   session(): AgentSession;
@@ -47,6 +50,57 @@ export class RunQueueOwner {
   readonly consumedSteeringOperationIDs = new Set<string>();
 
   constructor(private readonly context: RunQueueContext) {}
+
+  validateAdmission(display: PromptQueueDisplay, redelivery?: RuntimeQueuedMessage): void {
+    this.reconcileQueuedMessages();
+    if (this.pendingQueueAdmission) {
+      throw new GatewayError(
+        "busy",
+        "The prior queued prompt is still publishing its authoritative identity",
+        true,
+      );
+    }
+    validateQueue([...this.queuedMessages.filter((item) => item.id !== redelivery?.id), {
+      text: display.text,
+      attachmentCount: display.attachmentCount,
+      ...(display.resourceInvocations === undefined
+        ? {}
+        : { resourceInvocations: display.resourceInvocations }),
+    }]);
+  }
+
+  recordPendingAdmission(
+    operationId: string, behavior: QueueBehavior, display: PromptQueueDisplay,
+    images: ImageContent[], redelivery: RuntimeQueuedMessage | undefined,
+    resolveDisposition: (disposition: QueueAdmissionDisposition) => void,
+  ): void {
+  this.pendingQueueAdmission = {
+    // The returned operation identity is also the stable projected queue
+    // identity, giving clients an exact settlement receipt.
+    id: operationId,
+    behavior,
+    text: display.text,
+    attachmentCount: display.attachmentCount,
+    ...(display.resourceInvocations === undefined
+    ? {}
+    : { resourceInvocations: display.resourceInvocations }),
+    ...(display.photoCount === undefined
+      ? {}
+      : { photoCount: display.photoCount }),
+    ...(display.fileAttachmentCount === undefined
+      ? {}
+      : { fileAttachmentCount: display.fileAttachmentCount }),
+    ...(display.attachments === undefined
+      ? {}
+      : { attachments: display.attachments }),
+    inputSource: display.inputSource ?? "interactive",
+    ...(display.commandId === undefined ? {} : { commandId: display.commandId }),
+    attachmentEnvelope: display.attachmentEnvelope,
+    images,
+    ...(redelivery === undefined ? {} : { redelivery: true }),
+    resolveDisposition,
+  };
+  }
 
   reconcileQueuedMessages(): void {
     const session = this.context.session();

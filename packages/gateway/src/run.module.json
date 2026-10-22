@@ -63,6 +63,8 @@
     "kernel/run/run-queue-owner.ts",
     "kernel/run/queue-commands.ts",
     "kernel/run/prompt-attempt.ts",
+    "kernel/run/prompt-admission.ts",
+    "kernel/run/prompt-input.ts",
     "kernel/run/held-prompt-queue.ts",
     "kernel/run/queue-input.ts",
     "kernel/run/locks/run-markers-paths.golden.json"

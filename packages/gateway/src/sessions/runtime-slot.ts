@@ -49,10 +49,14 @@ import { RunPersistence, CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WR
 import { RunWorkOwner } from "../kernel/run/run-work-owner.js";
 import { RunAbortOwner } from "../kernel/run/run-abort-owner.js";
 import { RunQueueOwner } from "../kernel/run/run-queue-owner.js";
+import type { HomeTaskControlRequest } from "../home/home-task-dispatcher.js";
+import type { PromptOwnership, PromptAdmissionContext } from "../kernel/run/prompt-input.js";
+import { admitPrompt } from "../kernel/run/prompt-admission.js";
+import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../kernel/run/invocation-receipts.js";
 import { PromptAttempt } from "../kernel/run/prompt-attempt.js";
-import { RunQueueCommands, MAXIMUM_QUEUED_MESSAGE_BYTES, validateQueue, invocationResources, resourceIsInvocable } from "../kernel/run/queue-commands.js";
+import { RunQueueCommands, MAXIMUM_QUEUED_MESSAGE_BYTES, validateQueue, resourceIsInvocable } from "../kernel/run/queue-commands.js";
 import { HeldPromptQueue } from "../kernel/run/held-prompt-queue.js";
-import { MAXIMUM_PROMPT_ATTACHMENTS, type QueueAdmissionDisposition, type QueueBehavior, type RuntimeQueuedMessage, type HeldPrompt, type PromptQueueDisplay } from "../kernel/run/queue-input.js";
+import { type QueueBehavior, type PromptQueueDisplay } from "../kernel/run/queue-input.js";
 import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../kernel/run/compaction-policy.js";
@@ -98,7 +102,7 @@ import type {
   ResourceInvocation,
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { count, stage, wait } from "../transport/request-span.js";
+import { stage } from "../transport/request-span.js";
 import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { BlobStore } from "./blob-store.js";
@@ -135,7 +139,7 @@ import {
 } from "../kernel/projection/projection.js";
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { type RunMarkerEvidence, type RunMarkerStore } from "../kernel/run/run-markers.js";
-import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, withInvocationContext } from "../extensions/owner-attribution.js";
+import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext } from "../extensions/owner-attribution.js";
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
 import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "./child-session-admission.js";
@@ -144,7 +148,7 @@ import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../ke
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "../kernel/run/invocation-receipts.js";
 import type { InputTrigger } from "../kernel/host/input-admission.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
-import { admitResourceInvocations, composeResourcePrompt, parsePiLiteralCommand, userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
+import { parsePiLiteralCommand, userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "../kernel/projection/process-activity-recency.js";
 import { redactProcessText } from "../kernel/projection/process-activity.js";
@@ -369,16 +373,6 @@ export function completionOwnedByMarker(
   return completion ? { ...completion, operationId: marker.operationId } : undefined;
 }
 
-export interface OwnedOperationTerminal {
-  lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown";
-  operationId: string;
-  invocationId: string;
-  errorCode?: string;
-  assistantCompletionId?: string;
-}
-/** The terminal a task's Stop or deadline reports while the task waits between turns: no turn
- * was running to interrupt, so the dispatcher reads it as a stop of the waiting task. */
-export const TASK_STOP_WAITING = "task-stop-waiting";
 
 interface RuntimeSlotHooks {
   broadcast: SessionBroadcast;
@@ -401,40 +395,6 @@ interface RuntimeSlotHooks {
   closed?: (sessionId: string, slot: RuntimeSlot) => void;
 }
 
-interface AutomationPromptOwnership {
-  kind?: never;
-  operationId: string;
-  taskFence?: import("../home/home-task-dispatcher.js").HomeTaskControlRequest;
-  /** Exact scheduler admission cancellation, fenced again at SDK preflight. */
-  signal?: AbortSignal;
-  origin: ChatOrigin;
-  onAdmitted?: (invocationId: string) => void;
-  onTerminal: (terminal: OwnedOperationTerminal) => Promise<void> | void;
-}
-
-/** A Home wake: Gateway-authored, with no user input. The inbox's trigger result starts the run. */
-interface HomeWakeOwnership {
-  kind: "homeWake";
-  operationId: string;
-  origin: ChatOrigin;
-  onDelivered: (delivered: boolean) => void;
-  taskFence?: never;
-  expandPromptTemplates?: never;
-  signal?: never;
-  onAdmitted?: never;
-  onTerminal?: never;
-}
-
-type PromptOwnership = AutomationPromptOwnership | HomeWakeOwnership | {
-  kind: "subagentWake";
-  taskFence?: never;
-  expandPromptTemplates: boolean;
-  operationId: string;
-  origin: ChatOrigin;
-  signal?: never;
-  onAdmitted?: never;
-  onTerminal?: never;
-};
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
@@ -592,7 +552,7 @@ export class RuntimeSlot {
     settleOperationWork: operationId => this.runWork.settleOperationWork(operationId),
     diagnostic: () => this.dependencies.stopSteeringDiagnostic?.bind(this.dependencies),
     heldQueue: () => this.heldQueue,
-    admitPrompt: (...args) => this.admitPrompt(...args),
+    admitPrompt: (...args) => admitPrompt(this.promptAdmissionBindings(), ...args),
     publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
   });
   private retainedLeaseCount = 0;
@@ -880,7 +840,7 @@ export class RuntimeSlot {
     projectedQueue: () => this.runQueue.projectedQueue(),
     editedQueueItem: (previous, item, composed) => this.queueCommands.editedQueueItem(previous, item, composed),
     assertQueueableResources: items => this.queueCommands.assertQueueableResources(items),
-    admitHeld: entry => this.admitPrompt(entry.runtimeText, entry.images, entry.behavior, {
+    admitHeld: entry => admitPrompt(this.promptAdmissionBindings(), entry.runtimeText, entry.images, entry.behavior, {
           text: entry.text,
           attachmentEnvelope: entry.attachmentEnvelope,
           attachmentCount: entry.attachmentCount,
@@ -3701,7 +3661,7 @@ export class RuntimeSlot {
   }
 
   /** A message the maintainer sent, or Home's exact-operation steering, to this worker's task. */
-  private sharedTaskSteering(ownership: PromptOwnership | undefined): boolean {
+  private sharedTaskSteering(ownership: PromptOwnership<HomeTaskControlRequest> | undefined): boolean {
     if (!this.taskWorker) return false;
     if (!ownership) return true;
     const fence = ownership.taskFence;
@@ -7412,7 +7372,7 @@ export class RuntimeSlot {
     behavior?: QueueBehavior,
     queueDisplay?: PromptQueueDisplay,
     onAdmitted?: (result: { operationId: string }) => void,
-    ownership?: PromptOwnership,
+    ownership?: PromptOwnership<HomeTaskControlRequest>,
   ): Promise<{ operationId: string }> {
     // Once Stop closes Pi's queue, new client work stays Gateway-owned until
     // the stopped originals are admitted as one serialized continuation.
@@ -7427,7 +7387,7 @@ export class RuntimeSlot {
       onAdmitted?.(result);
       return result;
     }
-    return this.admitPrompt(
+    return admitPrompt(this.promptAdmissionBindings(),
       text, images, behavior, queueDisplay, onAdmitted, ownership,
       ownership?.operationId ?? randomUUID(),
     );
@@ -7453,658 +7413,130 @@ export class RuntimeSlot {
     );
   }
 
-  private async admitPrompt(
-    text: string,
-    images: ImageContent[],
-    behavior: QueueBehavior | undefined,
-    queueDisplay: PromptQueueDisplay | undefined,
-    onAdmitted: ((result: { operationId: string }) => void) | undefined,
-    ownership: PromptOwnership | undefined,
-    operationId: string,
-    held?: HeldPrompt,
-    redelivery?: RuntimeQueuedMessage,
-    laneOwned = false,
-  ): Promise<{ operationId: string }> {
-    return wait("session.prompt.runtime-lane", (acquired) => {
-      const run = async () => {
-      acquired();
-      ownership?.signal?.throwIfAborted();
-      this.assertUsable();
-      this.assertHomePromptAdmission();
-      if (!ownership && this.runAbort.stopRecoveryQueueClosed && !held && !redelivery) {
-        const heldAdmission = this.heldQueue.holdPrompt(text, images, behavior, queueDisplay, true);
-        onAdmitted?.(heldAdmission);
-        return heldAdmission;
+  private promptAdmissionBindings(): PromptAdmissionContext<HomeTaskControlRequest, CanonicalAssistantCompletion> {
+    const slot = this;
+    return {
+      get runtime() { return slot.runtime; },
+      get dependencies() { return slot.dependencies; },
+      get id() { return slot.id; },
+      get cwd() { return slot.cwd; },
+      get revision() { return slot.revision; },
+      set revision(value) { slot.revision = value; },
+      get phase() { return slot.phase; },
+      set phase(value) { slot.phase = value; },
+      get operation() { return slot.operation; },
+      set operation(value) { slot.operation = value; },
+      get activeOperationId() { return slot.activeOperationId; },
+      set activeOperationId(value) { slot.activeOperationId = value; },
+      get pendingPrompt() { return slot.pendingPrompt; },
+      set pendingPrompt(value) { slot.pendingPrompt = value; },
+      get pendingPromptMessage() { return slot.pendingPromptMessage; },
+      set pendingPromptMessage(value) { slot.pendingPromptMessage = value; },
+      get pendingExtensionCommand() { return slot.pendingExtensionCommand; },
+      set pendingExtensionCommand(value) { slot.pendingExtensionCommand = value; },
+      get operationWasHomeWake() { return slot.operationWasHomeWake; },
+      set operationWasHomeWake(value) { slot.operationWasHomeWake = value; },
+      get pendingAssistantCompletion() { return slot.pendingAssistantCompletion; },
+      get attentionBarrier() { return slot.attentionBarrier; },
+      get completionOwnershipQueue() { return slot.completionOwnershipQueue; },
+      get isAgentAdmissionSettling() { return slot.isAgentAdmissionSettling; },
+      get hasActiveAgentRun() { return slot.hasActiveAgentRun; },
+      get queuedManualCompactionInFlight() { return slot.queuedManualCompactionInFlight; },
+      get shuttingDown() { return slot.shuttingDown; },
+      get taskWorker() { return slot.taskWorker; },
+      get taskWait() { return slot.taskWait; },
+      get homeRequestPolicy() { return slot.homeRequestPolicy; },
+      get sessionFile() { return slot.sessionFile; },
+      get canonicalEntryCount() { return slot.canonicalEntryCount; },
+      get lifecycle() { return slot.lifecycle; },
+      get runAbort() { return slot.runAbort; },
+      get runQueue() { return slot.runQueue; },
+      get runWork() { return slot.runWork; },
+      get heldQueue() { return slot.heldQueue; },
+      get invocations() { return slot.invocations; },
+      get ownedTerminalObservers() { return slot.ownedTerminalObservers; },
+      get compactionPolicies() { return slot.compactionPolicies; },
+      get contextPolicies() { return slot.contextPolicies; },
+      get lane() { return slot.lane; },
+      get hooks() { return slot.hooks; },
+      get inboxAttributedMessages() { return slot.inboxAttributedMessages; },
+      assertUsable: (...args) => slot.assertUsable(...args),
+      assertHomePromptAdmission: (...args) => slot.assertHomePromptAdmission(...args),
+      assertHomeWakeAdmissible: (...args) => slot.assertHomeWakeAdmissible(...args),
+      attentionPendingError: (...args) => slot.attentionPendingError(...args),
+      liveTaskOperationId: (...args) => slot.liveTaskOperationId(...args),
+      sharedTaskSteering: (...args) => slot.sharedTaskSteering(...args),
+      waitForStateChange: (...args) => slot.waitForStateChange(...args),
+      applyLiveRunSettings: (...args) => slot.applyLiveRunSettings(...args),
+      assertInvocableResources: (...args) => slot.assertInvocableResources(...args),
+      resourceExpansionCatalog: (...args) => slot.resourceExpansionCatalog(...args),
+      invocationForOperation: (...args) => slot.invocationForOperation(...args),
+      extensionCommandOrigin: (...args) => slot.extensionCommandOrigin(...args),
+      promptDisplay: (...args) => slot.promptDisplay(...args),
+      persistInvocationReceipt: (...args) => slot.persistInvocationReceipt(...args),
+      persistCanonicalCustomEntry: (...args) => slot.persistCanonicalCustomEntry(...args),
+      enqueueMarkerOwnership: (...args) => slot.enqueueMarkerOwnership(...args),
+      clearMarkerOwnership: (...args) => slot.clearMarkerOwnership(...args),
+      notifyOwnedTerminal: (...args) => slot.notifyOwnedTerminal(...args),
+      notifyAgentTerminal: (...args) => slot.notifyAgentTerminal(...args),
+      completionObserved: (...args) => slot.completionObserved(...args),
+      terminalizeInvocation: (...args) => slot.terminalizeInvocation(...args),
+      startHomeWake: (...args) => slot.startHomeWake(...args),
+      publishSnapshot: (...args) => slot.publishSnapshot(...args),
+      emit: (...args) => slot.emit(...args),
+      persistTaskMarker: operationId => slot.persistCanonicalCustomEntry(HOME_TASK_MARKER,
+            JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...slot.taskWorker!.identity, sessionId: slot.id })), `task:${operationId}`),
+      noteAcceptedSteering: operationId => {
+      if (slot.taskWorker && operationId !== slot.taskWorker.identity.operationId) {
+        slot.dependencies.homeTaskDiagnostic?.({ event: "home.task.control",
+          taskHash: createHash("sha256").update(slot.taskWorker.identity.taskId).digest("hex").slice(0, 16),
+          operationHash: createHash("sha256").update(slot.taskWorker.identity.operationId).digest("hex").slice(0, 16),
+          action: "steer", disposition: "accepted" });
       }
-      try {
-        if (this.attentionBarrier) await this.attentionBarrier;
-      } catch {
-        throw this.attentionPendingError();
-      }
-      if (this.completionOwnershipQueue.length > 0 || this.pendingAssistantCompletion) {
-        throw this.attentionPendingError();
-      }
-      if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
-      const session = this.runtime.session;
-      if (ownership?.kind === "homeWake") await this.assertHomeWakeAdmissible(session);
-      if (this.taskWorker) {
-        const trust = await this.dependencies.trust.requireResolved(this.cwd);
-        if (!trust.trusted) throw new GatewayError("trust_required", "Home task target is no longer trusted");
-        if (ownership?.operationId === this.taskWorker.identity.operationId) {
-          await this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
-            JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker.identity, sessionId: this.id })), `task:${operationId}`);
-        } else if ((ownership?.kind === "subagentWake" || this.sharedTaskSteering(ownership)) && this.taskWait && this.taskWait.wakeOperationId === undefined
-          && this.taskWorker.acceptsSteering && this.activeOperationId === undefined && this.operation === undefined && !session.isStreaming) {
-          // The provider's wake, or the maintainer's or Home's message (#929), continues the task this
-          // operation holds open between turns; its marker stays the first one.
-        } else {
-          const fence = ownership?.taskFence;
-          // The maintainer and Home share one ordered steering lane per worker (#929): a maintainer
-          // message to a running task joins that lane whatever behavior the composer chose.
-          if (!ownership && this.taskWorker.acceptsSteering) behavior = "steer";
-          if (behavior !== "steer" || this.liveTaskOperationId() !== this.taskWorker.identity.operationId
-            || !session.isStreaming || !this.taskWorker.acceptsSteering
-            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.taskWorker.identity.operationId))) {
-            throw new GatewayError("conflict", "Stale or settled task operation cannot accept steering");
-          }
-        }
-      }
-      while (this.isAgentAdmissionSettling) {
-        await this.waitForStateChange();
-        this.assertUsable();
-      }
-      if (queueDisplay?.attachments !== undefined
-        && (queueDisplay.attachments.length > MAXIMUM_PROMPT_ATTACHMENTS
-          || queueDisplay.attachments.length !== queueDisplay.attachmentCount)) {
-        throw new GatewayError("invalid_request", "Prompt attachment descriptors do not match the bounded attachment count");
-      }
-      const resources = queueDisplay?.resourceInvocations;
-      // Skills and prompts the runtime expands itself; an extension command is Pi's literal command text.
-      const composedResources = resources?.[0]?.source === "extension" ? undefined : resources;
-      if (resources !== undefined) {
-        admitResourceInvocations(resources, queueDisplay!.text);
-        if (composedResources === undefined && (images.length > 0 || (queueDisplay!.attachments?.length ?? 0) > 0)) {
-          throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
-        }
-        this.assertInvocableResources(resources);
-      }
-      // Every caller passes the visible prompt; the expansions are composed
-      // here, in the lane, against the catalog just validated.
-      if (composedResources !== undefined) {
-        text = composeResourcePrompt(composedResources, text, this.resourceExpansionCatalog());
-      }
-      // Pi uses the first literal ASCII space as its command
-      // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
-      // part of the command name and therefore remain ordinary prompt text.
-      // A composed message is never a command, whatever its text begins with.
-      const parsedCommand = ownership?.kind === "subagentWake" || ownership?.kind === "homeWake" || composedResources !== undefined
-        ? undefined : parsePiLiteralCommand(text);
-      const extensionCommandName = parsedCommand?.name;
-      const isExactExtensionCommand = extensionCommandName !== undefined
-        && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
-      // Scheduled plain text can resolve to a command even without a typed
-      // resource. Gate the actual capability in the serialized runtime owner,
-      // before effects, markers or automation completion observers are admitted.
-      if (ownership && isExactExtensionCommand) {
-        throw new GatewayError("invalid_request", "Extension commands cannot be scheduled");
-      }
-      if (!session.isStreaming) {
-        await session.settingsManager.flush();
-        await this.applyLiveRunSettings(session);
-        this.compactionPolicies.get(session)?.applyBudgets();
-        this.contextPolicies.get(session)?.apply();
-      }
-      let queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
-      if (ownership && this.ownedTerminalObservers.has(operationId)) {
-        throw new GatewayError("conflict", "Automation operation is already registered", true);
-      }
-      const existingInvocation = redelivery ? this.invocationForOperation(operationId) : undefined;
-      if (redelivery && !existingInvocation) {
-        throw new GatewayError("conflict", "Accepted queued invocation identity is no longer available", true);
-      }
-      const invocationId = existingInvocation?.invocationId ?? randomUUID();
-      const invocationSource: InvocationProjection["source"] = existingInvocation?.source ?? (ownership?.kind === "subagentWake" ? "subagentWake" : ownership?.kind === "homeWake" ? "homeWake" : isExactExtensionCommand
-        ? "extension"
-        : resources?.[0]?.source ?? "plain");
-      const invocationName = existingInvocation?.name ?? (isExactExtensionCommand
-        ? extensionCommandName
-        : resources?.[0]?.name);
-      const invokedResources = invocationResources(composedResources);
-      const extensionArguments = composedResources === undefined ? resources?.[0]?.arguments : undefined;
-      // A composed message's canonical text is its expansions followed by this text.
-      const submittedText = images.length > 0 || composedResources !== undefined ? queueDisplay?.text ?? text : undefined;
-      const invocation: LiveInvocation = existingInvocation ?? {
-        version: 1,
-        invocationId,
-        operationId,
-        source: invocationSource,
-        ...(invocationName ? { name: invocationName } : {}),
-        ...(extensionArguments === undefined ? {} : { arguments: extensionArguments }),
-        ...(submittedText === undefined ? {} : { submittedText }),
-        ...(resources === undefined ? {} : { resourceInvocations: resources }),
-        lifecycle: "staged",
-        origin: ownership?.origin ?? (invocationSource === "extension" && invocationName
-          ? this.extensionCommandOrigin(invocationName)
-          : { kind: "user", confidence: "boundary" }),
-        sequence: this.revision + 1,
-        updatedAt: new Date().toISOString(),
-      };
-      if (session.isStreaming && !behavior && !isExactExtensionCommand) {
-        if (!redelivery) this.invocations.delete(invocationId);
-        throw new GatewayError("busy", "Session is running; choose steer or follow-up");
-      }
-      const queueAdmissionDisplay = queueDisplay ?? {
-        text,
-        attachmentEnvelope: "",
-        attachmentCount: images.length,
-        ...(images.length > 0 ? { photoCount: images.length } : {}),
-        ...(images.length > 0 ? { fileAttachmentCount: 0 } : {}),
-      };
-      const validateQueueAdmission = () => {
-        this.runQueue.reconcileQueuedMessages();
-        if (this.runQueue.pendingQueueAdmission) {
-          throw new GatewayError(
-            "busy",
-            "The prior queued prompt is still publishing its authoritative identity",
-            true,
-          );
-        }
-        validateQueue([...this.runQueue.queuedMessages.filter((item) => item.id !== redelivery?.id), {
-          text: queueAdmissionDisplay.text,
-          attachmentCount: queueAdmissionDisplay.attachmentCount,
-          ...(queueAdmissionDisplay.resourceInvocations === undefined
-            ? {}
-            : { resourceInvocations: queueAdmissionDisplay.resourceInvocations }),
-        }]);
-      };
-      if (queuesIntoActiveRun) validateQueueAdmission();
-
-      if (ownership && ownership.kind !== "subagentWake" && ownership.kind !== "homeWake") this.ownedTerminalObservers.set(operationId, ownership.onTerminal);
-      let operationWork!: GatewayWorkHandle;
-      let preflightStarted = false;
-      // Whether Pi had no run (starting or live) when this input was admitted; a
-      // command can then own only a start that its own handler began.
-      const runIdleAtAdmission = !this.runtime.session.isStreaming;
-      let acceptedResolve!: (accepted: boolean) => void;
-      const accepted = new Promise<boolean>((resolve) => { acceptedResolve = resolve; });
-      let sdkRun: Promise<void>;
-      let preflightFailure: GatewayError | undefined;
-      let handledWithoutAgent = false;
-      let queueDisposition: Promise<QueueAdmissionDisposition> | undefined;
-      let resolveQueueDisposition: ((disposition: QueueAdmissionDisposition) => void) | undefined;
-      let startPersisted = false;
-      /** The phase this admission replaced when it marked the session running. */
-      let phaseBeforeAdmission: SessionPhase | undefined;
-      try {
-        // Retained archive state is cleared here, inside the same lane critical
-        // section that admits this run and after every synchronous rejection
-        // above. A prompt can therefore never start while the session is hidden
-        // from the dashboard, and a store failure rejects the prompt retryably.
-        await this.dependencies.beforeRunAdmission(this.id);
-        // Attention, settings and archive I/O can yield to canonical writes or
-        // a seal. Recheck the physical target before invocation/SDK effects.
-        this.assertHomePromptAdmission();
-        this.invocations.set(invocationId, invocation);
-        while (this.invocations.size > 128) this.invocations.delete(this.invocations.keys().next().value!);
-        operationWork = this.runWork.beginOperationWork(operationId);
-        if (redelivery) this.lifecycle.cancelPreflight(operationId);
-        // Exact preflight ownership begins synchronously before marker I/O, so a
-        // drain that starts while the marker is pending snapshots this owner.
-        this.lifecycle.beginPreflight(operationId);
-        preflightStarted = true;
-
-        // Canonical invocation ownership must precede every extension side
-        // effect. This custom entry is intentionally hidden from model context
-        // and ordinary transcript projection, but survives runtime restart.
-        const startReceipt = makeInvocationReceipt({
-          version: 1,
-          receiptId: `start:${invocationId}`,
-          receiptKind: "start",
-          invocationId,
-          operationId,
-          sessionId: this.id,
-          source: invocationSource,
-          ...(invocationName ? { name: invocationName } : {}),
-          ...(extensionArguments ? { arguments: extensionArguments } : {}),
-          ...(invokedResources === undefined ? {} : { resources: invokedResources }),
-          ...(submittedText === undefined ? {} : { submittedText }),
-          lifecycle: "staged",
-          origin: invocation.origin,
-          sequence: this.revision + 1,
-          createdAt: new Date().toISOString(),
-        });
-        // Durable staging precedes the Pi call so an extension handler can
-        // never emit output before Gateway has recorded its invocation owner.
-        if (!redelivery) await this.persistInvocationReceipt(startReceipt, operationWork);
-        startPersisted = true;
-        this.assertHomePromptAdmission();
-
-        // Receipt persistence and extension hooks may outlive the run that was
-        // active at RPC entry. Re-evaluate at the last Gateway-owned boundary,
-        // then let queue_update/message_start provide the exact disposition if
-        // Pi crosses from streaming to idle inside its asynchronous input hook.
-        queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
-        if (session.isStreaming && !behavior && !isExactExtensionCommand) {
-          throw new GatewayError("busy", "Session is running; choose steer or follow-up");
-        }
-        if (queuesIntoActiveRun) {
-          validateQueueAdmission();
-          let dispositionResolved = false;
-          queueDisposition = new Promise<QueueAdmissionDisposition>((resolve) => {
-            resolveQueueDisposition = (disposition) => {
-              if (dispositionResolved) return;
-              dispositionResolved = true;
-              resolve(disposition);
-            };
-          });
-          this.runQueue.pendingQueueAdmission = {
-            // The returned operation identity is also the stable projected queue
-            // identity, giving clients an exact settlement receipt.
-            id: operationId,
-            behavior: behavior!,
-            text: queueAdmissionDisplay.text,
-            attachmentCount: queueAdmissionDisplay.attachmentCount,
-            ...(queueAdmissionDisplay.resourceInvocations === undefined
-            ? {}
-            : { resourceInvocations: queueAdmissionDisplay.resourceInvocations }),
-            ...(queueAdmissionDisplay.photoCount === undefined
-              ? {}
-              : { photoCount: queueAdmissionDisplay.photoCount }),
-            ...(queueAdmissionDisplay.fileAttachmentCount === undefined
-              ? {}
-              : { fileAttachmentCount: queueAdmissionDisplay.fileAttachmentCount }),
-            ...(queueAdmissionDisplay.attachments === undefined
-              ? {}
-              : { attachments: queueAdmissionDisplay.attachments }),
-            inputSource: queueAdmissionDisplay.inputSource ?? "interactive",
-            ...(queueAdmissionDisplay.commandId === undefined ? {} : { commandId: queueAdmissionDisplay.commandId }),
-            attachmentEnvelope: queueAdmissionDisplay.attachmentEnvelope,
-            images,
-            ...(redelivery === undefined ? {} : { redelivery: true }),
-            resolveDisposition: (disposition) => resolveQueueDisposition?.(disposition),
-          };
-        }
-
-        let homeWakeTrigger: InputTrigger | undefined;
-        if (isExactExtensionCommand) {
-          this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
-          // Exact commands run before Pi's preflight callback and can wait on UI
-          // indefinitely. Persist the provisional admission before invoking Pi.
-          await this.enqueueMarkerOwnership(operationId);
-          this.revision += 1;
-          this.publishSnapshot();
-        } else if (!queuesIntoActiveRun) {
-          this.activeOperationId = operationId;
-          if ((ownership?.kind === "subagentWake" || this.sharedTaskSteering(ownership)) && this.taskWait && this.taskWait.wakeOperationId === undefined) {
-            this.taskWait.wakeOperationId = operationId;
-          }
-          // The canonical leaf immediately before Pi sees the input is the exact
-          // activation start: the input's own entry is appended inside
-          // `session.prompt` below, and steering later inserts entries after it,
-          // never before it.
-          // Gateway owns preflight even before Pi creates an Agent controller
-          // (including auth and compaction preparation). It is not idle work.
-          phaseBeforeAdmission = this.phase;
-          this.phase = "running";
-          this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
-          this.pendingPromptMessage = undefined;
-          this.pendingPrompt = ownership?.kind === "homeWake" ? undefined : this.promptDisplay(operationId, text, images, queueDisplay);
-          // A waiting message becomes this pending prompt in the same
-          // publication, so it is never shown twice or not at all.
-          if (held) this.heldQueue.removeHeldPrompt(held.id);
-          this.revision += 1;
-          // Publish before entering Pi preflight. Automatic compaction can begin
-          // inside that call before the RPC receives its admission result.
-          this.publishSnapshot();
-          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt, ownership?.kind === "homeWake" ? "wake" : "user");
-          this.operationWasHomeWake = ownership?.kind === "homeWake";
-          if (this.homeRequestPolicy) {
-            // Inbox admission runs on this session's lane: every later prompt waits
-            // for it. A slow one is the first thing to name when Home stops answering (#906).
-            const inboxAdmissionStarted = performance.now();
-            try {
-            homeWakeTrigger = await this.dependencies.modules.policy("inputAdmission")?.().admit(this.id, operationId, ownership?.kind === "homeWake" ? "wake" : "user", async message => {
-              this.inboxAttributedMessages.add(message.details.eventId);
-              try { await session.sendCustomMessage(message, { triggerTurn: false }); }
-              finally { this.inboxAttributedMessages.delete(message.details.eventId); }
-              const entry = session.sessionManager.getLeafEntry();
-              if (entry?.type !== "custom_message" || entry.customType !== message.customType
-                || (entry.details as { eventId?: string })?.eventId !== message.details.eventId) throw new GatewayError("conflict", "Home task message lost its exact canonical identity");
-              await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
-                safeJson(makeContextDeliveryReceipt(entry.id, "stored", { source: "gateway:home-task",
-                  owner: { id: message.details.taskId, title: "Home task", source: "gateway:home-task" } })), entry.id);
-            }, () => this.dependencies.modules.policy("inputAdmission")!().envelope({
-              session, policy: this.homeRequestPolicy!, text, images, signal: ownership?.signal,
-              sessionFile: () => this.sessionFile, entries: () => this.canonicalEntryCount,
-            }));
-            } finally {
-              this.dependencies.modules.policy("inputAdmission")?.().finished(inboxAdmissionStarted, ownership?.kind === "homeWake" ? "wake" : "user");
-            }
-          }
-        }
-
-        if (ownership?.kind === "homeWake") ownership.onDelivered(homeWakeTrigger !== undefined);
-        ownership?.signal?.throwIfAborted();
-        sdkRun = ownership?.kind === "homeWake"
-          ? this.startHomeWake(session, operationId, homeWakeTrigger, acceptedResolve)
-          : withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
-          images,
-          ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
-          source: ownership?.kind === "subagentWake" ? "extension" : queueDisplay?.inputSource ?? "rpc",
-          ...(ownership?.kind === "subagentWake" ? { expandPromptTemplates: ownership.expandPromptTemplates }
-            : composedResources !== undefined ? { expandPromptTemplates: false } : {}),
-          preflightResult: (disposition) => {
-            // Pi calls back only after it has handled, queued, or started the
-            // prompt. Rejections do not call this hook; the SDK promise's
-            // rejection handler below resolves admission as false.
-            handledWithoutAgent = disposition === "handled";
-            // Pi has no active Agent signal during pre-prompt compaction. Stop
-            // must also revoke this exact pending prompt at SDK admission; an
-            // aborted summary alone does not prevent Agent.prompt() starting.
-            if (ownership?.signal?.aborted || this.runAbort.abortedOperations.has(operationId)
-              || (this.taskWorker && operationId !== this.taskWorker.identity.operationId && this.taskWait?.wakeOperationId !== operationId
-                && (!this.taskWorker.acceptsSteering || this.liveTaskOperationId() !== this.taskWorker.identity.operationId))) {
-              preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
-            } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
-              preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
-            }
-            if (preflightFailure) {
-              acceptedResolve(false);
-              throw preflightFailure;
-            }
-            // agent_start can fire synchronously before this Gateway promise
-            // resumes. Record the SDK's disposition now, not one turn later.
-            invocation.lifecycle = "accepted";
-            this.invocations.set(invocationId, invocation);
-            if (this.taskWorker && operationId !== this.taskWorker.identity.operationId) {
-              this.dependencies.homeTaskDiagnostic?.({ event: "home.task.control",
-                taskHash: createHash("sha256").update(this.taskWorker.identity.taskId).digest("hex").slice(0, 16),
-                operationHash: createHash("sha256").update(this.taskWorker.identity.operationId).digest("hex").slice(0, 16),
-                action: "steer", disposition: "accepted" });
-            }
-            acceptedResolve(true);
-          },
-        }));
-        // Pi awaits an extension command handler before invoking its preflight
-        // callback. The Gateway has already durably admitted the exact command
-        // and started its SDK promise, so release the RPC response while this
-        // session lane continues to serialize the handler and its side effects.
-        if (isExactExtensionCommand) {
-          ownership?.onAdmitted?.(invocationId);
-          onAdmitted?.({ operationId });
-        }
-      } catch (error) {
-        if (preflightStarted) this.lifecycle.cancelPreflight(operationId);
-        this.runQueue.pendingQueueAdmission = undefined;
-        if (this.activeOperationId === operationId) this.activeOperationId = undefined;
-        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
-        if (this.operation?.id === operationId) this.operation = undefined;
-        if (this.pendingPrompt?.id === operationId) {
-          this.pendingPrompt = undefined;
-          this.pendingPromptMessage = undefined;
-        }
-        if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
-        // An admission that failed before any run started gives back the phase it
-        // took (#881): a "running" session with nothing running admits nothing.
-        if (phaseBeforeAdmission !== undefined && this.phase === "running" && !this.hasActiveAgentRun
-          && this.activeOperationId === undefined && this.operation === undefined) {
-          this.phase = phaseBeforeAdmission;
-          this.revision += 1;
-          this.publishSnapshot();
-        }
-        if (startPersisted) {
-          await this.persistInvocationReceipt(makeInvocationReceipt({
-            version: 1,
-            receiptId: `terminal:${invocationId}`,
-            receiptKind: "terminal",
-            invocationId,
-            operationId,
-            sessionId: this.id,
-            source: invocationSource,
-            ...(invocationName ? { name: invocationName } : {}),
-            lifecycle: "outcomeUnknown",
-            origin: invocation.origin,
-            sequence: this.revision + 1,
-            createdAt: new Date().toISOString(),
-          }), operationWork);
-          await this.notifyOwnedTerminal({
-            lifecycle: "outcomeUnknown",
-            operationId,
-            invocationId,
-          });
-        }
-        this.invocations.delete(invocationId);
-        this.runWork.settleOperationWork(operationId);
-        if (!startPersisted) this.ownedTerminalObservers.delete(operationId);
-        // Once the canonical start receipt is durable the prompt may already
-        // have reached extension hooks or the provider. Report its failure as an
-        // unknown outcome so the idempotency receipt cannot be replayed, matching
-        // the outcome-unknown terminal receipt recorded above.
-        // A Home refusal names its own cause, so the client reads it first. It stays an
-        // unknown outcome: the start receipt is durable, so the prompt must not replay.
-        throw startPersisted
-          ? asUncertainOutcome(this.dependencies.modules.policy("requestPolicy")?.().isRefusal(error) ? new GatewayError("conflict", error.message) : error,
-            "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
-          : error;
-      }
-      const attempt = new PromptAttempt<CanonicalAssistantCompletion>({
-        lifecycle: this.lifecycle,
-        runQueue: this.runQueue,
-        runAbort: this.runAbort,
-        runWork: this.runWork,
-        invocations: this.invocations,
-        invocationFailures: this.invocationFailures,
-        shuttingDown: () => this.shuttingDown,
-        hasActiveAgentRun: () => this.hasActiveAgentRun,
-        activeOperationId: () => this.activeOperationId,
-        clearActiveOperation: () => { this.activeOperationId = undefined; },
-        operation: () => this.operation,
-        clearOperation: () => { this.operation = undefined; },
-        queuedManualCompactionInFlight: () => this.queuedManualCompactionInFlight,
-        adoptedManualCompaction: () => this.adoptedManualCompaction,
-        pendingPrompt: () => this.pendingPrompt,
-        clearPendingPrompt: () => { this.pendingPrompt = undefined; this.pendingPromptMessage = undefined; },
-        taskOperationId: () => this.taskWorker?.identity.operationId,
-        requestPolicy: () => this.homeRequestPolicy,
-        pendingManualCompaction: () => this.pendingManualCompaction,
-        pendingExtensionCommand: () => this.pendingExtensionCommand,
-        clearPendingExtensionCommand: () => { this.pendingExtensionCommand = undefined; },
-        pendingAssistantCompletion: () => this.pendingAssistantCompletion,
-        beginAttentionSettlement: completion => this.beginAttentionSettlement(completion),
-        queuesIntoActiveRun: () => queuesIntoActiveRun,
-        completionObserved: id => this.completionObserved(id),
-        terminalizeInvocation: (id, lifecycle, errorCode) => this.terminalizeInvocation(id, lifecycle, errorCode),
-        clearMarkerOwnership: id => this.clearMarkerOwnership(id),
-        enqueueMarkerOwnership: id => this.enqueueMarkerOwnership(id),
-        notifyAgentTerminal: (id, outcome) => this.notifyAgentTerminal(id, outcome),
-        persistInvocationReceipt: (receipt, owner) => this.persistInvocationReceipt(receipt, owner),
-        setIdle: () => { this.phase = "idle"; },
-        noteHomeIdle: () => this.noteHomeIdle(),
-        publishSnapshot: () => this.publishSnapshot(),
-        publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
-        startPendingManualCompaction: () => this.startPendingManualCompaction(),
-        maybePerformExtensionShutdown: () => this.maybePerformExtensionShutdown(),
-        settled: () => this.hooks.settled(this.id),
-        sessionId: () => this.id,
-        revision: () => this.revision,
-        emit: (topic, data) => this.emit(topic, data),
-      }, {
-        operationId, invocationId, invocationSource, invocationName, invocation,
-        isExactExtensionCommand, acceptedResolve, resolveQueueDisposition,
-      }, sdkRun);
-
-      // Successful Pi dispositions are reported by the callback; rejected
-      // prompts do not call it and are resolved by the SDK promise rejection
-      // handler. A local timeout could reject while an input handler later
-      // accepts canonical work, so admission remains callback/rejection-owned.
-      const admitted = await accepted;
-      if (queuesIntoActiveRun && admitted) {
-        this.runQueue.reconcileQueuedMessages();
-        const disposition = await queueDisposition!;
-        queuesIntoActiveRun = disposition === "queued";
-        if (disposition === "queued" && held) this.heldQueue.removeHeldPrompt(held.id);
-        if (disposition === "queued" && preflightStarted) {
-          // Queued input has an accepted queue owner, not an active preflight.
-          // Releasing this exact owner lets a later Stop-redelivery reuse the
-          // same operation identity through ordinary admission.
-          this.lifecycle.cancelPreflight(operationId);
-          preflightStarted = false;
-        }
-        handledWithoutAgent = disposition === "handled";
-        if (disposition === "failed") {
-          this.lifecycle.resolvePreflight(operationId, true);
-          attempt.admissionAccepted = true;
-          this.completionObserved(`terminal:${invocationId}`);
-          await this.terminalizeInvocation(
-            operationId,
-            "failed",
-            "runtime-prompt-failed",
-            operationWork,
-          );
-          if (!this.shuttingDown) await this.notifyAgentTerminal(`terminal:${invocationId}`, "failed");
-          this.lifecycle.cancelPreflight(operationId);
-          this.runWork.settleOperationWork(operationId);
-          attempt.finalizeAdmission();
-          throw attempt.queueDispositionFailure instanceof Error
-            ? attempt.queueDispositionFailure
-            : new GatewayError("internal", "The agent runtime failed after prompt admission");
-        }
-      }
-      if ((!queuesIntoActiveRun || !admitted) && this.runQueue.pendingQueueAdmission?.id === operationId) {
-        this.runQueue.pendingQueueAdmission = undefined;
-      }
-      // Pi >= 1.2 counts a run busy from the moment it prepares (through
-      // before_agent_start), so a turn an extension command triggered can still
-      // be starting, with no Agent run yet, when Pi reports the command handled.
-      // That start is the command's own: admit it once. A start already
-      // observed consumed its admission; a command admitted while a run was
-      // live or settling owns no start.
-      const commandTurnStarting = isExactExtensionCommand && handledWithoutAgent && runIdleAtAdmission
-        && this.runtime.session.isStreaming && !this.runtime.session.state.isStreaming;
-      this.lifecycle.resolvePreflight(operationId, admitted && !queuesIntoActiveRun && (!handledWithoutAgent || commandTurnStarting));
-      attempt.admissionAccepted = admitted;
-      if (!admitted) {
-        // A preflight callback is a disposition, not SDK settlement. Join the
-        // exact promise before retiring its marker or publishing idle.
-        await attempt.run.catch(() => {});
-        const stopped = this.runAbort.abortedOperations.has(operationId);
-        const terminalLifecycle = stopped ? "interrupted" : "failed";
-        const errorCode = stopped ? "user-abort" : "preflight-rejected";
-        this.completionObserved(`terminal:${invocationId}`);
-        await this.persistInvocationReceipt(makeInvocationReceipt({
-          version: 1,
-          receiptId: `terminal:${invocationId}`,
-          receiptKind: "terminal",
-          invocationId,
-          operationId,
-          sessionId: this.id,
-          source: invocationSource,
-          ...(invocationName ? { name: invocationName } : {}),
-          lifecycle: terminalLifecycle,
-          errorCode,
-          origin: invocation.origin,
-          sequence: this.revision + 1,
-          createdAt: new Date().toISOString(),
-        }), operationWork);
-        await this.notifyOwnedTerminal({
-          lifecycle: terminalLifecycle,
-          operationId,
-          invocationId,
-          errorCode,
-        });
-        this.invocations.delete(invocationId);
-        if (this.activeOperationId === operationId) this.activeOperationId = undefined;
-        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
-        if (this.operation?.id === operationId) this.operation = undefined;
-        if (this.pendingPrompt?.id === operationId) {
-          this.pendingPrompt = undefined;
-          this.pendingPromptMessage = undefined;
-        }
-        if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
-        await this.clearMarkerOwnership(operationId);
-        this.runWork.settleOperationWork(operationId);
-        this.runAbort.abortedOperations.delete(operationId);
-        if (this.activeOperationId === undefined && !this.hasActiveAgentRun && !this.queuedManualCompactionInFlight) this.phase = "idle";
-        this.hooks.settled(this.id);
-        this.revision += 1;
-        this.publishSnapshot();
-        attempt.finalizeAdmission();
-        if (!isExactExtensionCommand && !this.shuttingDown) await this.notifyAgentTerminal(`terminal:${invocationId}`, stopped ? "stopped" : "failed");
-        if (preflightFailure) throw preflightFailure;
-        throw new GatewayError(stopped ? "cancelled" : "invalid_request", stopped
-          ? "Prompt stopped before agent admission"
-          : "The agent runtime rejected the prompt before admission");
-      }
-
-      try {
-        await this.persistInvocationReceipt(makeInvocationReceipt({
-          version: 1,
-          receiptId: `accepted:${invocationId}`,
-          receiptKind: "transition",
-          invocationId,
-          operationId,
-          sessionId: this.id,
-          source: invocationSource,
-          lifecycle: "accepted",
-          sequence: this.revision + 1,
-          createdAt: new Date().toISOString(),
-        }), operationWork);
-      } catch (error) {
-        // Admission has already been accepted by Pi. A receipt write failure is
-        // a durability diagnostic, never evidence that execution was rejected.
-        this.emit("session.diagnostic", safeJson({
-          code: "invocation-acceptance-receipt-failed",
-          operationId,
-          message: error instanceof Error ? error.message : String(error),
-        }));
-      }
-      // Admission and Stop retain the same invocation object across receipt
-      // awaits; a late accepted transition cannot replace its recorded reason.
-      invocation.lifecycle = queuesIntoActiveRun ? "queued" : "accepted";
-      invocation.updatedAt = new Date().toISOString();
-      this.invocations.set(invocationId, invocation);
-      attempt.finalizeAdmission();
-      if (isExactExtensionCommand) operationWork.transition("extension-command-prompt-ui");
-      else if (queuesIntoActiveRun) operationWork.transition("queued-mutation");
-      else if (handledWithoutAgent) {
-        await attempt.settleWithoutAgent();
-      } else if (!attempt.runSettled) {
-        operationWork.transition("foreground-agent-operation");
-        const markerWrite = this.enqueueMarkerOwnership(operationId);
-        count("session.prompt.marker-persist");
-        // Prompt admission is already authoritative in Pi. Keep the marker owner
-        // tracked for drain and later settlement, but do not hold the response on
-        // its fsync; observing the rejection also prevents a detached write from
-        // becoming an unhandled rejection.
-        void markerWrite.catch(() => {});
-      }
-      this.revision += 1;
-      this.publishSnapshot();
-      if (!isExactExtensionCommand) {
-        ownership?.onAdmitted?.(invocationId);
-        onAdmitted?.({ operationId });
-      }
-
-      if (isExactExtensionCommand) {
-        if (!attempt.commandSettled) {
-          try { await attempt.run; } finally { await attempt.finishCommand(); }
-        } else {
-          await attempt.finishCommand();
-        }
-      } else if (attempt.runSettled) {
-        // Handles input action:"handled" and rejected accepted calls without
-        // touching a newer operation. `finally` can mark runSettled one
-        // microtask before `run` exposes its outcome, so join it explicitly.
-        const terminalLifecycle = await attempt.run.then(
-          () => "completed" as const,
-          () => "failed" as const,
-        );
-        await attempt.settleWithoutAgent(terminalLifecycle);
-      }
-      return { operationId };
-      };
-      return laneOwned ? run() : this.lane.run(run);
-    });
+      },
+      createAttempt: (sdkRun, input, queuesIntoActiveRun) => new PromptAttempt<CanonicalAssistantCompletion>({
+        lifecycle: slot.lifecycle,
+        runQueue: slot.runQueue,
+        runAbort: slot.runAbort,
+        runWork: slot.runWork,
+        invocations: slot.invocations,
+        invocationFailures: slot.invocationFailures,
+        shuttingDown: () => slot.shuttingDown,
+        hasActiveAgentRun: () => slot.hasActiveAgentRun,
+        activeOperationId: () => slot.activeOperationId,
+        clearActiveOperation: () => { slot.activeOperationId = undefined; },
+        operation: () => slot.operation,
+        clearOperation: () => { slot.operation = undefined; },
+        queuedManualCompactionInFlight: () => slot.queuedManualCompactionInFlight,
+        adoptedManualCompaction: () => slot.adoptedManualCompaction,
+        pendingPrompt: () => slot.pendingPrompt,
+        clearPendingPrompt: () => { slot.pendingPrompt = undefined; slot.pendingPromptMessage = undefined; },
+        taskOperationId: () => slot.taskWorker?.identity.operationId,
+        requestPolicy: () => slot.homeRequestPolicy,
+        pendingManualCompaction: () => slot.pendingManualCompaction,
+        pendingExtensionCommand: () => slot.pendingExtensionCommand,
+        clearPendingExtensionCommand: () => { slot.pendingExtensionCommand = undefined; },
+        pendingAssistantCompletion: () => slot.pendingAssistantCompletion,
+        beginAttentionSettlement: completion => slot.beginAttentionSettlement(completion),
+        queuesIntoActiveRun,
+        completionObserved: id => slot.completionObserved(id),
+        terminalizeInvocation: (id, lifecycle, errorCode) => slot.terminalizeInvocation(id, lifecycle, errorCode),
+        clearMarkerOwnership: id => slot.clearMarkerOwnership(id),
+        enqueueMarkerOwnership: id => slot.enqueueMarkerOwnership(id),
+        notifyAgentTerminal: (id, outcome) => slot.notifyAgentTerminal(id, outcome),
+        persistInvocationReceipt: (receipt, owner) => slot.persistInvocationReceipt(receipt, owner),
+        setIdle: () => { slot.phase = "idle"; },
+        noteHomeIdle: () => slot.noteHomeIdle(),
+        publishSnapshot: () => slot.publishSnapshot(),
+        publishChanged: () => { slot.revision += 1; slot.publishSnapshot(); },
+        startPendingManualCompaction: () => slot.startPendingManualCompaction(),
+        maybePerformExtensionShutdown: () => slot.maybePerformExtensionShutdown(),
+        settled: () => slot.hooks.settled(slot.id),
+        sessionId: () => slot.id,
+        revision: () => slot.revision,
+        emit: (topic, data) => slot.emit(topic, data),
+      }, input, sdkRun),
+    };
   }
 
   private promptDisplay(
