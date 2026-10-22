@@ -109,6 +109,7 @@ struct SettingsRendererRow: View {
                 if let liveControl, setting.projectSetting == nil { liveControl } else { control(for: control) }
             }
                 .environment(\.tronSettingsRowAccessory, accessory)
+                .environment(\.tronSettingsRowStatus, overriddenStatus)
             details
         }
         .accessibilityElement(children: .contain)
@@ -129,14 +130,14 @@ struct SettingsRendererRow: View {
             ) }
         }
         guard canReset && editable && control != .readOnly else { return { AnyView(EmptyView()) } }
-        return { AnyView(HStack(spacing: 8) {
-            // State words are never shortened; the row layout makes room or stacks.
-            // The pill paints to its edge, so it keeps its own gap from the value.
-            if target.objectValue?["kind"]?.stringValue != "global" {
-                TronStatusPill(text: "Overridden", accent: theme?.accent ?? .tronPurple).fixedSize().padding(.leading, TronSpacing.xl)
-            }
-            resetButton
-        }) }
+        return { AnyView(resetButton) }
+    }
+
+    /// Session and Home overrides name their state beside the title, never in
+    /// the value's trailing room (#1651); Global values are not overrides.
+    private var overriddenStatus: String? {
+        canReset && editable && control != .readOnly && setting.projectSetting == nil
+            && target.objectValue?["kind"]?.stringValue != "global" ? "Overridden" : nil
     }
 
     private var resetLabel: String {

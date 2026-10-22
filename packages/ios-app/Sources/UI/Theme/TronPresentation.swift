@@ -1522,10 +1522,20 @@ private struct TronSettingsRowAccessoryKey: EnvironmentKey {
     static let defaultValue: (@MainActor @Sendable () -> AnyView)? = nil
 }
 
+/// A renderer's state word (Overridden) beside the row's title, so a value's
+/// trailing control keeps the same room with or without it.
+private struct TronSettingsRowStatusKey: EnvironmentKey {
+    static let defaultValue: String? = nil
+}
+
 extension EnvironmentValues {
     var tronSettingsRowAccessory: (@MainActor @Sendable () -> AnyView)? {
         get { self[TronSettingsRowAccessoryKey.self] }
         set { self[TronSettingsRowAccessoryKey.self] = newValue }
+    }
+    var tronSettingsRowStatus: String? {
+        get { self[TronSettingsRowStatusKey.self] }
+        set { self[TronSettingsRowStatusKey.self] = newValue }
     }
 }
 
@@ -1617,6 +1627,7 @@ struct TronSettingsRow<Trailing: View>: View {
     @Environment(\.controlSize) private var controlSize
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.tronSettingsRowAccessory) private var accessory
+    @Environment(\.tronSettingsRowStatus) private var status
 
     init(
         icon: String?,
@@ -1661,6 +1672,7 @@ struct TronSettingsRow<Trailing: View>: View {
                 if let accessory { accessory() }
             }
             .environment(\.tronSettingsRowAccessory, nil)
+            .environment(\.tronSettingsRowStatus, nil)
         }
         .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
         .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
@@ -1705,6 +1717,14 @@ struct TronSettingsRow<Trailing: View>: View {
                             .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
                             .foregroundStyle(Color.tronTextMuted)
                             .lineLimit(1)
+                            .fixedSize()
+                    }
+                } else if let status {
+                    // The state word never shortens; a long title wraps beside it.
+                    HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
+                        Text(title).font(titleFont).foregroundStyle(titleColor)
+                            .fixedSize(horizontal: false, vertical: true)
+                        TronStatusPill(text: status, accent: settingsTheme?.accent ?? accent)
                             .fixedSize()
                     }
                 } else {

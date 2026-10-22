@@ -28,7 +28,7 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         XCTAssertTrue(models.waitForExistence(timeout: 8), app.debugDescription)
         shot("1651-home-settings-\(dark ? "dark" : "light")")
         models.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Models"].waitForExistence(timeout: 5), app.debugDescription)
+        expandSheet(app, title: "Models")
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.ref'"))
             .firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         shot("1651-home-models-\(dark ? "dark" : "light")")
@@ -48,13 +48,29 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         for _ in 0..<12 where !link.isHittable { app.swipeUp() }
         link.tap()
         expandSheet(app, title: "Session Settings")
-        let tools = element(app, "settings-row-tools.active")
-        XCTAssertTrue(tools.waitForExistence(timeout: 8), app.debugDescription)
+        let toolsLink = app.buttons["settings-section-tools-open"]
+        XCTAssertTrue(toolsLink.waitForExistence(timeout: 8), app.debugDescription)
         shot("1651-session-settings-\(dark ? "dark" : "light")")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        toolsLink.tap()
+        expandSheet(app, title: "Tools")
+        XCTAssertTrue(element(app, "settings-row-tools.active").waitForExistence(timeout: 8), app.debugDescription)
+        shot("1651-session-tools-\(dark ? "dark" : "light")")
+        app.navigationBars.containing(.staticText, identifier: "Tools").buttons["Done"].firstMatch.tap()
+        let modelsLink = app.buttons["settings-section-model-open"]
+        XCTAssertTrue(modelsLink.waitForExistence(timeout: 5), app.debugDescription)
+        _ = waitFor(modelsLink, "hittable == true", timeout: 5)
+        modelsLink.tap()
+        expandSheet(app, title: "Models")
+        shot("1651-session-models-\(dark ? "dark" : "light")")
+        app.navigationBars.containing(.staticText, identifier: "Models").buttons["Done"].firstMatch.tap()
+        _ = waitFor(modelsLink, "hittable == true", timeout: 5)
+        app.navigationBars.containing(.staticText, identifier: "Session Settings").buttons["Done"].firstMatch.tap()
         let project = app.buttons["project-settings-link"]
         XCTAssertTrue(project.waitForExistence(timeout: 5), app.debugDescription)
-        for _ in 0..<12 where !project.isHittable { app.swipeDown() }
+        // The pop back to Manage Session settles before its rows take taps.
+        _ = waitFor(project, "hittable == true", timeout: 5)
+        for _ in 0..<4 where !project.isHittable { app.swipeUp() }
+        for _ in 0..<8 where !project.isHittable { app.swipeDown() }
         project.tap()
         expandSheet(app, title: "Project Settings")
         _ = app.staticTexts["No repository overrides"].waitForExistence(timeout: 8)

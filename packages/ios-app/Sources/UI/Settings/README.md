@@ -45,7 +45,9 @@ services, paired Macs and devices, notifications and logs.
   completion and stop on repeated cursors. Choices open picker sheets of `TronCatalogOptionRow`
   (native menus fail inside nested sheets, #877); numbers and ordered choices use the shared
   anchored slider with Gateway-served bounds; a tap anywhere outside it closes and saves it, even
-  below a short embedded section. `chatInline` metadata owns section placement.
+  below a short embedded section. Session and Home settings place sections in Global's group
+  cards (Agent, Tools & Extensions, More), every section a drill-in row; overrides show the
+  shared Overridden pill beside the row title and Revert after the value.
 - **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
   `confirm` text asks before sending. Secret drafts start empty and clear on dismissal; list and
   numeric-map drafts write only on Save; unknown fields stay read-only. Outside-change recovery
@@ -55,8 +57,9 @@ services, paired Macs and devices, notifications and logs.
   Project, Session, Global); Home writes its saved settings, a chat its own Session scope.
   Both reuse Global's renderer and editors, including models and tools. Project-owned controls are
   read-only with a shared Project info pill; explicit overrides have Overridden and circular Revert.
-  `SettingsProjectGroups` shows applied Project values only; `SettingsProjectNotices` shares bounded
-  file/key/reason diagnostics. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
+  `SettingsProjectGroups` shows applied Project values only. Both scopes show why Project settings
+  are not applied; only Project Settings' `SettingsProjectNotices` lists ignored repository
+  fields, named by setting label in plain language. Summaries omit unset values. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
 - **Changes.** Only Global has a Changes entry. `SettingsChangesView` pages `settings.history` by
   Project/Session/Global, pins approvals above history and keeps last-look per Mac. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model

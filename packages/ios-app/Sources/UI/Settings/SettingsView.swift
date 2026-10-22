@@ -311,11 +311,12 @@ struct SettingsSectionLinks: View {
 
     /// A scope's drill-in row names what it currently uses: the root section's
     /// essential values (Home's model and thinking), then any grouped section's title.
+    /// An unset optional value (a context window with no override) uses nothing.
     private func summary(_ id: String) -> String? {
         let sections = members(id)
         guard let first = sections.first, first.id == id else { return nil }
         let values = model.settingsSnapshot(for: target)?.resolution.keys
-            .filter { $0.group == id && selection.includes($0) && $0.presentation?.importance == "essential" }
+            .filter { $0.group == id && selection.includes($0) && $0.presentation?.importance == "essential" && $0.value != nil }
             .map(\.display).filter { !$0.isEmpty } ?? []
         guard !values.isEmpty else { return nil }
         return (values + sections.dropFirst().map(\.title)).joined(separator: " · ")
@@ -341,58 +342,39 @@ struct SessionSettingsView: View {
         .sessionOverrides
     }
 
-    private func inline(_ section: SettingsRendererSection) -> Bool {
-        // Tools is a setting, not a doorway to the same row. Other small
-        // sections inline only when no meaningful grouping would be lost.
-        guard !["model", "workers", "approvals", "run"].contains(section.id) else { return false }
-        return section.chatInline || section.id == "tools"
-            || (model.settingsSnapshot(for: target)?.resolution.keys.filter {
-                $0.group == section.id && selection.includes($0)
-            }.count ?? 0) == 1
-    }
-
     var body: some View {
         let sections = model.settingsSnapshot(for: target).map { SettingsRendererView.sections($0.resolution) } ?? []
-        let shown = sections.filter { section in
+        let shown = Set(sections.filter { section in
             model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
-        }
+        }.map(\.id))
+        let agent = ["model", "workers", "context", "approvals", "run"].filter(shown.contains)
+        let tools = ["tools"].filter(shown.contains)
+        let more = sections.map(\.id).filter { shown.contains($0) && !SettingsGroupKind.placedSections.contains($0) }
+        let projectOnly = homeProfileID == nil
+            && model.settingsSnapshot(for: target)?.resolution.keys.contains(where: SettingsKeySelection.projectOnly.includes) == true
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: TronSpacing.lg) {
+            // Global Settings' layout: titled group cards of drill-in rows (#1651).
+            VStack(alignment: .leading, spacing: 18) {
                 TronSettingsCaption(homeProfileID == nil
                     ? "Choices for this session. Revert an override to use Global settings."
                     : "Home's overrides of Global settings. Worker launch choices apply to new workers.")
-                if let snapshot = model.settingsSnapshot(for: target) { SettingsProjectNotices(resolution: snapshot.resolution) }
+                if let notice = model.settingsSnapshot(for: target)?.resolution.projectNotice { SettingsProjectNoticeGroup(notice: notice) }
                 if sections.isEmpty {
                     TronSheetLoadingState(label: "Loading settings…")
                 } else {
-                    // Served section order decides placement: adjacent drill-in
-                    // sections share one card, so Models precedes inline Tools.
-                    ForEach(Self.blocks(shown, inline: inline), id: \.first) { ids in
-                        if ids.count == 1, let section = shown.first(where: { $0.id == ids[0] }), inline(section) {
-                            SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
-                                                 projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
-                        } else {
-                            TronGlassCard {
-                                SettingsSectionLinks(ids: ids, sections: sections,
-                                                     target: target, ownedLayers: ownedLayers, projectCWD: projectCWD,
-                                                     showsSummary: true, selection: selection, homeProfileID: homeProfileID)
-                            }
-                        }
+                    if !agent.isEmpty {
+                        SettingsGroupCard(.agent) { links(agent, sections) }
                     }
-                }
-                if homeProfileID == nil, model.settingsSnapshot(for: target)?.resolution.keys.contains(where: SettingsKeySelection.projectOnly.includes) == true {
-                    TronGlassCard {
-                        TronProgressiveSheetLink(accessibilityLabel: "Set by Project", identity: "settings.project-only.\(sessionID)") {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    SettingsProjectGroups(target: target, selection: .projectOnly)
-                                }.padding(20)
+                    if !tools.isEmpty {
+                        SettingsGroupCard(.tools) { links(tools, sections) }
+                    }
+                    if !more.isEmpty || projectOnly {
+                        SettingsGroupCard(.more) {
+                            if !more.isEmpty { links(more, sections) }
+                            if projectOnly {
+                                if !more.isEmpty { TronSettingsDivider() }
+                                setByProject
                             }
-                            .tronScrollEdgeChrome()
-                            .tronNavigationTitle("Set by Project")
-                        } label: {
-                            TronSettingsRow(icon: "folder.badge.gearshape", title: "Set by Project",
-                                            subtitle: "Read-only repository settings")
                         }
                     }
                 }
@@ -409,38 +391,59 @@ struct SessionSettingsView: View {
         }
     }
 
-    /// Each inline section alone, and each run of adjacent drill-in sections together.
-    private static func blocks(_ shown: [SettingsRendererSection], inline: (SettingsRendererSection) -> Bool) -> [[String]] {
-        shown.reduce(into: [[String]]()) { blocks, section in
-            if !inline(section), let last = blocks.last?.last, let previous = shown.first(where: { $0.id == last }), !inline(previous) {
-                blocks[blocks.count - 1].append(section.id)
-            } else {
-                blocks.append([section.id])
+    private func links(_ ids: [String], _ sections: [SettingsRendererSection]) -> some View {
+        SettingsSectionLinks(ids: ids, sections: sections, target: target, ownedLayers: ownedLayers, projectCWD: projectCWD,
+                             showsSummary: true, selection: selection, homeProfileID: homeProfileID)
+    }
+
+    private var setByProject: some View {
+        TronProgressiveSheetLink(accessibilityLabel: "Set by Project", identity: "settings.project-only.\(sessionID)") {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    SettingsProjectGroups(target: target, selection: .projectOnly)
+                }.padding(20)
             }
+            .tronScrollEdgeChrome()
+            .tronNavigationTitle("Set by Project")
+        } label: {
+            TronSettingsRow(icon: "folder.badge.gearshape", title: "Set by Project",
+                            subtitle: "Read-only repository settings", subtitleColor: .tronTextSecondary)
         }
     }
 }
 
-/// Project diagnostics share one presentation in Session and Project settings.
+/// Why the Project layer is not applied (untrusted or unreadable), in Session and Project settings.
+struct SettingsProjectNoticeGroup: View {
+    let notice: SettingsProjectNotice
+
+    var body: some View {
+        TronSettingsGroup(nil, detail: notice.file) { TronSettingsNotice(message: notice.message) }
+    }
+}
+
+/// Project Settings' notice and the repository fields the Gateway ignores, named
+/// by the setting they try to change. Listed once here, not on every Session.
 struct SettingsProjectNotices: View {
     let resolution: SettingsResolution
 
     var body: some View {
-        if let notice = resolution.projectNotice {
-            TronSettingsGroup(nil, detail: notice.file) { TronSettingsNotice(message: notice.message) }
-        }
+        if let notice = resolution.projectNotice { SettingsProjectNoticeGroup(notice: notice) }
         if !resolution.diagnostics.isEmpty {
-            TronSettingsGroup("Ignored Project settings", detail: resolution.diagnostics.first?.file) {
+            TronSettingsGroup("Ignored settings", detail: resolution.diagnostics.first?.file) {
                 ForEach(Array(resolution.diagnostics.enumerated()), id: \.offset) { index, diagnostic in
                     if index > 0 { TronSettingsDivider() }
-                    TronSettingsRow(icon: "info.circle", title: diagnostic.key,
-                                    subtitle: "\(diagnostic.path) · \(diagnostic.reason == "project-forbidden" ? "Not allowed in Project settings" : "Unknown field")")
+                    let label = resolution.keys.first { $0.key == diagnostic.key }?.presentation?.label
+                    TronSettingsRow(icon: "info.circle", title: label ?? diagnostic.path,
+                                    subtitle: diagnostic.reason == "project-forbidden"
+                                        ? "Project settings can't change this. Ignored: \(diagnostic.path)"
+                                        : "Not a setting Tron knows. Ignored.")
                         .textSelection(.enabled)
+                        .accessibilityIdentifier("settings-ignored-\(diagnostic.path)")
                 }
                 if resolution.diagnosticsTruncated {
                     TronSettingsDivider()
-                    TronSettingsRow(icon: "ellipsis", title: "Additional diagnostics omitted",
-                                    subtitle: "Project diagnostics have a bounded size.")
+                    TronSettingsRow(icon: "ellipsis", title: "More ignored settings",
+                                    subtitle: "Only the first ones are listed.")
                 }
             }
         }
