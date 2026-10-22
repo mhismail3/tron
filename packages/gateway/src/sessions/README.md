@@ -12,7 +12,7 @@ settlement. Other session modules have their own manifests here; projection live
 
 `runtime-registry.ts` (`RuntimeRegistry`), `runtime-slot.ts` (native frame extending kernel `RunOperations`),
 [`kernel/run`](../kernel/run/README.md) receipts, markers, per-operation work, held/SDK queues, serialized queue edits, serialized prompt admission/completion, SDK run transitions, manual compaction, durable terminals/observers, attention, task waits, write fences and cancellation;
-`owned-session-dispatch.ts`, `semantic-ui-broker.ts`, `restart-drain.ts`
+`semantic-ui-broker.ts`, `restart-drain.ts`
 and the rest of `../run.module.json`. State: Gateway-owned
 bounded run markers and command receipts; Pi owns JSONL. Host recipes are fixed per runtime; append policies resolve recorded identity live.
 
@@ -113,8 +113,8 @@ metadata, never JSONL, and never implies parallel execution.
 
 - Run admission, queue/Stop/compaction and configuration/bash algorithms: kernel `RunOperations`,
   inherited by `RuntimeSlot` with native SDK/resources/publication; acquisition/eviction: `RuntimeRegistry`.
-- Owned dispatch for Automations and Home tasks: `OwnedSessionDispatch` (shared
-  leases, recovery evidence, terminal acknowledgement, opt-in 24-hour deadline).
+- Owned dispatch for Automations and Home tasks: kernel/delegation `OwnedSessionDispatch` over
+  `RuntimeRegistry`'s leases, recovery evidence and marker acknowledgement (opt-in 24-hour deadline).
 - Notifications use call-time kernel hooks; the slot owns presence, waiting episodes and failure diagnostics.
 
 ## Signals
