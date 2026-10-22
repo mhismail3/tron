@@ -1926,6 +1926,10 @@ export class GatewayService {
           string(params.name, "name", { max: 8_192 }),
         ));
       }
+      case "session.subagentDetail": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(await slot.subagentDetail(string(params.name, "name", { max: 8_192 })));
+      }
       case "session.export": {
         const slot = await this.openedSlot(client, params);
         // A queued export whose client left is dropped before it starts: the

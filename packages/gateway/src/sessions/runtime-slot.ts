@@ -176,7 +176,7 @@ import { projectHookRegistrations } from "../kernel/projection/hook-projection.j
 import { resourceDistribution } from "./resource-distribution.js";
 import { skillTitle } from "./skill-title.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
-import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
+import { availableSubagentRow, loadSubagentCatalog, subagentDetail, type SubagentCatalog, type SubagentDetail } from "./subagent-catalog.js";
 import type { SessionStore } from "../admin/settings-resolver.js";
 import { KEYS, hasCompactionApplier, schemaKey } from "../admin/settings-schema.js";
 
@@ -7918,6 +7918,15 @@ export class RuntimeSlot {
       subagents: subagents.subagents.map(availableSubagentRow),
       ...(subagents.diagnostic ? { subagentDiagnostics: subagents.diagnostic } : {}),
     });
+  }
+
+  /** One discovered subagent's definition body, from the same discovery
+   * `resources()` lists; a name no longer discovered is not found. */
+  async subagentDetail(name: string): Promise<SubagentDetail> {
+    this.assertNoTrustReload();
+    const subagent = (await this.loadSubagents()).subagents.find((candidate) => candidate.name === name);
+    if (!subagent) throw new GatewayError("not_found", "That subagent is no longer available");
+    return subagentDetail(subagent);
   }
 
   /** Failure-soft and uncached: every call re-runs the package's own discovery,

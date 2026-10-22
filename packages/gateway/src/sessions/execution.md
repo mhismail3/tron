@@ -173,7 +173,9 @@ custom-model changes publish bounded global invalidations.
   I/O. A prompt starts its run-marker write before answering; settlement awaits it.
 - `session.commands`: runtime order, ≤ 1,000 rows and 700 KiB, unique `source:name`;
   a skill row carries its SKILL.md frontmatter `title` when set (display only);
-  `session.commandDetail` returns one source document ≤ 96 KiB.
+  `session.commandDetail` returns one source document ≤ 96 KiB;
+  `session.subagentDetail` returns one discovered subagent's row and its
+  credential-redacted definition body under the same bound, never its file path.
   `session.prompt.resourceInvocations` (#311): up to 16 skills and prompts once each
   with empty arguments, or one extension command whose arguments equal the text
   (no attachments). RuntimeSlot composes expansions then the visible prompt with Pi
