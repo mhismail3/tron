@@ -53,16 +53,16 @@ struct SettingsView: View {
                         }
                     }
                     SettingsGroupCard(.agent) {
-                        SettingsSectionLinks(ids: ["model", "workers", "context"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
+                        SettingsSectionLinks(ids: ["model", "workers", "context"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "global")
                         TronSettingsDivider()
                         settingsLink("Trusted Projects", summary: "Projects whose extensions and hooks load", icon: "checkmark.shield") { TrustedProjectsSettingsView() }
                         TronSettingsDivider()
                         SettingsSectionLinks(ids: ["approvals", "run"], sections: sections,
-                                             target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
+                                             target: SettingsTarget.global.gatewayTarget, writeLayer: "global",
                                              selection: .allExcept(TrustedProjectsSettingsView.keys))
                     }
                     SettingsGroupCard(.tools) {
-                        SettingsSectionLinks(ids: ["tools"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
+                        SettingsSectionLinks(ids: ["tools"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "global")
                         TronSettingsDivider()
                         settingsLink("MCP Servers", summary: "Tool providers and their sign-ins", icon: "server.rack") {
                             MCPServersSettingsView()
@@ -81,7 +81,7 @@ struct SettingsView: View {
                     if !unplaced.isEmpty {
                         SettingsGroupCard(.more) {
                             SettingsSectionLinks(ids: unplaced.map(\.id), sections: sections,
-                                                 target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
+                                                 target: SettingsTarget.global.gatewayTarget, writeLayer: "global")
                         }
                     }
                     // Utilities and diagnostics that span this iPhone and the
@@ -475,7 +475,7 @@ struct SetupSettingsView: View {
                 TronSettingsGroup("Import", detail: "Open a Tron session export in a new session.") {
                     ImportSessionRow(onImported: onImported)
                 }
-                SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
+                SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global",
                                      presentation: .section("setup"), embedded: true)
                 ExperimentalSettingsContent()
             }

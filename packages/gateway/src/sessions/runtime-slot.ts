@@ -64,7 +64,7 @@ import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../kernel/host/session-profile.js";
-import type { ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
+import type { ChangeContext, ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
 import type { Actor } from "../admin/settings-record.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -1282,6 +1282,7 @@ export class RuntimeSlot {
         if (input.taskId === undefined) {
           return owners.changes.change(target, changes, {
             actor: actor(input.toolCallId), reason: input.reason, web: input.web, session: source(),
+            ...(this.isHomeChapter ? { homeChapter: this.homeSettingsChapter() } : {}),
             ...(input.dryRun ? { dryRun: true } : {}),
           });
         }
@@ -1448,7 +1449,7 @@ export class RuntimeSlot {
       && (entry.data as { fixed?: Record<string, { ref: string }> } | null)?.fixed?.["model.ref[role=chat]"]?.ref === modelChoice.ref) : -1;
     const choice = (key: string, legacy: unknown) => {
       const recorded = fixed[key];
-      return recorded ? recorded.from === "chat" || recorded.from === "delegate" ? recorded.value : undefined : legacy;
+      return recorded ? recorded.from === "session" || recorded.from === "delegate" ? recorded.value : undefined : legacy;
     };
     const model = readWorkerQueueSelection(branch, choiceIndex) ?? choice("model.ref[role=chat]",
       session.model && { provider: session.model.provider, id: session.model.id }) as { provider: string; id: string } | undefined;
@@ -1499,7 +1500,7 @@ export class RuntimeSlot {
     const settings = changeChatSetting(readChatSettings(branch), key, value);
     const fixed = readChatFixedSettings(branch);
     if (schemaKey(key).timing === "fixed") {
-      fixed[key] = { ...(fixedAt ?? { from: "chat", at: new Date().toISOString(), ref: randomUUID() }), value };
+      fixed[key] = { ...(fixedAt ?? { from: "session", at: new Date().toISOString(), ref: randomUUID() }), value };
     }
     const requestPins = readChatRequestPins(branch);
     // Tier admission and timing are separate: lowering a floor must not make
@@ -1550,7 +1551,7 @@ export class RuntimeSlot {
       const row = resolved.keys[0];
       // Approval of a lower layer is not approval to release a higher layer's
       // fixed policy, even if that higher store is subsequently edited outside Tron.
-      if (row?.value !== false || row.layer === "chat" || row.layer === "profile"
+      if (row?.value !== false || row.layer === "session"
         || (layer === "mac" && row.layer === "project")) return;
       delete pins["context.images.block"];
       const receiptId = randomUUID();
@@ -2220,7 +2221,7 @@ export class RuntimeSlot {
         { cwd: trust.cwd, home: profile.launchDefaults === "settings-profile-layer", chat: { settings: {} }, modelRuntime },
         ["model.ref[role=chat]", "model.thinking[role=chat]", "tools.active"], { storeState: false },
       ) : undefined;
-      const profileModel = launchDefaults?.keys.find(row => row.key === "model.ref[role=chat]" && row.layer === "profile")?.value as { provider: string; id: string } | undefined;
+      const profileModel = launchDefaults?.keys.find(row => row.key === "model.ref[role=chat]" && row.layer === "session")?.value as { provider: string; id: string } | undefined;
       if (profile.launchDefaults === "settings-profile-layer" && profileModel) {
         const configured = modelRuntime.getPhysicalModel(profileModel.provider, profileModel.id);
         if (!configured) throw new GatewayError("conflict", "Home's configured profile model is unavailable or virtual");
@@ -2269,7 +2270,7 @@ export class RuntimeSlot {
       const toolChoice = readChatToolChoice(sessionManager.getBranch());
       if (toolChoice && toolChoice.fixed?.from !== "project") created.session.setActiveToolsByName(toolChoice.tools);
       else if (profile.launchDefaults === "settings-profile-layer") {
-        const tools = launchDefaults?.keys.find(row => row.key === "tools.active" && row.layer === "profile")?.value;
+        const tools = launchDefaults?.keys.find(row => row.key === "tools.active" && row.layer === "session")?.value;
         if (Array.isArray(tools)) created.session.setActiveToolsByName(tools.filter((name): name is string => typeof name === "string" && profile.tools?.includes(name) === true));
       }
       if (profile.model && startsNewChat && created.session.model) {
@@ -2387,7 +2388,7 @@ export class RuntimeSlot {
       // Startup fallback/explicit Home choices are not attributed to a default
       // that did not supply them. Existing chats never acquire invented history.
       const from = binding.store === "chat" && binding.field === "model" && row.value !== undefined && JSON.stringify(value) !== JSON.stringify(row.value)
-        ? "chat" : row.layer;
+        ? "session" : row.layer;
       fixed[row.key] = { value, from, at: new Date().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) };
     }
     if (context && session.model) policy!.set({ provider: session.model.provider, id: session.model.id }, context.effective);
@@ -2430,7 +2431,7 @@ export class RuntimeSlot {
 
   private async recordFixedSetting(key: string, value: unknown, origin?: FixedSetting): Promise<void> {
     const fixed = readChatFixedSettings(this.sessionManager.getBranch());
-    fixed[key] = { ...(origin ?? { from: "chat", at: new Date().toISOString(), ref: randomUUID() }), value };
+    fixed[key] = { ...(origin ?? { from: "session", at: new Date().toISOString(), ref: randomUUID() }), value };
     await this.persistFixedSettings(fixed);
   }
 
@@ -8809,33 +8810,63 @@ export class RuntimeSlot {
 
   /** Direct runtime owners may omit expectations; every remote RPC requires
    * the originating runtime/model cut before entering this serialized lane. */
+  /** The settings receipt coordinator publishes Home's recipe and adopts it
+   * without releasing this runtime's lane or recursively entering its setters. */
+  homeSettingsChapter(initiatingWorkToken?: string): NonNullable<ChangeContext["homeChapter"]> {
+    const session = this.runtime.session;
+    const revision = this.revision;
+    return {
+      sessionId: this.id, cwd: this.cwd, home: this.isHomeChapter, chat: this.settingsChatLayer(), modelRuntime: this.modelRuntime,
+      mutate: operation => this.lane.run(async () => {
+        try {
+          this.assertConfigurationIdle(initiatingWorkToken);
+          this.assertChapterWritable();
+          if (!this.isHomeChapter || this.runtime.session !== session || this.revision !== revision) {
+            throw new GatewayError("conflict", "Home runtime changed before settings publication");
+          }
+        } catch (error) {
+          return operation({ error: error instanceof GatewayError ? error : new GatewayError("internal", String(error)) });
+        }
+        return operation({ appliers: {
+          setModel: (ref, fixedAt) => this.applyModelConfiguration(ref.provider, ref.id, initiatingWorkToken, undefined, fixedAt),
+          setThinking: (level, fixedAt) => this.applyThinkingConfiguration(level as ThinkingLevel, initiatingWorkToken, undefined, fixedAt),
+          setTools: (tools, fixedAt) => this.applyToolsConfiguration(tools, initiatingWorkToken, fixedAt),
+          setContextWindow: () => { throw new GatewayError("invalid_request", "Home has no context window override"); },
+          setSetting: () => { throw new GatewayError("invalid_request", "Home adopts only model, thinking and tools"); },
+        } });
+      }),
+    };
+  }
+
   async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
-    return this.lane.run(async () => {
-      this.assertConfigurationAdmissible(initiatingWorkToken);
-      this.assertChapterWritable();
-      if (expectation) this.assertConfigurationExpectation(expectation);
-      const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
-      if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
-      // Home must stay on a fixed physical model: a virtual model routes on the
-      // canonical transcript, which Home's profile does not own. The live
-      // runtime's profile decides, so an ordinary session keeps the choice.
-      if (this.liveProfile().model?.physicalOnly && model.api === VIRTUAL_MODEL_API) {
-        throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
-      }
-      const previousThinking = this.runtime.session.thinkingLevel;
-      await this.runtime.session.setModel(model as Model<never>);
-      await this.recordFixedSetting("model.ref[role=chat]", { provider, id: modelId }, fixedAt);
-      if (this.runtime.session.thinkingLevel !== previousThinking) await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel);
-      // The Home record is the single source of truth for the model a re-enable
-      // restores, and only an enabled Home's change belongs to it.
-      const modelPolicy = this.liveProfile().model;
-      if (modelPolicy) {
-        await modelPolicy.changed(this.id, { provider, id: modelId });
-      }
-      this.revision += 1;
-      this.publishSnapshot();
-      return this.revision;
-    });
+    return this.lane.run(() => this.applyModelConfiguration(provider, modelId, initiatingWorkToken, expectation, fixedAt));
+  }
+
+  private async applyModelConfiguration(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
+    this.assertConfigurationAdmissible(initiatingWorkToken);
+    this.assertChapterWritable();
+    if (expectation) this.assertConfigurationExpectation(expectation);
+    const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
+    if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
+    // Home must stay on a fixed physical model: a virtual model routes on the
+    // canonical transcript, which Home's profile does not own. The live
+    // runtime's profile decides, so an ordinary session keeps the choice.
+    if (this.liveProfile().model?.physicalOnly && model.api === VIRTUAL_MODEL_API) {
+      throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
+    }
+    const previousThinking = this.runtime.session.thinkingLevel;
+    await this.runtime.session.setModel(model as Model<never>);
+    await this.recordFixedSetting("model.ref[role=chat]", { provider, id: modelId }, fixedAt);
+    if (this.runtime.session.thinkingLevel !== previousThinking) await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel);
+    // The Home record is the single source of truth for the model a re-enable
+    // restores, and only an enabled Home's change belongs to it.
+    const modelPolicy = this.liveProfile().model;
+    if (modelPolicy) {
+      await modelPolicy.changed(this.id, { provider, id: modelId });
+    }
+    this.revision += 1;
+    this.publishSnapshot();
+    return this.revision;
   }
 
   async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<number> {
@@ -8863,34 +8894,38 @@ export class RuntimeSlot {
   }
 
   async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
-    return this.lane.run(async () => {
-      this.assertConfigurationAdmissible(initiatingWorkToken);
-      this.assertChapterWritable();
-      if (expectation) this.assertConfigurationExpectation(expectation);
-      this.runtime.session.setThinkingLevel(level);
-      await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel, fixedAt);
-      this.revision += 1;
-      this.publishSnapshot();
-      return this.revision;
-    });
+    return this.lane.run(() => this.applyThinkingConfiguration(level, initiatingWorkToken, expectation, fixedAt));
+  }
+
+  private async applyThinkingConfiguration(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
+    this.assertConfigurationAdmissible(initiatingWorkToken);
+    this.assertChapterWritable();
+    if (expectation) this.assertConfigurationExpectation(expectation);
+    this.runtime.session.setThinkingLevel(level);
+    await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel, fixedAt);
+    this.revision += 1;
+    this.publishSnapshot();
+    return this.revision;
   }
 
   async setTools(toolNames: string[], initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<void> {
-    await this.lane.run(async () => {
-      this.assertNoLiveTaskConfiguration("active tools");
-      this.assertIdle(false, initiatingWorkToken);
-      const tools = this.runtime.session.getAllTools();
-      const known = new Set(tools.map((tool) => tool.name));
-      const unknown = toolNames.filter((name) => !known.has(name));
-      if (unknown.length > 0) throw new GatewayError("invalid_request", `Unknown agent tools: ${unknown.join(", ")}`);
-      const hidden = toolNames.filter((name) => tools.find((tool) => tool.name === name)?.exposure === "hidden");
-      if (hidden.length > 0) throw new GatewayError("invalid_request", `Hidden agent tools cannot be activated: ${hidden.join(", ")}`);
-      this.runtime.session.setActiveToolsByName(toolNames);
-      await this.recordFixedSetting("tools.active", this.runtime.session.getActiveToolNames(), fixedAt);
-      this.revision += 1;
-      this.emit("session.contextChanged", {});
-      this.publishSnapshot();
-    });
+    return this.lane.run(() => this.applyToolsConfiguration(toolNames, initiatingWorkToken, fixedAt));
+  }
+
+  private async applyToolsConfiguration(toolNames: string[], initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<void> {
+    this.assertNoLiveTaskConfiguration("active tools");
+    this.assertIdle(false, initiatingWorkToken);
+    const tools = this.runtime.session.getAllTools();
+    const known = new Set(tools.map((tool) => tool.name));
+    const unknown = toolNames.filter((name) => !known.has(name));
+    if (unknown.length > 0) throw new GatewayError("invalid_request", `Unknown agent tools: ${unknown.join(", ")}`);
+    const hidden = toolNames.filter((name) => tools.find((tool) => tool.name === name)?.exposure === "hidden");
+    if (hidden.length > 0) throw new GatewayError("invalid_request", `Hidden agent tools cannot be activated: ${hidden.join(", ")}`);
+    this.runtime.session.setActiveToolsByName(toolNames);
+    await this.recordFixedSetting("tools.active", this.runtime.session.getActiveToolNames(), fixedAt);
+    this.revision += 1;
+    this.emit("session.contextChanged", {});
+    this.publishSnapshot();
   }
 
   async compact(instructions?: string): Promise<{ queued: boolean }> {

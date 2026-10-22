@@ -511,7 +511,7 @@ struct SessionContextSheet: View {
                 }
                 TronProgressiveSheetLink(accessibilityLabel: "Session Settings", identity: "session.\(sessionID).settings",
                                          accent: .tronEmerald) {
-                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd)
+                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["session"], projectCWD: snapshot.cwd)
                         .tronNavigationTitle("Session Settings")
                 } label: {
                     TronSettingsRow(icon: "slider.horizontal.3", title: "Session Settings",

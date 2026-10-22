@@ -167,7 +167,7 @@ const SETTINGS_MODEL_CAPABILITY = "settings-model.v1";
 
 function settingsTarget(raw: unknown): SettingsTarget {
   const target = object(raw, "target");
-  const kind = oneOf(target.kind, "target.kind", ["mac", "project", "session", "home"] as const);
+  const kind = oneOf(target.kind, "target.kind", ["global", "project", "session", "home"] as const);
   rejectUnknownFields(target, kind === "project" ? ["kind", "cwd"] : kind === "session" ? ["kind", "sessionId"] : ["kind"], "target");
   if (kind === "project") return { kind, cwd: string(target.cwd, "target.cwd", { max: 4_096 }) };
   if (kind === "session") return { kind, sessionId: string(target.sessionId, "target.sessionId", { max: 200 }) };
@@ -229,7 +229,7 @@ function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
   return {
     key: string(change.key, `${label}.key`, { max: 200 }),
     ...(qualifiers ? { qualifiers } : {}),
-    layer: oneOf(change.layer, `${label}.layer`, ["chat", "profile", "project", "mac"] as const),
+    layer: oneOf(change.layer, `${label}.layer`, ["session", "project", "global"] as const),
     op: oneOf(change.op, `${label}.op`, ["set", "unset"] as const),
     ...("value" in change ? { value: change.value } : {}),
     ...("expected" in change ? { expected: change.expected } : {}),
@@ -1084,8 +1084,8 @@ export class GatewayService {
           // and the revoke can be retried, rather than a revoked iPhone keeping
           // a working SSH key.
           if ((await this.dependencies.settingsModel?.macTerminalKeys?.read())?.[deviceId] !== undefined) {
-            await this.dependencies.settingsChanges.change({ kind: "mac" }, [{
-              key: "permissions.macTerminalKey", qualifiers: { device: deviceId }, layer: "mac", op: "unset",
+            await this.dependencies.settingsChanges.change({ kind: "global" }, [{
+              key: "permissions.macTerminalKey", qualifiers: { device: deviceId }, layer: "global", op: "unset",
             }], {
               actor: { kind: "ui", id: client.identity }, reason: "The paired device was revoked",
               commandId: `${string(params.commandId, "commandId", { min: 8, max: 120 })}:mac-terminal`,
@@ -2144,7 +2144,7 @@ export class GatewayService {
           const session = target.kind === "session"
             ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), target.sessionId, params.fence, workToken)
             : undefined;
-          const homeChapter = target.kind === "home" && params.dryRun !== true ? await this.settingsHomeChapter(workToken) : undefined;
+          const homeChapter = (target.kind === "home" || session?.home) && params.dryRun !== true ? await this.settingsHomeChapter(workToken) : undefined;
           const result = await this.dependencies.settingsChanges.change(target, changes, {
             actor: { kind: "ui", id: client.identity },
             ...(params.reason === undefined ? {} : { reason: boundedText(params.reason, "reason", 2_000) }),
@@ -2174,11 +2174,15 @@ export class GatewayService {
       case "settings.applyAgain":
         // Apply again is offered on an outside change that replaced or removed a
         // value Tron wrote (docs/settings-model.md 5.6); it is never automatic.
-        return this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, async workToken => {
           rejectUnknownFields(params, ["commandId", "changeId"], method);
-          return safeJson(await this.dependencies.settingsChanges.applyAgain(string(params.changeId, "changeId", { max: 100 }), {
+          const changeId = string(params.changeId, "changeId", { max: 100 });
+          const entry = await this.dependencies.settingsChanges.record.find(changeId);
+          const homeChapter = entry?.target.kind === "home" ? await this.settingsHomeChapter(workToken) : undefined;
+          return safeJson(await this.dependencies.settingsChanges.applyAgain(changeId, {
             actor: { kind: "ui", id: client.identity },
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
+            ...(homeChapter ? { homeChapter } : {}),
           }));
         });
       case "settings.approvals": {
@@ -2196,7 +2200,9 @@ export class GatewayService {
           const session = pending?.kind === "session" && params.approved === true
             ? await this.settingsSession(await this.slot({ sessionId: pending.sessionId }), pending.sessionId, params.fence, workToken)
             : undefined;
+          const homeChapter = pending?.kind === "home" && params.approved === true ? await this.settingsHomeChapter(workToken) : undefined;
           return safeJson(await this.dependencies.settingsChanges.decide(requestId, {
+            ...(homeChapter ? { homeChapter } : {}),
             digest: string(params.digest, "digest", { max: 64 }),
             approved: boolean(params.approved, "approved"),
             decidedBy: { kind: "ui", id: client.identity },
@@ -2208,7 +2214,7 @@ export class GatewayService {
         rejectUnknownFields(params, ["cursor", "limit", "key", "status", "actor", "layer", "section"], method);
         const page = await this.dependencies.settingsChanges.history({
           ...(params.actor === undefined ? {} : { actor: oneOf(params.actor, "actor", ["agents", "ui", "home", "worker", "agent", "outside"] as const) }),
-          ...(params.layer === undefined ? {} : { layer: oneOf(params.layer, "layer", ["chat", "profile", "project", "mac"] as const) }),
+          ...(params.layer === undefined ? {} : { layer: oneOf(params.layer, "layer", ["session", "project", "global"] as const) }),
           ...(params.section === undefined ? {} : { section: oneOf(params.section, "section", SECTIONS.map(section => section.id)) }),
           ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 40 }) }),
           ...(params.limit === undefined ? {} : { limit: integer(params.limit, "limit", 1, 200) }),
@@ -2521,25 +2527,15 @@ export class GatewayService {
     };
   }
 
-  /** The enabled Home's active chapter with its slot-lane appliers, for a
-   * maintainer's Home profile change to adopt (settings-model.md 6.1, #1335).
-   * The lane guards stay: a running chapter refuses, and the bundle rolls back. */
+  /** The enabled Home's runtime boundary holds its lane before any recipe
+   * publication, including through the operational SDK adoption. */
   private async settingsHomeChapter(workToken?: string): Promise<ChangeContext["homeChapter"]> {
     const home = this.dependencies.home;
     let open: ReturnType<HomeOwner["open"]>;
     try { open = home!.open(); } catch { return undefined; }
     if (open.chapterState !== "active") return undefined;
     const slot = await this.slot({ sessionId: open.sessionId });
-    return {
-      sessionId: open.sessionId, cwd: slot.cwd, home: slot.isHomeChapter, chat: slot.settingsChatLayer(), modelRuntime: slot.modelRuntime,
-      appliers: {
-        setModel: (ref, fixedAt) => slot.setModel(ref.provider, ref.id, workToken, undefined, fixedAt),
-        setThinking: (level, fixedAt) => slot.setThinking(oneOf(level, "level", thinkingLevels), workToken, undefined, fixedAt),
-        setTools: (tools, fixedAt) => slot.setTools(tools, workToken, fixedAt),
-        setContextWindow: () => { throw new GatewayError("invalid_request", "Home profile has no context window"); },
-        setSetting: () => { throw new GatewayError("invalid_request", "Home profile adopts only model, thinking and tools"); },
-      },
-    };
+    return slot.homeSettingsChapter(workToken);
   }
 
   /** After-apply effects by each key's effect point, then the broadcast (doc 5.2
@@ -2571,13 +2567,13 @@ export class GatewayService {
       // changed store, not the target through which the request arrived.
       const imageLayers = new Set(changes.filter(change => change.key === "context.images.block").map(change => change.layer));
       for (const layer of imageLayers) {
-        if (layer !== "mac" && layer !== "project") continue;
+        if (layer !== "global" && layer !== "project") continue;
         const projectCwd = layer === "project"
           ? target.kind === "project" ? target.cwd
             : target.kind === "session" ? (await this.slot({ sessionId: target.sessionId })).cwd : undefined
           : undefined;
         if (layer === "project" && projectCwd === undefined) continue;
-        const defaultTarget: SettingsTarget = projectCwd === undefined ? { kind: "mac" } : { kind: "project", cwd: projectCwd };
+        const defaultTarget: SettingsTarget = projectCwd === undefined ? { kind: "global" } : { kind: "project", cwd: projectCwd };
         const resolved = await this.dependencies.settingsModel.resolve(defaultTarget, undefined, ["context.images.block"]);
         if (resolved.keys[0]?.value === false) {
           await this.dependencies.sessions.releaseInheritedImageBlock(projectCwd === undefined ? undefined : (await this.dependencies.trust.inspect(projectCwd)).projectDir);
@@ -2588,9 +2584,9 @@ export class GatewayService {
       // A record subject (a profile item) has no after-apply effect of its own.
       const key = KEYS.find(candidate => candidate.id === change.key);
       if (!key) continue;
-      if (key.effect === "reload" && change.layer === "mac" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
-      if (key.effect === "next-compaction" && (change.layer === "mac" || projectDir)) {
-        this.dependencies.sessions.refreshCompactionPolicies(change.layer === "mac" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);
+      if (key.effect === "reload" && change.layer === "global" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
+      if (key.effect === "next-compaction" && (change.layer === "global" || projectDir)) {
+        this.dependencies.sessions.refreshCompactionPolicies(change.layer === "global" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);
       }
     }
     this.dependencies.broadcast("settings.changed", safeJson({
@@ -2765,7 +2761,7 @@ export class GatewayService {
   /** This Gateway's default model for a new session, admitted the same way. */
   private async defaultHomeModel(): Promise<ModelRef> {
     // The Mac layer's default model through the one resolver.
-    const resolution = await this.dependencies.settingsModel.resolve({ kind: "mac" }, undefined, ["model.ref[role=chat]"], { storeState: false });
+    const resolution = await this.dependencies.settingsModel.resolve({ kind: "global" }, undefined, ["model.ref[role=chat]"], { storeState: false });
     const fallback = resolution.keys.find(key => key.key === "model.ref[role=chat]")?.value as ModelRef | undefined;
     if (!fallback) throw new GatewayError("invalid_request", "Tron Home needs a model: set a default model or name one");
     return this.admitHomeModel(fallback.provider, fallback.id);

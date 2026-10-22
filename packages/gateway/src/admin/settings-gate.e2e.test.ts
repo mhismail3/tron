@@ -224,78 +224,47 @@ describe("settings risk gate", () => {
     transcript.push({ case: "project default before first chat", steps: [{ saved, project, source }] });
   });
 
-  it.each([[false, false], [true, false], [true, true]])("Home uses its profile default unless designation explicitly chooses a model (%s explicit, %s equal to profile)", async (explicit, sameAsProfile) => {
+  it("Home's durable model choice has one Session family across its alias, Revert and re-enable", async () => {
     const f = await fixture();
-    const profileModel = (model: typeof MODEL) => f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: { kind: "home" },
-      changes: [{ key: "model.ref[role=chat]", layer: "profile", op: "set", value: model }],
+    const home = await f.designateHome(MODEL);
+    const target = { kind: "home" };
+    const save = (value: typeof MODEL) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target, changes: [{ key: "model.ref[role=chat]", layer: "session", op: "set", value }],
     });
-    await profileModel(MEMORY_MODEL);
-    const requested = sameAsProfile ? MEMORY_MODEL : MODEL;
-    const designation = await f.registry.homeOwner().designate(explicit ? { model: requested } : {}, () => MODEL);
-    await setHomeMemoryModels(f.registry, [MEMORY_MODEL]);
-    const home = await f.registry.acquire(designation.sessionId);
-    const chosen = explicit ? requested : MEMORY_MODEL;
-    expect(home.snapshot().model).toMatchObject(chosen);
-    expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toMatchObject({
-      value: chosen, from: explicit ? "chat" : "profile",
-    });
-    // Home Settings' model is Home's model (#1335): saving it adopts it into the
-    // current chapter, replacing even an explicit Session override, so the saved
-    // selection, Configuration and the next Home request agree.
     const served: string[] = [];
-    const nextTurn = async () => {
+    const turn = async () => {
       f.faux.setResponses([async (_context, _options, _state, model) => {
-        served.push(`${model.provider}/${model.id}`);
-        return fauxAssistantMessage("Home model observed");
+        served.push(model.id);
+        return fauxAssistantMessage("Single Home recipe model");
       }]);
-      const before = served.length;
-      await home.prompt("which model runs Home");
-      await waitFor(() => (served.length > before && home.snapshot().configurationBlocker === null) || undefined, "Home turn settled");
-      return served.at(-1);
+      await home.prompt("Observe Home's effective model");
+      await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home model turn settled");
     };
-    const configuration = async () => ((await f.service.invoke(phone(), "settings.resolve", {
-      target: { kind: "session", sessionId: home.id }, keys: ["model.ref[role=chat]"],
-    })) as unknown as { keys: Array<{ value: unknown; layer: string; fixedAt?: { from: string } }> }).keys[0];
-    const saved = async () => ((await f.service.invoke(phone(), "settings.resolve", {
-      target: { kind: "home" }, keys: ["model.ref[role=chat]"],
-    })) as unknown as { keys: Array<{ value: unknown; layer: string }> }).keys[0];
-    await profileModel(MODEL);
-    expect(await saved()).toMatchObject({ value: MODEL, layer: "profile" });
-    expect(home.snapshot().model).toMatchObject(MODEL);
-    expect(await configuration()).toMatchObject({ value: MODEL, layer: "chat", fixedAt: { from: "profile" } });
-    expect(await nextTurn()).toBe(`${MODEL.provider}/${MODEL.id}`);
-    // History is newest first.
-    const adopted = (await f.history()).filter(entry => entry.key === "model.ref[role=chat]").slice(0, 2).reverse();
-    expect(adopted).toEqual([
-      expect.objectContaining({ target: { kind: "home" }, layer: "profile", after: MODEL, status: "applied" }),
-      expect.objectContaining({ target: { kind: "session", sessionId: home.id }, layer: "chat", after: MODEL, status: "applied",
-        fixedAt: expect.objectContaining({ from: "profile", value: MODEL }) }),
-    ]);
-    // Precedence is unchanged: a later Session override still wins over the profile.
+    await save(MEMORY_MODEL);
+    await turn();
+    expect(served).toEqual([MEMORY_MODEL.id]);
+    const alias = { kind: "session", sessionId: home.id };
+    const resolved = await f.service.invoke(phone(), "settings.resolve", { target: alias, keys: ["model.ref[role=chat]"] }) as unknown as { target: unknown; keys: Array<Record<string, unknown>> };
+    expect(resolved.target).toEqual(target);
+    expect(resolved.keys[0]).toMatchObject({ value: MEMORY_MODEL, layer: "session", overridden: true });
+    const fence = () => ({ runtimeGeneration: home.snapshot().runtimeGeneration, model: home.snapshot().model });
     await f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: { kind: "session", sessionId: home.id },
-      fence: { runtimeGeneration: home.snapshot().runtimeGeneration, model: home.snapshot().model },
-      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: MEMORY_MODEL }],
+      commandId: commandId(), target: alias, fence: fence(),
+      changes: [{ key: "model.ref[role=chat]", layer: "session", op: "unset" }],
     });
-    expect(await configuration()).toMatchObject({ value: MEMORY_MODEL, layer: "chat", fixedAt: { from: "chat" } });
-    expect(await nextTurn()).toBe(`${MEMORY_MODEL.provider}/${MEMORY_MODEL.id}`);
-    const beforeDisable = home.settingsChatLayer().fixed?.["model.ref[role=chat]"];
+    await turn();
+    expect(served).toEqual([MEMORY_MODEL.id, MODEL.id]);
+    await save(MEMORY_MODEL);
     await f.registry.homeOwner().disable();
     const enabled = await f.registry.homeOwner().designate({}, () => MODEL);
     expect(enabled.sessionId).toBe(home.id);
+    await turn();
+    expect(served).toEqual([MEMORY_MODEL.id, MODEL.id, MEMORY_MODEL.id]);
     expect(home.snapshot().model).toMatchObject(MEMORY_MODEL);
-    expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(beforeDisable);
-    const snapshot = home.snapshot();
-    await f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: { kind: "session", sessionId: home.id },
-      fence: { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model },
-      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "unset" }],
-    });
-    expect(home.snapshot().model).toMatchObject(MODEL);
-    expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toMatchObject({ value: MODEL, from: "profile" });
-    expect(await nextTurn()).toBe(`${MODEL.provider}/${MODEL.id}`);
-    transcript.push({ case: `Home profile default: ${explicit ? "explicit" : "inherited"}`, steps: [{ chosen, served, reset: home.settingsChatLayer().fixed }] });
+    const changes = (await f.history()).filter(entry => entry.key === "model.ref[role=chat]");
+    expect(changes).toHaveLength(3);
+    expect(changes.every(entry => entry.target.kind === "home" && entry.layer === "session")).toBe(true);
+    transcript.push({ case: "single durable Home model family", steps: [{ served, resolved, changes }] });
   });
 
   it("Home's tool choices carry the descriptions its chapter registered", async () => {
@@ -317,146 +286,60 @@ describe("settings risk gate", () => {
     expect(described.find(option => option.value === "ask_user")?.detail).toBeTruthy();
   });
 
-  it("Home profile thinking and tools reach the current chapter, and a running chapter refuses the save without changing the profile", async () => {
+  it("Home's single Session override reaches its provider and a busy Home refuses without changing it", async () => {
     const f = await fixture({ reasoning: true });
     const home = await f.designateHome();
-    const profile = (changes: Array<Record<string, unknown>>) => f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: { kind: "home" }, changes: changes.map(change => ({ layer: "profile", op: "set", ...change })),
-    });
     const tools = ["ask_user", "date", "settings"];
-    // A chapter-local choice that the profile save then replaces.
-    await f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: { kind: "session", sessionId: home.id },
-      fence: { runtimeGeneration: home.snapshot().runtimeGeneration, model: home.snapshot().model },
-      changes: [{ key: "model.thinking[role=chat]", layer: "chat", op: "set", value: "low" }],
+    const save = (changes: Array<Record<string, unknown>>) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "home" },
+      changes: changes.map(change => ({ layer: "session", op: "set", ...change })),
     });
-    await profile([{ key: "model.thinking[role=chat]", value: "high" }, { key: "tools.active", value: tools }]);
+    await save([{ key: "model.thinking[role=chat]", value: "high" }, { key: "tools.active", value: tools }]);
     let observed: { reasoning?: unknown; tools?: string[] } | undefined;
     f.faux.setResponses([async (_context, options) => {
-      // The agent's request tools are its active set at request time.
       observed = { reasoning: options?.reasoning, tools: home.runtime.session.getActiveToolNames().sort() };
-      return fauxAssistantMessage("Home profile observed");
+      return fauxAssistantMessage("Home single override observed");
     }]);
     await home.prompt("observe Home's thinking and tools");
     await waitFor(() => (observed && home.snapshot().configurationBlocker === null) || undefined, "Home turn settled");
     expect(observed).toEqual({ reasoning: "high", tools: [...tools].sort() });
     const resolved = await f.service.invoke(phone(), "settings.resolve", {
       target: { kind: "session", sessionId: home.id }, keys: ["model.thinking[role=chat]", "tools.active"],
-    }) as unknown as { keys: Array<{ key: string; value: unknown; fixedAt?: { from: string } }> };
-    expect(resolved.keys.map(row => [row.key, row.value, row.fixedAt?.from])).toEqual([
-      ["model.thinking[role=chat]", "high", "profile"], ["tools.active", tools, "profile"],
+    }) as unknown as { target: { kind: string }; layers: string[]; keys: Array<{ key: string; value: unknown; layer: string }> };
+    expect(resolved.target.kind).toBe("home");
+    expect(resolved.layers).toEqual(["session", "global"]);
+    expect(resolved.keys.map(row => [row.key, row.value, row.layer])).toEqual([
+      ["model.thinking[role=chat]", "high", "session"], ["tools.active", tools, "session"],
     ]);
-
-    // While Home runs, its chapter cannot change: the bundle rolls back, so the
-    // profile never claims a value Home is not running.
     let release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });
-    f.faux.setResponses([async () => { await held; return fauxAssistantMessage("released"); }]);
+    let busyReasoning: unknown;
+    f.faux.setResponses([async (_context, options) => {
+      busyReasoning = options?.reasoning;
+      await held;
+      return fauxAssistantMessage("released");
+    }]);
     await home.prompt("stay busy");
     await waitFor(() => home.snapshot().configurationBlocker === "running" || undefined, "Home running");
-    await expect(profile([{ key: "model.thinking[role=chat]", value: "minimal" }])).rejects.toMatchObject({ code: "busy" });
-    release();
-    await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "busy turn settled");
-    const saved = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "home" }, keys: ["model.thinking[role=chat]"] }) as unknown as { keys: Array<{ value: unknown }> };
-    expect(saved.keys[0]?.value).toBe("high");
-    expect(home.runtime.session.thinkingLevel).toBe("high");
-    const failed = (await f.history()).filter(entry => entry.status === "failed").map(entry => [entry.target.kind, entry.layer]);
-    expect(failed).toEqual([["session", "chat"], ["home", "profile"]]);
-    transcript.push({ case: "Home profile thinking/tools adoption and busy rollback", steps: [{ observed, resolved: resolved.keys, failed }] });
-  });
-
-  it("resolves partial thinking budgets exactly as the new runtime and provider request consume them", async () => {
-    const f = await fixture({ reasoning: true });
-    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), thinkingBudgets: { low: 1_234, high: 2_345 } }));
-    await mkdir(join(f.project, ".pi"));
-    await writeFile(join(f.project, ".pi", "settings.json"), JSON.stringify({ thinkingBudgets: { high: 3_456 } }));
-    const slot = await f.registry.create(f.project);
-    const expected = { low: 1_234, high: 3_456 };
-    const served = await f.service.invoke(phone(), "settings.resolve", {
-      target: { kind: "session", sessionId: slot.id }, keys: ["model.thinkingBudgets"],
-    }) as { keys: Array<{ value: unknown; layer: string }> };
-    expect(slot.runtime.session.settingsManager.getThinkingBudgets()).toEqual(expected);
-    expect(served.keys[0]).toMatchObject({ value: expected, layer: "project" });
-    let requested: unknown;
-    f.faux.setResponses([async (_context, options) => {
-      requested = options?.thinkingBudgets;
-      return fauxAssistantMessage("observed thinking budgets");
-    }]);
-    await slot.prompt("Observe partial budget defaults");
-    await waitFor(() => slot.snapshot().configurationBlocker === null, "budget provider request settled");
-    expect(requested).toEqual(expected);
-    transcript.push({ case: "partial thinking budget scope composition", steps: [{ served, requested }] });
-  });
-
-  it("fixed model and thinking retain their start source and reset through the audited current-default path", async () => {
-    const f = await fixture({ reasoning: true });
-    const slot = await f.registry.create(f.project);
-    const resolve = async () => await f.service.invoke(phone(), "settings.resolve", {
-      target: { kind: "session", sessionId: slot.id }, keys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
-    }) as unknown as { keys: Array<{ key: string; value: unknown; fixedAt?: { from: string; value: unknown; at: string }; badges: Array<{ kind: string; label: string; detail?: string; action?: { kind: string; label: string } }> }> };
-    const initial = await resolve();
-    expect(initial.keys.find(row => row.key === "model.ref[role=chat]")?.fixedAt).toMatchObject({ from: "mac", value: MODEL });
-    expect(initial.keys.find(row => row.key === "model.thinking[role=chat]")?.fixedAt).toMatchObject({ from: "builtin" });
-    const resetKey = (key: string) => f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: { kind: "session", sessionId: slot.id },
-      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL, revision: slot.snapshot().revision },
-      changes: [{ key, layer: "chat", op: "unset" }],
-    });
-    const startWindow = slot.snapshot().contextWindowPolicy!.effective;
-    const startTools = slot.settingsChatLayer().tools;
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
-      { key: "model.thinking[role=chat]", layer: "mac", op: "set", value: "high" },
-      { key: "model.contextWindow", layer: "mac", qualifiers: { model: `${MODEL.provider}/${MODEL.id}` }, op: "set", value: 65_536 },
-      { key: "tools.active", layer: "mac", op: "set", value: ["read"] },
-    ] });
-    expect(slot.settingsChatLayer().thinking).toBe("medium");
-    expect(slot.snapshot().contextWindowPolicy!.effective).toBe(startWindow);
-    expect(slot.settingsChatLayer().tools).toEqual(startTools);
-    await resetKey("model.thinking[role=chat]");
-    await resetKey("model.contextWindow");
-    await resetKey("tools.active");
-    expect(slot.settingsChatLayer()).toMatchObject({ thinking: "high", tools: ["read"], contextWindow: { value: 65_536 } });
-    for (const key of ["model.thinking[role=chat]", "model.contextWindow", "tools.active"]) {
-      expect((await resolve()).keys.find(row => row.key === key)?.fixedAt?.from).toBe("mac");
+    try {
+      await expect(save([{ key: "model.thinking[role=chat]", value: "minimal" }])).rejects.toMatchObject({ code: "busy" });
+    } finally {
+      release();
     }
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
-      { key: "model.ref[role=chat]", layer: "mac", op: "set", value: MEMORY_MODEL },
-    ] });
-    expect(slot.snapshot().model).toMatchObject(MODEL);
-    expect((await resolve()).keys.find(row => row.key === "model.ref[role=chat]")?.fixedAt).toEqual(initial.keys[0]!.fixedAt);
-    await f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: { kind: "session", sessionId: slot.id },
-      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
-      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "unset" }],
-    });
-    expect(slot.snapshot().model).toMatchObject(MEMORY_MODEL);
-    const reset = (await resolve()).keys.find(row => row.key === "model.ref[role=chat]")!;
-    expect(reset.fixedAt).toMatchObject({ from: "mac", value: MEMORY_MODEL });
-    expect(reset.badges.find(badge => badge.kind === "source")).toMatchObject({
-      label: "Mac at launch", detail: expect.stringContaining("From Mac default at start:"),
-    });
-    expect(reset.badges).toContainEqual(expect.objectContaining({ kind: "source", action: { kind: "useCurrentDefault", label: "Use the current default" } }));
-    expect((await f.history()).find(entry => entry.layer === "chat" && entry.key === "model.ref[role=chat]"))
-      .toMatchObject({ before: MODEL, after: MEMORY_MODEL, status: "applied" });
-    f.faux.setResponses([fauxAssistantMessage("retain these settings")]);
-    await slot.prompt("retain settings across fork");
-    await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "fixed settings turn settled");
-    const point = slot.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
-    const fork = await slot.fork(point.id, "at");
-    expect(slot.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(reset.fixedAt);
-    await f.registry.dispose();
-    const reopened = await createTestRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
-      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
-    registries.push(reopened);
-    await reopened.initialize();
-    await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "fixed settings catalog cut");
-    settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime, sessions: reopened,
-      home: () => reopened.homeOwner(), registry: reopened });
-    const resumed = await reopened.acquire(fork.sessionId);
-    expect(resumed.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(reset.fixedAt);
-    expect(resumed.settingsChatLayer().tools).toEqual(["read"]);
-    transcript.push({ case: "fixed start source and current-default reset", steps: [{ initial, reset, resumed: resumed.settingsChatLayer() }] });
+    await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "busy turn settled");
+    const saved = await f.service.invoke(phone(), "settings.resolve", {
+      target: { kind: "home" }, keys: ["model.thinking[role=chat]"],
+    }) as unknown as { keys: Array<{ value: unknown }> };
+    const sdkThinking = home.runtime.session.thinkingLevel;
+    const failed = (await f.history()).filter(entry => entry.status === "failed").map(entry => [entry.target.kind, entry.layer]);
+    // Preserve the real consumer state even on a failed parity assertion.
+    transcript.push({ case: "single Home override provider and busy rollback", steps: [{ observed, busyReasoning, resolved, saved: saved.keys, sdkThinking, failed }] });
+    expect(saved.keys[0]?.value).toBe("high");
+    expect(sdkThinking).toBe("high");
+    expect(busyReasoning).toBe("high");
+    expect(failed).toEqual([["home", "session"]]);
   });
+
   it.each(["warm", "cold"] as const)("carries Chat choices from a %s predecessor into Home's next chapter without copying messages", async temperature => {
     const f = await fixture({ reasoning: true, ...(temperature === "cold" ? { maximumLiveRuntimes: 1 } : {}) });
     const first = await f.designateHome();
@@ -614,30 +497,19 @@ describe("settings risk gate", () => {
     expect((await observe()).images).toBeGreaterThan(0);
     transcript.push({ case: `${kind} directional image request policy`, steps: [...captures, { withinTurn, lowered }] });
   });
-  it.each([["mac", false], ["project", false], ["mac", true], ["project", true]] as const)("an approved %s image-block widening (session target: %s) releases only inheriting open chats", async (layer, viaSession) => {
+  it.each([false, true])("an approved Global image-block widening (session target: %s) releases only inheriting open chats", async (viaSession) => {
     const f = await fixture();
-    const target = layer === "mac" ? { kind: "mac" } as const : { kind: "project", cwd: f.project } as const;
-    const initialLayer = layer === "mac" ? "mac" : "project";
-    const setDefault = async (value: boolean, sessionId?: string) => {
-      const changes = [{ key: "context.images.block", layer: initialLayer, op: "set" as const, value }];
-      if (layer === "mac") return f.service.invoke(phone(), "settings.change", {
-        commandId: commandId(), target: sessionId ? { kind: "session", sessionId } : target, changes,
-      });
-      if (!sessionId) return f.approveProjectChange(changes);
-      const result = f.settle((await f.run(await f.registry.acquire(sessionId), "Change repository image policy", [
-        { name: "settings", args: { action: "change", changes, reason: "Allow requested images" } },
-      ])).results);
-      const approval = result.approval as { requestId: string; digest: string };
-      expect(result.status).toBe("pending");
-      return f.decide(approval.requestId, approval.digest, true);
-    };
+    const target = { kind: "global" } as const;
+    const setDefault = (value: boolean, sessionId?: string) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: sessionId ? { kind: "session", sessionId } : target,
+      changes: [{ key: "context.images.block", layer: "global", op: "set", value }],
+    });
     await setDefault(true);
     const inheriting = await f.chat();
     const explicit = await f.chat();
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: explicit.id },
       fence: { runtimeGeneration: explicit.snapshot().runtimeGeneration, model: MODEL },
-      changes: [{ key: "context.images.block", layer: "chat", op: "set", value: true }] });
-    const unrelated = layer === "project" ? await f.registry.create(f.other).then(async slot => { await slot.setModel(MODEL.provider, MODEL.id); return slot; }) : undefined;
+      changes: [{ key: "context.images.block", layer: "session", op: "set", value: true }] });
     const image = { type: "image" as const, mimeType: "image/png", data: syntheticPng(1, 1).toString("base64") };
     const images = async (slot: typeof inheriting) => {
       let count = -1;
@@ -651,34 +523,11 @@ describe("settings risk gate", () => {
     };
     expect(await images(inheriting)).toBe(0);
     expect(await images(explicit)).toBe(0);
-    if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
     const widened = await setDefault(false, viaSession ? inheriting.id : undefined);
-    expect(widened).toMatchObject({ status: layer === "project" ? "approved" : "applied", tier: "approve" });
+    expect(widened).toMatchObject({ status: "applied", tier: "approve" });
     expect(await images(inheriting)).toBeGreaterThan(0);
     expect(await images(explicit)).toBe(0);
-    if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
-    transcript.push({ case: `${layer} image widening via ${viaSession ? "session" : "default"}`, result: { widened, inherited: await images(inheriting), explicit: await images(explicit), unrelated: unrelated ? await images(unrelated) : null } });
-  });
-
-  it("a Mac image widening cannot release a Project-owned pin before an outside Project widening", async () => {
-    const f = await fixture();
-    await f.approveProjectChange([{ key: "context.images.block", layer: "project", op: "set", value: true }]);
-    const slot = await f.chat();
-    expect(slot.settingsChatLayer().requestPins?.["context.images.block"]).toMatchObject({ value: true, from: "project" });
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" },
-      changes: [{ key: "context.images.block", layer: "mac", op: "set", value: false }] });
-    // No request intervenes: a wrongly released pin must not be silently
-    // recreated by a request while Project still blocks images.
-    await writeFile(join(f.project, ".pi/settings.json"), JSON.stringify({ images: { blockImages: false } }));
-    let count = -1;
-    f.faux.setResponses([async context => {
-      count = context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image").length;
-      return fauxAssistantMessage("observed Project image policy");
-    }]);
-    await slot.prompt("observe image policy", [{ type: "image", mimeType: "image/png", data: syntheticPng(1, 1).toString("base64") }]);
-    await waitFor(() => count >= 0 || undefined, "Project image request observed");
-    expect(count).toBe(0);
-    transcript.push({ case: "Mac widening preserves Project pin", steps: [{ images: count }] });
+    transcript.push({ case: `Global image widening via ${viaSession ? "session" : "default"}`, result: { widened, inherited: await images(inheriting), explicit: await images(explicit) } });
   });
 
   it("open chats follow live retry defaults while a canonical Chat override stays local and can be unset", async () => {

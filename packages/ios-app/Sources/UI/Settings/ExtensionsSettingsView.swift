@@ -34,7 +34,7 @@ struct ExtensionsSettingsView: View {
     private var settingsTarget: JSONValue {
         projectCWD.map { SettingsTarget.project(cwd: $0).gatewayTarget } ?? SettingsTarget.global.gatewayTarget
     }
-    private var settingsWriteLayer: String { projectCWD == nil ? "mac" : "project" }
+    private var settingsWriteLayer: String { projectCWD == nil ? "global" : "project" }
 
     private var loadID: PackageLoadID {
         PackageLoadID(target: target, profileRevision: model.profileRevision,

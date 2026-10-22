@@ -135,18 +135,18 @@ export const STORES: readonly StoreSpec[] = [
       const { path } = await settingsPath(home);
       const ui = { kind: "ui" as const, id: IDENTITY };
       const agent = { kind: "agent" as const, id: CORPUS_IDS.session, sessionId: CORPUS_IDS.session };
-      await path.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 }],
+      await path.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }],
         { actor: ui, reason: "Corpus: retry longer" });
-      await path.change({ kind: "mac" }, [{ key: "context.images.block", layer: "mac", op: "set", value: true }],
+      await path.change({ kind: "global" }, [{ key: "context.images.block", layer: "global", op: "set", value: true }],
         { actor: ui, reason: "Corpus: block images" });
       // One single floor raised to approve, one directional floor raised to notify.
       for (const [qualifiers, value] of [[{ key: "run.retry.maxRetries" }, "approve"], [{ key: "context.images.block", direction: "narrow" }, "notify"]] as const) {
-        await path.change({ kind: "mac" }, [{ key: "permissions.floor", qualifiers, layer: "mac", op: "set", value }],
+        await path.change({ kind: "global" }, [{ key: "permissions.floor", qualifiers, layer: "global", op: "set", value }],
           { actor: ui, reason: `Corpus: raise the floor of ${qualifiers.key}` });
       }
-      const held = await path.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 2 }],
+      const held = await path.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 2 }],
         { actor: agent, reason: "Corpus: an agent asks to retry less" });
-      await path.change({ kind: "mac" }, [{ key: "context.images.block", layer: "mac", op: "set", value: false }],
+      await path.change({ kind: "global" }, [{ key: "context.images.block", layer: "global", op: "set", value: false }],
         { actor: agent, reason: "Corpus: an agent asks to allow images" });
       const approval = (held as { approval?: { requestId: string; digest: string } }).approval;
       if (!approval) throw new Error(`The corpus agent change was not held: ${JSON.stringify(held)}`);
@@ -159,7 +159,7 @@ export const STORES: readonly StoreSpec[] = [
       const requestIds = [...new Set(history.flatMap((entry) => (entry as { requestId?: string }).requestId ?? []))];
       return {
         history,
-        resolved: floorsOf(await model.resolve({ kind: "mac" }, undefined, ["run.retry.maxRetries", "context.images.block", "permissions.floor"]),
+        resolved: floorsOf(await model.resolve({ kind: "global" }, undefined, ["run.retry.maxRetries", "context.images.block", "permissions.floor"]),
           ["run.retry.maxRetries", "context.images.block"]),
         approvals: { pending: await approvals.pending(), requests: await Promise.all(requestIds.map((id) => approvals.get(id) ?? null)) },
       };

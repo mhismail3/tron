@@ -605,7 +605,7 @@ struct GatewayConnectionDetailView: View {
                 }
 
                 if currentProfile.id == model.profiles.selected?.id {
-                    SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
+                    SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global",
                         presentation: .section("connections"), embedded: true)
                 }
                 GatewayMaintenanceActions(

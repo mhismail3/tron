@@ -186,6 +186,8 @@ struct TronSelectionSheetRow<Destination: View>: View {
     let value: String
     var accessibilityLabel: String? = nil
     var accent: Color = .tronEmerald
+    /// A short count or state is shown whole; the row layout makes room.
+    var valueFixed = false
     @ViewBuilder let destination: () -> Destination
     @Environment(\.tronSettingsVisualTheme) private var theme
 
@@ -193,6 +195,7 @@ struct TronSelectionSheetRow<Destination: View>: View {
         TronSettingsRow(icon: icon, title: title, subtitle: detail, accent: accent) {
             TronProgressiveSheetLink(accessibilityLabel: accessibilityLabel ?? title, accent: theme?.accent ?? accent, destination: destination) {
                 TronInlineActionLabel(value, accent: accent)
+                    .fixedSize(horizontal: valueFixed, vertical: false)
             }
             .accessibilityValue(value)
         }

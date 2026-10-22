@@ -1030,13 +1030,14 @@ private actor HostedHomeShellGateway {
         let modelKey: JSONValue = .object([
             "key": .string("model.ref[role=chat]"), "group": .string("model"),
             "value": modelValue, "display": .string(settingsModelOverridden ? "Claude Opus 5.5" : "Claude Haiku 5.5"),
-            "layer": .string(settingsModelOverridden ? "profile" : "mac"), "origin": .string("inherited"), "applied": .bool(true),
-            "layers": .array([.object(["layer": .string("profile"), "value": settingsModelOverridden ? modelValue : .null]), .object(["layer": .string("mac")])]),
+            "layer": .string(settingsModelOverridden ? "session" : "global"), "origin": .string("inherited"), "applied": .bool(true),
+            "layers": .array([.object(["layer": .string("session"), "value": settingsModelOverridden ? modelValue : .null]), .object(["layer": .string("global")])]),
             "badges": .array(settingsModelOverridden ? [
                 .object(["kind": .string("layer"), "label": .string("Set in Home profile")]),
                 .object(["kind": .string("source"), "label": .string("Home profile")])
             ] : [.object(["kind": .string("layer"), "label": .string("Set on Mac")])]),
             "presentation": .object(["label": .string("Model"), "help": .string("The default for Home’s new chapters."),
+                "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true),
                 "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
                 "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
         ])
@@ -1049,19 +1050,21 @@ private actor HostedHomeShellGateway {
             "key": .string("model.thinking[role=worker]"), "qualifiers": .object(["role": .string("worker")]),
             "group": .string("workers"),
             "value": workerThinking == "sameAsHome" ? .object(["sameAs": .string("home")]) : .string(workerThinking),
-            "display": .string(thinkingLabel), "layer": .string(workerThinking == "sameAsHome" ? "builtin" : "profile"),
+            "display": .string(thinkingLabel), "layer": .string(workerThinking == "sameAsHome" ? "global" : "session"),
             "applied": .bool(true), "badges": .array([.object(["kind": .string("source"), "label": .string(workerThinking == "sameAsHome" ? "Tron default" : "Set in Home profile")])]),
-            "layers": .array([.object(["layer": .string("profile")]), .object(["layer": .string("builtin")])]),
+            "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")])]),
             "presentation": .object(["label": .string("Worker thinking"), "help": .string("Thinking level for Home task workers."),
+                "sessionOverridable": .bool(true), "projectSettable": .bool(false), "editable": .bool(true),
                 "order": .number(41), "importance": .string("essential"), "control": .string("choice"),
                 "options": .array(choices)]),
         ])
         let contextWindowKey: JSONValue = .object([
             "key": .string("model.contextWindow"), "qualifiers": .object(["model": .string("anthropic/claude-opus-5-5")]),
             "group": .string("model"), "value": .number(200_000), "display": .string("200,000 tokens"),
-            "layer": .string("builtin"), "applied": .bool(true), "badges": .array([]),
-            "layers": .array([.object(["layer": .string("chat")]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
+            "layer": .string("global"), "applied": .bool(true), "badges": .array([]),
+            "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")]), .object(["layer": .string("global")])]),
             "presentation": .object(["label": .string("Context window"), "help": .string("How many tokens the model receives."),
+                "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(false),
                 "order": .number(30), "importance": .string("essential"), "control": .string("number"),
                 "optionsSource": .object(["name": .string("catalog.contextWindow"), "dependsOn": .array([])])]),
         ])
@@ -1069,10 +1072,11 @@ private actor HostedHomeShellGateway {
         let memoryKey: JSONValue = .object([
             "key": .string("model.queue[role=background]"), "qualifiers": .object(["role": .string("background")]),
             "group": .string("workers"), "value": .array(configuredModels.map(JSONValue.string)),
-            "display": .string(memoryName), "layer": .string(configuredModels.isEmpty ? "builtin" : "profile"), "applied": .bool(true),
+            "display": .string(memoryName), "layer": .string(configuredModels.isEmpty ? "global" : "session"), "applied": .bool(true),
             "badges": .array([.object(["kind": .string("source"), "label": .string(configuredModels.isEmpty ? "Tron default" : "Set in Home profile")])]),
-            "layers": .array([.object(["layer": .string("profile"), "value": configuredModels.isEmpty ? .null : .array(configuredModels.map(JSONValue.string))]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
+            "layers": .array([.object(["layer": .string("session"), "value": configuredModels.isEmpty ? .null : .array(configuredModels.map(JSONValue.string))]), .object(["layer": .string("global")]), .object(["layer": .string("global")])]),
             "presentation": .object(["label": .string("Background models"), "help": .string("The models for memory and Knowledge calls, in order. Empty uses the subagent models."),
+                "sessionOverridable": .bool(true), "projectSettable": .bool(false), "editable": .bool(true),
                 "order": .number(44), "importance": .string("essential"), "control": .string("list"), "valueKind": .string("stringList"),
                 "entry": .object(["hint": .string("A provider/model ID. Tron uses the first available model in this order."), "example": .string("anthropic/claude-haiku-5-5")]),
                 "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])]),
@@ -1087,8 +1091,8 @@ private actor HostedHomeShellGateway {
         }
         let profileKeys = [modelKey, workerThinkingKey, contextWindowKey, memoryKey,
             HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
-                order: 20, essential: true, layer: "profile", options: [.object(["value": .string("high"), "label": .string("High")])]),
-            HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "profile")
+                order: 20, essential: true, layer: "session", options: [.object(["value": .string("high"), "label": .string("High")])]),
+            HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "session")
         ] + homeKeys
         let keys = profileKeys.map { value -> JSONValue in
             guard session, var row = value.objectValue,
@@ -1097,11 +1101,11 @@ private actor HostedHomeShellGateway {
             let retained: JSONValue = tools ? .array(Self.defaultHomeTools.dropLast().map(JSONValue.string)) : .string("medium")
             let display = tools ? "\(Self.defaultHomeTools.count - 1) tools" : "Medium"
             row["layers"] = .array([
-                .object(["layer": .string("chat"), "value": retained, "display": .string(display)]),
-                .object(["layer": .string("profile"), "value": row["value"] ?? .null, "display": row["display"] ?? .null])
+                .object(["layer": .string("session"), "value": retained, "display": .string(display)]),
+                .object(["layer": .string("session"), "value": row["value"] ?? .null, "display": row["display"] ?? .null])
             ])
             row["value"] = retained; row["display"] = .string(display)
-            row["layer"] = .string("chat"); row["origin"] = .string("launch")
+            row["layer"] = .string("session"); row["origin"] = .string("launch")
             row["badges"] = .array([.object(["kind": .string("source"), "label": .string("From Home profile at start"),
                 "detail": .string("Retained at chapter launch; the current profile can differ.")])])
             return .object(row)

@@ -1,10 +1,21 @@
+import type { LayerId, SettingsTarget } from "../kernel/settings/tool-contract.js";
 import type { KeyDeclaration } from "./settings-schema.js";
+import type { StoreLayer } from "./settings-types.js";
 
-/** Bindings describe storage, not permission. The two declaration booleans are
- * the grant; all consumers receive this derived, admitted binding projection. */
-export function admitKey(key: KeyDeclaration): KeyDeclaration {
-  const layers = { ...key.layers };
-  if (!key.projectSettable) delete layers.project;
-  if (!key.sessionOverridable) { delete layers.chat; delete layers.profile; }
-  return { ...key, layers };
+/** Storage paths remain available to the SDK and historical undo. Grants are
+ * checked independently, before values enter resolution or a new mutation. */
+export function scopeAdmitted(key: KeyDeclaration, layer: StoreLayer): boolean {
+  return layer === "project" ? key.projectSettable : layer === "chat" || layer === "profile" ? key.sessionOverridable : true;
+}
+
+export function scopeForStore(layer: StoreLayer): LayerId {
+  return layer === "project" ? "project" : layer === "chat" || layer === "profile" ? "session" : "global";
+}
+
+export function storeForScope(scope: LayerId, layers: readonly StoreLayer[]): Exclude<StoreLayer, "builtin"> {
+  return scope === "global" ? "mac" : scope === "project" ? "project" : layers.includes("profile") ? "profile" : "chat";
+}
+
+export function canonicalSettingsTarget(target: SettingsTarget, home: boolean): SettingsTarget {
+  return home && target.kind === "session" ? { kind: "home" } : target;
 }

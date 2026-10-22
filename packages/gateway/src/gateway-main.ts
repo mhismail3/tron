@@ -79,6 +79,7 @@ import { knowledgeModelLimits, type KnowledgeRecord } from "./knowledge/knowledg
 import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./sessions/delegated-root-migration.js";
+import { migrateSettings } from "./admin/settings-migration.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
 
 // Time since process start when this module's import graph finished loading
@@ -90,6 +91,7 @@ const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 // its legacy roots. The operator cutover is explicit and runs before Pi loads
 // the provider, so an old run cannot be silently stranded.
 await assertDelegatedRootCutoverReady(config.tronHome);
+await migrateSettings({ tronHome: config.tronHome, agentDir: config.agentDir, acquireRuntimeLocks: acquireAgentRuntimeLocks });
 await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
 // extensions. Existing installed packages are never rewritten in place.

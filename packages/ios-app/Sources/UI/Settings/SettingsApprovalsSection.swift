@@ -210,13 +210,7 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
     }
 
     private static func layerLabel(_ layer: String) -> String {
-        switch layer {
-        case "mac": "Mac"
-        case "chat": "Chat"
-        case "project": "Project"
-        case "profile": "Profile: Home"
-        default: layer.capitalized
-        }
+        settingsLayerLabel(layer)
     }
 
     private func load() async {

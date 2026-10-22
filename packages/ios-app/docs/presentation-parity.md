@@ -136,7 +136,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   shared Overridden status pill and Revert. An applied Project value replaces the editor with a
   read-only value and a shared Project pill opening file/key information. Absent non-secret values
   render a dash. Values, pills and resets remain independent sibling targets, not nested buttons;
-  at accessibility sizes the cluster stacks under the text column.
+  the Overridden pill and a tool selection's "N of M tools" count never truncate. At
+  accessibility sizes, or when the cluster would leave the title less than a 96-point column,
+  the cluster stacks under the text column.
 - **Reset.** Uses the renderer's preview/confirmation/receipted `settings.change` unset at the
   writable layer. Inherited values have no reset; nothing invents a default locally.
 - **Text entry** ends through `tronTextEntryDone` (return reads Done; multi-line or

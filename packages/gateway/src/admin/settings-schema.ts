@@ -1,12 +1,12 @@
 import { GatewayError } from "../errors.js";
-import { admitKey } from "./settings-registry.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../kernel/run/compaction-policy.js";
 import { validateMacTerminalKey } from "../security/mac-terminal.js";
 import { MODEL_QUEUE_ROLES, modelQueueKey } from "../providers/model-queue.js";
 import { boolean, integer, object, string, arrayOfStrings } from "../util/validation.js";
 import { type Control, type Direction, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "./settings-types.js";
-import { type LayerId, type QualifierName, type Tier } from "../kernel/settings/tool-contract.js";
+import { type QualifierName, type Tier } from "../kernel/settings/tool-contract.js";
+import type { StoreLayer } from "./settings-types.js";
 
 /**
  * Canonical setting declarations (docs/settings-contract.md F1): the resolver,
@@ -71,8 +71,8 @@ export interface KeyDeclaration {
   optionsSource?: { name: string; dependsOn: readonly string[] };
   sessionOverridable: boolean;
   projectSettable: boolean;
-  layers: Partial<Record<Exclude<LayerId, "builtin">, Binding>>;
-  home?: { layers: readonly Exclude<LayerId, "builtin">[]; builtin?: unknown };
+  layers: Partial<Record<Exclude<StoreLayer, "builtin">, Binding>>;
+  home?: { layers: readonly Exclude<StoreLayer, "builtin">[]; builtin?: unknown };
   /** The built-in value. `undefined` means none: the key is unset. */
   builtin?: unknown;
   /** A built-in that depends on the instance (a floor's built-in is that key's code floor). */
@@ -318,7 +318,7 @@ export const KEYS: readonly KeyDeclaration[] = ([
   })),
   {
     id: "model.thinking[role=worker]", sessionOverridable: true, projectSettable: false, group: "workers", fixed: { role: "worker" }, type: sameAsHomeChoice(thinkingType),
-    layers: { profile: { store: "profile", path: ["thinking", "worker"] } }, builtin: { sameAs: "home" },
+    layers: { profile: { store: "profile", path: ["thinking", "worker"] }, mac: { store: "gateway", path: ["workerThinking"] } }, builtin: { sameAs: "home" },
     timing: "fixed", effect: "delegate", floor: "notify", writers: ["ui", "home"],
     label: "Worker thinking", help: "The thinking level Home's task workers start with.", order: 41, importance: "essential", control: "choice",
   },
@@ -457,7 +457,7 @@ export const KEYS: readonly KeyDeclaration[] = ([
     // reaches a running task (widen is fixed at its start); a lower applies at
     // its next turn boundary (narrow live). Unset is no limit, today's behaviour.
     id: "permissions.budget.task", sessionOverridable: true, projectSettable: false, group: "workers", type: taskBudgetType(),
-    layers: { profile: { store: "profile", path: ["budget", "task"] } }, timing: { narrow: "live", widen: "fixed" }, effect: "delegate",
+    layers: { profile: { store: "profile", path: ["budget", "task"] }, mac: { store: "gateway", path: ["taskBudget"] } }, timing: { narrow: "live", widen: "fixed" }, effect: "delegate",
     floor: { widen: "approve", narrow: "quiet" }, direction: raisesBudget, writers: ["ui", "home"],
     label: "Task budget", help: "Tokens one Home task may use, cached included. Empty is no limit.",
     order: 50, importance: "essential", control: "list", confirm: "Raising a task budget lets Home's tasks spend more.",
@@ -586,7 +586,7 @@ export const KEYS: readonly KeyDeclaration[] = ([
     help: "Closes an app terminal or Mac Terminal shell no device has open, sitting at an empty prompt with nothing typed, after this long.",
     order: 30, importance: "advanced", control: "choice",
   },
-] satisfies readonly KeyDeclaration[]).map(admitKey);
+] satisfies readonly KeyDeclaration[]);
 
 const byId = new Map(KEYS.map(key => [key.id, key]));
 
@@ -594,9 +594,9 @@ const byId = new Map(KEYS.map(key => [key.id, key]));
  * (#479). The Gateway store is the Mac layer's truth; the built-in applies when
  * it is unset. */
 export async function terminalIdleLimitMs(model: {
-  resolve(target: { kind: "mac" }, session?: undefined, keys?: readonly string[], options?: { storeState?: boolean }): Promise<{ keys: readonly { key: string; value?: unknown }[] }>;
+  resolve(target: { kind: "global" }, session?: undefined, keys?: readonly string[], options?: { storeState?: boolean }): Promise<{ keys: readonly { key: string; value?: unknown }[] }>;
 }): Promise<number | null> {
-  const resolution = await model.resolve({ kind: "mac" }, undefined, ["setup.terminalIdleMinutes"], { storeState: false });
+  const resolution = await model.resolve({ kind: "global" }, undefined, ["setup.terminalIdleMinutes"], { storeState: false });
   const value = resolution.keys.find(row => row.key === "setup.terminalIdleMinutes")?.value ?? TERMINAL_IDLE_DEFAULT_MINUTES;
   return typeof value === "number" && value > 0 ? value * 60_000 : null;
 }
@@ -631,9 +631,14 @@ function codeFloor(qualifiers: Partial<Record<QualifierName, string>>): Tier | u
 
 /** Apply a key\u0027s declared Home scope before resolution and presentation. */
 export function keyForHome(key: KeyDeclaration, home: boolean): KeyDeclaration {
-  if (!home || !key.home) return key;
-  return { ...key, layers: Object.fromEntries(Object.entries(key.layers).filter(([layer]) => key.home!.layers.includes(layer as Exclude<LayerId, "builtin">))),
-    ...(Object.prototype.hasOwnProperty.call(key.home, "builtin") ? { builtin: key.home.builtin } : {}) };
+  if (!home) return key;
+  const layers = key.home ? Object.fromEntries(Object.entries(key.layers).filter(([layer]) => key.home!.layers.includes(layer as Exclude<StoreLayer, "builtin">))) : { ...key.layers };
+  // The restricted Home recipe owns its request overrides. The active chapter
+  // keeps SDK boundary snapshots, never a second settings override.
+  if (key.sessionOverridable && layers.chat?.store === "chat-settings" && !layers.profile) {
+    layers.profile = { store: "profile", path: ["settings", ...layers.chat.path] };
+  }
+  return { ...key, layers, ...(key.home && Object.hasOwn(key.home, "builtin") ? { builtin: key.home.builtin } : {}) };
 }
 
 export function builtinValue(key: KeyDeclaration, qualifiers: Partial<Record<QualifierName, string>>): unknown {

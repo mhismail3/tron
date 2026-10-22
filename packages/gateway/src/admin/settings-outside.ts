@@ -111,7 +111,7 @@ export function observedInstance(key: KeyDeclaration, layer: string, binding: Bi
     return qualifiers.project === undefined ? undefined : { store: { kind: "trust" }, instance: instanceId(key.id, { ...fixed, project: qualifiers.project }) };
   }
   if (binding.store !== "pi" && binding.store !== "pi-model-ref") return undefined;
-  const store: ObservedStore | undefined = layer === "mac" ? { kind: "mac" } : layer === "project" && projectRoot ? { kind: "project", root: projectRoot } : undefined;
+  const store: ObservedStore | undefined = layer === "global" ? { kind: "mac" } : layer === "project" && projectRoot ? { kind: "project", root: projectRoot } : undefined;
   if (!store) return undefined;
   const modelQualified = binding.store === "pi" && qualifiers.model !== undefined
     && (binding.qualified !== undefined || binding.path.includes("{model}"));
@@ -559,8 +559,8 @@ export class OutsideChanges {
     const file = observedFile(store, this.agentDir);
     return {
       changeId: randomUUID(), at, actor: { kind: "outside", id: file },
-      target: isProjectStore(store) ? { kind: "project", cwd: store.root } : { kind: "mac" },
-      layer: isProjectStore(store) ? "project" : "mac", key: value.key,
+      target: isProjectStore(store) ? { kind: "project", cwd: store.root } : { kind: "global" },
+      layer: isProjectStore(store) ? "project" : "global", key: value.key,
       ...(subject && before === undefined && after !== undefined ? { added: true as const } : {}),
       ...(Object.keys(qualifiers).length ? { qualifiers } : {}),
       op: after === undefined ? "unset" : "set",

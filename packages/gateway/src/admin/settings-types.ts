@@ -5,18 +5,11 @@ import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from ".
 
 
 
+/** Private persistence metadata, never an outward settings scope or grant. */
+export type StoreLayer = "chat" | "profile" | "project" | "mac" | "builtin";
+
 export const LAYER_LABELS: Record<LayerId, string> = {
-  chat: "Chat", profile: "Profile: Home", project: "Project", mac: "Mac", builtin: "Built-in",
-};
-/** A row's provenance pill: where its value comes from, as a short phrase (#939).
- * The one source of this wording for every surface; LAYER_LABELS still names
- * the layer itself in sentences, details and the Changes feed. */
-export const LAYER_SOURCE_LABELS: Record<LayerId, string> = {
-  chat: "Session", profile: "Home profile", project: "Repository", mac: "Mac", builtin: "Built-in",
-};
-/** The default a fixed chat value was taken from at start ("From Mac default at start"). */
-export const LAYER_DEFAULT_LABELS: Record<Exclude<LayerId, "chat">, string> = {
-  profile: "Home profile", project: "project default", mac: "Mac default", builtin: "Tron default",
+  project: "Project", session: "Session", global: "Global",
 };
 
 

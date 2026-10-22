@@ -137,9 +137,9 @@ struct DefaultToolsSettingsSection: View {
         }
         func matches(_ entry: String) -> Bool { ["+", "-", "!"].contains(entry.first) && entry.dropFirst() == path }
         if let project = entries("project").last(where: matches) { return project.first == "+" }
-        let mac = entries("mac")
-        if mac.contains("-" + path) { return false }
-        return mac.contains("+" + path) || !mac.contains("!" + path)
+        let global = entries("global")
+        if global.contains("-" + path) { return false }
+        return global.contains("+" + path) || !global.contains("!" + path)
     }
 
     /// Why a saved managed entry at `layer` has no effect, for Value & Source.

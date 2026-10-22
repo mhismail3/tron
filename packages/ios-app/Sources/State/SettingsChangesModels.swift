@@ -85,12 +85,12 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
         switch scope {
         case .all:
             true
-        case .mac: layer == "mac"
+        case .global: layer == "global"
         case .project(let cwd): layer == "project" && target.kind == "project" && target.cwd == cwd
         case .home(let sessionID):
-            layer == "profile" || (target.kind == "session" && target.sessionId == sessionID)
+            target.kind == "home" || (target.kind == "session" && target.sessionId == sessionID)
         case .session(let id, _):
-            layer == "chat" && target.kind == "session" && target.sessionId == id
+            layer == "session" && target.kind == "session" && target.sessionId == id
         }
     }
 }
@@ -99,7 +99,7 @@ extension SettingsApprovalRequest {
     func belongs(to scope: SettingsChangesScope) -> Bool {
         switch scope {
         case .all: true
-        case .mac: changes.contains { $0.layer == "mac" }
+        case .global: changes.contains { $0.layer == "global" }
         case .project(let cwd): target.kind == "project" && target.cwd == cwd && changes.contains { $0.layer == "project" }
         case .home(let sessionID): target.kind == "home" || (target.kind == "session" && target.sessionId == sessionID)
         case .session(let id, _): target.kind == "session" && target.sessionId == id
@@ -115,7 +115,7 @@ struct SettingsChangeHistoryPage: Decodable, Sendable {
 /// Native entry point ownership: global Settings, Home, or one chat.
 enum SettingsChangesScope: Hashable, Sendable {
     case all
-    case mac
+    case global
     case project(String)
     case home(String)
     case session(String, projectCWD: String?)
@@ -123,8 +123,8 @@ enum SettingsChangesScope: Hashable, Sendable {
     var title: String {
         switch self {
         case .all: "All scopes"
-        case .mac: "Mac"
-        case .project: "Repository"
+        case .global: "Global"
+        case .project: "Project"
         case .home: "Home"
         case .session: "This session"
         }
@@ -133,7 +133,7 @@ enum SettingsChangesScope: Hashable, Sendable {
     var storageKey: String {
         switch self {
         case .all: "all"
-        case .mac: "mac"
+        case .global: "global"
         case .project(let cwd): "project.\(cwd)"
         case .home: "home"
         case .session(let id, let cwd): "session.\(id).\(cwd ?? "")"

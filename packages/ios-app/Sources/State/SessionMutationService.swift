@@ -43,7 +43,7 @@ final class SessionMutationService {
         sessionID: String, commandID: String, key: String, op: String = "set", value: JSONValue?,
         qualifiers: [String: JSONValue]? = nil, fence: [String: JSONValue]?
     ) -> JSONValue {
-        var change: [String: JSONValue] = ["key": .string(key), "layer": .string("chat"), "op": .string(op)]
+        var change: [String: JSONValue] = ["key": .string(key), "layer": .string("session"), "op": .string(op)]
         if let value { change["value"] = value }
         if let qualifiers { change["qualifiers"] = .object(qualifiers) }
         var params: [String: JSONValue] = [

@@ -158,7 +158,7 @@ struct SettingsRendererView: View {
     @ViewBuilder
     private func sectionDetail(_ id: String, resolution: SettingsResolution, options: [String: SettingsOptionsResponse]) -> some View {
         let section = Self.sections(resolution).first { $0.id == id } ?? SettingsRendererSection(id: id)
-        let ownsDefaultTools = id == "tools" && ["mac", "project"].contains(target.objectValue?["kind"]?.stringValue ?? "") && writeLayer != nil
+        let ownsDefaultTools = id == "tools" && target.objectValue?["kind"]?.stringValue == "global" && writeLayer != nil
         // The moved Default Tools container owns code-mode selection at these
         // scopes; do not expose a second editor for the same setting beside it.
         let keys = Self.sorted(resolution.keys.filter {

@@ -147,17 +147,19 @@ private actor NewSessionFixtureGateway {
     private func projectResolution() -> JSONValue {
         .object([
             "target": .object(["kind": .string("project"), "cwd": .string("/fixture/original")]),
-            "layers": .array([.string("project"), .string("mac"), .string("builtin")]),
+            "layers": .array([.string("project"), .string("global"), .string("global")]),
             "keys": .array([.object([
                 "key": .string("model.ref[role=chat]"), "group": .string("model"),
                 "value": projectModel.map { .object(["provider": .string("fixture"), "id": .string($0)]) } ?? .null,
                 "display": .string(projectModel == nil ? "Built-in model" : "Project Pro"),
-                "layer": .string(projectModel == nil ? "builtin" : "project"), "applied": .bool(true),
+                "layer": .string(projectModel == nil ? "global" : "project"), "applied": .bool(true),
                 "layers": .array([.object(["layer": .string("project"),
                     "value": projectModel.map { .object(["provider": .string("fixture"), "id": .string($0)]) } ?? .null,
                     "display": projectModel == nil ? .null : .string("Project Pro"), "applied": .bool(true)])]),
                 "badges": .array([.object(["kind": .string("layer"), "label": .string(projectModel == nil ? "Tron default" : "Set in project")])]),
+                "projectSetting": projectModel == nil ? .null : .object(["file": .string("/fixture/original/.pi/settings.json"), "path": .string("defaultProvider + defaultModel")]),
                 "presentation": .object(["label": .string("Model"), "help": .string("The default for new chats in this project."),
+                    "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(false),
                     "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
                     "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
             ])] + (scenario.hasPrefix("project-settings") ? [HostedSettingsReviewSchema.key("tools.active", "tools", "Tools",

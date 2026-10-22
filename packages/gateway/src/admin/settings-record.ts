@@ -46,7 +46,7 @@ export interface ChangeEntry {
   commandId?: string;
   actor: Actor;
   target: SettingsTarget;
-  layer: Exclude<LayerId, "builtin">;
+  layer: LayerId;
   key: string;
   qualifiers?: Qualifiers;
   op: "set" | "unset";

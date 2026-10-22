@@ -28,7 +28,7 @@ export interface PendingChange {
   changeId: string;
   key: string;
   qualifiers?: Qualifiers;
-  layer: Exclude<LayerId, "builtin">;
+  layer: LayerId;
   op: "set" | "unset";
   /** Absent for a redacted key: the diff names the key, never the value. */
   before?: unknown;
@@ -60,7 +60,9 @@ interface ApprovalsDocument { version: 1; requests: ApprovalRequest[] }
 const EMPTY: ApprovalsDocument = { version: 1, requests: [] };
 
 /** The digest of a diff: the target and each change's instance, before and after. */
-function approvalDigest(target: SettingsTarget, changes: readonly PendingChange[]): string {
+export function approvalDigest(target: unknown, changes: readonly {
+  key: string; qualifiers?: unknown; layer: string; op: string; before?: unknown; after?: unknown; fixedAt?: unknown;
+}[]): string {
   return createHash("sha256").update(JSON.stringify({
     target,
     changes: changes.map(change => [change.key, change.qualifiers ?? {}, change.layer, change.op, change.before ?? null, change.after ?? null, change.fixedAt ?? null]),

@@ -3,6 +3,7 @@ import type { ResolvedKey, Resolution } from "../kernel/settings/tool-contract.j
 import type { Actor, ChangeEntry } from "./settings-record.js";
 import { formatProfileValue } from "../home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type ValueType } from "./settings-types.js";
+import { scopeAdmitted } from "./settings-registry.js";
 
 /**
  * What a client is shown for each resolved key and section (docs/settings-model.md
@@ -61,7 +62,7 @@ function presentKey(key: KeyDeclaration, clientControls: readonly string[] | und
     // Project files remain repository-owned; the app is an inspector there.
     sessionOverridable: key.sessionOverridable,
     projectSettable: key.projectSettable,
-    editable: layer !== "project" && key.writers.includes("ui") && binding !== undefined && binding.store !== "chat-launch",
+    editable: layer !== "project" && scopeAdmitted(key, layer) && key.writers.includes("ui") && binding !== undefined && binding.store !== "chat-launch",
     timing: key.timing,
     effect: key.effect,
     ...(key.type.options ? { options: key.type.options } : {}),
@@ -144,11 +145,11 @@ export function presentHistoryEntry(entry: ChangeEntry) {
 }
 
 export function presentResolution(resolution: Resolution, input: PresentationInput): PresentedResolution {
-  const layer = resolution.target.kind === "mac" ? "mac" : resolution.target.kind === "project" ? "project"
-    : resolution.layers.includes("profile") ? "profile" : "chat";
+  const layer = resolution.target.kind === "global" ? "mac" : resolution.target.kind === "project" ? "project"
+    : resolution.target.kind === "home" ? "profile" : "chat";
   const keys: PresentedKey[] = resolution.keys.filter(key => input.controls === undefined || schemaKey(key.key).writers.length > 0).map(key => ({
     ...key,
-    presentation: presentKey(keyForHome(schemaKey(key.key), resolution.layers.includes("profile")), input.controls, layer),
+    presentation: presentKey(keyForHome(schemaKey(key.key), resolution.target.kind === "home"), input.controls, layer),
   }));
   const sections = SECTIONS.flatMap((section): SettingsSectionPresentation[] =>
     keys.some(key => key.group === section.id) ? [{

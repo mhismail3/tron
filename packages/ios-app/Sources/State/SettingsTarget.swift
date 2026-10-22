@@ -36,8 +36,8 @@ enum SettingsTarget: Hashable, Sendable {
 }
 
 extension SettingsTarget {
-    /// The layer a write to this target lands in: Mac for global, Project for a project.
-    var writeLayer: String { scope == .global ? "mac" : "project" }
+    /// The layer a write to this target lands in: Global for global, Project for a project.
+    var writeLayer: String { scope == .global ? "global" : "project" }
 
     /// One chat's `settings.resolve`/`settings.change` target. Every surface names a
     /// target the same way, so they share one snapshot.
@@ -48,13 +48,13 @@ extension SettingsTarget {
     /// The `target` of `settings.resolve` and `settings.change` (docs/settings-model.md 3.1).
     var gatewayTarget: JSONValue {
         switch self {
-        case .global: .object(["kind": .string("mac")])
+        case .global: .object(["kind": .string("global")])
         case let .project(cwd): .object(["kind": .string("project"), "cwd": .string(cwd)])
         }
     }
 
     /// One `settings.change` entry that sets, or with nil unsets, a schema key at
-    /// this target's own layer: Mac for global, Project for a project.
+    /// this target's own layer: Global for global, Project for a project.
     func keyChange(_ key: String, value: JSONValue?) -> JSONValue {
         var change: [String: JSONValue] = ["key": .string(key), "layer": .string(writeLayer)]
         if let value {

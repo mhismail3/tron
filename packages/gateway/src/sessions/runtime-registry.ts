@@ -2896,7 +2896,7 @@ export class RuntimeRegistry {
   /** A role's model queue, `provider/id` in order, through the one settings
    * resolver (Profile > Mac > built-in). The background queue without a value
    * of its own is the subagent queue. */
-  async modelQueueOf(role: ModelQueueRole, scope: "mac" | "home" = "mac"): Promise<string[]> {
+  async modelQueueOf(role: ModelQueueRole, scope: "global" | "home" = "global"): Promise<string[]> {
     const settings = this.settingsOwners?.model;
     if (!settings) return [];
     const keys = role === "background" ? [modelQueueKey("background"), modelQueueKey("subagent")] : [modelQueueKey(role)];

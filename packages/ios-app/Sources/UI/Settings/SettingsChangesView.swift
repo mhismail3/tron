@@ -248,7 +248,7 @@ struct SettingsChangesView: View {
             TronSettingsDivider()
             TronChoiceRow(icon: "square.3.layers.3d", title: "Scope",
                           choices: [TronChoice(id: "", label: "All scopes")]
-                            + ["mac", "project", "chat", "profile"].map { TronChoice(id: $0, label: layerLabel($0)) },
+                            + ["project", "session", "global"].map { TronChoice(id: $0, label: layerLabel($0)) },
                           selected: layerFilter) { layerFilter = $0 }
                 .accessibilityIdentifier("settings-changes-layer")
             TronSettingsDivider()

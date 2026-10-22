@@ -1,7 +1,8 @@
-import { type SettingsTarget, type FixedSetting, type Badge, type LayerValue, type ResolvedKey, type Resolution, type LayerId, type Qualifiers } from "../kernel/settings/tool-contract.js";
+import { type SettingsTarget, type FixedSetting, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import { dirname, join } from "node:path";
 import { KEYS, keyForHome, builtinValue, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
-import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext } from "./settings-types.js";
+import { LAYER_LABELS, type FormatContext, type StoreLayer } from "./settings-types.js";
+import { canonicalSettingsTarget, scopeAdmitted, scopeForStore } from "./settings-registry.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
@@ -41,7 +42,7 @@ export interface OutsideMark { changeId: string; applyAgain: boolean; before: st
 /** Every store the target's layers read, loaded by their owners (doc 3.2). */
 export interface SettingsStores {
   /** The layers this target has (doc 3.3). Built-in is always last. */
-  layers: readonly LayerId[];
+  layers: readonly StoreLayer[];
   chat?: ChatStore;
   profile?: Record<string, unknown>;
   project?: ProjectStore;
@@ -74,7 +75,7 @@ export interface OptionSources {
 
 
 
-const BOTTOM_UP: readonly LayerId[] = ["builtin", "mac", "profile", "chat", "project"];
+const BOTTOM_UP: readonly StoreLayer[] = ["builtin", "mac", "profile", "chat", "project"];
 
 function readPath(document: Record<string, unknown> | undefined, path: readonly string[]): unknown {
   let current: unknown = document;
@@ -91,12 +92,12 @@ function fill(path: readonly string[], qualifiers: Qualifiers): readonly string[
   return path.map(segment => segment === "{model}" ? qualifiers.model! : segment);
 }
 
-function piDocument(stores: SettingsStores, layer: LayerId): Record<string, unknown> | undefined {
+function piDocument(stores: SettingsStores, layer: StoreLayer): Record<string, unknown> | undefined {
   return layer === "mac" ? stores.mac : layer === "project" ? stores.project?.document : undefined;
 }
 
 /** Read one layer's raw value for a key instance from that layer's store. */
-export function readBinding(stores: SettingsStores, layer: LayerId, binding: Binding, qualifiers: Qualifiers, qualifiedOnly: boolean, keyId?: string): unknown {
+export function readBinding(stores: SettingsStores, layer: StoreLayer, binding: Binding, qualifiers: Qualifiers, qualifiedOnly: boolean, keyId?: string): unknown {
   switch (binding.store) {
     case "pi": {
       const document = piDocument(stores, layer);
@@ -150,18 +151,18 @@ function nearestTrustDecision(decisions: Record<string, boolean>, project: strin
 
 /** A composing key's value from the layers below `layer`: what that layer's
  * entries are relative to. */
-export function composedBelow(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers, layer: LayerId): unknown {
+export function composedBelow(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers, layer: StoreLayer): unknown {
   let value = builtinValue(key, qualifiers);
   for (const below of BOTTOM_UP.slice(1, BOTTOM_UP.indexOf(layer))) {
-    const binding = key.layers[below as Exclude<LayerId, "builtin">];
-    if (!binding || !stores.layers.includes(below) || !layerApplied(stores, below).applied) continue;
+    const binding = key.layers[below as Exclude<StoreLayer, "builtin">];
+    if (!binding || !scopeAdmitted(key, below) || !stores.layers.includes(below) || !layerApplied(stores, below).applied) continue;
     const entry = readBinding(stores, below, binding, qualifiers, false, key.id);
     if (entry !== undefined) value = key.type.compose ? key.type.compose(value, entry) : entry;
   }
   return value;
 }
 
-function layerApplied(stores: SettingsStores, layer: LayerId): { applied: boolean; reason?: "untrusted" } {
+function layerApplied(stores: SettingsStores, layer: StoreLayer): { applied: boolean; reason?: "untrusted" } {
   if (layer === "project" && stores.project && !stores.project.applied) return { applied: false, reason: "untrusted" };
   return { applied: true };
 }
@@ -192,7 +193,8 @@ export function resolveSettings(target: SettingsTarget, stores: SettingsStores, 
   for (const key of keys) {
     // A key belongs to a target that has at least one of its allowed layers
     // (doc 3.3): Home-only profile keys never appear on an ordinary chat.
-    if (!Object.keys(key.layers).some(layer => stores.layers.includes(layer as LayerId))) continue;
+    if (target.kind === "session" && !stores.layers.includes("profile") && key.layers.profile && !key.layers.chat) continue;
+    if (!Object.keys(key.layers).some(layer => stores.layers.includes(layer as StoreLayer) && scopeAdmitted(key, layer as StoreLayer))) continue;
     for (const qualifiers of instances(key, target, stores, modelQualifier)) {
       resolved.push(resolveInstance(key, qualifiers, stores, options, dependencyValue));
     }
@@ -200,7 +202,7 @@ export function resolveSettings(target: SettingsTarget, stores: SettingsStores, 
   const projectNotice = stores.project && (stores.project.unreadable || (!stores.project.applied && Object.keys(stores.project.document).length))
     ? { file: join(stores.project.root, ".pi", "settings.json"), message: stores.project.unreadable
       ? "Project settings couldn't be read" : "Project settings aren't applied until this project is trusted" } : undefined;
-  return { target, layers: stores.layers, ...(stores.project?.unreadable ? { projectUnreadable: true as const } : {}),
+  return { target: canonicalSettingsTarget(target, stores.layers.includes("profile")), layers: [...new Set(stores.layers.map(scopeForStore))], ...(stores.project?.unreadable ? { projectUnreadable: true as const } : {}),
     ...(projectNotice ? { projectNotice } : {}), keys: resolved, ...diagnostics };
 }
 
@@ -208,10 +210,10 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
   const fixed = { ...(key.fixed ?? {}) } as Qualifiers;
   if (key.qualifier === "model") {
     const onlyQualified = Object.values(key.layers).some(binding => binding.store === "pi" && binding.path.includes("{model}"));
-    if (target.kind === "project" || target.kind === "mac") {
+    if (target.kind === "project" || target.kind === "global") {
       // Repository inspection includes non-default models, not an inherited snapshot.
       const models = new Set<string>();
-      if (target.kind === "mac" && model) models.add(model);
+      if (target.kind === "global" && model) models.add(model);
       const layer = target.kind === "project" ? "project" : "mac";
       const binding = key.layers[layer];
       if (binding?.store === "pi") {
@@ -228,11 +230,11 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
   }
   if (key.qualifier === "key") {
     // Floors are Mac policy only the maintainer's tap writes; they appear on the Mac target.
-    return target.kind === "mac" ? floorInstances().map(instance => ({ ...fixed, ...instance })) : [];
+    return target.kind === "global" ? floorInstances().map(instance => ({ ...fixed, ...instance })) : [];
   }
   if (key.qualifier === "device") {
     // Mac policy: the enrolled iPhones appear on the Mac target only.
-    return target.kind === "mac" ? Object.keys(stores.macTerminal).sort().map(device => ({ ...fixed, device })) : [];
+    return target.kind === "global" ? Object.keys(stores.macTerminal).sort().map(device => ({ ...fixed, device })) : [];
   }
   if (key.qualifier === "project") {
     if (target.kind === "project" || target.kind === "session") return stores.project ? [{ ...fixed, project: stores.project.root }] : [];
@@ -241,7 +243,7 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
   return [fixed];
 }
 
-function resolveInstance(
+export function resolveInstance(
   key: KeyDeclaration,
   qualifiers: Qualifiers,
   stores: SettingsStores,
@@ -252,11 +254,11 @@ function resolveInstance(
     : value === undefined ? "Not set" : key.type.format(value, options.format);
   const layerValues: LayerValue[] = [];
   const read = (qualifiedOnly: boolean) => {
-    const found: Array<{ layer: LayerId; value: unknown; applied: boolean; reason?: "untrusted" }> = [];
+    const found: Array<{ layer: StoreLayer; value: unknown; applied: boolean; reason?: "untrusted" }> = [];
     for (const layer of BOTTOM_UP) {
       if (layer === "builtin" || !stores.layers.includes(layer)) continue;
-      const binding = key.layers[layer as Exclude<LayerId, "builtin">];
-      if (!binding) continue;
+      const binding = key.layers[layer as Exclude<StoreLayer, "builtin">];
+      if (!binding || !scopeAdmitted(key, layer)) continue;
       const value = readBinding(stores, layer, binding, qualifiers, qualifiedOnly, key.id);
       if (value === undefined) continue;
       found.push({ layer, value, ...layerApplied(stores, layer) });
@@ -275,7 +277,7 @@ function resolveInstance(
 
   const builtin = builtinValue(key, qualifiers);
   let value: unknown = builtin;
-  let layer: LayerId = "builtin";
+  let layer: StoreLayer = "builtin";
   for (const entry of present) {
     if (!entry.applied) continue;
     value = key.type.compose ? key.type.compose(value, entry.value) : entry.value;
@@ -286,19 +288,16 @@ function resolveInstance(
 
   for (const layerId of [...BOTTOM_UP].reverse()) {
     if (!stores.layers.includes(layerId) && layerId !== "builtin") continue;
-    if (layerId === "builtin") {
-      layerValues.push({ layer: "builtin", ...(builtin === undefined ? {} : { value: builtin, display: format(builtin) }), applied: true });
-      continue;
-    }
-    if (!key.layers[layerId as Exclude<LayerId, "builtin">]) continue;
+    if (layerId === "builtin") continue;
+    if (!key.layers[layerId] || !scopeAdmitted(key, layerId)) continue;
     // Only the Home chat has the Profile layer (doc 3.3); it has no Chat compaction layer.
     const entry = shown.find(candidate => candidate.layer === layerId);
     layerValues.push(entry
-      ? { layer: layerId, value: entry.value, display: format(entry.value), applied: entry.applied, ...(entry.reason ? { reason: entry.reason } : {}) }
-      : { layer: layerId, applied: true });
+      ? { layer: scopeForStore(layerId), value: entry.value, display: format(entry.value), applied: entry.applied, ...(entry.reason ? { reason: entry.reason } : {}) }
+      : { layer: scopeForStore(layerId), applied: true });
   }
 
-  const badges: Badge[] = [{ kind: "layer", label: LAYER_SOURCE_LABELS[layer] }];
+  const badges: Badge[] = [];
   // A per-model value is the one for this chat's model, named as the picker names it.
   if (qualifiers.model && key.qualifier === "model") badges.push({ kind: "scope", label: `For ${modelDisplayName(qualifiers.model, options.format)}`, detail: qualifiers.model });
   if (qualifiers.project && key.qualifier === "project") badges.push({ kind: "scope", label: qualifiers.project });
@@ -308,7 +307,7 @@ function resolveInstance(
       ? `${schemaKey(qualifiers.key).label}: ${qualifiers.direction === "widen" ? "loosening" : "tightening"}` : schemaKey(qualifiers.key).label });
   }
   if (notApplied) {
-    badges.push({ kind: "state", label: "Not applied (untrusted)", detail: `${LAYER_LABELS[notApplied.layer]}: ${format(notApplied.value)}`,
+    badges.push({ kind: "state", label: "Not applied (untrusted)", detail: `${LAYER_LABELS[scopeForStore(notApplied.layer)]}: ${format(notApplied.value)}`,
       action: { kind: "reviewTrust", label: "Review trust" } });
   }
   badges.push(...storeStateBadges(key, qualifiers, stores, format));
@@ -336,19 +335,12 @@ function resolveInstance(
     if (requested !== undefined && JSON.stringify(requested) !== JSON.stringify(value)) {
       badges.push({ kind: "state", label: "Applies to a new chat", detail: `Requested: ${format(requested)}` });
     }
-    const evidence = fixedAt.from === "chat" ? "Chosen for this chat" : fixedAt.from === "delegate"
-      ? `From Home at start: ${fixedAt.via === "home-profile:sameAs:home" ? "same as Home" : fixedAt.via === "home-profile" ? "Home profile" : fixedAt.via === "home-fallback" ? "worker default" : "chosen for this task"} (${format(fixedAt.value)})`
-      : `From ${LAYER_DEFAULT_LABELS[fixedAt.from]} at start: ${format(fixedAt.value)}`;
-    badges.push({ kind: "source", label: fixedAt.from === "chat" ? "Session override"
-      : fixedAt.from === "delegate" ? "Home at launch" : `${LAYER_LABELS[fixedAt.from]} at launch`,
-      detail: [evidence, fixedAt.reason].filter(Boolean).join(" · "),
-      action: { kind: "useCurrentDefault", label: "Use the current default" } });
   }
 
   const localLayer = stores.layers.includes("profile") ? "profile" : stores.layers.includes("chat") ? "chat" : "mac";
   const localBinding = key.layers[localLayer];
-  const localValue = localBinding?.store === "chat-settings" ? readPath(stores.chat?.settings, localBinding.path)
-    : localBinding ? readBinding(stores, localLayer, localBinding, qualifiers, false, key.id) : undefined;
+  const localValue = !scopeAdmitted(key, localLayer) ? undefined : localBinding?.store === "chat-settings" ? readPath(stores.chat?.settings, localBinding.path)
+    : localBinding ? readBinding(stores, localLayer, localBinding, qualifiers, localBinding.store === "pi" && !!localBinding.qualified && !!qualifiers.model, key.id) : undefined;
   const projectValue = shown.find(entry => entry.layer === "project" && entry.applied);
   const binding = key.layers.project;
   const projectPath = binding?.store === "pi-model-ref" ? "defaultProvider + defaultModel" : binding?.store === "pi"
@@ -361,13 +353,11 @@ function resolveInstance(
     ...(key.subgroup ? { subgroup: key.subgroup } : {}),
     value: key.redacted ? undefined : value,
     display: value !== undefined && key.type.summary ? key.type.summary(value) : format(value),
-    layer,
+    layer: scopeForStore(layer),
     applied: !notApplied,
     ...(notApplied ? { reason: notApplied.reason } : {}),
     badges,
     ...(fixedAt ? { fixedAt } : {}),
-    origin: layer !== "chat" ? "inherited" : fixedAt ? fixedAt.from === "chat" ? "override" : "launch"
-      : key.layers.chat?.store === "chat-settings" && readPath(stores.chat?.settings, key.layers.chat.path) !== undefined ? "override" : "legacy-session",
     overridden: localValue !== undefined,
     ...(projectValue && projectPath && stores.project ? { projectSetting: { file: join(stores.project.root, ".pi", "settings.json"), path: projectPath } } : {}),
     layers: key.redacted ? layerValues.map(({ value: _value, ...rest }) => rest) : layerValues,
@@ -407,20 +397,20 @@ function storeStateBadges(key: KeyDeclaration, qualifiers: Qualifiers, stores: S
     const marks = stores.outside?.[layer];
     const mark = marks?.[instanceId(key.id, qualifiers)] ?? marks?.[instanceId(key.id, key.fixed ?? {})];
     if (!mark) continue;
-    badges.push({ kind: "state", label: "Changed outside Tron", detail: `${LAYER_LABELS[layer]}: ${mark.before} → ${mark.after}`,
+    badges.push({ kind: "state", label: "Changed outside Tron", detail: `${LAYER_LABELS[scopeForStore(layer)]}: ${mark.before} → ${mark.after}`,
       ...(mark.applyAgain ? { action: { kind: "applyAgain", label: "Apply again", changeId: mark.changeId } } : {}) });
   }
   return badges;
 }
 
 /** The layers a target has (doc 3.3): a target has a layer when it has its store. */
-export function targetLayers(target: SettingsTarget, options: { home?: boolean; project?: boolean }): readonly LayerId[] {
+export function targetLayers(target: SettingsTarget, options: { home?: boolean; project?: boolean }): readonly StoreLayer[] {
   switch (target.kind) {
-    case "mac": return ["mac", "builtin"];
+    case "global": return ["mac", "builtin"];
     case "project": return ["project", "mac", "builtin"];
     case "home": return ["profile", "mac", "builtin"];
     case "session": return options.home
-      ? ["chat", "profile", "mac", "builtin"]
+      ? ["profile", "mac", "builtin"]
       : options.project === false ? ["chat", "mac", "builtin"] : ["project", "chat", "mac", "builtin"];
   }
 }

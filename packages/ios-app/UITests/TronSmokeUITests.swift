@@ -536,7 +536,7 @@ final class TronSmokeUITests: XCTestCase {
                     app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
                 default:
                     app.launchArguments = ["-tron-settings-renderer-fixture"]
-                    if surface == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-session", "-settings-changes-scope"] }
+                    if surface == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-scope"] }
                     if dark { app.launchArguments.append("-settings-renderer-dark") }
                 }
                 app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
@@ -564,8 +564,9 @@ final class TronSmokeUITests: XCTestCase {
                     expandSettingsSheet(app, title: "Manage Session")
                 case "changes":
                     XCTAssertTrue(app.buttons["settings-change-ui-change"].waitForExistence(timeout: 10))
-                    app.buttons["All scopes"].tap()
+                    chooseChangesFilter(app, row: "settings-changes-layer", option: "Project")
                     XCTAssertTrue(app.buttons["settings-change-project-change"].waitForExistence(timeout: 5))
+                    chooseChangesFilter(app, row: "settings-changes-layer", option: "All scopes")
                 default:
                     let model = app.buttons["settings-section-model-open"]
                     XCTAssertTrue(model.waitForExistence(timeout: 10))
@@ -1038,7 +1039,7 @@ final class TronSmokeUITests: XCTestCase {
                     app.launchArguments = ["-tron-new-session-fixture", "-new-session-scenario", "project-settings", "-fixture-appearance", appearance]
                 } else {
                     app.launchArguments = ["-tron-settings-renderer-fixture"]
-                    if scope == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-session", "-settings-changes-scope"] }
+                    if scope == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-scope"] }
                     if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
                 }
                 app.launch()
@@ -1058,25 +1059,13 @@ final class TronSmokeUITests: XCTestCase {
                     app.buttons["Stop session"].tap()
                     app.buttons["Release terminal settlement"].tap()
                     expandSettingsSheet(app, title: "Manage Session")
-                    let models = app.descendants(matching: .any)["session-model-summary"]
-                    XCTAssertTrue(models.buttons["settings-row-model.thinking_role_chat_-source"].waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1325-session-\(appearance)-canonical-models")
-                    tapScrolling(app.buttons["Available Tools"], in: app)
-                    expandSettingsSheet(app, title: "Available Tools")
-                    XCTAssertTrue(app.switches["Read File"].waitForExistence(timeout: 5), app.debugDescription)
-                    keepScreenshot(named: "1325-session-\(appearance)-canonical-tools")
-                    closeTopSheet(app)
                     openChatSettings(app)
                     expandSettingsSheet(app, title: "Session Settings")
                     keepScreenshot(named: "1325-session-\(appearance)")
                     captureConfiguration(app, scope: scope, appearance: appearance)
                     captureSettingsTools(app, scope: scope, appearance: appearance)
-                    let source = app.descendants(matching: .any)["settings-configuration"].buttons["settings-row-model.thinking_role_chat_-source"]
-                    for _ in 0..<12 where !source.isHittable { app.swipeDown() }
-                    source.tap()
-                    XCTAssertTrue(app.navigationBars.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1325-session-\(appearance)-source")
-                    closeTopSheet(app)
+                    XCTAssertFalse(app.buttons["Configuration"].exists)
+                    XCTAssertFalse(app.buttons["Available Tools"].exists)
                 } else if scope == "project" {
                     XCTAssertTrue(app.buttons["project-settings-link"].waitForExistence(timeout: 10))
                     app.buttons["project-settings-link"].tap()
@@ -1085,10 +1074,16 @@ final class TronSmokeUITests: XCTestCase {
                     captureSettingsTools(app, scope: scope, appearance: appearance)
                 } else if scope == "changes" {
                     XCTAssertTrue(app.buttons["settings-changes-filters"].waitForExistence(timeout: 10))
-                    XCTAssertTrue(app.staticTexts["All scopes"].firstMatch.exists || app.buttons["All scopes"].exists)
+                    XCTAssertFalse(app.buttons["This session"].exists)
                     XCTAssertTrue(app.buttons["settings-change-ui-change"].waitForExistence(timeout: 5))
                     keepScreenshot(named: "1305-changes-\(appearance)")
-                    app.buttons["All scopes"].tap()
+                    chooseChangesFilter(app, row: "settings-changes-layer", option: "Session")
+                    XCTAssertTrue(app.buttons["settings-change-ui-change"].waitForExistence(timeout: 5))
+                    chooseChangesFilter(app, row: "settings-changes-layer", option: "Global")
+                    XCTAssertTrue(app.buttons["settings-change-fixture-change"].waitForExistence(timeout: 5))
+                    chooseChangesFilter(app, row: "settings-changes-layer", option: "Project")
+                    XCTAssertTrue(app.buttons["settings-change-project-change"].waitForExistence(timeout: 5))
+                    chooseChangesFilter(app, row: "settings-changes-layer", option: "All scopes")
                     let project = app.buttons["settings-change-project-change"]
                     XCTAssertTrue(project.waitForExistence(timeout: 5))
                     keepScreenshot(named: "1305-changes-\(appearance)-all-scopes")
@@ -1108,13 +1103,89 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Session, Home and Project settings sheets at the largest accessibility
+    /// type size, top and scrolled, for visual review (#1634).
+    @MainActor
+    func testCaptureSettingsScopesAtAccessibilityXXXL() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            for scope in ["session", "home", "project"] {
+                let app = XCUIApplication()
+                switch scope {
+                case "home":
+                    app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+                    if appearance == "dark" { app.launchArguments.append("-home-dark") }
+                case "session":
+                    app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
+                default:
+                    app.launchArguments = ["-tron-new-session-fixture", "-new-session-scenario", "project-settings", "-fixture-appearance", appearance]
+                }
+                app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+                app.launch()
+                defer { app.terminate() }
+                let title: String
+                switch scope {
+                case "home":
+                    XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+                    app.buttons["home-pinned-row"].tap()
+                    openManageHome(app)
+                    tapManageRow(app, "home-manage-settings")
+                    title = "Home Settings"
+                case "session":
+                    XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+                    app.buttons["Stop session"].tap()
+                    app.buttons["Release terminal settlement"].tap()
+                    openChatSettings(app)
+                    title = "Session Settings"
+                default:
+                    XCTAssertTrue(app.buttons["project-settings-link"].waitForExistence(timeout: 10))
+                    tapScrolling(app.buttons["project-settings-link"], in: app)
+                    title = "Project Settings"
+                }
+                expandSettingsSheet(app, title: title)
+                let anchor = scope == "project"
+                    ? app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
+                    : app.buttons["settings-section-model-open"]
+                XCTAssertTrue(anchor.waitForExistence(timeout: 5), app.debugDescription)
+                keepScreenshot(named: "1634-\(scope)-\(appearance)-xxxl")
+                app.swipeUp()
+                keepScreenshot(named: "1634-\(scope)-\(appearance)-xxxl-scrolled")
+            }
+        }
+    }
+
     @MainActor
     private func captureSettingsTools(_ app: XCUIApplication, scope: String, appearance: String) {
-        let container = scope == "session" ? app.descendants(matching: .any)["settings-configuration"] : app
-        let row = container.descendants(matching: .any)["settings-row-tools.active"]
+        if scope == "project" {
+            // Tools cannot be set by Project. Inspect its admitted model and
+            // exact repository field, without opening another editor.
+            let model = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
+            reveal(model, in: app)
+            XCTAssertTrue(model.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["Project Pro"].exists)
+            XCTAssertFalse(app.descendants(matching: .any)["settings-row-tools.active"].exists)
+            let source = model.buttons.matching(NSPredicate(format: "label == %@", "Set by Project settings")).firstMatch
+            XCTAssertTrue(source.isHittable, app.debugDescription)
+            assertRendersUntruncated(source, matching: "^Set by Project settings$", named: "1325-\(scope)-\(appearance)-project-source")
+            source.tap()
+            XCTAssertTrue(app.navigationBars.staticTexts["Project setting"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["defaultProvider + defaultModel"].exists)
+            XCTAssertFalse(app.buttons["Revert"].exists)
+            keepScreenshot(named: "1325-\(scope)-\(appearance)-project-info")
+            closeTopSheet(app)
+            return
+        }
+        let row = app.descendants(matching: .any)["settings-row-tools.active"]
         let editor = settingEditor(row)
         reveal(editor, in: app)
         XCTAssertTrue(editor.isHittable, app.debugDescription)
+        // Rendered pixels, not accessibility labels: a truncated label keeps its
+        // full AX text, so only the painted glyphs prove nothing was cut off.
+        assertRendersUntruncated(row.staticTexts["Overridden"], matching: "^Overridden$", named: "1325-\(scope)-\(appearance)-overridden-pill")
+        assertRendersUntruncated(editor, matching: #"^\d+ of \d+ tools$"#, named: "1325-\(scope)-\(appearance)-tools-chip")
+        let resize = app.descendants(matching: .any)["settings-row-context.images.autoResize"]
+        reveal(resize, in: app)
+        assertVisibleGapBeforePill(in: resize, named: "1325-\(scope)-\(appearance)-toggle-pill-gap")
         keepScreenshot(named: "1325-\(scope)-\(appearance)-direct-tools")
         editor.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Tools"].waitForExistence(timeout: 5))
@@ -1127,16 +1198,72 @@ final class TronSmokeUITests: XCTestCase {
 
     @MainActor
     private func captureConfiguration(_ app: XCUIApplication, scope: String, appearance: String) {
-        let configuration = app.buttons["Configuration"]
-        reveal(configuration, in: app)
-        configuration.tap()
-        expandSettingsSheet(app, title: "Configuration")
+        let models = app.buttons["settings-section-model-open"]
+        reveal(models, in: app)
+        XCTAssertTrue(models.isHittable, app.debugDescription)
+        models.tap()
+        expandSettingsSheet(app, title: "Models")
         XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].waitForExistence(timeout: 5))
-        keepScreenshot(named: "1325-\(scope)-\(appearance)-configuration")
-        let source = app.descendants(matching: .any)["settings-configuration"].buttons["settings-row-tools.active-source"]
-        reveal(source, in: app)
-        XCTAssertTrue(source.isHittable, app.debugDescription)
-        keepScreenshot(named: "1325-\(scope)-\(appearance)-configuration-tools")
+        XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.thinking_role_chat_"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "1325-\(scope)-\(appearance)-canonical-models")
+        closeTopSheet(app)
+    }
+
+    /// Recognizes the element's painted text; an ellipsis or a shortened word fails.
+    @MainActor
+    private func assertRendersUntruncated(_ element: XCUIElement, matching pattern: String, named name: String,
+                                          file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), file: file, line: line)
+        let screenshot = element.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        guard let image = screenshot.image.cgImage else { return XCTFail("No element pixels for \(name)", file: file, line: line) }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        XCTAssertNoThrow(try VNImageRequestHandler(cgImage: image).perform([request]), file: file, line: line)
+        let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+            .joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        XCTAssertNotNil(text.range(of: pattern, options: .regularExpression),
+                        "\(name) rendered \"\(text)\", expected \(pattern)", file: file, line: line)
+    }
+
+    /// A row's Overridden pill must be separated from the control before it by
+    /// at least 6 points of the row's own background. The pill's accessibility
+    /// frame is its painted capsule; the background is sampled in the spacing
+    /// after it, before the Revert target.
+    @MainActor
+    private func assertVisibleGapBeforePill(in row: XCUIElement, named name: String,
+                                            file: StaticString = #filePath, line: UInt = #line) {
+        let pill = row.staticTexts["Overridden"]
+        XCTAssertTrue(pill.waitForExistence(timeout: 5), file: file, line: line)
+        let screenshot = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let image = screenshot.image
+        guard let cgImage = image.cgImage else { return XCTFail("No screen pixels for \(name)", file: file, line: line) }
+        let scale = image.scale, width = cgImage.width
+        let y = Int((pill.frame.midY * scale).rounded())
+        guard let strip = cgImage.cropping(to: CGRect(x: 0, y: y, width: width, height: 1)) else {
+            return XCTFail("Cannot sample \(name)", file: file, line: line)
+        }
+        var pixels = [UInt8](repeating: 0, count: width * 4)
+        guard let context = CGContext(data: &pixels, width: width, height: 1, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return XCTFail("Cannot read \(name)", file: file, line: line) }
+        context.draw(strip, in: CGRect(x: 0, y: 0, width: width, height: 1))
+        func color(_ x: Int) -> [Int] { (0..<3).map { Int(pixels[max(0, min(width - 1, x)) * 4 + $0]) } }
+        let background = color(Int((pill.frame.maxX + 3) * scale))
+        var x = Int(pill.frame.minX * scale) - 3 // past the capsule's antialiased edge
+        var gap = 0
+        while x > 0, zip(color(x), background).allSatisfy({ abs($0 - $1) <= 12 }) { gap += 1; x -= 1 }
+        XCTAssertGreaterThanOrEqual(CGFloat(gap + 3) / scale, 6,
+            "\(name): \(CGFloat(gap + 3) / scale) pt of row background \(background) before the pill; then \(color(x))",
+            file: file, line: line)
     }
 
     /// Measure the actual shared Revert button, not its enclosing settings row.
@@ -2473,9 +2600,13 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertFalse(app.buttons["Show all"].exists, "Manage Session never expands settings in place")
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-primary")
             app.buttons["Release terminal settlement"].tap()
-            let reset = app.descendants(matching: .any)["session-model-summary"].buttons["settings-row-model.thinking_role_chat_-reset"]
+            openChatSettings(app)
+            tapScrolling(app.buttons["settings-section-model-open"], in: app)
+            let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
             reveal(reset, in: app)
             XCTAssertTrue(reset.isHittable, "The canonical Thinking reset must stay reachable at XXXL")
+            closeTopSheet(app)
+            closeTopSheet(app)
             // The shared row moves a competing trailing control below its labels at
             // accessibility sizes, so titles and values wrap only at word
             // boundaries (#868): a compact action and a plain value both stack.
@@ -2633,12 +2764,11 @@ final class TronSmokeUITests: XCTestCase {
     func testSettingsChangesScopeFiltersAndApprovalReceipts() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-session", "-settings-changes-scope", "-settings-changes-approvals"]
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-scope", "-settings-changes-approvals"]
         app.launch(); defer { app.terminate() }
         let approve = app.buttons["Approve"].firstMatch
-        XCTAssertTrue(app.buttons["This session"].waitForExistence(timeout: 5))
-        XCTAssertFalse(approve.exists, "Mac approvals do not belong to this Session's chat-layer scope")
-        app.buttons["All scopes"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Changes"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["This session"].exists)
         XCTAssertTrue(approve.waitForExistence(timeout: 5), app.debugDescription)
         tapScrolling(approve, in: app)
         XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
@@ -2655,12 +2785,23 @@ final class TronSmokeUITests: XCTestCase {
         drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
         XCTAssertTrue(app.buttons["settings-change-foreign-change"].exists, "All scopes includes other sessions")
-        app.buttons["This session"].tap()
+        chooseChangesFilter(app, row: "settings-changes-layer", option: "Global")
+        drainChanges(app)
+        XCTAssertTrue(app.buttons["settings-change-fixture-change"].exists)
+        XCTAssertTrue(app.buttons["settings-change-foreign-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-project-change"].exists)
+        chooseChangesFilter(app, row: "settings-changes-layer", option: "Project")
+        drainChanges(app)
+        XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-fixture-change"].exists)
+        chooseChangesFilter(app, row: "settings-changes-layer", option: "Session")
         drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-project-change"].exists, "Repository history is not a Session value")
-        // Filters intersect with the exact context, never widen its ownership.
+        // Actor/status filters intersect with the selected scope, never widen it.
         chooseChangesFilter(app, row: "settings-changes-actor", option: "Agents and outside")
         drainChanges(app)
         XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)

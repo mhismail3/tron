@@ -1735,15 +1735,20 @@ struct TronSettingsRow<Trailing: View>: View {
 
 /// A settings row's labels and trailing control. The control keeps its natural
 /// width when both fit on one line, so the subtitle uses the rest of the row.
-/// When they compete, the control caps at 45% and truncates; with
-/// `stackedSpacing` (accessibility sizes) it moves below the labels instead,
-/// keeping the same visible trailing edge at its natural width.
+/// When they compete, the control caps at 45% and truncates, but never below the
+/// width its fixed-size parts (state pills, counts) require. With
+/// `stackedSpacing` (accessibility sizes), or when that leaves the labels less
+/// than a readable column, it moves below the labels instead, keeping the same
+/// visible trailing edge at its natural width.
 private struct TronSettingsRowLayout: Layout {
     let spacing: CGFloat
     let stackedSpacing: CGFloat?
     /// Inspection includes the glyph; a stacked value still aligns with the
     /// text column, as it did before the labels became an independent target.
     let stackedLeadingInset: CGFloat
+
+    /// The narrowest text column that still reads as a title beside its control.
+    private static let minimumLabelTextWidth: CGFloat = 96
 
     private struct Arrangement {
         var labels: CGFloat
@@ -1763,10 +1768,11 @@ private struct TronSettingsRowLayout: Layout {
             let trailing = max(trailingIdeal, min(room, subviews[1].sizeThatFits(ProposedViewSize(width: room, height: nil)).width))
             return Arrangement(labels: available - trailing, trailing: trailing)
         }
-        if stackedSpacing != nil {
+        let trailingMinimum = subviews[1].sizeThatFits(ProposedViewSize(width: 0, height: nil)).width
+        let trailing = min(trailingIdeal, max(available * 0.45, trailingMinimum))
+        if stackedSpacing != nil || available - trailing < stackedLeadingInset + Self.minimumLabelTextWidth {
             return Arrangement(labels: width, trailing: min(trailingIdeal, max(0, width - stackedLeadingInset)), stacked: true)
         }
-        let trailing = min(trailingIdeal, available * 0.45)
         return Arrangement(labels: available - trailing, trailing: trailing)
     }
 
@@ -1779,7 +1785,7 @@ private struct TronSettingsRowLayout: Layout {
         let width = proposal.width ?? subviews.reduce(0) { $0 + $1.sizeThatFits(.unspecified).width } + spacing
         let arrangement = arrange(subviews, in: width)
         let (labels, trailing) = heights(subviews, arrangement)
-        let height = arrangement.stacked ? labels + (stackedSpacing ?? 0) + trailing : max(labels, trailing)
+        let height = arrangement.stacked ? labels + (stackedSpacing ?? spacing) + trailing : max(labels, trailing)
         return CGSize(width: width, height: height)
     }
 
@@ -1789,7 +1795,7 @@ private struct TronSettingsRowLayout: Layout {
             let (labels, _) = heights(subviews, arrangement)
             subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
                               proposal: ProposedViewSize(width: arrangement.labels, height: nil))
-            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.minY + labels + (stackedSpacing ?? 0)), anchor: .topTrailing,
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.minY + labels + (stackedSpacing ?? spacing)), anchor: .topTrailing,
                               proposal: ProposedViewSize(width: arrangement.trailing, height: nil))
             return
         }

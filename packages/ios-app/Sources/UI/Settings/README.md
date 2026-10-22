@@ -52,13 +52,16 @@ services, paired Macs and devices, notifications and logs.
   remains an explicit Apply again action. The Gateway supplies override presence and permissions;
   rows never infer ownership from value equality.
 - **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView`: Home
-  resolves a `home` target and edits its Profile override; ordinary chats edit their Session override.
+  resolves a `home` target and writes the Session scope in Home's durable recipe; ordinary chats
+  write their own Session scope. Public scope names are Project, Session and Global; SDK defaults
+  belong to Global, while physical store bindings stay Gateway-private.
   Both reuse Global's renderer and editors, including models and tools. Project-owned controls are
   read-only with a shared Project info pill; explicit overrides have Overridden and circular Revert.
   `SettingsProjectGroups` shows applied Project values only; `SettingsProjectNotices` shares bounded
   file/key/reason diagnostics. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
 - **Changes.** Only Global has a Changes entry. `SettingsChangesView` pages `settings.history`, intersects filters with the
-  surface's scope, pins approvals above history, and keeps last-look per Mac and scope. Undo and
+  selected Project/Session/Global filters, pins approvals above history, and keeps last-look per Mac
+  and entry context. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
   entries never show their definition.
 - **Approvals.** `SettingsApprovalsSection` re-reads `settings.approvals` on its revision and
@@ -72,7 +75,7 @@ services, paired Macs and devices, notifications and logs.
 - **Models and compaction.** Model names are the catalog's `name`; thinking choices come from the
   model's advertised levels; the default model comes from canonical settings, never catalog order.
   `compaction-policy.v1` adds per-field thinking and focus inheritance.
-- **Default Tools.** Mac Tools' Always include switches edit `tools.active`. While
+- **Default Tools.** Global Tools' Always include switches edit `tools.active`. While
   `sources.extensions` keeps the built-in from loading at that scope (Pi's rule: a Project entry
   overrides the Mac list), the switch is dimmed, shows Off and says why; the saved entry is kept,
   and the row explains why.

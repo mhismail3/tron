@@ -196,8 +196,8 @@ describe("persisted-state upgrade corpus recorder", () => {
       const settingsRuntime = await modelRuntimeFactory();
       const existing = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8").catch(() => "{}")) as Record<string, unknown>;
       await writeFile(join(agentDir, "settings.json"), JSON.stringify({ ...existing, sessionDir }));
-      const mac = (key: string, value: unknown) => ({ key, layer: "mac" as const, op: "set" as const, value });
-      await settingsDependencies({ agentDir, tronHome: join(root, "tron"), trust, modelRuntime: settingsRuntime }).settingsChanges.change({ kind: "mac" }, [
+      const mac = (key: string, value: unknown) => ({ key, layer: "global" as const, op: "set" as const, value });
+      await settingsDependencies({ agentDir, tronHome: join(root, "tron"), trust, modelRuntime: settingsRuntime }).settingsChanges.change({ kind: "global" }, [
         mac("model.ref[role=chat]", { provider: CORPUS_AZURE_PROVIDER, id: CORPUS_AZURE_MODEL }),
         mac("model.thinking[role=chat]", "medium"),
         mac("model.thinkingBudgets", { minimal: 512, high: 8_192 }),

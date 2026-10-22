@@ -55,7 +55,7 @@ export async function setModelQueue(input: {
   const installed = (input.registry as unknown as { settingsOwners?: { changes: SettingsChangePath } }).settingsOwners;
   const changes = installed?.changes ?? settingsDependencies({ ...input, home: () => input.registry.homeOwner() }).settingsChanges;
   const value = models.map(model => typeof model === "string" ? model : `${model.provider}/${model.id}`);
-  await changes.change({ kind: "home" }, [{ key: `model.queue[role=${role}]`, layer: "profile", op: "set", value }],
+  await changes.change({ kind: "home" }, [{ key: `model.queue[role=${role}]`, layer: "session", op: "set", value }],
     { actor: { kind: "ui", id: "fixture" }, commandId: randomUUID() });
 }
 

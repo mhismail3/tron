@@ -8,6 +8,7 @@ import { fauxProvider } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "./trust-service.js";
+import { createSettingsManager } from "./settings-sdk-manager.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
 import { SettingsApprovals } from "./settings-approvals.js";
@@ -156,15 +157,15 @@ describe("settings.resolve", () => {
   });
   it("persists the app-terminal idle period in the Gateway store and serves it live to the terminal owner (#479)", async () => {
     const f = await fixture();
-    const target = { kind: "mac" };
+    const target = { kind: "global" };
     const store = join(f.tronHome, "gateway", "settings", "gateway.json");
     // Unset: the built-in 60 minutes.
     expect(row(await f.service.invoke(subscribed(), "settings.resolve", { target }) as Resolution, "setup.terminalIdleMinutes"))
-      .toMatchObject({ value: 60, layer: "builtin" });
+      .toMatchObject({ value: 60, layer: "global" });
     expect(await terminalIdleLimitMs(f.settingsModel)).toBe(3_600_000);
 
     const change = async (commandId: string, value: unknown) => f.service.invoke(subscribed(), "settings.change", {
-      commandId, target, changes: [{ key: "setup.terminalIdleMinutes", layer: "mac", op: value === undefined ? "unset" : "set", ...(value === undefined ? {} : { value }) }],
+      commandId, target, changes: [{ key: "setup.terminalIdleMinutes", layer: "global", op: value === undefined ? "unset" : "set", ...(value === undefined ? {} : { value }) }],
     }) as Promise<{ status: string }>;
     expect((await change("terminal-idle-15", 15)).status).toBe("applied");
     expect(JSON.parse(await readFile(store, "utf8"))).toEqual({ terminal: { idleMinutes: 15 } });
@@ -183,17 +184,17 @@ describe("settings.resolve", () => {
     const target = { kind: "home" };
     const response = await f.service.invoke(subscribed(), "settings.change", {
       commandId: "home-profile-worker-thinking", target,
-      changes: [{ key: "model.thinking[role=worker]", layer: "profile", op: "set", value: "high" }],
+      changes: [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "high" }],
     }) as { status: string };
     expect(response.status).toBe("applied");
     const profile = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"));
     expect(profile).toEqual({ thinking: { worker: "high" } });
     const resolution = await f.service.invoke(subscribed(), "settings.resolve", { target }) as Resolution;
-    expect(row(resolution, "model.thinking[role=worker]")).toMatchObject({ value: "high", layer: "profile" });
+    expect(row(resolution, "model.thinking[role=worker]")).toMatchObject({ value: "high", layer: "session" });
 
     await expect(f.service.invoke(subscribed(), "settings.change", {
       commandId: "home-profile-invalid-thinking", target,
-      changes: [{ key: "model.thinking[role=worker]", layer: "profile", op: "set", value: "unbounded" }],
+      changes: [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "unbounded" }],
     })).rejects.toThrow();
     expect(JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"))).toEqual(profile);
 
@@ -202,25 +203,26 @@ describe("settings.resolve", () => {
     await writeFile(join(f.tronHome, "gateway", "home", "profile.json"), JSON.stringify({ oversized: "x".repeat(256 * 1024) }));
     await expect(f.service.invoke(subscribed(), "settings.resolve", { target })).rejects.toThrow("Home profile exceeds its 262144-byte limit");
   });
-  it("resolves five uniform layers for every target, shows an untrusted project as not applied, and matches pi and a live chat", async () => {
+  it("resolves three scopes for every target, shows an untrusted project as not applied, and matches pi and a live chat", async () => {
     const { service, project, registry, model, modelKey, tronHome, agentDir, trust } = await fixture();
     const client = subscribed();
     const resolve = (target: Record<string, unknown>, c = client) => service.invoke(c, "settings.resolve", { target }) as Promise<Resolution>;
 
+    const projectFile = join(await trust.canonicalDirectory(project), ".pi", "settings.json");
     // Untrusted: the project's values are present but not applied (doc 3.5).
     const untrusted = await resolve({ kind: "project", cwd: project });
     const retries = row(untrusted, "run.retry.maxRetries");
-    expect(retries).toMatchObject({ value: 5, layer: "mac", applied: false, reason: "untrusted", display: "5 retries" });
+    expect(retries).toMatchObject({ value: 5, layer: "global", applied: false, reason: "untrusted", display: "5 retries" });
     expect(retries.layers.find(layer => layer.layer === "project")).toMatchObject({ value: 7, applied: false, reason: "untrusted" });
     expect(retries.badges).toContainEqual(expect.objectContaining({ kind: "state", label: "Not applied (untrusted)" }));
     // Untrusted equals what pi itself applies without trust.
     const piUntrusted = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: false }), model);
     for (const [key, expected] of Object.entries(piUntrusted)) expect(row(untrusted, key).value, key).toEqual(expected);
-    // A Project value for a Mac-only key is a diagnostic, never applied.
-    expect(untrusted.diagnostics).toContainEqual({ key: "permissions.defaultProjectTrust", layer: "project", reason: "layer-not-allowed", path: "defaultProjectTrust" });
+    // A Project value for a Global-only key is a diagnostic, never applied.
+    expect(untrusted.diagnostics).toContainEqual({ key: "permissions.defaultProjectTrust", layer: "project", reason: "project-forbidden", path: "defaultProjectTrust", file: projectFile });
     expect(row(untrusted, "permissions.defaultProjectTrust").value).toBe("ask");
     // Redacted: shown as set, never the value.
-    expect(row(untrusted, "run.httpProxy")).toMatchObject({ display: "Set", layer: "mac" });
+    expect(row(untrusted, "run.httpProxy")).toMatchObject({ display: "Set", layer: "global" });
     expect(JSON.stringify(untrusted)).not.toContain("proxy.invalid");
 
     // Trusting flips the project's values to applied with no other change.
@@ -234,65 +236,67 @@ describe("settings.resolve", () => {
     expect(strip(trusted)).toEqual(strip(untrusted));
     expect(row(trusted, "permissions.projectTrust")).toMatchObject({ value: true, display: "Trusted", qualifiers: { project: trusted.keys.find(k => k.key === "permissions.projectTrust")!.qualifiers!.project } });
 
-    // Trusted equals pi's merged resolution, including the +name tool modifier
-    // and the per-model compaction override that beats the Mac ordinary value.
+    // Keep raw SDK parity for every other key. Tools cross the production
+    // admission boundary: the repository cannot widen the executable ceiling.
     const piTrusted = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: true }), model);
+    const admittedTools = (await createSettingsManager(project, agentDir, true)).getDefaultTools();
+    piTrusted["tools.active"] = admittedTools;
     for (const [key, expected] of Object.entries(piTrusted)) {
       const qualifiers = key.startsWith("context.compaction.") && key !== "context.compaction.enabled" ? { model: modelKey } : undefined;
       expect(row(trusted, key, qualifiers).value, key).toEqual(expected);
     }
-    expect(row(trusted, "tools.active").value).toEqual(["read", "bash", "write"]);
+    expect(admittedTools).toEqual(["read", "bash"]);
+    expect(row(trusted, "tools.active").value).toEqual(admittedTools);
     expect(row(trusted, "context.compaction.reserveTokens", { model: modelKey })).toMatchObject({ value: 30_000, layer: "project" });
-    // Provenance pills say where a value comes from (#939); a per-model value
-    // names its model as the picker does, with the raw qualifier as detail.
-    expect(row(trusted, "context.compaction.reserveTokens", { model: modelKey }).badges.slice(0, 2)).toEqual([
-      { kind: "layer", label: "Repository" },
-      { kind: "scope", label: "For Reasoner Pro", detail: modelKey },
-    ]);
+    // Project metadata points to the exact repository field, including the
+    // qualified model; retired source badges are not another authority.
+    expect(row(trusted, "context.compaction.reserveTokens", { model: modelKey })).toMatchObject({
+      layer: "project", projectSetting: { file: projectFile, path: `compaction.modelOverrides["${modelKey}"].reserveTokens` },
+    });
 
-    // Mac target: Mac and Built-in only.
-    const mac = await resolve({ kind: "mac" });
-    expect(mac.layers).toEqual(["mac", "builtin"]);
-    expect(row(mac, "run.retry.maxRetries")).toMatchObject({ value: 5, layer: "mac" });
-    expect(row(mac, "run.retry.baseDelayMs")).toMatchObject({ value: 2_000, layer: "builtin" });
-    expect(row(mac, "run.retry.maxRetries").badges[0]).toEqual({ kind: "layer", label: "Mac" });
-    expect(row(mac, "run.retry.baseDelayMs").badges[0]).toEqual({ kind: "layer", label: "Built-in" });
+    // Global includes SDK defaults without exposing a separate built-in scope.
+    const mac = await resolve({ kind: "global" });
+    expect(mac.layers).toEqual(["global"]);
+    expect(row(mac, "run.retry.maxRetries")).toMatchObject({ value: 5, layer: "global" });
+    expect(row(mac, "run.retry.baseDelayMs")).toMatchObject({ value: 2_000, layer: "global" });
+    expect(row(mac, "run.retry.maxRetries").layer).toBe("global");
+    expect(row(mac, "run.retry.baseDelayMs").layer).toBe("global");
 
-    // Session target: a live chat in the project. Its Chat layer is what the
+    // Session target: a live chat in the project. Its Session scope is what the
     // runtime actually uses, and a fresh runtime used the resolver's values.
     const slot = await registry.create(project);
     const session = await resolve({ kind: "session", sessionId: slot.id }, subscribed([slot.id]));
-    expect(session.layers).toEqual(["chat", "project", "mac", "builtin"]);
+    expect(session.layers).toEqual(["project", "session", "global"]);
     const context = await slot.context() as { activeTools: string[] };
     const snapshot = slot.snapshot();
-    expect(row(session, "model.ref[role=chat]")).toMatchObject({ value: { provider: model.provider, id: model.id }, layer: "chat" });
-    expect(row(session, "model.ref[role=chat]").badges[0]).toEqual({ kind: "layer", label: "Session" });
+    expect(row(session, "model.ref[role=chat]")).toMatchObject({ value: { provider: model.provider, id: model.id }, layer: "session" });
+    expect(row(session, "model.ref[role=chat]").layer).toBe("session");
     expect(snapshot.model).toEqual(row(trusted, "model.ref[role=chat]").value);
     expect(row(session, "model.thinking[role=chat]", { model: modelKey }).value).toBe(snapshot.thinkingLevel);
     expect(snapshot.thinkingLevel).toBe(row(trusted, "model.thinking[role=chat]").value);
     expect([...row(session, "tools.active").value as string[]].sort()).toEqual([...context.activeTools].sort());
     for (const tool of row(trusted, "tools.active").value as string[]) expect(context.activeTools).toContain(tool);
-    // A Run key with no Chat value follows the project for this chat.
+    // A Run key with no Session value follows the project for this chat.
     expect(row(session, "run.retry.maxRetries")).toMatchObject({ value: 7, layer: "project" });
     // Home-only profile keys never appear on an ordinary chat (doc 3.3).
     expect(session.keys.some(key => key.key === "model.thinking[role=worker]")).toBe(false);
 
-    // Home profile target: Profile, Mac and Built-in; "same as Home" is built in.
+    // Home has Session/Global scopes and no Project; empty worker choice means Same as Home.
     await mkdir(join(tronHome, "gateway", "home"), { recursive: true });
     await writeFile(join(tronHome, "gateway", "home", "profile.json"), JSON.stringify({ thinking: { worker: "low" } }));
     const home = await resolve({ kind: "home" });
-    expect(home.layers).toEqual(["profile", "mac", "builtin"]);
-    expect(row(home, "model.queue[role=worker]")).toMatchObject({ value: [], layer: "builtin", display: "Same as Home" });
-    expect(row(home, "model.queue[role=background]")).toMatchObject({ value: [], layer: "builtin", display: "Subagent queue" });
-    expect(row(home, "model.thinking[role=worker]")).toMatchObject({ value: "low", layer: "profile", badges: expect.arrayContaining([{ kind: "layer", label: "Home profile" }]) });
+    expect(home.layers).toEqual(["session", "global"]);
+    expect(row(home, "model.queue[role=worker]")).toMatchObject({ value: [], layer: "global", display: "Same as Home" });
+    expect(row(home, "model.queue[role=background]")).toMatchObject({ value: [], layer: "global", display: "Subagent queue" });
+    expect(row(home, "model.thinking[role=worker]")).toMatchObject({ value: "low", layer: "session", overridden: true });
 
     // Removing stored values must reveal the SDK defaults at the real read
     // boundary, not merely make two declaration tables agree.
     await writeFile(join(agentDir, "settings.json"), "{}");
-    const defaults = await resolve({ kind: "mac" });
+    const defaults = await resolve({ kind: "global" });
     const piDefaults = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: false }), model);
     for (const [key, expected] of Object.entries(piDefaults)) {
-      if (expected !== undefined) expect(row(defaults, key), key).toMatchObject({ value: expected, layer: "builtin" });
+      if (expected !== undefined) expect(row(defaults, key), key).toMatchObject({ value: expected, layer: "global" });
     }
     await mkdir(dirname(ARTIFACT), { recursive: true });
     await writeFile(ARTIFACT, `${JSON.stringify({ untrusted, trusted, mac, session, home, defaults }, null, 2)}\n`);
@@ -305,7 +309,7 @@ describe("settings.resolve", () => {
     if (!plain) throw new Error("the pinned catalog has no non-reasoning model");
     const document = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ ...document, defaultProvider: plain.provider, defaultModel: plain.id }));
-    const mac = await service.invoke(subscribed(), "settings.resolve", { target: { kind: "mac" } }) as Resolution;
+    const mac = await service.invoke(subscribed(), "settings.resolve", { target: { kind: "global" } }) as Resolution;
     const thinking = row(mac, "model.thinking[role=chat]");
     expect(thinking.value).toBe("off");
     expect(thinking.badges).toContainEqual(expect.objectContaining({ kind: "state", label: "Clamped" }));
@@ -336,7 +340,7 @@ describe("settings renderer contract", () => {
 
   it("summarizes queues and tools without losing ordered values or full change-history detail", async () => {
     const f = await fixture();
-    const target = { kind: "mac" } as const;
+    const target = { kind: "global" } as const;
     const queue = "model.queue[role=worker]";
     const first = `${f.model.provider}/plain`;
     const second = f.modelKey;
@@ -347,7 +351,7 @@ describe("settings renderer contract", () => {
     expect(row(initial, queue)).toMatchObject({ display: "Same as Home", value: [] });
     expect(row(initial, "tools.active")).toMatchObject({ display: "2 tools", value: ["read", "bash"] });
     const change = async (id: string, key: string, value: unknown) => await f.service.invoke(subscribed(), "settings.change", {
-      commandId: id, target, changes: [{ key, layer: "mac", op: "set", value }],
+      commandId: id, target, changes: [{ key, layer: "global", op: "set", value }],
     });
     await change("queue-two", queue, [first, second]);
     const configured = await resolve();
@@ -361,9 +365,9 @@ describe("settings renderer contract", () => {
     expect(row(singular, queue)).toMatchObject({ display: "1 model", value: [second] });
     expect(row(singular, "tools.active")).toMatchObject({ display: "1 tool", value: ["read"] });
     await f.service.invoke(subscribed(), "settings.change", {
-      commandId: "queue-unset", target, changes: [{ key: queue, layer: "mac", op: "unset" }],
+      commandId: "queue-unset", target, changes: [{ key: queue, layer: "global", op: "unset" }],
     });
-    expect(row(await resolve(), queue)).toMatchObject({ display: "Same as Home", value: [], layer: "builtin" });
+    expect(row(await resolve(), queue)).toMatchObject({ display: "Same as Home", value: [], layer: "global" });
     transcript.push({ case: "count summaries preserve full values", response: { initial, configured, singular, history } });
   });
   afterAll(async () => {
@@ -373,7 +377,7 @@ describe("settings renderer contract", () => {
 
   let command = 0;
   const commandId = () => `settings-renderer-${String(++command).padStart(4, "0")}`;
-  const macTarget: SettingsTarget = { kind: "mac" };
+  const macTarget: SettingsTarget = { kind: "global" };
   type Fixture = Awaited<ReturnType<typeof fixture>>;
   type Options = { key: string; source: string; dependsOn: string[]; options: Array<{ value: unknown; label: string; detail?: string; disabledReason?: string; resource?: Record<string, unknown> }>; range?: unknown; nextCursor?: string };
 
@@ -411,9 +415,8 @@ describe("settings renderer contract", () => {
       return result;
     };
     const projectTarget = { kind: "project", cwd: f.project };
-    const projectDocument = async () => JSON.parse(await readFile(join(f.project, ".pi", "settings.json"), "utf8")) as { defaultTools?: string[] };
 
-    // Mac and Project offer pi's built-ins, then opt-in extension tools such as codemode.
+    // Global and Project offer pi's built-ins, then opt-in extension tools such as codemode.
     const scope = await options(f, { key: "tools.active" }, projectTarget);
     expect(scope.source).toBe("catalog.tools");
     expect(scope.options.slice(0, PI_BUILTIN_TOOL_NAMES.length).map(option => option.value)).toEqual(PI_BUILTIN_TOOL_NAMES);
@@ -441,21 +444,12 @@ describe("settings renderer contract", () => {
     }) as unknown as Options;
     for (const name of context.activeTools) expect(chat.options.map(option => option.value)).toContain(name);
 
-    // The Project holds ["+write"] over the Mac's ["read", "bash"]. Choosing codemode too stays relative.
-    await changeAt(projectTarget, ["read", "bash", "write", "codemode"]);
-    expect((await projectDocument()).defaultTools).toEqual(["+write", "+codemode"]);
-    // So a Mac change still flows into the project.
-    await changeAt({ kind: "mac" }, ["read"]);
-    const followed = row(await f.service.invoke(subscribed(), "settings.resolve", { target: projectTarget }) as Resolution, "tools.active");
-    expect(followed).toMatchObject({ value: ["read", "write", "codemode"], layer: "project" });
-    // Unchoosing a tool from below is a removal entry.
-    await changeAt(projectTarget, ["write"]);
-    expect((await projectDocument()).defaultTools).toEqual(["+write", "-read"]);
-    // Choosing exactly what the Mac selects leaves the Project holding nothing.
-    await changeAt(projectTarget, ["read"]);
-    expect((await projectDocument()).defaultTools).toBeUndefined();
-    expect(row(await f.service.invoke(subscribed(), "settings.resolve", { target: projectTarget }) as Resolution, "tools.active"))
-      .toMatchObject({ value: ["read"], layer: "mac" });
+    // Project is an inspector, not another writer. Preserve every byte,
+    // including repository-owned relative syntax and unrelated fields.
+    const before = await readFile(join(f.project, ".pi", "settings.json"), "utf8");
+    await expect(changeAt(projectTarget, ["read", "bash", "write", "codemode"]))
+      .rejects.toThrow("Project settings are read-only");
+    expect(await readFile(join(f.project, ".pi", "settings.json"), "utf8")).toBe(before);
   });
 
   it("negotiates each key's control with the client, and shows every key read-only with its display when no renderer is named", async () => {
@@ -491,8 +485,8 @@ describe("settings renderer contract", () => {
     // The new iPhone primitives persist through the same real change path. A
     // secret is writable but never comes back as an editable/readable value.
     await maintainerChange(f, [
-      { key: "sources.skills", layer: "mac", op: "set", value: ["beta", "gamma"] },
-      { key: "run.httpProxy", layer: "mac", op: "set", value: "http://replacement.invalid:8080" },
+      { key: "sources.skills", layer: "global", op: "set", value: ["beta", "gamma"] },
+      { key: "run.httpProxy", layer: "global", op: "set", value: "http://replacement.invalid:8080" },
     ]);
     const edited = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
     expect(presentedRow(edited, "sources.skills")).toMatchObject({ value: ["beta", "gamma"], presentation: { control: "list", valueKind: "stringList" } });
@@ -568,14 +562,14 @@ describe("settings renderer contract", () => {
     const followed = await options(f, { key: "model.thinking[role=chat]", qualifiers: { model: plainKey } });
     expect(followed.options).toEqual([]);
     // Switching the chat model re-requests: the same key now follows the new chat model.
-    await maintainerChange(f, [{ key: "model.ref[role=chat]", layer: "mac", op: "set", value: { provider: plain.provider, id: plain.id } }]);
+    await maintainerChange(f, [{ key: "model.ref[role=chat]", layer: "global", op: "set", value: { provider: plain.provider, id: plain.id } }]);
     expect((await options(f, { key: "model.thinking[role=chat]" })).options).toEqual([]);
     expect((await options(f, { key: "model.thinking[role=chat]", qualifiers: { model: f.modelKey } })).options.length).toBeGreaterThan(0);
 
     // The context window range is the bounds settings.change validates against.
     const window = await options(f, { key: "model.contextWindow", qualifiers: { model: f.modelKey } });
     expect(window).toMatchObject({ source: "catalog.contextWindow", options: [], range: { min: contextWindowLimits(reasoner)!.minimum, max: 200_000, unit: "tokens" } });
-    const tooLarge = await maintainerChange(f, [{ key: "model.contextWindow", qualifiers: { model: f.modelKey }, layer: "mac", op: "set", value: 200_001 }], true);
+    const tooLarge = await maintainerChange(f, [{ key: "model.contextWindow", qualifiers: { model: f.modelKey }, layer: "global", op: "set", value: 200_001 }], true);
     expect(tooLarge.changes[0]).toMatchObject({ status: "failed", error: { code: "invalid_request", message: expect.stringContaining("Context window must be") } });
 
     // Models: a provider query narrows the catalog to the faux provider, and pages by an opaque cursor.
@@ -607,8 +601,8 @@ describe("settings renderer contract", () => {
     const f = await fixture();
     const settingsFile = join(f.agentDir, "settings.json");
     const beforeFile = await readFile(settingsFile, "utf8");
-    const dryRun = await maintainerChange(f, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 99 }], true);
-    expect(dryRun).toMatchObject({ dryRun: true, changes: [{ key: "run.retry.maxRetries", layer: "mac", status: "failed",
+    const dryRun = await maintainerChange(f, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 99 }], true);
+    expect(dryRun).toMatchObject({ dryRun: true, changes: [{ key: "run.retry.maxRetries", layer: "global", status: "failed",
       error: { code: "invalid_request", message: expect.stringContaining("run.retry.maxRetries must be an integer from 0 through 20") } }] });
     expect(await readFile(settingsFile, "utf8")).toBe(beforeFile);
     const history = await f.service.invoke(subscribed(), "settings.history", { limit: 50 }) as unknown as { entries: ChangeEntry[] };

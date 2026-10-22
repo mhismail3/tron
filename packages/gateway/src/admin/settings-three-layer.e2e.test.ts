@@ -45,7 +45,7 @@ async function setup() {
   const retryChange = (slot: Slot, op: "set" | "unset", value?: number) => service.invoke(client, "settings.change", {
     commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
     fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
-    changes: [{ key: "run.retry.maxRetries", layer: "chat", op, ...(value === undefined ? {} : { value }) }],
+    changes: [{ key: "run.retry.maxRetries", layer: "session", op, ...(value === undefined ? {} : { value }) }],
   });
   const attempts = async (slot: Slot) => {
     let count = 0;
@@ -152,7 +152,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     const read = (target: Record<string, string>) => f.service.invoke(f.client, "settings.resolve", {
       target, keys: ["run.retry.maxRetries", "setup.sessionDir"], renderer: { version: 1, controls: ["number", "text"] },
     }) as Promise<{ keys: Array<{ key: string; overridden: boolean; presentation: { editable: boolean } }> }>;
-    const global = await read({ kind: "mac" });
+    const global = await read({ kind: "global" });
     expect(global.keys).toHaveLength(1);
     expect(global.keys[0]).toMatchObject({ key: "run.retry.maxRetries", overridden: true, presentation: { editable: true } });
     await f.project({ retry: { maxRetries: 2 } });
@@ -213,7 +213,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await f.service.invoke(f.client, "settings.change", {
       commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
       fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
-      changes: [{ key: "context.compaction.reserveTokens", layer: "chat", op: "set", value: 2048 }],
+      changes: [{ key: "context.compaction.reserveTokens", layer: "session", op: "set", value: 2048 }],
     });
     await f.project({ compaction: { reserveTokens: 4096 } });
     await f.attempts(slot);
@@ -263,7 +263,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await f.service.invoke(f.client, "settings.change", {
       commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
       fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
-      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID } }],
+      changes: [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID } }],
     });
     await f.project({ defaultProvider: f.model.provider, defaultModel: f.model.id });
     const observed: string[] = [];

@@ -1,6 +1,6 @@
 /** The settings model's vocabulary (docs/settings-model.md section 4).
  * Every key's behaviour is data here; nothing outside the schema names a key. */
-export const LAYERS = ["chat", "profile", "project", "mac", "builtin"] as const;
+export const LAYERS = ["project", "session", "global"] as const;
 
 export type LayerId = typeof LAYERS[number];
 
@@ -38,7 +38,7 @@ export interface GitResult {
  */
 
 export type SettingsTarget =
-  | { kind: "mac" }
+  | { kind: "global" }
   | { kind: "project"; cwd: string }
   | { kind: "session"; sessionId: string }
   | { kind: "home" };
@@ -78,8 +78,6 @@ export interface ResolvedKey {
   reason?: "untrusted";
   badges: Badge[];
   fixedAt?: FixedSetting;
-  /** Derived from canonical entries; legacy sessions never acquire invented origin. */
-  origin: "override" | "launch" | "legacy-session" | "inherited";
   layers: LayerValue[];
   /** A stored Session/Home override, including one currently masked by Project. */
   overridden?: boolean;
@@ -99,12 +97,10 @@ export interface Resolution {
   diagnosticsTruncated?: true;
 }
 
-export type WritableLayer = Exclude<LayerId, "builtin">;
-
 export interface ChangeRequest {
   key: string;
   qualifiers?: Qualifiers;
-  layer: WritableLayer;
+  layer: LayerId;
   op: "set" | "unset";
   value?: unknown;
   /** The value the actor read at this layer; `null` means unset. Omitted skips the check. */
@@ -127,7 +123,7 @@ export interface ChangeOutcome {
   changeId: string;
   key: string;
   qualifiers?: Qualifiers;
-  layer: WritableLayer;
+  layer: LayerId;
   status: ChangeStatus;
   tier: Tier;
   revision?: number;

@@ -201,8 +201,8 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             result = .object(["keys": .array([.object([
                 "key": .string("model.thinking[role=chat]"), "group": .string("model"),
                 "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized),
-                "layer": .string("chat"), "applied": .bool(true), "origin": .string("launch"),
-                "layers": .array([.object(["layer": .string("chat"), "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized), "applied": .bool(true)])]),
+                "layer": .string("session"), "applied": .bool(true), "origin": .string("launch"), "overridden": .bool(true),
+                "layers": .array([.object(["layer": .string("session"), "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized), "applied": .bool(true)])]),
                 "badges": .array([.object(["kind": .string("source"),
                     "label": .string("From Mac default at start"),
                     "detail": .string("From Mac default at start: \(snapshot.thinkingLevel.capitalized)"),
@@ -247,7 +247,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                         return .object(layer)
                     })
                     if var presentation = row["presentation"]?.objectValue {
-                        presentation["editable"] = .bool((row["layers"]?.arrayValue ?? []).contains { $0.objectValue?["layer"]?.stringValue == "chat" })
+                        presentation["editable"] = .bool((row["layers"]?.arrayValue ?? []).contains { ["chat", "session"].contains($0.objectValue?["layer"]?.stringValue ?? "") })
                         row["presentation"] = .object(presentation)
                     }
                     return .object(row)

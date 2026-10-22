@@ -22,25 +22,26 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 
 ## Layers
 
-| Layer | Store | Owner |
+| Scope | Store | Owner |
 |---|---|---|
-| Chat | Session JSONL: SDK `model_change`/`thinking_level_change`, `tron.context-window.v1`, active tools, `tron.settings.v1` (other Chat keys and fixed-value provenance) | The session's runtime slot lane |
-| Profile | `<tronHome>/gateway/home/profile.json` (typed, ≤ 256 KiB; undeclared fields preserved, never resolved) | The settings change path |
-| Project | `.pi/settings.json`, `.pi/mcp.json` at the chat's worktree root | The repository; Tron writes and stages, never commits |
-| Mac | `<tronHome>/agent/settings.json`, `models.json`, `mcp.json`, `trust.json`; `<tronHome>/gateway/settings/` (`floors.json`, `gateway.json`) and `notifications.json` | The Gateway; pi CLI runs and hand edits are outside writers |
-| Built-in | pi defaults and the schema's `builtin` values | The release |
+| Project | Admitted `.pi/settings.json` and `.pi/mcp.json` fields at the worktree root | Repository-owned, read-only; verified historical Undo alone retains its applier |
+| Session/Home override | Session JSONL for ordinary chats and workers; `<tronHome>/gateway/home/profile.json` for Home's bounded durable recipe | Settings change path; the runtime lane owns SDK effects |
+| Global | Agent and Gateway defaults, trust, floors, notifications and SDK/schema defaults | Gateway and the underlying SDK stores; hand edits are outside writers |
 
-A target has a layer when it has its store: an ordinary chat (a Home task worker too) has
-Chat, Project, Mac, Built-in; Home's chat has Chat, Profile, Mac, Built-in. Workers get
-profile-derived values only as Chat values Home writes at delegation. The Project store is
+Precedence is Project > Session/Home override > Global, admitted by
+`projectSettable` and `sessionOverridable`. Home has no Project and no separate chapter
+override. Project masks a stored Session choice without deleting it; removing Project
+reactivates that choice. Workers inherit only the bounded queue/model, thinking,
+subagent-queue and task-budget recipe. The Project store is
 `.pi/` at the worktree root (`TrustInspection.projectDir`, pi's `projectDir`;
-[project root](../src/machine/README.md#project-root)). Trust is the Mac key
-`permissions.projectTrust[project]`, so a repository never trusts itself; an untrusted `.pi/`
-is read but not applied (`reason: "untrusted"`) and never written; an unparseable one is
-`projectUnreadable`. A fixed qualifier is part of the id; a dynamic `model` qualifier resolves
-for the effective model, per-model before plain within a scope. `defaultTools` `+name`/`-name`
-lists and thinking-budget maps compose over the layer below; unsupported values clamp
-(**Clamped** badge).
+[project root](../src/machine/README.md#project-root)). Trust is the Global key
+`permissions.projectTrust[project]`, so a repository never trusts itself. Untrusted or
+unreadable Project data is not applied. Ignored fields produce bounded file/key/reason-only
+diagnostics, never values. Project tools, thinking budgets and image permissions cannot
+widen Global policy. A fixed qualifier is part of the id; a dynamic `model` qualifier
+resolves for the effective model, per-model before plain within a scope. Private
+`chat/profile/mac/builtin` bindings describe persistence, not more scopes. The generated
+key table's Layers/Home layers columns list those private bindings; grants own admission.
 
 ## Keys
 
@@ -194,16 +195,19 @@ blob appends `committed`.
 
 ## Home profile
 
-Typed Profile keys resolve like any layer; learned notes may explain a value but never carry
-one. A maintainer save of Home's model, thinking or tools also sets the active chapter's Chat
-value (refused while it runs). `permissions.budget.task` (`{ inputTokens?, outputTokens? }`) is
-fixed at admission; raises need approval, lowers apply live.
+Home's typed durable recipe is its Session override; learned notes may explain a value but
+never carry one. A save of Home's model, thinking or tools acquires the runtime's existing
+lane before publishing any recipe value and retains it through SDK adoption. A busy or
+stale runtime refuses before publication, leaving both the persisted choice and SDK
+unchanged. SDK effects share the recipe's audit identity, not a second chapter edit.
+`permissions.budget.task` (`{ inputTokens?, outputTokens? }`) is fixed at admission; raises
+need approval, lowers apply live.
 
 | Queue role | Runs | Resolves | Empty means |
 |---|---|---|---|
-| `worker` | Home task workers | Profile > Mac, captured at admission | Home's model |
-| `subagent` | Managed subagent children (`tron/subagent`) | Mac; task children use the captured queue | Each agent's model |
-| `background` | Home memory (Profile > Mac), Knowledge (Mac) | as stated | The subagent queue |
+| `worker` | Home task workers | Home recipe > Global, captured at admission | Home's model |
+| `subagent` | Managed subagent children (`tron/subagent`) | Global; task children use the captured queue | Each agent's model |
+| `background` | Home memory (Home recipe > Global), Knowledge (Global) | as stated | The subagent queue |
 
 `ModelQueueOwner` (`src/providers/model-queue.ts`) skips unregistered, virtual or
 uncredentialed models, models with a usage-limit error in the last 15 minutes or ≥ 95% usage,

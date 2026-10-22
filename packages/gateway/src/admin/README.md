@@ -25,7 +25,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 
 Durable stores: `<tronHome>/gateway/settings/` (`changes/`, `approvals.json`,
 `observed.json`, `floors.json`, `gateway.json`), `<tronHome>/gateway/home/profile.json`
-(typed Profile values) and the pi agent directory files it applies
+(Home's durable Session recipe) and the pi agent directory files it applies
 (`<tronHome>/agent/settings.json`, `trust.json`, `mcp.json`, `models.json`).
 
 ## Contract
@@ -46,11 +46,11 @@ In short:
 - **One key, declared once on the Gateway** (F1). The schema holds type,
   group, allowed layers, timing, effect point, floor, writers, redaction and
   display. iOS renders keys generically; a new key needs no iOS release.
-- **Uniform layers** (F4): **Project > Chat > Home profile > Mac > Built-in**,
-  top wins, among the layers the target has and the key allows. Ordinary chats
-  have no Profile; Home's chat has no Project. Effective values are computed;
-  canonical fixed evidence retains explicit/delegated choices even while a
-  Project selection masks them.
+- **Three scopes** (F4): **Project > Session/Home override > Global**, gated by
+  registry grants. Home has no Project or separate chapter override. Private store
+  bindings are not scopes. Effective values are computed; canonical fixed evidence
+  retains explicit/delegated choices while Project masks them. Home SDK adoption
+  holds the runtime lane before recipe publication and records one logical edit.
 - **Each store is the truth** (F2). The change record is audit and undo only.
 - **One change path, three tiers** (F3): quiet, notify, approve;
   `tier = max(floor + web, assessment)`.
@@ -111,6 +111,7 @@ running-worker `announce`; Home supplies `HomeProfileItems` for learned notes.
 | `settings.risk.failed` | warning | Risk classification failed or hit its 1.5 s deadline; the deterministic tier stands |
 | `settings.notification.failed` | warning | A notify or pending-approval push could not be queued; the change is already recorded |
 | `settings.outside.failed` | warning | An outside-change comparison failed |
+| `session_configuration_*` on a `busy` settings refusal | retryable error | Home's runtime boundary refused before recipe publication; its stored and SDK selections remain unchanged |
 | `settings-run-applied` code on `session.diagnostic` | session diagnostic | The operational settings resolved and applied at request admission |
 | `gateway.shutdown-step` `step=outside-settings-dispose` | info | Time spent retiring outside-change watches and observers at shutdown |
 | `runtime.diagnostic` | error for a resource reload or extension load failure; warning for a per-provider refresh failure | Global provider or extension resources (`global-provider-resources.ts`) failed to load or refresh; the failure text in the message |

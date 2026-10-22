@@ -121,20 +121,24 @@ struct SettingsRendererRow: View {
                 TronProgressiveSheetLink(accessibilityLabel: "Set by Project settings",
                     identity: "settings.project.\(setting.id)", detents: .fixed([.height(300), .medium])) {
                     SettingsProjectInfo(source: source)
-                } label: { TronInlineActionLabel("Set by Project settings").controlSize(.small) }
+                } label: { TronInlineActionLabel("Set by Project settings").controlSize(.small).fixedSize() }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("\(settingsRowIdentifier(setting))-project")
             ) }
         }
         guard canReset && editable && control != .readOnly else { return nil }
         return { AnyView(HStack(spacing: 8) {
-            if target.objectValue?["kind"]?.stringValue != "mac" { TronStatusPill(text: "Overridden", accent: theme?.accent ?? .tronPurple) }
+            // State words are never shortened; the row layout makes room or stacks.
+            // The pill paints to its edge, so it keeps its own gap from the value.
+            if target.objectValue?["kind"]?.stringValue != "global" {
+                TronStatusPill(text: "Overridden", accent: theme?.accent ?? .tronPurple).fixedSize().padding(.leading, TronSpacing.xl)
+            }
             resetButton
         }) }
     }
 
     private var resetLabel: String {
-        target.objectValue?["kind"]?.stringValue == "mac" ? "Reset" : "Revert"
+        target.objectValue?["kind"]?.stringValue == "global" ? "Reset" : "Revert"
     }
 
     private var resetButton: some View {
@@ -250,7 +254,8 @@ struct SettingsRendererRow: View {
             // A tool catalog opens the shared Available Tools list and details (#900).
             if presentation?.optionsSource?.name == "catalog.tools", let options, let values = setting.value?.arrayValue,
                values.allSatisfy({ $0.stringValue != nil }) {
-                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
+                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: toolCount(values.compactMap(\.stringValue), of: options.options),
+                                      valueFixed: true) {
                     SettingsToolsEditor(title: title, selected: values.compactMap(\.stringValue),
                                         options: options.options) { onChange(.array($0.map(JSONValue.string))) }
                 }
@@ -294,11 +299,19 @@ struct SettingsRendererRow: View {
         }
     }
 
+    /// A tool selection reads as its share of the served catalog; until the
+    /// catalog arrives the Gateway's own summary stands.
+    private func toolCount(_ selected: [String], of catalog: [SettingsOption]?) -> String {
+        guard let catalog, !catalog.isEmpty else { return display }
+        let total = Set(catalog.compactMap(\.value.stringValue)).union(selected).count
+        return "\(selected.count) of \(total) tools"
+    }
+
     /// Inspection never offers a shortcut to a different configuration editor.
     @ViewBuilder
     private var readOnlyRow: some View {
         if presentation?.optionsSource?.name == "catalog.tools", let values = setting.value?.arrayValue?.compactMap(\.stringValue) {
-            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
+            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: toolCount(values, of: options?.options), valueFixed: true) {
                 SettingsToolsEditor(title: title, selected: values, options: options?.options ?? values.map {
                     SettingsOption(value: .string($0), label: $0, detail: nil, disabledReason: nil, resource: nil)
                 })
@@ -368,11 +381,9 @@ struct SettingsProjectInfo: View {
 
 func settingsLayerLabel(_ layer: String) -> String {
     switch layer {
-    case "chat": "Session"
-    case "profile": "Home profile"
-    case "project": "Repository"
-    case "mac": "Mac"
-    case "builtin": "Built-in"
+    case "project": "Project"
+    case "session": "Session"
+    case "global": "Global"
     default: layer.capitalized
     }
 }

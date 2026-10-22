@@ -33,9 +33,9 @@ struct TrustedProjectsSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 20) {
                 TronSettingsGroup(nil) {
-                    SettingsRendererView(target: target, writeLayer: "mac", presentation: .keys([Self.policyKey]), detailedKeys: true)
+                    SettingsRendererView(target: target, writeLayer: "global", presentation: .keys([Self.policyKey]), detailedKeys: true)
                 }
-                SettingsRendererView(target: target, writeLayer: "mac", presentation: .instances(key: Self.key), embedded: true)
+                SettingsRendererView(target: target, writeLayer: "global", presentation: .instances(key: Self.key), embedded: true)
                 Button { choosingFolder = true } label: {
                     TronSettingsRow(
                         icon: "plus",
@@ -62,7 +62,7 @@ struct TrustedProjectsSettingsView: View {
         guard !adding, !listedProjects.contains(path) else { return }
         adding = true
         let change = JSONValue.object([
-            "key": .string(Self.key), "layer": .string("mac"), "op": .string("set"),
+            "key": .string(Self.key), "layer": .string("global"), "op": .string("set"),
             "qualifiers": .object(["project": .string(path)]), "value": .bool(false),
         ])
         // An accepted command, not a presentation read: it is not cancelled with the view.

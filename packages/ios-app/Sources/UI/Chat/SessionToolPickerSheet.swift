@@ -192,7 +192,7 @@ struct SessionToolPickerSheet: View {
                     TronSettingsCaption("Turn tools on or off for this chat only. Defaults for new chats are in Settings → Tools. Changes apply while the agent is idle.")
                     if model.settingsSnapshot(for: SettingsTarget.sessionGatewayTarget(sessionID)) != nil {
                         TronGlassCard(accent: .tronSessionTeal) {
-                            SettingsRendererView(target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "chat",
+                            SettingsRendererView(target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "session",
                                 presentation: .keys(["tools.active"]), liveControl: { setting in
                                     AnyView(TronSettingsRow(icon: "checklist", title: setting.presentation?.label ?? "Tools",
                                         subtitle: setting.presentation?.help, accent: .tronSessionTeal) {

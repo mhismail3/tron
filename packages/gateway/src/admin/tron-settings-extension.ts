@@ -8,7 +8,8 @@ import type { ExtensionFactory, ToolInfo } from "../kernel/pi/coding-agent.js";
  * The tool is a thin client of `settings.resolve` and `settings.change` for an
  * agent: Home, a task worker or an ordinary chat's agent, each recorded as that
  * actor. It targets the chat it runs in, so it reaches that chat's layers
- * (Chat, Project, Mac, and Home's profile). Home alone may name a delegated
+ * (Project > Session/Home override > Global). Project is read-only.
+ * Home alone may name a delegated
  * worker with `taskId` (#1336): the target is then that worker's session, and
  * the change is still Home's, through the same path, floors and approvals.
  *
@@ -50,7 +51,7 @@ export function marksTurn(tool: Pick<ToolInfo, "name" | "annotations" | "sourceI
 
 const CHANGE = Type.Object({
   key: Type.String({ minLength: 1, maxLength: 200, description: "A key id from resolve, e.g. run.retry.maxRetries." }),
-  layer: Type.Union([Type.Literal("chat"), Type.Literal("profile"), Type.Literal("project"), Type.Literal("mac")]),
+  layer: Type.Union([Type.Literal("session"), Type.Literal("global")], { description: "Session/Home override or Global. Project is read-only." }),
   op: Type.Union([Type.Literal("set"), Type.Literal("unset")]),
   value: Type.Optional(Type.Unknown()),
   qualifiers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "e.g. model (provider/id) or project (absolute path)." })),

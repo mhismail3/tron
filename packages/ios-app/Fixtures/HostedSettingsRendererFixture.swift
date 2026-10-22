@@ -373,7 +373,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                     "actor": .object(["kind": .string("agent"), "sessionId": .string("foreign-chat")]),
                     "target": .object(["kind": .string("session"), "sessionId": .string("foreign-chat")])]) { $1 }),
                 .object(base.merging(["changeId": .string("ui-change"), "actor": .object(["kind": .string("ui")]),
-                    "layer": .string("chat"),
+                    "layer": .string("session"),
                     "target": .object(["kind": .string("session"), "sessionId": .string("fixture-chat")]),
                     "status": .string("failed")]) { $1 })
             ]
@@ -399,7 +399,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             return .object([
                 "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
                 "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
-                "target": .object(["kind": .string("mac")]), "layer": .string("mac"),
+                "target": .object(["kind": .string("global")]), "layer": .string("global"),
                 "key": .string("run.retry.maxRetries"), "op": .string("set"), "changed": .bool(true), "redacted": .bool(true),
                 "tier": .string("quiet"), "status": .string("applied"),
                 "presentation": .object(["label": .string("Agent retry count"), "section": .string("run"),
@@ -410,7 +410,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         return .object([
             "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
             "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
-            "target": .object(["kind": .string("mac")]), "layer": .string("mac"),
+            "target": .object(["kind": .string("global")]), "layer": .string("global"),
             "key": .string("run.retry.maxRetries"), "op": .string("set"),
             "before": .number(4), "after": .number(6), "tier": .string("quiet"), "status": .string("applied"),
             "tierBasis": .object(["direction": .string("widen"), "floor": .string("quiet"), "floorSource": .string("code"),

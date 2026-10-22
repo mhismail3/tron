@@ -66,7 +66,7 @@ final class SettingsTrustCoordinator {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
         var change: [String: JSONValue] = [
-            "key": .string("permissions.projectTrust"), "layer": .string("mac"),
+            "key": .string("permissions.projectTrust"), "layer": .string("global"),
         ]
         if let decision { change["op"] = .string("set"); change["value"] = .bool(decision) } else { change["op"] = .string("unset") }
         let params: JSONValue = .object([
@@ -100,13 +100,13 @@ final class SettingsTrustCoordinator {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
         var change: [String: JSONValue] = [
-            "key": .string("permissions.macTerminalKey"), "layer": .string("mac"),
+            "key": .string("permissions.macTerminalKey"), "layer": .string("global"),
             "qualifiers": .object(["device": .string(device)]),
         ]
         if let publicKey { change["op"] = .string("set"); change["value"] = .string(publicKey) } else { change["op"] = .string("unset") }
         let params: JSONValue = .object([
             "commandId": .string(commandID),
-            "target": .object(["kind": .string("mac")]),
+            "target": .object(["kind": .string("global")]),
             "changes": .array([.object(change)]),
         ])
         let value = try await mutationExecutor.performValue(method: "settings.change", commandID: commandID) {

@@ -29,7 +29,7 @@ export function compactionAdmission(settings: SettingsManager, chat: Record<stri
     } catch {
       throw new GatewayError("conflict", "Canonical compaction settings contain an invalid value");
     }
-    source[field] = row.layer === "builtin" ? "default" : row.layer === "mac" ? "global" : row.layer;
+    source[field] = row.layer;
   }
   return { ...configuration, source } as unknown as CompactionConfiguration;
 }

@@ -273,38 +273,6 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(ordinary.snapshot().model).toEqual({ provider: f.model.provider, id: f.model.id });
   });
 
-  it("beats the repo default for workers, freezes the first choice, and leaves ordinary chats profile-free", async () => {
-    const f = await fixture();
-    const settings = installSettings(f);
-    await mkdir(join(f.cwd, ".pi"), { recursive: true });
-    await writeFile(join(f.cwd, ".pi", "settings.json"), JSON.stringify({ defaultProvider: f.model.provider, defaultModel: f.model.id }));
-    const home = await f.registry.acquire(f.home.sessionId);
-    await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
-    await home.setThinking("high");
-    const first = await delegateThroughHome(f, { taskId: "before-home-change", intent: "Finite work", target: f.cwd });
-    await taskIsTerminal(f, "before-home-change");
-    expect(first.observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
-    const task = await f.registry.homeOwner().taskStatus("before-home-change");
-    const worker = await f.registry.acquire(task.sessionId!);
-    expect(readChatFixedSettings(await f.registry.readTaskEvidence(task.sessionId!))["model.ref[role=chat]"]).toMatchObject({ via: "home-profile:sameAs:home" });
-    await waitFor(() => {
-      const context = f.registry.homeOwner().contextStatus();
-      return context.available && context.breakdown?.activation.kind === "wake" && !context.activationOpen
-        && home.snapshot().configurationBlocker === null;
-    }, "first worker wake settled");
-    await home.setModel(f.model.provider, f.model.id);
-    expect(worker.snapshot().model?.id).toBe(TASK_REASONING_MODEL_ID);
-    const second = await delegateThroughHome(f, { taskId: "after-home-change", intent: "Finite work", target: f.cwd });
-    await taskIsTerminal(f, "after-home-change");
-    expect(second.observed).toEqual([{ model: f.model.id, reasoning: undefined }]);
-    const ordinary = await f.registry.create(f.cwd);
-    expect(ordinary.snapshot().model?.id).toBe(f.model.id);
-    const resolved = await settings.resolve({ kind: "session", sessionId: ordinary.id }, {
-      cwd: f.cwd, home: false, chat: ordinary.settingsChatLayer(), modelRuntime: ordinary.modelRuntime,
-    });
-    expect(resolved.keys.flatMap(key => key.layers).some(layer => layer.layer === "profile")).toBe(false);
-  });
-
   it("defaults a worker to Home's live model and thinking, and tells Home that identity", async () => {
     const f = await fixture();
     const home = await f.registry.acquire(f.home.sessionId);
