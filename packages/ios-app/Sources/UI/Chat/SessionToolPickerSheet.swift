@@ -191,11 +191,11 @@ struct SessionToolPickerSheet: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     TronSettingsCaption("Turn tools on or off for this chat only. Defaults for new chats are in Settings → Tools. Changes apply while the agent is idle.")
                     if model.settingsSnapshot(for: SettingsTarget.sessionGatewayTarget(sessionID)) != nil {
-                        TronGlassCard(accent: .tronSessionTeal) {
+                        TronGlassCard(accent: .tronEmerald) {
                             SettingsRendererView(target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "session",
                                 presentation: .keys(["tools.active"]), liveControl: { setting in
                                     AnyView(TronSettingsRow(icon: "checklist", title: setting.presentation?.label ?? "Tools",
-                                        subtitle: setting.presentation?.help, accent: .tronSessionTeal) {
+                                        subtitle: setting.presentation?.help, accent: .tronEmerald) {
                                         TronDynamicValue(text: setting.display)
                                     })
                                 }, resetDisabled: saving != nil)
@@ -205,16 +205,16 @@ struct SessionToolPickerSheet: View {
                         TronSettingsNotice(message: errorMessage, accent: .tronError)
                     }
                     if loading && groups.isEmpty {
-                        TronLoadingState(label: "Loading tools…", accent: .tronSessionTeal)
+                        TronLoadingState(label: "Loading tools…", accent: .tronEmerald)
                     } else if groups.isEmpty {
                         TronPlaceholderState(
                             title: "Tools Unavailable",
                             detail: "Reopen this chat and try again.",
                             icon: "wrench.and.screwdriver",
-                            accent: .tronSessionTeal
+                            accent: .tronEmerald
                         )
                     } else {
-                        AvailableToolsList(groups: groups, active: active, accent: .tronSessionTeal, isSaving: saving != nil,
+                        AvailableToolsList(groups: groups, active: active, accent: .tronEmerald, isSaving: saving != nil,
                                           onToggle: { tool, enabled in set(tool, enabled: enabled) },
                                           onSelect: { tool in
                             selected = ProjectResourceSelection(kind: .tools, title: tool.title, value: tool.value)
@@ -228,26 +228,26 @@ struct SessionToolPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Available Tools", accent: .tronSessionTeal)
+                    TronSheetTitle(title: "Available Tools", accent: .tronEmerald)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronSessionTeal)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }
             }
         }
         .tronManagedSheet(item: $selected, identity: { _ in "chat.available-tool-detail" }) { selection in
-            ProjectResourceDetailSheet(sessionID: sessionID, selection: selection, accentOverride: .tronSessionTeal) { selected = nil }
+            ProjectResourceDetailSheet(sessionID: sessionID, selection: selection, accentOverride: .tronEmerald) { selected = nil }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronSessionTeal)
-        .tint(Color.tronSessionTeal)
+        .tronSettingsVisualTheme(accent: .tronEmerald)
+        .tint(Color.tronEmerald)
         .task(id: PresentationActivityTaskID(
             source: "\(model.sessionContextRevision(for: sessionID))/\(model.sessionResourceRevision(for: sessionID))",
             presentationActive: presentationActivity.allowsPresentationPublication

@@ -74,9 +74,9 @@ struct HostedToolSheetsPolishFixture: View {
                 )
                 .accessibilityIdentifier("picker-comparison-\(index)")
             }
-            TronGlassCard(accent: .tronSessionTeal) {
+            TronGlassCard(accent: .tronEmerald) {
                 TronSettingsRow(icon: "slider.horizontal.3", title: "Home Settings",
-                                subtitle: "Assistant profile and worker launch choices", accent: .tronSessionTeal)
+                                subtitle: "Assistant profile and worker launch choices", accent: .tronEmerald)
             }
             .tronSettingsLayout()
             .accessibilityIdentifier("picker-reference")

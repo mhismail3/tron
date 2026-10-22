@@ -3,6 +3,8 @@ import SwiftUI
 import TronMobileCore
 
 struct ProcessHistorySheet: View {
+    /// The one label of this sheet's title and the Manage Session row that opens it.
+    static let title = "Subagent History"
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -16,15 +18,15 @@ struct ProcessHistorySheet: View {
         NavigationStack {
             Group {
                 if let store { history(store) }
-                else { TronSheetLoadingState(label: "Preparing subagent history…", accent: .tronSessionTeal)
+                else { TronSheetLoadingState(label: "Preparing subagent history…", accent: .tronEmerald)
                     // Match the title, which sits outside the subagent content theme.
-                    .tronSettingsVisualTheme(accent: .tronSessionTeal) }
+                    .tronSettingsVisualTheme(accent: .tronEmerald) }
             }
             // The history header inherits Manage Session; only its content is subagent themed.
             .tronSettingsVisualTheme(accent: .tronSubagent)
-            .tronNavigationTitle("Subagent History", accent: .tronSessionTeal)
+            .tronNavigationTitle(Self.title, accent: .tronEmerald)
             .toolbar { doneToolbar }
-            .tint(Color.tronSessionTeal)
+            .tint(Color.tronEmerald)
         }
         .tronManagedSheet(
             item: $selectedProcess,
@@ -49,7 +51,7 @@ struct ProcessHistorySheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronSessionTeal)
+        .tronSettingsVisualTheme(accent: .tronEmerald)
         .tronPresentation()
         .accessibilityIdentifier("process-history-sheet")
     }
@@ -60,7 +62,7 @@ struct ProcessHistorySheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .tronToolbarAction(accent: .tronSessionTeal)
+                    .tronToolbarAction(accent: .tronEmerald)
             }
             .accessibilityLabel("Done")
         }
@@ -127,8 +129,8 @@ struct ProcessHistorySheet: View {
                     unavailable("Unable to load history", detail: message, icon: "exclamationmark.triangle")
                 case .idle where earlier.isEmpty && !hasMounted,
                      .loading where earlier.isEmpty && !hasMounted:
-                    TronSheetLoadingState(label: "Loading subagent history…", accent: .tronSessionTeal)
-                        .tronSettingsVisualTheme(accent: .tronSessionTeal)
+                    TronSheetLoadingState(label: "Loading subagent history…", accent: .tronEmerald)
+                        .tronSettingsVisualTheme(accent: .tronEmerald)
                 case .loaded where earlier.isEmpty && !hasMounted:
                     SessionProcessPlaceholder(
                         title: "No recorded subagents",

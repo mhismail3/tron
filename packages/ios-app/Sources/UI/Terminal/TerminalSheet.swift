@@ -18,12 +18,14 @@ struct SessionTerminalToolbarButton: View {
                 .tronToolbarAction(accent: accent)
         }
         .disabled(!enabled)
-        .accessibilityLabel("Terminal")
+        .accessibilityLabel(TerminalSheet.title)
         .accessibilityIdentifier(identifier)
     }
 }
 
 struct TerminalSheet: View {
+    /// The one label of this sheet's title and the Manage Session row that opens it.
+    static let title = "Terminal"
     let sessionID: String
     @Environment(AppModel.self) private var model
     // Presentation-scoped: SwiftUI may rebuild this content while the sheet
@@ -34,7 +36,7 @@ struct TerminalSheet: View {
     @PresentationState private var confirmQuit = false
 
     var body: some View {
-        TerminalSheetChrome(title: "Terminal", phase: controller.connectionPhase, keyboard: keyboard) { accent in
+        TerminalSheetChrome(title: Self.title, phase: controller.connectionPhase, keyboard: keyboard) { accent in
             if let error = controller.error, controller.terminal == nil {
                 ScrollView {
                     TronPlaceholderState(title: "Terminal unavailable", detail: error,

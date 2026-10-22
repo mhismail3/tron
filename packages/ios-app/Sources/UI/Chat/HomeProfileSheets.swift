@@ -23,11 +23,11 @@ extension HomeSheet {
                                      icon: "person.text.rectangle")
             }
             if editable, inferred.count > 1 {
-                TronGlassCard(accent: .tronSessionTeal) {
+                TronGlassCard(accent: accent) {
                     Button { profileEdit.confirmingAll = true } label: {
                         TronSettingsRow(icon: "checkmark.seal", title: "Confirm all inferred",
-                                        subtitle: "\(inferred.count) items become binding on every Home turn", accent: .tronSessionTeal) {
-                            TronInlineActionLabel("Confirm all", isWorking: profileEdit.working, accent: .tronSessionTeal)
+                                        subtitle: "\(inferred.count) items become binding on every Home turn", accent: accent) {
+                            TronInlineActionLabel("Confirm all", isWorking: profileEdit.working, accent: accent)
                         }
                     }
                     .buttonStyle(.plain)
@@ -49,14 +49,14 @@ extension HomeSheet {
                 }
             }
             ForEach(HomeProfilePresentation.groups(active), id: \.kind) { group in
-                TronSettingsGroup(HomeProfilePresentation.groupTitle(group.kind), accent: .tronSessionTeal) {
+                TronSettingsGroup(HomeProfilePresentation.groupTitle(group.kind), accent: accent) {
                     profileRows(group.items)
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home-profile-group-\(group.kind.rawValue)")
             }
             if !inactive.isEmpty {
-                TronSettingsGroup("No longer applied", detail: "Superseded or retired items, kept in Knowledge.", accent: .tronSessionTeal) {
+                TronSettingsGroup("No longer applied", detail: "Superseded or retired items, kept in Knowledge.", accent: accent) {
                     profileRows(inactive)
                 }
                 .accessibilityElement(children: .contain)
@@ -76,7 +76,7 @@ extension HomeSheet {
                 if index > 0 { divider() }
                 Button { present(.profileItem(item)) } label: {
                     TronSettingsRow(icon: HomeProfilePresentation.stateIcon(item), title: HomeChapterPresentation.topicPreview(item.text, limit: 160),
-                                    subtitle: HomeProfilePresentation.rowSubtitle(item), accent: .tronSessionTeal,
+                                    subtitle: HomeProfilePresentation.rowSubtitle(item), accent: accent,
                                     titleFont: TronTypography.sans(size: TronTypography.sizeBody))
                 }
                 .buttonStyle(.plain)
@@ -88,10 +88,10 @@ extension HomeSheet {
     func profileItemDetail(_ item: HomeProfileListDTO.Item) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             profileEditNotices()
-            TronGlassCard(accent: .tronSessionTeal) {
+            TronGlassCard(accent: accent) {
                 VStack(alignment: .leading, spacing: 0) {
                     TronSettingsRow(icon: HomeProfilePresentation.kindIcon(item.kind), title: HomeProfilePresentation.kindTitle(item.kind),
-                                    subtitle: HomeProfilePresentation.stateLine(item), accent: .tronSessionTeal) {
+                                    subtitle: HomeProfilePresentation.stateLine(item), accent: accent) {
                         TronStatusPill(text: HomeProfilePresentation.stateLabel(item), accent: HomeProfilePresentation.stateAccent(item))
                             .accessibilityIdentifier("home-profile-item-state")
                     }
@@ -104,16 +104,16 @@ extension HomeSheet {
             if model.homeProfileEditable, item.status == .active {
                 profileItemActions(item)
             }
-            TronSettingsGroup("Knowledge note", accent: .tronSessionTeal) {
+            TronSettingsGroup("Knowledge note", accent: accent) {
                 VStack(spacing: 0) {
-                    TronSettingsRow(icon: "number", title: "Note ID", subtitle: item.id, subtitleLineLimit: nil, accent: .tronSessionTeal)
+                    TronSettingsRow(icon: "number", title: "Note ID", subtitle: item.id, subtitleLineLimit: nil, accent: accent)
                         .accessibilityIdentifier("home-profile-item-note-id")
                     divider()
-                    TronSettingsRow(icon: "calendar", title: "Learned", subtitle: HomeSheetTime.absolute(item.createdAt), accent: .tronSessionTeal)
+                    TronSettingsRow(icon: "calendar", title: "Learned", subtitle: HomeSheetTime.absolute(item.createdAt), accent: accent)
                     if item.updatedAt != item.createdAt {
                         divider()
                         TronSettingsRow(icon: "clock.arrow.circlepath", title: "Last changed", subtitle: HomeSheetTime.absolute(item.updatedAt),
-                                        accent: .tronSessionTeal)
+                                        accent: accent)
                     }
                 }
             }
@@ -123,12 +123,12 @@ extension HomeSheet {
     /// Confirm, Edit and Retire. Edit and Retire open the Settings value-editor
     /// pattern: a progressive sheet with Save (or Retire) in its toolbar.
     private func profileItemActions(_ item: HomeProfileListDTO.Item) -> some View {
-        TronSettingsGroup("Change", accent: .tronSessionTeal) {
+        TronSettingsGroup("Change", accent: accent) {
             VStack(spacing: 0) {
                 if !item.confirmed {
                     Button { confirm(item) } label: {
                         TronSettingsRow(icon: "checkmark.seal", title: "Confirm",
-                                        subtitle: "Make it binding on every Home turn", accent: .tronSessionTeal)
+                                        subtitle: "Make it binding on every Home turn", accent: accent)
                     }
                     .buttonStyle(.plain)
                     .disabled(profileEdit.working)
@@ -139,7 +139,7 @@ extension HomeSheet {
                     HomeProfileItemEditor(item: item) { change, summary in changeProfile([change], done: summary) }
                 } label: {
                     TronSettingsRow(icon: "pencil", title: "Edit",
-                                    subtitle: "Change its text or kind, or replace it", accent: .tronSessionTeal)
+                                    subtitle: "Change its text or kind, or replace it", accent: accent)
                 }
                 .disabled(profileEdit.working)
                 .accessibilityIdentifier("home-profile-item-edit")
@@ -163,13 +163,13 @@ extension HomeSheet {
     /// Profile sheet and an item's sheet.
     @ViewBuilder func profileEditNotices() -> some View {
         if let undo = profileEdit.undo {
-            TronGlassCard(accent: .tronSessionTeal) {
+            TronGlassCard(accent: accent) {
                 // Undo sits beside the row, not in it: the row reads as one element.
                 HStack(spacing: 0) {
                     TronSettingsRow(icon: "checkmark.circle", title: undo.summary,
-                                    subtitle: "Applies from Home's next activation", accent: .tronSessionTeal)
+                                    subtitle: "Applies from Home's next activation", accent: accent)
                     Button { undoProfileChange(undo) } label: {
-                        TronInlineActionLabel("Undo", icon: "arrow.uturn.backward", isWorking: profileEdit.working, accent: .tronSessionTeal)
+                        TronInlineActionLabel("Undo", icon: "arrow.uturn.backward", isWorking: profileEdit.working, accent: accent)
                     }
                     .buttonStyle(.plain)
                     .disabled(profileEdit.working)
@@ -295,6 +295,7 @@ struct HomeProfileItemEditor: View {
     @PresentationState private var replaces = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronEmerald }
 
     init(item: HomeProfileListDTO.Item, onSave: @escaping (HomeProfileChange, String) -> Void) {
         self.item = item
@@ -313,28 +314,28 @@ struct HomeProfileItemEditor: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                TronSettingsGroup("Text", detail: "One line, as Home applies it.", accent: .tronSessionTeal) {
+                TronSettingsGroup("Text", detail: "One line, as Home applies it.", accent: accent) {
                     TextField("Item text", text: $text, axis: .vertical)
                         .lineLimit(2...8)
                         .tronTextEntryDone(keyboardToolbar: true)
                         .textFieldStyle(.plain)
                         .font(TronTypography.body)
                         .foregroundStyle(Color.tronTextPrimary)
-                        .tint(theme?.accent ?? .tronSessionTeal)
+                        .tint(accent)
                         .padding(.horizontal, TronSpacing.section)
                         .padding(.vertical, TronSpacing.md)
                         .frame(minHeight: 52)
                         .accessibilityIdentifier("home-profile-editor-text")
                 }
-                TronSettingsGroup("Kind", accent: .tronSessionTeal) {
+                TronSettingsGroup("Kind", accent: accent) {
                     TronChoiceRow(icon: HomeProfilePresentation.kindIcon(kind), title: "Kind",
                                   choices: HomeProfileListDTO.Item.Kind.allCases.map { TronChoice(id: $0, label: HomeProfilePresentation.kindTitle($0)) },
-                                  selected: kind, accent: .tronSessionTeal) { kind = $0 }
+                                  selected: kind, accent: accent) { kind = $0 }
                 }
-                TronSettingsGroup("Replace", accent: .tronSessionTeal) {
+                TronSettingsGroup("Replace", accent: accent) {
                     TronToggleRow(icon: "arrow.triangle.2.circlepath", title: "Replace this item",
                                   detail: "Save a new item and keep this one as superseded. Use it when the meaning changes, not to fix wording.",
-                                  accent: .tronSessionTeal, isOn: $replaces)
+                                  accent: accent, isOn: $replaces)
                         .accessibilityIdentifier("home-profile-editor-replace")
                 }
                 TronSettingsCaption("Your edit is confirmed and applies from Home's next activation. You can undo it.")
@@ -367,22 +368,23 @@ struct HomeProfileRetireEditor: View {
     @PresentationState private var reason = ""
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronEmerald }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                TronSettingsGroup("Item", accent: .tronSessionTeal) {
+                TronSettingsGroup("Item", accent: accent) {
                     TronSettingsRow(icon: HomeProfilePresentation.kindIcon(item.kind), title: HomeProfilePresentation.kindTitle(item.kind),
-                                    subtitle: item.text, subtitleLineLimit: 4, accent: .tronSessionTeal)
+                                    subtitle: item.text, subtitleLineLimit: 4, accent: accent)
                 }
-                TronSettingsGroup("Reason", detail: "Optional. Shown with the change in Changes.", accent: .tronSessionTeal) {
+                TronSettingsGroup("Reason", detail: "Optional. Shown with the change in Changes.", accent: accent) {
                     TextField("Why it no longer holds", text: $reason, axis: .vertical)
                         .lineLimit(1...4)
                         .tronTextEntryDone(keyboardToolbar: true)
                         .textFieldStyle(.plain)
                         .font(TronTypography.body)
                         .foregroundStyle(Color.tronTextPrimary)
-                        .tint(theme?.accent ?? .tronSessionTeal)
+                        .tint(accent)
                         .padding(.horizontal, TronSpacing.section)
                         .padding(.vertical, TronSpacing.md)
                         .frame(minHeight: 52)

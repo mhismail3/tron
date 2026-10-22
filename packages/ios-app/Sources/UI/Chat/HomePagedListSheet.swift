@@ -27,7 +27,7 @@ struct HomePagedListSheet: View {
 
     private var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
     private var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
-    private var accent: Color { theme?.accent ?? .tronSessionTeal }
+    private var accent: Color { theme?.accent ?? .tronEmerald }
     private var isMemory: Bool { if case .memory = destination { return true }; return false }
     private var identifier: String { isMemory ? "home-memory" : "home-tasks" }
     private var index: Int { store.pageCursor?.index ?? 0 }

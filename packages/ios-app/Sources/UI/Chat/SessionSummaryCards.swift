@@ -25,13 +25,13 @@ struct SessionWorkspaceSummaryRow: View {
         switch presentation {
         case .loading:
             TronSettingsRow(
-                icon: "arrow.triangle.branch", title: "Workspace",
+                icon: "arrow.triangle.branch", title: WorkspaceInspectorSheet.title,
                 subtitle: "Checking workspace…", accent: accent
             ) {
                 TronPulseLoadingIndicator(size: 18)
             }
         case .notRepository:
-            TronSettingsRow(icon: "folder", title: "Workspace", subtitle: "Browse workspace files", accent: accent) {
+            TronSettingsRow(icon: "folder", title: WorkspaceInspectorSheet.title, subtitle: "Browse workspace files", accent: accent) {
                 Text("No Git")
                     .font(TronTypography.code(size: TronTypography.sizeCaption + SessionSummaryTypography.metadataSizeAdjustment))
                     .foregroundStyle(Color.tronTextSecondary)
@@ -41,7 +41,7 @@ struct SessionWorkspaceSummaryRow: View {
                 ? "\(changeCount) uncommitted \(changeCount == 1 ? "change" : "changes")"
                 : "Working tree clean"
             TronSettingsRow(
-                icon: "arrow.triangle.branch", title: "Workspace",
+                icon: "arrow.triangle.branch", title: WorkspaceInspectorSheet.title,
                 subtitle: branch, subtitleLineLimit: 1, accent: accent
             ) {
                 Text(workingTreeStatus)
@@ -54,7 +54,7 @@ struct SessionWorkspaceSummaryRow: View {
             }
         case .failed:
             TronSettingsRow(
-                icon: "exclamationmark.triangle", title: "Workspace",
+                icon: "exclamationmark.triangle", title: WorkspaceInspectorSheet.title,
                 subtitle: "Tap to retry workspace inspection", accent: accent
             ) {
                 Text("Unavailable")

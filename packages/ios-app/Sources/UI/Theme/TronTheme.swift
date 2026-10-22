@@ -29,9 +29,9 @@ extension Color {
     static let tronCyan = Color(lightHex: "#0891B2", darkHex: "#06B6D4")
     static let tronSky = Color(lightHex: "#0284C7", darkHex: "#38BDF8")
     static let tronIndigo = Color(lightHex: "#6366F1", darkHex: "#818CF8")
-    /// Adaptive accent for the Manage Session workspace/resource group and its
-    /// progressive descendants. Keep this separate from Settings' blue group.
-    static let tronSessionTeal = Color(lightHex: "#0E7490", darkHex: "#67E8F9")
+    /// The chapter segment of Home's context breakdown, a legend color only:
+    /// Manage Home and Manage Session sheets follow the emerald sheet theme.
+    static let tronChapter = Color(lightHex: "#0E7490", darkHex: "#67E8F9")
     static let tronTeal = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
     /// Subagent seafoam identity; darker light-mode ink keeps sheet controls readable.
     static let tronSubagent = Color(lightHex: "#007D6C", darkHex: "#03C3A8")

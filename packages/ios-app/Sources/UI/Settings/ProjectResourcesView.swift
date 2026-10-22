@@ -328,6 +328,8 @@ struct ProjectResourceDetailPresentation: Equatable {
 }
 
 struct ProjectResourcesView: View {
+    /// The one label of this sheet's title and the Manage Session row that opens it.
+    static let title = "Resources"
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -370,13 +372,13 @@ struct ProjectResourcesView: View {
                             .environment(\.tronSettingsVisualTheme, nil)
                         }
                     } else if loading {
-                        TronSheetLoadingState(label: "Loading resources…", accent: .tronSessionTeal)
+                        TronSheetLoadingState(label: "Loading resources…", accent: .tronEmerald)
                     } else {
                         TronPlaceholderState(
                             title: "Resources Unavailable",
                             detail: "Reload the session resources and try again.",
                             icon: "shippingbox",
-                            accent: .tronSessionTeal
+                            accent: .tronEmerald
                         )
                     }
                 }
@@ -393,19 +395,19 @@ struct ProjectResourcesView: View {
                             systemImage: "arrow.clockwise",
                             isWorking: loading || reloading
                         )
-                        .tronToolbarAction(accent: .tronSessionTeal)
+                        .tronToolbarAction(accent: .tronEmerald)
                     }
                     .disabled(loading || reloading)
                     .accessibilityValue(loading || reloading ? "In progress" : "")
                 }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Resources", accent: .tronSessionTeal)
+                    TronSheetTitle(title: Self.title, accent: .tronEmerald)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronSessionTeal)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -430,8 +432,8 @@ struct ProjectResourcesView: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronSessionTeal)
-        .tint(Color.tronSessionTeal)
+        .tronSettingsVisualTheme(accent: .tronEmerald)
+        .tint(Color.tronEmerald)
     }
 
     private func resourceGroup(_ section: ProjectResourceOverviewSection) -> some View {

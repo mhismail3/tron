@@ -85,7 +85,7 @@ struct HostedSettingsThreeLayerPreview: View {
 
     private var manage: some View {
         page(home ? "Manage Home" : "Manage Session") {
-            TronSettingsGroup(home ? "Home" : "Session", accent: .tronSessionTeal) {
+            TronSettingsGroup(home ? "Home" : "Session", accent: .tronEmerald) {
                 TronSettingsRow(icon: home ? "house" : "bubble.left", title: home ? "Home" : "Settings redesign",
                                 subtitle: home ? "Your assistant profile" : "Tron · main")
                 TronSettingsDivider()

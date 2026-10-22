@@ -38,7 +38,7 @@ extension HomeSheet {
         } label: {
             TronSettingsRow(icon: HomeMemoryPresentation.icon(line), title: HomeMemoryPresentation.title(line),
                             subtitle: HomeMemoryPresentation.text(line), subtitleLineLimit: 3,
-                            subtitleIsMarkdown: true, accent: .tronSessionTeal) {
+                            subtitleIsMarkdown: true, accent: accent) {
                 Text(HomeMemoryPresentation.when(line) ?? "")
                     .font(TronTypography.caption)
                     .foregroundStyle(Color.tronTextMuted)
@@ -52,15 +52,15 @@ extension HomeSheet {
     /// One summary line: its text whole, then the two lines under it.
     private func memorySummary(_ line: HomeMemoryViewDTO.Line, halves: [HomeMemoryViewDTO.Line]) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            TronGlassCard(accent: .tronSessionTeal) {
+            TronGlassCard(accent: accent) {
                 VStack(alignment: .leading, spacing: 0) {
                     TronSettingsRow(icon: HomeMemoryPresentation.icon(line), title: HomeMemoryPresentation.title(line),
-                                    subtitle: HomeSheetTime.range(line.firstAt, line.lastAt), accent: .tronSessionTeal)
+                                    subtitle: HomeSheetTime.range(line.firstAt, line.lastAt), accent: accent)
                     divider()
                     markdownText(HomeMemoryPresentation.text(line))
                 }
             }
-            TronSettingsGroup("Covers", detail: "The two halves this summary was made from.", accent: .tronSessionTeal) {
+            TronSettingsGroup("Covers", detail: "The two halves this summary was made from.", accent: accent) {
                 memoryLines(halves)
             }
         }
@@ -76,10 +76,10 @@ extension HomeSheet {
         let remembered = item.summary.map { HomeMemoryPresentation.strip($0.text) }
             .flatMap { HomeMemoryPresentation.differs($0, from: message) ? $0 : nil }
         return VStack(alignment: .leading, spacing: 18) {
-            TronGlassCard(accent: .tronSessionTeal) {
+            TronGlassCard(accent: accent) {
                 VStack(alignment: .leading, spacing: 0) {
                     TronSettingsRow(icon: Self.attributionIcon(item.attribution), title: Self.attributionLabel(item.attribution),
-                                    subtitle: HomeSheetTime.relative(item.timestamp), accent: .tronSessionTeal)
+                                    subtitle: HomeSheetTime.relative(item.timestamp), accent: accent)
                     divider()
                     markdownText(message)
                     if item.projection.omitted || !item.projection.omissions.isEmpty {
@@ -89,14 +89,14 @@ extension HomeSheet {
                 }
             }
             if let remembered {
-                TronSettingsGroup("Home remembers", accent: .tronSessionTeal) { markdownText(remembered) }
+                TronSettingsGroup("Home remembers", accent: accent) { markdownText(remembered) }
                     .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home-memory-remembered")
             }
-            TronGlassCard(accent: .tronSessionTeal) {
+            TronGlassCard(accent: accent) {
                 Button { present(.evidence(item.evidence, origin: origin)) } label: {
                     TronSettingsRow(icon: "doc.text.magnifyingglass", title: "Exact evidence",
-                                    subtitle: "The canonical text this memory came from", accent: .tronSessionTeal)
+                                    subtitle: "The canonical text this memory came from", accent: accent)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("home-memory-exact-evidence")
@@ -109,10 +109,10 @@ extension HomeSheet {
     /// The canonical history of one memory entry, paged in bounded characters.
     func evidenceSheet(_ page: HomeMemoryEvidencePageDTO, origin: HomeMemoryOrigin) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            TronGlassCard(accent: .tronSessionTeal) {
+            TronGlassCard(accent: accent) {
                 VStack(alignment: .leading, spacing: 0) {
                     TronSettingsRow(icon: Self.attributionIcon(origin.attribution), title: Self.attributionLabel(origin.attribution),
-                                    subtitle: HomeSheetTime.relative(origin.timestamp), accent: .tronSessionTeal)
+                                    subtitle: HomeSheetTime.relative(origin.timestamp), accent: accent)
                     divider()
                     Text("\(page.evidence.sessionId) · \(page.evidence.entryId)")
                         .font(TronTypography.code(size: TronTypography.sizeCaption))
@@ -127,7 +127,7 @@ extension HomeSheet {
             }
             TronSettingsGroup("Canonical history",
                               detail: "Characters \(page.offset)–\(page.offset + page.text.utf16.count) of \(page.totalCharacters)",
-                              accent: .tronSessionTeal) {
+                              accent: accent) {
                 readingText(page.text).accessibilityIdentifier("home-evidence-text")
             }
             if let previous = page.previousOffset {
@@ -163,9 +163,9 @@ extension HomeSheet {
 
     /// A standard action row for paging.
     func pageRow(title: String, icon: String, id: String, action: @escaping () -> Void) -> some View {
-        TronGlassCard(accent: .tronSessionTeal) {
+        TronGlassCard(accent: accent) {
             Button(action: action) {
-                TronSettingsRow(icon: icon, title: title, accent: .tronSessionTeal)
+                TronSettingsRow(icon: icon, title: title, accent: accent)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(title)

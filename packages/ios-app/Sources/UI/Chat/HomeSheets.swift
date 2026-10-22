@@ -135,9 +135,6 @@ struct HomeSheet: View {
     /// Rows present an existing Home sheet as a managed child, so each child keeps
     /// its own read owner and lifetime.
     @PresentationState var childDestination: HomeSheetDestination?
-    /// The accent of the row that opened the child: its sheet title, Done and
-    /// loading pulse take it through the shared settings visual theme (#925).
-    @PresentationState private var childAccent: Color?
     /// A Home text opened whole (a chapter topic) in the shared document sheet.
     @PresentationState var reading: HomeTextReading?
     @Environment(\.tronSettingsVisualTheme) private var visualTheme
@@ -254,7 +251,7 @@ struct HomeSheet: View {
         .tronManagedSheet(item: $childDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
             HomeSheet(destination: child, profileID: profileID, sessionID: sessionID, onOpenSession: onOpenSession,
                       onChanged: { returnsFromBrowsing = false; onChanged?() })
-                .tronSettingsVisualTheme(accent: childAccent ?? accent)
+                .tronSettingsVisualTheme(accent: accent)
         }
         .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
             HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent)
@@ -309,14 +306,12 @@ struct HomeSheet: View {
     }
 
     /// Presents a managed child sheet; rows use this, not their own navigation.
-    /// `rowAccent` is the presenting row's tint; without one the child keeps
-    /// this sheet's accent, so a whole Home branch shares its row's color.
-    func present(_ child: HomeSheetDestination, rowAccent: Color? = nil) {
+    /// The child keeps this sheet's accent, so a whole Home branch shares it.
+    func present(_ child: HomeSheetDestination) {
         switch child {
         case .memory, .chapters, .profile, .profileItem: returnsFromBrowsing = true
         default: returnsFromBrowsing = false
         }
-        childAccent = rowAccent
         childDestination = child
     }
 

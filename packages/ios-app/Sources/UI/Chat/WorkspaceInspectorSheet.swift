@@ -192,6 +192,8 @@ private struct WorkspaceHistoryGraph: View {
 }
 
 struct WorkspaceInspectorSheet: View {
+    /// The one label of this sheet's title and the Manage Session row that opens it.
+    static let title = "Workspace"
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -228,13 +230,13 @@ struct WorkspaceInspectorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Workspace", accent: .tronSessionTeal)
+                    TronSheetTitle(title: Self.title, accent: .tronEmerald)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronSessionTeal)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -302,8 +304,8 @@ struct WorkspaceInspectorSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronSessionTeal)
-        .tint(Color.tronSessionTeal)
+        .tronSettingsVisualTheme(accent: .tronEmerald)
+        .tint(Color.tronEmerald)
     }
 
     private var header: some View {
@@ -311,10 +313,10 @@ struct WorkspaceInspectorSheet: View {
             HStack(alignment: .center, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "folder.fill")
-                        .foregroundStyle(Color.tronSessionTeal)
+                        .foregroundStyle(Color.tronEmerald)
                     Text(owner.inspection?.root ?? "Loading workspace…")
                         .font(TronTypography.codeContent)
-                        .foregroundStyle(Color.tronSessionTeal)
+                        .foregroundStyle(Color.tronEmerald)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -323,14 +325,14 @@ struct WorkspaceInspectorSheet: View {
                 if let repository = owner.inspection?.repository {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 7) {
-                            ToolStaticChip(icon: "arrow.triangle.branch", text: branchLabel(repository), accent: .tronSessionTeal)
+                            ToolStaticChip(icon: "arrow.triangle.branch", text: branchLabel(repository), accent: .tronEmerald)
                             ToolStaticChip(
                                 icon: repository.dirty ? "pencil.and.list.clipboard" : "checkmark.circle",
                                 text: repository.dirty ? "\(repository.changes.count) changed" : "Clean",
-                                accent: .tronSessionTeal
+                                accent: .tronEmerald
                             )
                             if repository.detached {
-                                ToolStaticChip(icon: "link.badge.plus", text: "Detached HEAD", accent: .tronSessionTeal)
+                                ToolStaticChip(icon: "link.badge.plus", text: "Detached HEAD", accent: .tronEmerald)
                             }
                         }
                         .padding(.vertical, 1)
@@ -343,7 +345,7 @@ struct WorkspaceInspectorSheet: View {
             if owner.inspection != nil, owner.inspection?.repository == nil {
                 Text("This workspace is not version controlled by Git.")
                     .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronSessionTeal)
+                    .foregroundStyle(Color.tronEmerald)
             }
             if let error = owner.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -364,15 +366,15 @@ struct WorkspaceInspectorSheet: View {
         return TronSegmentedControl(
             options: available.map { (label: $0.rawValue, value: $0) },
             selection: $selectedTab,
-            accent: .tronSessionTeal,
-            foreground: .tronSessionTeal,
+            accent: .tronEmerald,
+            foreground: .tronEmerald,
             minimumHeight: 40
         )
     }
 
     @ViewBuilder private var content: some View {
         if owner.loadingInspection && owner.inspection == nil {
-            TronLoadingState(label: "Inspecting workspace…", accent: .tronSessionTeal)
+            TronLoadingState(label: "Inspecting workspace…", accent: .tronEmerald)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             switch selectedTab {
@@ -388,14 +390,14 @@ struct WorkspaceInspectorSheet: View {
             fileActions
             let entries = (owner.directory?.entries ?? []).filter { includeHidden || !$0.hidden }
             if owner.loadingDirectory && owner.directory == nil {
-                TronLoadingState(label: "Loading files…", accent: .tronSessionTeal)
+                TronLoadingState(label: "Loading files…", accent: .tronEmerald)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 30)
             } else if entries.isEmpty {
                 TronInfoCard(
                     icon: "folder",
                     text: includeHidden ? "This folder is empty." : "No visible files or folders are here.",
-                    accent: .tronSessionTeal
+                    accent: .tronEmerald
                 )
             } else {
                 ForEach(entries) { entry in fileRow(entry).transition(.opacity) }
@@ -412,7 +414,7 @@ struct WorkspaceInspectorSheet: View {
         HStack(spacing: 8) {
             Text(owner.directory?.path.isEmpty == false ? owner.directory!.path : "Workspace root")
                 .font(TronTypography.codeContent)
-                .foregroundStyle(Color.tronSessionTeal)
+                .foregroundStyle(Color.tronEmerald)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -434,12 +436,12 @@ struct WorkspaceInspectorSheet: View {
                 Text(title).lineLimit(1)
             }
             .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-            .foregroundStyle(Color.tronSessionTeal)
+            .foregroundStyle(Color.tronEmerald)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronSessionTeal.opacity(0.09)).interactive(), in: Capsule())
+        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.09)).interactive(), in: Capsule())
     }
 
     private func fileRow(_ entry: SessionWorkspaceDirectoryEntry) -> some View {
@@ -453,7 +455,7 @@ struct WorkspaceInspectorSheet: View {
             HStack(spacing: 12) {
                 Image(systemName: fileIcon(entry))
                     .font(TronTypography.body)
-                    .foregroundStyle(entry.kind == .directory ? Color.tronSessionTeal : Color.tronTextSecondary)
+                    .foregroundStyle(entry.kind == .directory ? Color.tronEmerald : Color.tronTextSecondary)
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry.name)
@@ -481,7 +483,7 @@ struct WorkspaceInspectorSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(entry.kind == .symlink)
-        .tronScrollSurface(accent: .tronSessionTeal, cornerRadius: 14, tintOpacity: 0.07)
+        .tronScrollSurface(accent: .tronEmerald, cornerRadius: 14, tintOpacity: 0.07)
         .accessibilityLabel(entry.name)
         .accessibilityValue(entry.kind == .symlink ? "Symbolic link, preview unavailable" : entry.kind.rawValue)
     }
@@ -490,7 +492,7 @@ struct WorkspaceInspectorSheet: View {
         if let repository = owner.inspection?.repository {
             LazyVStack(alignment: .leading, spacing: 16) {
                 if repository.changes.isEmpty {
-                    TronInfoCard(icon: "checkmark.circle", text: "Working tree clean", accent: .tronSessionTeal)
+                    TronInfoCard(icon: "checkmark.circle", text: "Working tree clean", accent: .tronEmerald)
                 } else {
                     ForEach(owner.changeGroups) { group in
                         VStack(alignment: .leading, spacing: 8) {
@@ -504,7 +506,7 @@ struct WorkspaceInspectorSheet: View {
             }
             .padding(18)
         } else {
-            TronInfoCard(icon: "folder", text: "Changes are unavailable because this workspace is not a Git repository.", accent: .tronSessionTeal)
+            TronInfoCard(icon: "folder", text: "Changes are unavailable because this workspace is not a Git repository.", accent: .tronEmerald)
                 .padding(18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
@@ -514,7 +516,7 @@ struct WorkspaceInspectorSheet: View {
         Button { openDiff(change) } label: {
             HStack(spacing: 10) {
                 Image(systemName: change.conflicted ? "exclamationmark.triangle.fill" : "doc.text.magnifyingglass")
-                    .foregroundStyle(change.conflicted ? Color.tronError : Color.tronSessionTeal)
+                    .foregroundStyle(change.conflicted ? Color.tronError : Color.tronEmerald)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(change.path)
@@ -532,7 +534,7 @@ struct WorkspaceInspectorSheet: View {
                 ToolStaticChip(
                     icon: changeStatusIcon(change),
                     text: changeStatusLabel(change),
-                    accent: change.conflicted ? .tronError : .tronSessionTeal
+                    accent: change.conflicted ? .tronError : .tronEmerald
                 )
             }
             .padding(.horizontal, 12)
@@ -541,13 +543,13 @@ struct WorkspaceInspectorSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .tronScrollSurface(accent: change.conflicted ? .tronError : .tronSessionTeal, cornerRadius: 12, tintOpacity: 0.07)
+        .tronScrollSurface(accent: change.conflicted ? .tronError : .tronEmerald, cornerRadius: 12, tintOpacity: 0.07)
         .accessibilityLabel("\(change.path), \(changeLabel(change))")
     }
 
     @ViewBuilder private var historyContent: some View {
         if owner.inspection?.repository == nil {
-            TronInfoCard(icon: "clock.arrow.circlepath", text: "History is unavailable because this workspace is not a Git repository.", accent: .tronSessionTeal)
+            TronInfoCard(icon: "clock.arrow.circlepath", text: "History is unavailable because this workspace is not a Git repository.", accent: .tronEmerald)
                 .padding(18)
         } else {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -562,18 +564,18 @@ struct WorkspaceInspectorSheet: View {
                                 Task { await owner.selectHistoryScope(scope, service: model.workspaceInspection, sessionID: sessionID) }
                             }
                         ),
-                        accent: .tronSessionTeal,
-                        foreground: .tronSessionTeal,
+                        accent: .tronEmerald,
+                        foreground: .tronEmerald,
                         minimumHeight: 36
                     )
                     .padding(.bottom, 14)
 
                 if owner.loadingHistory && owner.commits.isEmpty {
-                    TronLoadingState(label: "Loading history…", accent: .tronSessionTeal)
+                    TronLoadingState(label: "Loading history…", accent: .tronEmerald)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 24)
                 } else if owner.commits.isEmpty {
-                    TronInfoCard(icon: "clock", text: "No commits are available for this scope.", accent: .tronSessionTeal)
+                    TronInfoCard(icon: "clock", text: "No commits are available for this scope.", accent: .tronEmerald)
                 } else {
                     if owner.historyScope == .allReferences {
                         historyReferences
@@ -582,7 +584,7 @@ struct WorkspaceInspectorSheet: View {
                         commitRow(row)
                     }
                     if owner.historyCursor != nil {
-                        TronPaginationButton(label: "Load Earlier", loadingLabel: "Loading…", icon: "arrow.down", isLoading: owner.loadingHistory, accent: .tronSessionTeal) {
+                        TronPaginationButton(label: "Load Earlier", loadingLabel: "Loading…", icon: "arrow.down", isLoading: owner.loadingHistory, accent: .tronEmerald) {
                             Task { await owner.loadHistory(service: model.workspaceInspection, sessionID: sessionID, append: true) }
                         }
                         .frame(maxWidth: .infinity, minHeight: 44)
@@ -599,7 +601,7 @@ struct WorkspaceInspectorSheet: View {
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(references, id: \.self) { reference in
-                    ToolStaticChip(icon: "arrow.triangle.branch", text: reference, accent: .tronSessionTeal)
+                    ToolStaticChip(icon: "arrow.triangle.branch", text: reference, accent: .tronEmerald)
                 }
             }
             .padding(.vertical, 1)
@@ -772,7 +774,7 @@ private struct WorkspaceGitDiffSheet: View {
         NavigationStack {
             Group {
                 if route.diff.binary {
-                    TronInfoCard(icon: "doc.badge.ellipsis", text: "This binary change does not have a text diff.", accent: .tronSessionTeal)
+                    TronInfoCard(icon: "doc.badge.ellipsis", text: "This binary change does not have a text diff.", accent: .tronEmerald)
                         .padding(18)
                 } else if let presentation = route.presentation {
                     ScrollView(.vertical, showsIndicators: true) {
@@ -787,17 +789,17 @@ private struct WorkspaceGitDiffSheet: View {
                     }
                     .tronScrollEdgeChrome()
                 } else {
-                    TronInfoCard(icon: "checkmark.circle", text: "No text changes are present in this diff scope.", accent: .tronSessionTeal)
+                    TronInfoCard(icon: "checkmark.circle", text: "No text changes are present in this diff scope.", accent: .tronEmerald)
                         .padding(18)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: route.diff.path, accent: .tronSessionTeal, truncationMode: .head)
+                    TronSheetTitle(title: route.diff.path, accent: .tronEmerald, truncationMode: .head)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronSessionTeal) }
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronEmerald) }
                         .accessibilityLabel("Done")
                 }
             }
@@ -841,7 +843,7 @@ private struct WorkspaceCommitDetailSheet: View {
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronScrollSurface(accent: .tronSessionTeal, cornerRadius: 16, tintOpacity: 0.08)
+                    .tronScrollSurface(accent: .tronEmerald, cornerRadius: 16, tintOpacity: 0.08)
 
                     if !detail.changes.isEmpty {
                         Text("CHANGED FILES")
@@ -851,7 +853,7 @@ private struct WorkspaceCommitDetailSheet: View {
                             Button { openDiff(change) } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: "doc.text")
-                                        .foregroundStyle(Color.tronSessionTeal)
+                                        .foregroundStyle(Color.tronEmerald)
                                         .frame(width: 20)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(change.path)
@@ -871,7 +873,7 @@ private struct WorkspaceCommitDetailSheet: View {
                             }
                             .buttonStyle(.plain)
                             .disabled(!supportsHistoricalDiff)
-                            .tronScrollSurface(accent: .tronSessionTeal, cornerRadius: 14, tintOpacity: 0.06)
+                            .tronScrollSurface(accent: .tronEmerald, cornerRadius: 14, tintOpacity: 0.06)
                             .accessibilityHint(supportsHistoricalDiff ? "Opens this file's diff for the commit" : "Historical file diffs require a newer Gateway")
                         }
                     }
@@ -881,9 +883,9 @@ private struct WorkspaceCommitDetailSheet: View {
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Commit", accent: .tronSessionTeal) }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Commit", accent: .tronEmerald) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronSessionTeal) }
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronEmerald) }
                         .accessibilityLabel("Done")
                 }
             }

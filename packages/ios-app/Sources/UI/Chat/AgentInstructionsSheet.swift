@@ -160,16 +160,6 @@ enum AgentInstructionsPresentation {
         }
     }
 
-    static func accent(_ source: AgentInstructionsProjection.Source) -> Color {
-        switch source.kind {
-        case "pi": .tronBlue
-        case "module": .tronSessionTeal
-        case "package": .tronPurple
-        case "local", "file": .tronAmber
-        default: .tronTextMuted
-        }
-    }
-
     /// The Gateway reports Mac paths; shorten the home folder for a phone.
     static func displayPath(_ path: String) -> String {
         path.replacingOccurrences(of: #"^/Users/[^/]+"#, with: "~", options: .regularExpression)
@@ -181,6 +171,8 @@ enum AgentInstructionsPresentation {
 }
 
 struct AgentInstructionsSheet: View {
+    /// The one label of this sheet's title and the Manage Session row that opens it.
+    static let title = "Instructions"
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -188,13 +180,13 @@ struct AgentInstructionsSheet: View {
     @PresentationState private var loadingRequest: UUID?
 
     var body: some View {
-        AgentInstructionsListSheet(title: "Agent Instructions", accent: .tronSessionTeal) {
+        AgentInstructionsListSheet(title: Self.title) {
             if let projection = AgentInstructionsProjection(context: model.context) {
                 AgentInstructionsOverview(projection: projection)
             } else if loading {
-                TronSheetLoadingState(label: "Loading instructions…", accent: .tronSessionTeal)
+                TronSheetLoadingState(label: "Loading instructions…", accent: .tronEmerald)
             } else {
-                TronInfoCard(icon: "doc.text", text: "Instructions are unavailable for this session.", accent: .tronSessionTeal)
+                TronInfoCard(icon: "doc.text", text: "Instructions are unavailable for this session.", accent: .tronEmerald)
                     .padding(18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
@@ -217,9 +209,11 @@ struct AgentInstructionsSheet: View {
 
 /// Shared chrome for the overview and each section sheet: the standard
 /// medium-first, large-capable sheet with a themed title and icon-only Done.
+/// Every instructions sheet, row and source tag takes Manage Session's emerald
+/// sheet theme; the source is named by its tag, not by a color.
 private struct AgentInstructionsListSheet<Content: View>: View {
     let title: String
-    let accent: Color
+    private var accent: Color { .tronEmerald }
     @ViewBuilder let content: () -> Content
     @Environment(\.dismiss) private var dismiss
 
@@ -266,7 +260,7 @@ private struct AgentInstructionsReader: View {
             PreparedAgentInstructions(instructions: reading.text)
                 .tronScrollEdgeChrome()
         }
-        .tronSettingsVisualTheme(accent: .tronSessionTeal)
+        .tronSettingsVisualTheme(accent: .tronEmerald)
     }
 }
 
@@ -281,7 +275,7 @@ struct AgentInstructionsOverview: View {
         ScrollView {
             // A dozen rows at most; eager layout keeps every row addressable
             // while the sheet rests at its medium detent.
-            VStack(alignment: .leading, spacing: TronSpacing.lg) {
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
                 TronSettingsCaption("The model reads these sections in this order for every turn. Open one to see where it comes from.")
                     .padding(.bottom, TronSpacing.xs)
                 ForEach(Array(projection.sections.enumerated()), id: \.element.id) { index, section in
@@ -290,15 +284,11 @@ struct AgentInstructionsOverview: View {
                 Button {
                     reading = AgentInstructionsReading(id: "full", title: "Full Prompt", text: projection.text)
                 } label: {
-                    TronSettingsRow(
-                        icon: "doc.plaintext",
-                        title: "View Full Prompt",
-                        subtitle: "\(projection.text.count.formatted()) characters, exactly as the model receives them",
-                        accent: .tronSessionTeal
-                    )
+                    AgentInstructionsSummaryRow(icon: "doc.plaintext", title: "View Full Prompt",
+                                                summary: "\(projection.text.count.formatted()) characters")
                 }
                 .buttonStyle(.plain)
-                .tronGlassSurface(accent: .tronSessionTeal, tintOpacity: 0.10, interactive: true)
+                .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.10, interactive: true)
                 .padding(.top, TronSpacing.md)
                 .accessibilityIdentifier("agent-instructions-full-prompt")
                 TronSettingsCaption("Some model providers add their own text to each request. That text is not part of these instructions.")
@@ -317,28 +307,79 @@ struct AgentInstructionsOverview: View {
 
     private func sectionRow(_ section: AgentInstructionsProjection.Section, number: Int) -> some View {
         let copy = AgentInstructionsPresentation.copy(for: section)
-        let accent = section.source.map(AgentInstructionsPresentation.accent) ?? .tronSessionTeal
-        let summary = AgentInstructionsPresentation.summary(for: section)
         return Button {
             selection = section
         } label: {
-            TronSettingsRow(
+            AgentInstructionsSummaryRow(
                 // The numbered symbol keeps the model's reading order visible.
                 icon: number <= 50 ? "\(number).circle" : copy.icon,
                 title: copy.title,
-                subtitle: summary.isEmpty ? nil : summary,
-                subtitleLineLimit: 1,
-                accent: accent
-            ) {
-                if section.perTurn { ResourceTagLabel(title: "Each turn", accent: .tronSessionTeal) }
-            }
+                summary: AgentInstructionsPresentation.summary(for: section),
+                perTurn: section.perTurn
+            )
         }
         .buttonStyle(.plain)
-        .tronGlassSurface(accent: accent, tintOpacity: 0.10, interactive: true, respectsSettingsTheme: false)
-        // Source accents identify where each section comes from; the teal
-        // theme belongs to the sheet chrome.
-        .environment(\.tronSettingsVisualTheme, nil)
+        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.10, interactive: true)
         .accessibilityIdentifier("agent-instructions-section-\(section.id)")
+    }
+}
+
+/// An overview row: the title, then its summary trailing on the same line,
+/// right-aligned, with the Each turn tag before it. A path may shorten in the
+/// middle, keeping both ends; any other summary shows whole or, when it does not
+/// fit beside the title, returns below it. At accessibility sizes the summary is
+/// always below the title and wraps.
+private struct AgentInstructionsSummaryRow: View {
+    let icon: String
+    let title: String
+    let summary: String
+    var perTurn = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+
+    /// The narrowest trailing path still worth reading on the title's line.
+    private static let minimumPathWidth: CGFloat = 72
+
+    private var isPath: Bool { summary.hasPrefix("/") || summary.hasPrefix("~/") }
+
+    var body: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            stacked
+        } else {
+            // A path's ideal width here is its minimum, so a long path still
+            // takes the single line and truncates; only a crowded title stacks.
+            ViewThatFits(in: .horizontal) { singleLine; stacked }
+        }
+    }
+
+    private var singleLine: some View {
+        TronSettingsRow(icon: icon, title: title) {
+            HStack(spacing: TronSpacing.sm) {
+                tag
+                if !summary.isEmpty {
+                    let text = Text(summary)
+                        .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .lineLimit(1)
+                    if isPath {
+                        text.truncationMode(.middle)
+                            .frame(minWidth: Self.minimumPathWidth, idealWidth: Self.minimumPathWidth,
+                                   maxWidth: .infinity, alignment: .trailing)
+                    } else {
+                        text.fixedSize()
+                    }
+                }
+            }
+        }
+    }
+
+    private var stacked: some View {
+        TronSettingsRow(icon: icon, title: title, subtitle: summary.isEmpty ? nil : summary,
+                        subtitleLineLimit: dynamicTypeSize.isAccessibilitySize ? nil : 1) { tag }
+    }
+
+    @ViewBuilder private var tag: some View {
+        if perTurn { ResourceTagLabel(title: "Each turn", accent: .tronEmerald) }
     }
 }
 
@@ -351,10 +392,10 @@ private struct AgentInstructionsSectionSheet: View {
     private static let inlineLimit = 2_400
 
     private var copy: AgentInstructionsPresentation.SectionCopy { AgentInstructionsPresentation.copy(for: section) }
-    private var accent: Color { section.source.map(AgentInstructionsPresentation.accent) ?? .tronSessionTeal }
+    private var accent: Color { .tronEmerald }
 
     var body: some View {
-        AgentInstructionsListSheet(title: copy.title, accent: accent) {
+        AgentInstructionsListSheet(title: copy.title) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
                     Text(copy.purpose)
@@ -393,7 +434,7 @@ private struct AgentInstructionsSectionSheet: View {
                     title: AgentInstructionsPresentation.sourceDetail(source),
                     accent: accent
                 ) {
-                    ResourceTagLabel(title: AgentInstructionsPresentation.sourceTag(source), accent: AgentInstructionsPresentation.accent(source))
+                    ResourceTagLabel(title: AgentInstructionsPresentation.sourceTag(source), accent: accent)
                 }
             }
             if section.perTurn {
@@ -456,8 +497,6 @@ private struct AgentInstructionsSectionSheet: View {
                 }
             }
         }
-        // Entries keep the accent of their own source.
-        .environment(\.tronSettingsVisualTheme, nil)
     }
 
     private var isFileSection: Bool { section.id == "project_context" || section.id == "addendum" }
@@ -481,7 +520,7 @@ private struct AgentInstructionsSectionSheet: View {
                 icon: "doc.text",
                 title: entry.name ?? "Instructions",
                 subtitle: [path, "\(entry.text.count.formatted()) characters"].compactMap { $0 }.joined(separator: " · "),
-                accent: AgentInstructionsPresentation.accent(entry.source)
+                accent: .tronEmerald
             )
         }
         .buttonStyle(.plain)
@@ -497,7 +536,7 @@ private struct AgentInstructionsEntryRow: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
     var body: some View {
-        let accent = AgentInstructionsPresentation.accent(entry.source)
+        let accent = Color.tronEmerald
         let secondary = TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment)
         HStack(alignment: .top, spacing: TronSpacing.xl) {
             Image(systemName: icon)
@@ -577,7 +616,7 @@ struct PreparedAgentInstructions: View {
                         }
                 }
             } else {
-                TronSheetLoadingState(label: "Preparing instructions…", accent: .tronSessionTeal)
+                TronSheetLoadingState(label: "Preparing instructions…", accent: .tronEmerald)
             }
         }
         .task(id: PresentationActivityTaskID(

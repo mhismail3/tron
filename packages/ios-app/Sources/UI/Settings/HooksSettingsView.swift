@@ -139,7 +139,7 @@ struct HooksSettingsView: View {
     @Environment(AppModel.self) private var model
     /// The opening group's accent (Tools, or the Project card's); teal only when opened alone (#939).
     @Environment(\.tronSettingsVisualTheme) private var theme
-    private var accent: Color { theme?.accent ?? .tronSessionTeal }
+    private var accent: Color { theme?.accent ?? .tronEmerald }
     @Environment(\.tronPresentationActivity) private var presentationActivity
     private var scope: SettingsScope { projectCWD == nil ? .global : .project }
     @PresentationState private var mode: HookViewMode = .byEvent

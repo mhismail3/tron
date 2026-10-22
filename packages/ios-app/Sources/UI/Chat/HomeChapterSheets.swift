@@ -9,7 +9,7 @@ extension HomeSheet {
         // The sheet's title already names the list: one intro line, then the rows.
         VStack(alignment: .leading, spacing: 10) {
             TronSettingsCaption("Newest first. Sealed chapters stay readable and refuse changes.")
-            TronGlassCard(accent: .tronSessionTeal) {
+            TronGlassCard(accent: accent) {
                 VStack(spacing: 0) {
                     ForEach(Array(list.chapters.reversed().enumerated()), id: \.element.id) { index, chapter in
                         if index > 0 { divider() }
@@ -17,7 +17,7 @@ extension HomeSheet {
                             TronSettingsRow(icon: chapter.state == .active ? "book" : "book.closed",
                                             title: "Chapter \(chapter.ordinal)",
                                             subtitle: HomeChapterPresentation.dateRange(chapter),
-                                            accent: .tronSessionTeal) {
+                                            accent: accent) {
                                 TronStatusPill(text: HomeChapterPresentation.stateLabel(chapter.state), accent: Self.chapterAccent(chapter.state))
                             }
                         }
@@ -35,22 +35,22 @@ extension HomeSheet {
             if let contents = chapter.contents {
                 let lines = HomeChapterPresentation.contentsLines(contents)
                 if !lines.isEmpty {
-                    TronGlassCard(accent: .tronSessionTeal) {
+                    TronGlassCard(accent: accent) {
                         VStack(spacing: 0) {
                             ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                                 if index > 0 { divider() }
-                                TronSettingsRow(icon: line.icon, title: line.text, accent: .tronSessionTeal)
+                                TronSettingsRow(icon: line.icon, title: line.text, accent: accent)
                             }
                         }
                     }
                 }
                 if let topics = contents.topics, !topics.isEmpty {
-                    TronSettingsGroup("Topics", detail: "From Home's summaries of this chapter.", accent: .tronSessionTeal) {
+                    TronSettingsGroup("Topics", detail: "From Home's summaries of this chapter.", accent: accent) {
                         VStack(spacing: 0) {
                             ForEach(Array(topics.enumerated()), id: \.offset) { index, topic in
                                 if index > 0 { divider() }
                                 Button { reading = HomeTextReading(id: "topic-\(index)", title: "Topic", text: topic) } label: {
-                                    TronSettingsRow(icon: nil, title: HomeChapterPresentation.topicPreview(topic), accent: .tronSessionTeal,
+                                    TronSettingsRow(icon: nil, title: HomeChapterPresentation.topicPreview(topic), accent: accent,
                                                     titleFont: TronTypography.sans(size: TronTypography.sizeBody))
                                 }
                                 .buttonStyle(.plain)
@@ -62,11 +62,11 @@ extension HomeSheet {
                 .accessibilityIdentifier("home-chapter-topics")
                 }
             }
-            TronGlassCard(accent: .tronSessionTeal) {
+            TronGlassCard(accent: accent) {
                 VStack(spacing: 0) {
                     Button { present(.memory(sessionID: chapter.sessionId, chapterOrdinal: chapter.ordinal)) } label: {
                         TronSettingsRow(icon: "brain", title: "Browse memory",
-                                        subtitle: "What Home remembers from this chapter", accent: .tronSessionTeal)
+                                        subtitle: "What Home remembers from this chapter", accent: accent)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("home-chapter-browse-memory")
@@ -75,7 +75,7 @@ extension HomeSheet {
                         divider()
                         Button { onOpenSession(chapter.sessionId) } label: {
                             TronSettingsRow(icon: "book.pages", title: "Open chapter transcript",
-                                            subtitle: "Read-only; sealed history refuses changes", accent: .tronSessionTeal)
+                                            subtitle: "Read-only; sealed history refuses changes", accent: accent)
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("home-chapter-open-transcript")
@@ -103,7 +103,7 @@ extension HomeSheet {
                 .foregroundStyle(Color.tronTextSecondary)
             if let percent {
                 ProgressView(value: Double(min(percent, 100)), total: 100)
-                    .tint(Color.tronSessionTeal)
+                    .tint(accent)
                     .accessibilityLabel("Size against the rollover limit")
                     .accessibilityValue("\(percent) percent")
             }
@@ -115,7 +115,7 @@ extension HomeSheet {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: .tronSessionTeal, tintOpacity: 0.14)
+        .tronGlassSurface(accent: accent, tintOpacity: 0.14)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home-chapter-header")
     }

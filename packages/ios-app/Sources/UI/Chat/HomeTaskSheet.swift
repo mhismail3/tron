@@ -205,15 +205,15 @@ struct HomeTaskSheet: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .tronGlassSurface(accent: .tronSessionTeal, tintOpacity: 0.14)
+            .tronGlassSurface(accent: accent, tintOpacity: 0.14)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home-task-header")
             briefCard(task.intent.text)
             if let terminal = task.terminalEvidence {
-                TronSettingsGroup("Result", accent: .tronSessionTeal) {
+                TronSettingsGroup("Result", accent: accent) {
                     TronSettingsRow(icon: Self.taskIcon(task.lifecycle, outcome: terminal.outcome),
                                     title: terminal.outcome.rawValue.capitalized, subtitle: terminal.reason,
-                                    subtitleLineLimit: nil, accent: .tronSessionTeal)
+                                    subtitleLineLimit: nil, accent: accent)
                 }
             }
             workerCard(task)
@@ -227,7 +227,7 @@ struct HomeTaskSheet: View {
     /// from a View All row, as a tool's script or result does.
     private func briefCard(_ text: String) -> some View {
         let preview = ToolTextHeadPreview.make(text)
-        return TronSettingsGroup("Brief", accent: .tronSessionTeal) {
+        return TronSettingsGroup("Brief", accent: accent) {
             VStack(alignment: .leading, spacing: 0) {
                 TronMarkdownView(text: preview.isTruncated ? preview.text : text, streaming: false)
                     .textSelection(.enabled)
@@ -236,9 +236,9 @@ struct HomeTaskSheet: View {
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("home-task-brief")
                 if preview.isTruncated {
-                    TronSettingsDivider(accent: .tronSessionTeal)
+                    TronSettingsDivider(accent: accent)
                     Button { reading = HomeTextReading(id: "brief", title: "Brief", text: text) } label: {
-                        TronSettingsRow(icon: "text.alignleft", title: "View All", accent: .tronSessionTeal)
+                        TronSettingsRow(icon: "text.alignleft", title: "View All", accent: accent)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("home-task-brief-view-all")
@@ -251,37 +251,37 @@ struct HomeTaskSheet: View {
     @ViewBuilder private func workerCard(_ task: HomeTaskDTO) -> some View {
         let runs = task.subagentRuns.flatMap { $0.total > 0 ? $0 : nil }
         if task.workerModel != nil || task.subagents != nil || runs != nil || task.spend != nil || task.checkins?.last != nil {
-            TronSettingsGroup("Worker", accent: .tronSessionTeal) {
+            TronSettingsGroup("Worker", accent: accent) {
                 VStack(spacing: 0) {
                     let rows = workerRows(task)
                     if let checkin = task.checkins?.last {
                         TronSettingsRow(icon: "text.bubble", title: "Latest check-in",
                                         subtitle: HomeTaskPresentation.checkinText(checkin),
-                                        subtitleLineLimit: nil, accent: .tronSessionTeal)
+                                        subtitleLineLimit: nil, accent: accent)
                             .accessibilityElement(children: .combine)
                             .accessibilityIdentifier("home-task-checkin")
-                        if !rows.isEmpty { TronSettingsDivider(accent: .tronSessionTeal) }
+                        if !rows.isEmpty { TronSettingsDivider(accent: accent) }
                     }
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                        if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
+                        if index > 0 { TronSettingsDivider(accent: accent) }
                         // Title over value, as every other Home detail row reads.
-                        TronSettingsRow(icon: row.icon, title: row.title, subtitle: row.value, accent: .tronSessionTeal)
+                        TronSettingsRow(icon: row.icon, title: row.title, subtitle: row.value, accent: accent)
                             .accessibilityElement(children: .combine)
                             .accessibilityIdentifier(row.id)
                     }
                     if let runs {
-                        TronSettingsDivider(accent: .tronSessionTeal)
+                        TronSettingsDivider(accent: accent)
                         ForEach(Array(runs.runs.enumerated()), id: \.element.id) { index, run in
-                            if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
+                            if index > 0 { TronSettingsDivider(accent: accent) }
                             TronSettingsRow(icon: "person.crop.circle.badge.clock", title: run.agent,
                                             subtitle: HomeSheetTime.relative(run.lastActivityAt ?? run.startedAt),
-                                            accent: .tronSessionTeal) {
-                                TronStatusPill(text: run.state.capitalized, accent: .tronSessionTeal)
+                                            accent: accent) {
+                                TronStatusPill(text: run.state.capitalized, accent: accent)
                             }
                         }
                         if runs.total > runs.runs.count {
-                            TronSettingsDivider(accent: .tronSessionTeal)
-                            TronSettingsRow(icon: "ellipsis", title: "\(runs.total - runs.runs.count) more live runs", accent: .tronSessionTeal)
+                            TronSettingsDivider(accent: accent)
+                            TronSettingsRow(icon: "ellipsis", title: "\(runs.total - runs.runs.count) more live runs", accent: accent)
                         }
                     }
                 }
@@ -308,9 +308,9 @@ struct HomeTaskSheet: View {
         } : nil
         if let route = redeliverable {
             TronSettingsGroup("Redeliver", detail: "Deliver this unadmitted result to the current Home. This does not replay the task.",
-                              accent: .tronSessionTeal) {
+                              accent: accent) {
                 Button { mutate(.redeliver(taskID: task.taskId, homeID: task.homeId, routeGeneration: route)) } label: {
-                    TronSettingsRow(icon: "arrow.uturn.forward", title: "Redeliver result", accent: .tronSessionTeal)
+                    TronSettingsRow(icon: "arrow.uturn.forward", title: "Redeliver result", accent: accent)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canMutate)
@@ -351,10 +351,10 @@ struct HomeTaskSheet: View {
     /// A standard action row: a chevron-free row that performs one action.
     func actionRow(title: String, subtitle: String? = nil, icon: String, destructive: Bool = false,
                    id: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
-        TronGlassCard(accent: destructive ? .tronError : .tronSessionTeal) {
+        TronGlassCard(accent: destructive ? .tronError : accent) {
             Button(action: action) {
                 TronSettingsRow(icon: icon, title: title, subtitle: subtitle,
-                                accent: destructive ? .tronError : .tronSessionTeal,
+                                accent: destructive ? .tronError : accent,
                                 titleColor: destructive ? .tronError : .tronTextPrimary)
             }
             .buttonStyle(.plain)

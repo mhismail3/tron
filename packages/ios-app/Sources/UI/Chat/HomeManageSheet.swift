@@ -75,7 +75,7 @@ extension HomeSheet {
         case .instructions: .tronSlate
         case .profile: .tronPurple
         case .memory: .tronKnowledge
-        case .chapter: .tronSessionTeal
+        case .chapter: .tronChapter
         case .results: .tronSuccess
         case .input: .tronBlue
         }
@@ -89,10 +89,10 @@ extension HomeSheet {
         let memoryBrowser = model.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true
         let chapterList = model.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
         let profileList = model.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
-        return TronGlassCard(accent: .tronSessionTeal) {
+        return TronGlassCard(accent: accent) {
             VStack(spacing: 0) {
                 TronSettingsRow(icon: "desktopcomputer", title: "Host pressure",
-                                subtitle: HomeStatusLinePresentation.workers(status), accent: .tronSessionTeal) {
+                                subtitle: HomeStatusLinePresentation.workers(status), accent: accent) {
                     TronStatusPill(text: status.hostPressure.level.rawValue.capitalized,
                                    accent: Self.hostPressureAccent(status.hostPressure.level))
                 }
@@ -101,25 +101,25 @@ extension HomeSheet {
                 if profileList || memoryBrowser || (status.chapter != nil && chapterList) || status.taskRecovery != nil { divider() }
                 // What Home has learned about you sits above what it remembers.
                 if profileList {
-                    navigationRow(icon: "person.text.rectangle", title: "Profile",
+                    navigationRow(icon: "person.text.rectangle",
                                   subtitle: HomeManageRowPresentation.profile(read.profile),
                                   destination: .profile, id: "home-manage-profile")
                     if memoryBrowser || (status.chapter != nil && chapterList) || status.taskRecovery != nil { divider() }
                 }
                 if memoryBrowser {
-                    navigationRow(icon: "brain", title: "Memory",
+                    navigationRow(icon: "brain",
                                   subtitle: HomeStatusLinePresentation.memory(status, summaries: summaries, unresolvedCommand: unresolved),
                                   destination: .memory(sessionID: nil, chapterOrdinal: nil), id: "home-manage-memory-browser")
                 }
                 if let chapter = status.chapter, chapterList {
                     if memoryBrowser { divider() }
-                    navigationRow(icon: "book", title: "Chapters",
+                    navigationRow(icon: "book",
                                   subtitle: HomeManageRowPresentation.chapters(read.chapters, fallback: chapter),
                                   destination: .chapters, id: "home-manage-chapters")
                 }
                 if status.taskRecovery != nil {
                     if memoryBrowser || (status.chapter != nil && chapterList) { divider() }
-                    navigationRow(icon: "checklist", title: "Tasks",
+                    navigationRow(icon: "checklist",
                                   subtitle: HomeManageRowPresentation.tasks(read.tasks, admitted: status.admitsTaskReads),
                                   destination: .tasks, id: "home-manage-tasks")
                 }
@@ -138,13 +138,14 @@ extension HomeSheet {
     /// Every setting Home uses, in its own container below the Home sub-sheets.
     @ViewBuilder var settingsRow: some View {
         if let sessionID {
-            TronGlassCard(accent: .tronSessionTeal) {
-                TronProgressiveSheetLink(accessibilityLabel: "Home Settings", identity: "home.settings", accent: .tronSessionTeal) {
+            let title = "Home Settings"
+            TronGlassCard(accent: accent) {
+                TronProgressiveSheetLink(accessibilityLabel: title, identity: "home.settings", accent: accent) {
                     SessionSettingsView(sessionID: sessionID, ownedLayers: ["session"], homeProfileID: profileID)
-                        .tronNavigationTitle("Home Settings")
+                        .tronNavigationTitle(title, accent: accent)
                 } label: {
-                    TronSettingsRow(icon: "slider.horizontal.3", title: "Home Settings",
-                                    subtitle: "Assistant profile and worker launch choices", accent: .tronSessionTeal)
+                    TronSettingsRow(icon: "slider.horizontal.3", title: title,
+                                    subtitle: "Assistant profile and worker launch choices", accent: accent)
                 }
                 .accessibilityIdentifier("home-manage-settings")
             }
@@ -214,17 +215,17 @@ extension HomeSheet {
         }
     }
 
-    /// A row that presents a managed child sheet.
-    func navigationRow(icon: String, title: String, subtitle: String? = nil,
+    /// A row that presents a managed child sheet, labeled with that sheet's title.
+    func navigationRow(icon: String, subtitle: String? = nil,
                        destination: HomeSheetDestination, id: String) -> some View {
-        Button { present(destination, rowAccent: .tronSessionTeal) } label: {
-            TronSettingsRow(icon: icon, title: title, subtitle: subtitle, accent: .tronSessionTeal)
+        Button { present(destination) } label: {
+            TronSettingsRow(icon: icon, title: destination.title, subtitle: subtitle, accent: accent)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
     }
 
-    func divider(accent: Color = .tronSessionTeal) -> some View {
-        TronSettingsDivider(accent: accent)
+    func divider(accent: Color? = nil) -> some View {
+        TronSettingsDivider(accent: accent ?? self.accent)
     }
 }
