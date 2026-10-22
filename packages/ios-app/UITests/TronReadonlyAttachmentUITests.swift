@@ -40,7 +40,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             chip.tap()
             let height = 200 + index * 10
             let opened = wait(app.staticTexts["fixture.preview-native"], predicate: "label BEGINSWITH 'image native:' AND label CONTAINS %@", value: "height:\(height) ")
-            if !opened { keepScreenshot(app, "1652-chip-\(index)-no-preview") }
+            keepScreenshot(app, opened ? "1652-chip-\(index)-preview" : "1652-chip-\(index)-no-preview")
             XCTAssertTrue(opened, "Chip \(index) opens its own photo (height \(height)); native: \(app.staticTexts["fixture.preview-native"].label)")
             app.buttons["Close"].tap()
             XCTAssertTrue(wait(app.staticTexts["fixture.preview-native"], predicate: "label == 'none'"), "Chip \(index) preview closes")
