@@ -1148,9 +1148,7 @@ final class TronSmokeUITests: XCTestCase {
         reveal(resize, in: app)
         assertVisibleGapBeforePill(in: resize, named: "1325-\(scope)-\(appearance)-toggle-pill-gap")
         keepScreenshot(named: "1325-\(scope)-\(appearance)-direct-tools")
-        editor.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Tools"].waitForExistence(timeout: 5))
-        expandSettingsSheet(app, title: "Tools")
+        tapScrolling(settingEditor(row), in: app)
         let tool = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", scope == "home" ? "Ask User" : "Read File")).firstMatch
         XCTAssertTrue(tool.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "1325-\(scope)-\(appearance)-populated-tools")
