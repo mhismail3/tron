@@ -34,8 +34,11 @@ notification inbox.
   back on failure. A zero badge is written at launch to clear the retired badge implementation.
 - **Taps.** Admission rejects partial, oversized or non-opaque routes, resolves the machine only
   against a paired profile, marks the inbox row read without delaying navigation, and joins an
-  in-flight same-profile reconnect at transport activation. A tap from Knowledge or Automations
-  switches to Sessions first. A background or cold tap is held in memory only, never persisted.
+  in-flight same-profile reconnect at transport activation. A tap for the presented conversation
+  (Home's chapter included) keeps that chat; any other target mounts only after the presented chat
+  retires, so its restoring open never contends with the target. A tap from Knowledge or
+  Automations switches to Sessions first. A background or cold tap is held in memory only, never
+  persisted.
 - **Inbox.** `notification-inbox.v1`. `NotificationInboxCoordinator` keeps a bounded projection of
   two server windows per profile (`all`, `unread`, the latter the server's own page), merges
   refreshes by id so loaded older pages and keyset cursors survive, and pages each window through
@@ -62,6 +65,7 @@ Registration stage label only.
 
 ```bash
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronNotificationInboxUITests \
+  --only-testing TronMobileUITests/TronHomePushNavigationUITests \
   --only-testing TronMobileUITests/TronSmokeUITests/testPushReadinessAndRegistrationAreSeparateFromPolicyToggles
 scripts/validate-push-service-config.sh config/PushService.xcconfig
 ```

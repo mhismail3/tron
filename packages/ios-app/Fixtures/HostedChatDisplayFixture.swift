@@ -335,12 +335,13 @@ struct HostedHomeDashboardFixture: View {
                 model.becameActive()
                 // The production tap handler delivers a notification response
                 // while the scene activates (ProductionSceneRoot), for the Home
-                // chapter the push names.
+                // chapter (or, with `-home-push-ordinary`, the ordinary chat) the push names.
                 if backgrounded, arguments.contains("-home-push-tap-on-foreground") {
                     pushRequested = true
                     model.requestPushNavigation(PushNotificationTap.admit([
                         "tron": ["kind": "agent_notification", "requestId": "fixture-home-push-0001"],
-                        "sessionId": "home-session", "machineId": profile.machineId,
+                        "sessionId": arguments.contains("-home-push-ordinary") ? "ordinary-session" : "home-session",
+                        "machineId": profile.machineId,
                     ]))
                 }
             @unknown default: break

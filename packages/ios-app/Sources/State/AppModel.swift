@@ -110,6 +110,12 @@ final class AppModel {
             return [base, home, history].compactMap { $0 }.joined(separator: ":")
         }
 
+        /// Whether this route already shows `other`'s conversation: the same
+        /// Gateway profile and session, whatever its Home or history entry.
+        func showsConversation(of other: SessionNavigationRoute) -> Bool {
+            gatewayProfileID == other.gatewayProfileID && sessionID == other.sessionID
+        }
+
         init(
             sessionID: String,
             editorText: String?,

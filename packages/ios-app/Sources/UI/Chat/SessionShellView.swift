@@ -32,8 +32,14 @@ enum PushNavigationFailureAdmission {
 }
 
 enum PushNavigationPresentationPolicy {
-    static func retainsCurrent(presentedRouteID: String?, targetRouteID: String) -> Bool {
-        presentedRouteID == targetRouteID
+    /// A tap for the conversation already presented keeps that chat, so a push
+    /// for Home's chapter keeps the Home route instead of remounting it as an
+    /// ordinary chat.
+    static func retainsCurrent(
+        presented: AppModel.SessionNavigationRoute?,
+        target: AppModel.SessionNavigationRoute
+    ) -> Bool {
+        presented?.showsConversation(of: target) == true
     }
 }
 
@@ -483,30 +489,10 @@ struct SessionShellView: View {
             try Task.checkCancellation()
             guard model.pushNavigationRequest?.id == request.id,
                   model.ownsNavigationRoute(route) else { return }
-            if PushNavigationPresentationPolicy.retainsCurrent(
-                presentedRouteID: presentedSession?.id,
-                targetRouteID: route.id
-            ) {
-                model.consumePushNavigation(request.id)
-                return
-            }
-
-            if let current = presentedSession {
-                if let target = model.presentationTarget(for: current.sessionID) {
-                    model.revokePresentationIntake(target)
-                }
-                withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
-                    presentedSession = nil
-                }
-                if !reduceMotion {
-                    try await Task.sleep(for: .milliseconds(260))
-                }
-            }
-
-            try Task.checkCancellation()
-            guard model.pushNavigationRequest?.id == request.id,
-                  model.ownsNavigationRoute(route) else { return }
-            withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
+            if !PushNavigationPresentationPolicy.retainsCurrent(presented: presentedSession, target: route) {
+                // The replacement owner mounts the target only after the current
+                // chat retires: a covered chat still restoring its open must not
+                // contend with the target for the one presentation authority.
                 present(route)
             }
             model.consumePushNavigation(request.id)
