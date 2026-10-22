@@ -346,12 +346,14 @@ const LEGACY_KEYS = ["model.ref[role=chat]", "model.thinking[role=chat]", "run.r
 async function resolveLegacy(gateway: Awaited<ReturnType<typeof startGateway>>, path: string) {
   const { id } = JSON.parse((await readFile(path, "utf8")).split("\n")[0]!) as { id: string };
   // Serving precedes the bounded catalog passes; their refusals are retryable by contract.
+  const openStarted = performance.now();
   let opened = await gateway.request("session.open", { sessionId: id });
   for (const deadline = performance.now() + 60_000; !opened.ok && /catalog|proven|provable/.test(opened.error?.message ?? "") && performance.now() < deadline;) {
     await new Promise(done => setTimeout(done, 250));
     opened = await gateway.request("session.open", { sessionId: id });
   }
   expect(opened.ok, opened.error?.message).toBe(true);
+  evidence.push({ case: "#1663 Stable-shaped session.open including catalog admission", durationMs: performance.now() - openStarted });
   const resolved = await gateway.request("settings.resolve", { target: { kind: "session", sessionId: id }, keys: LEGACY_KEYS });
   expect(resolved.ok, resolved.error?.message).toBe(true);
   return Object.fromEntries((resolved.result as Resolution).keys.map(row => [row.key, { value: row.value, layer: row.layer }]));

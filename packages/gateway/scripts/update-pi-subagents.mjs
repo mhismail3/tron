@@ -100,7 +100,11 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     };
     for (const path of Object.values(paths)) if (existsSync(join(root, path))) throw new Error(`immutable artifact already exists: ${path}`);
     invoke("npm", ["ci", "--ignore-scripts", "--omit=peer", "--engine-strict", "--no-audit", "--no-fund"], exportRoot, env);
-    const packed = JSON.parse(invoke("npm", ["pack", "--silent", "--json", `--pack-destination=${join(staging, "candidate/artifacts")}`], exportRoot, env));
+    // The fork owns its emitted import/export graph and package assets. Pack that
+    // build, not source TypeScript that every cold Gateway would transpile again.
+    try { invoke("npm", ["run", "build:pkg"], exportRoot, env); }
+    catch (error) { throw new Error(`compiled package build failed: ${error.message}`, { cause: error }); }
+    const packed = JSON.parse(invoke("npm", ["pack", "./dist-pkg", "--silent", "--json", `--pack-destination=${join(staging, "candidate/artifacts")}`], exportRoot, env));
     if (!Array.isArray(packed) || packed.length !== 1 || packed[0].filename !== `pi-subagents-${manifest.version}.tgz`) throw new Error("npm pack produced unexpected package identity");
     const candidateRoot = join(staging, "candidate");
     const sourceBytes = readFileSync(join(candidateRoot, paths.source));
