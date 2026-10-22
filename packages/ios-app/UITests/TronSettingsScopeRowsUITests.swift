@@ -111,9 +111,11 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
         XCTAssertTrue(editor.exists && pill.exists && heading.exists && revert.exists, row.debugDescription, file: file, line: line)
         XCTAssertLessThanOrEqual(pill.frame.maxX, editor.frame.minX, "\(title): Overridden precedes the value", file: file, line: line)
-        // Beside the title and centered on its line (#1655); these titles are one line.
+        // Beside the title, centered on its first line when a long title wraps (#1655).
+        // At the default size one title line is about the pill's height.
         XCTAssertGreaterThan(pill.frame.minX, heading.frame.minX, "\(title): Overridden follows the title", file: file, line: line)
-        XCTAssertEqual(pill.frame.midY, heading.frame.midY, accuracy: 0.75,
+        let lines = max(1, (heading.frame.height / pill.frame.height).rounded())
+        XCTAssertEqual(pill.frame.midY, heading.frame.minY + heading.frame.height / lines / 2, accuracy: 0.75,
                        "\(title): Overridden is centered on the title line: \(pill.frame) vs \(heading.frame)", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.minX, editor.frame.maxX, "\(title): Revert follows the value", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.width, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)

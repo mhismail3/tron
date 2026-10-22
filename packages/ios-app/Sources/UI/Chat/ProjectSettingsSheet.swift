@@ -154,11 +154,11 @@ struct ProjectSettingsSections: View {
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("project-settings-no-overrides")
                     }
+                    TronSettingsCaption("Read-only Project settings. Only allowed repository values are listed. Ask an agent to update them in the repo.")
                 } else if let settingsError {
                     TronPlaceholderState(title: "Repository overrides unavailable", detail: settingsError,
                                          icon: "folder.badge.gearshape", actionTitle: "Retry") { reload &+= 1 }
                 } else { TronSheetLoadingState(label: "Loading repository overrides…") }
-                TronSettingsCaption("Read-only Project settings. Only allowed repository values are listed. Ask an agent to update them in the repo.")
             }
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
