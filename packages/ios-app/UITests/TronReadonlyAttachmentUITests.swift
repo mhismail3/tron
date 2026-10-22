@@ -32,7 +32,10 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(app, "1652-photo-chip-row")
         let ordered = chips.allElementsBoundByIndex.sorted { $0.frame.minX < $1.frame.minX }
         XCTAssertEqual(ordered.count, 5)
-        for (index, chip) in ordered.enumerated() {
+        // The last chip first: once any chip of the row has presented, every
+        // other chip must still present its own photo.
+        for index in [4, 0, 1, 2, 3] {
+            let chip = ordered[index]
             XCTAssertTrue(chip.isHittable, "Chip \(index) is reachable: \(chip.frame)")
             chip.tap()
             let height = 200 + index * 10
