@@ -457,7 +457,6 @@ describe("settings risk gate", () => {
     const approval = (await f.approvals())[0]!;
     await f.service.invoke(phone(), "settings.decide", {
       commandId: commandId(), requestId: approval.requestId, digest: approval.digest, approved: true,
-      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
     });
     expect((await observe()).images).toBeGreaterThan(0);
     // Narrowing during a model/tool loop must affect the next request in the
@@ -1158,9 +1157,7 @@ describe("settings risk gate", () => {
 
     // The maintainer approves from the iPhone while that request is in flight: applied live, signalled.
     const [request] = (await service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<{ requestId: string; digest: string }> }).requests;
-    const snapshot = worker.snapshot();
-    const approved = await service.invoke(phone(), "settings.decide", { commandId: commandId(), requestId: request!.requestId, digest: request!.digest, approved: true,
-      fence: { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model } }) as unknown as Record<string, unknown>;
+    const approved = await service.invoke(phone(), "settings.decide", { commandId: commandId(), requestId: request!.requestId, digest: request!.digest, approved: true }) as unknown as Record<string, unknown>;
     expect(approved).toMatchObject({ status: "approved", signal: { status: "queued", taskId: "live-worker", appliesFrom: "next-request" } });
     expect(worker.snapshot().thinkingLevel).toBe("low");
     gates[1]!.open();
@@ -1205,4 +1202,5 @@ describe("settings risk gate", () => {
     expect(worker.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "report")).toHaveLength(1);
     transcript.push({ case: "Home changes a running worker", steps: [...steps, { entries: entries.map(entry => ({ key: entry.key, status: entry.status, after: entry.after, actor: entry.actor })) }] });
   }, 120_000);
+
 });

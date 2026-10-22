@@ -2142,7 +2142,7 @@ export class GatewayService {
             throw new GatewayError("invalid_request", "An iPhone can enroll only its own Mac Terminal key");
           }
           const session = target.kind === "session"
-            ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), target.sessionId, params.fence, workToken)
+            ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), params.fence, changes, workToken)
             : undefined;
           const homeChapter = (target.kind === "home" || session?.home) && params.dryRun !== true ? await this.settingsHomeChapter(workToken) : undefined;
           const result = await this.dependencies.settingsChanges.change(target, changes, {
@@ -2161,7 +2161,7 @@ export class GatewayService {
           const changeId = string(params.changeId, "changeId", { max: 100 });
           const found = await this.dependencies.settingsChanges.record.entry(changeId);
           const session = found?.entry.target.kind === "session"
-            ? await this.settingsSession(await this.slot({ sessionId: found.entry.target.sessionId }), found.entry.target.sessionId, params.fence, workToken)
+            ? await this.settingsSession(await this.slot({ sessionId: found.entry.target.sessionId }), params.fence, [found.entry], workToken)
             : undefined;
           const homeChapter = found?.entry.target.kind === "home" ? await this.settingsHomeChapter(workToken) : undefined;
           const result = await this.dependencies.settingsChanges.undo(changeId, {
@@ -2191,15 +2191,13 @@ export class GatewayService {
       }
       case "settings.decide":
         // The maintainer's decision on a pending change, bound to the exact diff
-        // he saw (docs/settings-model.md 5.5). A Chat-layer change carries the
-        // fence of the chat it applies to, as settings.change does.
+        // he saw (docs/settings-model.md 5.5) is its fence, re-checked against the
+        // stores: no client fence; the slot's own appliers and lane guards (#1642).
         return this.mutation(client, method, params, async (workToken) => {
-          rejectUnknownFields(params, ["commandId", "requestId", "digest", "approved", "fence"], method);
+          rejectUnknownFields(params, ["commandId", "requestId", "digest", "approved"], method);
           const requestId = string(params.requestId, "requestId", { max: 100 });
           const pending = (await this.dependencies.settingsChanges.approvals.get(requestId))?.target;
-          const session = pending?.kind === "session" && params.approved === true
-            ? await this.settingsSession(await this.slot({ sessionId: pending.sessionId }), pending.sessionId, params.fence, workToken)
-            : undefined;
+          const session = pending?.kind === "session" && params.approved === true ? (await this.slot({ sessionId: pending.sessionId })).taskWorkerSettingsSession() : undefined;
           const homeChapter = pending?.kind === "home" && params.approved === true ? await this.settingsHomeChapter(workToken) : undefined;
           return safeJson(await this.dependencies.settingsChanges.decide(requestId, {
             ...(homeChapter ? { homeChapter } : {}),
@@ -2499,14 +2497,15 @@ export class GatewayService {
   }
 
   /** A session target's Chat layer and its slot-lane appliers. The fence is the
-   * runtime the client read (and its model or revision); the lane guards stay. */
-  private async settingsSession(slot: RuntimeSlot, sessionId: string, rawFence: unknown, workToken?: string): Promise<SessionSettingsSource & { appliers: ChatAppliers }> {
+   * runtime the client read (and its model or revision); the lane guards stay.
+   * An applier's missing fence refuses before planning, dry run too (#1642). */
+  private async settingsSession(slot: RuntimeSlot, rawFence: unknown, changes: ReadonlyArray<Pick<ChangeRequest, "key" | "layer">>, workToken?: string): Promise<SessionSettingsSource & { appliers: ChatAppliers }> {
     const fence = rawFence === undefined ? undefined : object(rawFence, "fence");
     if (fence) rejectUnknownFields(fence, ["runtimeGeneration", "model", "revision"], "fence");
-    const expectation = () => {
-      if (!fence) throw new GatewayError("invalid_request", "A Chat-layer change needs the fence it read");
-      return this.configurationExpectation({ expectedRuntimeGeneration: fence.runtimeGeneration, expectedModel: fence.model ?? null });
-    };
+    const bindings = changes.flatMap(change => change.layer === "session" ? [KEYS.find(key => key.id === change.key)?.layers.chat] : []);
+    if (!fence && bindings.some(binding => binding?.store === "chat-settings" || binding?.store === "chat" && binding.field !== "tools")) throw new GatewayError("invalid_request", "A Chat-layer change needs the fence it read");
+    if (fence?.revision === undefined && bindings.some(binding => binding?.store === "chat" && binding.field === "contextWindow")) throw new GatewayError("invalid_request", "A context window change needs the fence revision it read");
+    const expectation = () => this.configurationExpectation({ expectedRuntimeGeneration: fence!.runtimeGeneration, expectedModel: fence!.model ?? null });
     return {
       cwd: slot.cwd,
       home: slot.isHomeChapter,

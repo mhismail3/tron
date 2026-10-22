@@ -4096,19 +4096,9 @@ extension AppModel {
         }
     }
 
-    /// Approves or declines one pending change. A change to a chat's own Chat
-    /// layer applies under the runtime this app last read for that chat, as the
-    /// chat's own controls do; without a read the Gateway refuses it.
+    /// Approves or declines one pending change, bound to the exact diff shown.
     func decideSettingsApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws {
-        var fence: JSONValue?
-        if approved, request.target.kind == "session", request.changes.contains(where: { $0.layer == "chat" }),
-           let sessionID = request.target.sessionId, let snapshot = authoritativeSnapshot(for: sessionID) {
-            fence = .object([
-                "runtimeGeneration": .string(snapshot.runtimeGeneration),
-                "model": try snapshot.model.map { try JSONValue.encode($0) } ?? .null,
-            ])
-        }
-        try await settingsTrust.decideApproval(request, approved: approved, fence: fence)
+        try await settingsTrust.decideApproval(request, approved: approved)
     }
 
     /// The generic settings renderer's reads and writes, for any target (settings-model.md 7.5).

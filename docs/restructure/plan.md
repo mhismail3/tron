@@ -152,8 +152,13 @@ Ranked. A lower-ranked metric never justifies regressing a higher one.
 ### M3. Size
 - Hand-written lines by category (production, tests, tooling, docs).
   **Target: ≤ 260k total (−40%)**, reported per category.
-- Each **phase** must be net-negative. A single slice may grow only if it names
-  the locality gain it buys.
+- Each **phase** must be net-negative. **Each slice** is expected to be net ≤ 0
+  in production lines (moves count as neutral). Growth needs a one-line
+  justification (the locality gain it buys) and a named follow-up that
+  removes it. Each slice also lists the concepts it deleted (Appendix D).
+  This is closeout acceptance, not a gate.
+- Milestone targets: from M1 on, each milestone's hand-written total is at or
+  below the previous milestone's and the 434,127 baseline; M6 ≤ 260k.
 - Planning budget (a guide, not a promise): docs −70%, tests −40%,
   production −35%, tooling −35%. Production at −35% without behavior change is
   the riskiest number; it never outranks M1 or M2.
@@ -169,8 +174,8 @@ Ranked. A lower-ranked metric never justifies regressing a higher one.
 ### Measurement
 Phase 0 builds `scripts/tron metrics`. It is read-only and deterministic, and
 writes `test-results/metrics/<sha>.json`. `scripts/tron metrics --compare <base>`
-prints the delta table that every slice pastes into its closing comment. It is
-never a gate.
+prints the delta table that every slice summarizes in its closing comment, and
+`scripts/tron measure <base>` counts moved lines. Neither is ever a gate.
 
 ---
 
@@ -774,7 +779,8 @@ No Stable handoff is needed, because there is no runtime change.
 1. `scripts/tron verify --changed`. Goldens must be unchanged.
 2. Every `move` commit needs a clean moved-lines report.
 3. Every deletion needs its surviving oracle plus known-bad evidence.
-4. `scripts/tron metrics --compare <base>`.
+4. `scripts/tron metrics --compare <base>` and `scripts/tron measure <base>`
+   for the net-lines line; list the concepts deleted (§3 M3, Appendix D).
 5. Review if the slice is risk-class (§8.4).
 6. `git fetch && git rebase origin/main`. Rerun **only** verify sets
    invalidated by the integrated diff. Kernel or contract changes from others
@@ -1310,7 +1316,9 @@ Change: <2–4 lines: what moved/was deleted/simplified, where>.
 Verify: `scripts/tron verify --changed` → <runner: passed/total> … ; goldens unchanged.
 Known-bad: <mutation> → failed as expected (restored).        # lock/delete/semantic slices
 Moved-lines: <moved N / edited-in-move M (declared: renames/imports)>.  # moves
-Metrics Δ: LOC prod/test/tool/docs <…>; files>500 <…>; violations <…>; hotspot <…>.
+Net lines: prod <Δ> (moved <N>, neutral); tests/locks <Δ>; fixtures/goldens <Δ>; generated (data, excluded) <Δ>. Prod > 0: <why> → follow-up #<…>.
+Deleted: <files, modules, types, exports, settings keys, routes, flags, shims, duplicate paths | none: why>.
+Metrics Δ: docs <…>; files>500 <…>; violations <…>; hotspot <…>.
 Ledger: module #<m> files <…> → done.
 Residual: <unknowns, follow-up issues #…, or "none">.
 Artifacts: test-results/verify/<sha>.json, test-results/metrics/<sha>.json

@@ -101,6 +101,43 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepEvidence(app, name: "348-readonly-file-after")
     }
 
+    /// A small encoded PNG can exceed the decoded preview budget at 16 bits.
+    /// Exercise the actual display sheet, not a standalone decoder assertion.
+    @MainActor func testHighDepthDisplayImageOpensAndReopensInBothAppearances() {
+        for mode in ["light", "dark"] {
+            let app = launch("display-image-16bit-\(mode)")
+            let button = app.buttons["Open Orientation Image photo preview"]
+            XCTAssertTrue(button.waitForExistence(timeout: 15))
+            button.tap()
+            let image = app.images["Red above blue, with the close badge at top right."]
+            let opened = wait(app.staticTexts["fixture.preview-native"], predicate: "label BEGINSWITH 'image native:'")
+            keepEvidence(app, name: "1637-high-depth-\(mode)")
+            XCTAssertTrue(opened, "A retained 16-bit PNG must open within the preview memory budget")
+            if opened {
+                image.doubleTap()
+                XCTAssertTrue(wait(app.staticTexts["fixture.preview-native"], predicate: "label BEGINSWITH 'image native:' AND NOT label CONTAINS 'zoom:1.00'"))
+                app.buttons["Close"].tap()
+                XCTAssertTrue(button.waitForExistence(timeout: 5)); button.tap()
+                XCTAssertTrue(image.waitForExistence(timeout: 10), "Reopening decodes the same retained artifact again")
+            }
+            app.terminate()
+        }
+    }
+
+    @MainActor func testInvalidDisplayImageShowsHonestFallbackInBothAppearances() {
+        for mode in ["light", "dark"] {
+            let app = launch("display-invalid-image-\(mode)")
+            let button = app.buttons["Open Orientation Image photo preview"]
+            XCTAssertTrue(button.waitForExistence(timeout: 15)); button.tap()
+            let fallback = app.staticTexts["The photo could not be loaded for preview."].waitForExistence(timeout: 10)
+            keepScreenshot(app, "1637-unavailable-\(mode)")
+            XCTAssertTrue(fallback)
+            app.buttons["Close"].tap()
+            XCTAssertTrue(button.waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+
     @MainActor func testDownloadedDisplayImageRouteSurvivesBackgroundReconnect() {
         continueAfterFailure = false
         let app = launch("display-image"); defer { app.terminate() }

@@ -46,6 +46,14 @@ The model requests a surface, but native policy resolves it by typed content kin
 
 Unsupported requested surfaces deterministically fall back to sheet. Audio/video larger than 50 MiB cannot trigger automatic inline or floating download; when floating was requested, an explicit user tap may open the bounded staged-file panel. The agent cannot choose dimensions, coordinates, z-order, autoplay, permissions, or whether close controls exist.
 
+Full photo previews preflight source dimensions and component depth before ImageIO decoding:
+up to a 4,096-pixel edge within 64 MiB decoded RGBA bytes, including row-alignment allowance.
+High-depth PNGs downsample to fit rather than being rejected solely for exceeding the budget
+at that edge. The actual decoded-byte check and 25 MiB encoded cap still apply. Load or decode
+failure says “The photo could not be loaded for preview”; it does not claim deletion. The
+light/dark high-depth open/zoom/reopen and invalid-image fallback journeys are in
+`TronReadonlyAttachmentUITests`.
+
 ## Ownership and lifecycle
 
 `ChatTranscriptProjectionKernel` keeps a display invocation in an isolated one-tool run so generic neighboring tools retain their identities. A finalized parallel group owns one physical row: each consecutive display stretch renders the shared `DisplayThumbnailButton` in the horizontal `ChatChipStrip`, with the normal 8-point spacing. Non-images use a kind icon/title on the same card; preparing and failed calls keep progress/warning faces. Generic stretches retain their own counted chips, while completed inline non-images retain their full-width card. Segment keys and canonical/live row reconciliation are unchanged. The selected call's bounded payload is resolved only on activation and travels with its read-only preview route, so info never opens another call's trace.

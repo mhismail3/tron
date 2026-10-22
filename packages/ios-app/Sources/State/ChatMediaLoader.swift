@@ -872,45 +872,35 @@ final class ChatMediaLoader {
         )
     }
 
-    nonisolated static func decodeFullPreview(_ data: Data) throws -> UIImage {
+    private nonisolated static func decodeImage(
+        _ data: Data, maximumDimension: Int, maximumBytes: Int
+    ) throws -> (UIImage, Int) {
         guard let source = CGImageSourceCreateWithData(data as CFData, [
             kCGImageSourceShouldCache: false,
         ] as CFDictionary) else {
             throw ChatMediaLoadError.invalidImage
         }
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              width.isFinite, height.isFinite, width > 0, height > 0 else {
+            throw ChatMediaLoadError.invalidImage
+        }
+        let depth = (properties[kCGImagePropertyDepth] as? NSNumber)?.doubleValue ?? 16
+        guard depth.isFinite, depth > 0, depth <= 32 else { throw ChatMediaLoadError.invalidImage }
+        // ImageIO preserves 16-bit PNG components: an edge cap alone can admit
+        // twice the decoded budget. Reserve RGBA bytes and row alignment before
+        // decoding, then retain the actual decoded-byte check below.
+        let edge = min(Double(maximumDimension), max(width, height))
+        let scale = edge / max(width, height)
+        let pixelBytes = ceil(width * scale) * ceil(height * scale) * 4 * ceil(depth / 8)
+        let budget = Double(maximumBytes) - 64 * edge
+        let dimension = max(1, Int(floor(edge * min(1, sqrt(budget / pixelBytes)))))
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: ChatMediaPolicy.maximumFullPreviewPixelDimension,
-            kCGImageSourceShouldCacheImmediately: true,
-        ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(
-            source,
-            0,
-            options as CFDictionary
-        ) else {
-            throw ChatMediaLoadError.invalidImage
-        }
-        guard ChatMediaPolicy.decodedByteCount(
-            bytesPerRow: image.bytesPerRow,
-            height: image.height,
-            maximum: ChatMediaPolicy.maximumDecodedFullPreviewBytes
-        ) != nil else {
-            throw ChatMediaLoadError.decodedPayloadTooLarge
-        }
-        return UIImage(cgImage: image)
-    }
-
-    nonisolated static func decodeThumbnail(_ data: Data) throws -> (UIImage, Int) {
-        guard let source = CGImageSourceCreateWithData(data as CFData, [
-            kCGImageSourceShouldCache: false,
-        ] as CFDictionary) else {
-            throw ChatMediaLoadError.invalidImage
-        }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: ChatMediaPolicy.maximumThumbnailPixelDimension,
+            kCGImageSourceThumbnailMaxPixelSize: dimension,
+            kCGImageSourceShouldAllowFloat: false,
             kCGImageSourceShouldCacheImmediately: true,
         ]
         guard let image = CGImageSourceCreateThumbnailAtIndex(
@@ -921,13 +911,19 @@ final class ChatMediaLoader {
             throw ChatMediaLoadError.invalidImage
         }
         guard let decodedBytes = ChatMediaPolicy.decodedByteCount(
-            bytesPerRow: image.bytesPerRow,
-            height: image.height,
-            maximum: ChatMediaPolicy.maximumDecodedThumbnailBytes
-        ) else {
-            throw ChatMediaLoadError.decodedPayloadTooLarge
-        }
+            bytesPerRow: image.bytesPerRow, height: image.height, maximum: maximumBytes
+        ) else { throw ChatMediaLoadError.decodedPayloadTooLarge }
         return (UIImage(cgImage: image), decodedBytes)
+    }
+
+    nonisolated static func decodeFullPreview(_ data: Data) throws -> UIImage {
+        try decodeImage(data, maximumDimension: ChatMediaPolicy.maximumFullPreviewPixelDimension,
+                        maximumBytes: ChatMediaPolicy.maximumDecodedFullPreviewBytes).0
+    }
+
+    nonisolated static func decodeThumbnail(_ data: Data) throws -> (UIImage, Int) {
+        try decodeImage(data, maximumDimension: ChatMediaPolicy.maximumThumbnailPixelDimension,
+                        maximumBytes: ChatMediaPolicy.maximumDecodedThumbnailBytes)
     }
 
     #if HOSTED_TEST
