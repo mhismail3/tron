@@ -24,7 +24,7 @@ CELL = re.compile(r"(?<!\\)\|")
 # Generators that load Gateway code, so need its installed dependencies, and whether a path is a source of
 # theirs. With `check --base`, their blocks are regenerated only when a source or the block itself changed.
 LOADED = {"settings": lambda path: path.startswith("tools/docs/") or path in (f"{GATEWAY}/package.json",
-          f"{GATEWAY}/package-lock.json") or (path.startswith(f"{GATEWAY}/src/") and path.endswith(".ts"))}
+          f"{GATEWAY}/package-lock.json") or path.startswith(f"{GATEWAY}/src/")}
 
 USAGE = """usage: scripts/tron docs modules [<path>] | signals | rpc | settings | check [--base <ref>] | update
 Prints a generated Markdown index, or checks/rewrites the generated blocks in tracked Markdown
@@ -210,7 +210,7 @@ def generate(args: list[str]) -> str:
 def unchanged_loaded(base: str) -> set[str]:
     """The LOADED generators none of whose sources changed between `base` and the working tree."""
     try:
-        changed = ownership.git("diff", "--name-only", "-z", base, "--").split(b"\0") \
+        changed = ownership.git("diff", "--no-renames", "--name-only", "-z", base, "--").split(b"\0") \
             + ownership.git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0")
     except ownership.GitError as error:
         raise DocsError(f"base {base}: {error}") from None
