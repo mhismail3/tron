@@ -32,6 +32,15 @@ final class FeedStore<Page, Cursor: Equatable & Sendable, Identity: Presentation
 
     var hasPage: Bool { !pages.isEmpty }
 
+    /// What a (re)activated presentation reads: nothing when current; the newest
+    /// page in place when the new identity retains this content (foreground,
+    /// reconnect), so later pages and the scroll position stay; else the feed afresh.
+    func request(for identity: Identity) -> Request? {
+        guard let installed = self.identity, hasPage else { return .reset }
+        if installed == identity { return nil }
+        return identity.retainsContent(from: installed) ? .refresh(0) : .reset
+    }
+
     func suspend() { generation &+= 1; loading = false; inFlight = nil }
 
     @discardableResult

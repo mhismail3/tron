@@ -124,6 +124,7 @@ private struct HistoryLoadKey: Hashable {
     let identity: SessionHistoryReadIdentity?
     let active: Bool
     let supported: Bool
+    let pendingRefresh: String?
 }
 
 /// One entry in the flattened feed with its canonical one-based ordinal.
@@ -170,6 +171,8 @@ struct SessionTreeSheet: View {
     @PresentationState private var initialEntryResolved = false
     @PresentationState private var initialEntryStore = SessionHistoryEntryStore()
     @PresentationState private var forkNavigation = ChatForkNavigationOwner()
+    /// An entry whose page must be re-read once the sheet is active again (after a bookmark).
+    @PresentationState private var pendingRefresh: String?
 
     init(sessionID: String, initialEntryID: String? = nil, onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void, onNavigated: @escaping () -> Void) {
         self.sessionID = sessionID
@@ -236,10 +239,17 @@ struct SessionTreeSheet: View {
                     .accessibilityIdentifier("session-history-viewport")
                 }
             }
-            .task(id: HistoryLoadKey(identity: identity, active: active, supported: supported)) {
+            .task(id: HistoryLoadKey(identity: identity, active: active, supported: supported, pendingRefresh: pendingRefresh)) {
                 guard active, supported, let identity else { store.suspend(); return }
-                guard store.identity != identity || !store.hasPage else { return }
-                await load(.reset, identity: identity)
+                if let entryID = pendingRefresh, store.identity == identity, store.hasPage {
+                    let index = store.pages.firstIndex { $0.page.nodes.contains { $0.id == entryID } } ?? 0
+                    await load(.refresh(index), identity: identity)
+                    // Cleared only after the read: changing the task's id cancels it.
+                    if !Task.isCancelled { pendingRefresh = nil }
+                    return
+                }
+                guard let request = store.request(for: identity) else { return }
+                await load(request, identity: identity)
                 await resolveInitialEntryIfPresent(identity: identity)
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -376,12 +386,9 @@ struct SessionTreeSheet: View {
         Task { await load(store.failed ?? .reset, identity: identity) }
     }
 
-    /// Re-reads the installed page that holds this entry, keeping every other row and the scroll position.
-    private func refresh(entryID: String) {
-        guard active, let identity, store.identity == identity else { return }
-        let index = store.pages.firstIndex { $0.page.nodes.contains { $0.id == entryID } } ?? 0
-        Task { await load(.refresh(index), identity: identity) }
-    }
+    /// Re-reads the installed page that holds this entry once the sheet is active,
+    /// keeping every other row and the scroll position.
+    private func refresh(entryID: String) { pendingRefresh = entryID }
 
     private func select(_ node: SessionTreeNode, _ action: HistorySelection.Action, initialPage: SessionHistoryEntryPage? = nil) {
         guard canAct, let identity else { return }

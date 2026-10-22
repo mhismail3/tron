@@ -99,7 +99,8 @@ final class TronForegroundCaptureUITests: XCTestCase {
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "settings.resolve", "home.status", "home.taskList"])
         XCTAssertTrue(olderPage.isHittable, "Foreground preserves the current page, not merely a cached first page")
         let item = app.descendants(matching: .any)["home-memory-row-34"].firstMatch
-        for _ in 0..<12 where !item.isHittable { app.swipeDown() }
+        // Back toward the newest rows, clear of the title bar.
+        for _ in 0..<12 where !(item.exists && item.frame.minY > 140) { app.swipeDown() }
         reveal(item, in: app)
         try capture(app, name: "memory-viewport-\(dark ? "dark" : "light")", reads: ["home.memory.view": 1],
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "home.status", "home.taskList"])

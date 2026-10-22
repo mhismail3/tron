@@ -105,8 +105,8 @@ struct HomePagedListSheet: View {
             }
             .task(id: LoadKey(identity: identity, active: active)) {
                 guard active, let identity else { store.suspend(); return }
-                guard store.identity != identity || !store.hasPage else { return }
-                await load(.reset, identity: identity)
+                guard let request = store.request(for: identity) else { return }
+                await load(request, identity: identity)
             }
             .onChange(of: active) { _, active in if !active { store.suspend() } }
             .onPresentationRetire { store.suspend() }
