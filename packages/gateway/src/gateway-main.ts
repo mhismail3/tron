@@ -1,5 +1,5 @@
 import { MacTerminalHost, MacTerminalKeys } from "./security/mac-terminal.js";
-import { ManagedSubagents } from "./sessions/managed-subagents.js";
+import { ManagedSubagents } from "./kernel/delegation/managed-subagents.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, renameSync, writeFileSync, rmSync } from "node:fs";
@@ -77,8 +77,8 @@ import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./se
 import { KnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import { knowledgeModelLimits, type KnowledgeRecord } from "./knowledge/knowledge-contract.js";
 import { ConnectionOwner } from "./integrations/connection-owner.js";
-import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
-import { assertDelegatedRootCutoverReady } from "./sessions/delegated-root-migration.js";
+import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./kernel/delegation/delegated-provider.js";
+import { assertDelegatedRootCutoverReady } from "./kernel/delegation/delegated-root-migration.js";
 import { migrateSettings } from "./admin/settings-migration.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
 

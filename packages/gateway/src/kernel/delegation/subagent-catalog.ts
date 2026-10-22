@@ -1,12 +1,12 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { type SettingsManager } from "../kernel/pi/coding-agent.js";
+import { type SettingsManager } from "../pi/coding-agent.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
-import type { ResourceDistribution } from "../protocol/types.js";
-import { boundCommandContent } from "../kernel/projection/projection.js";
-import { redactCredentials } from "../util/credential-redaction.js";
-import { GatewayError } from "../errors.js";
+import type { ResourceDistribution } from "../../protocol/types.js";
+import { boundCommandContent } from "../projection/projection.js";
+import { redactCredentials } from "../../util/credential-redaction.js";
+import { GatewayError } from "../../errors.js";
 
 /** The third-party package that owns subagent discovery. */
 const SUBAGENT_PACKAGE = "pi-subagents";

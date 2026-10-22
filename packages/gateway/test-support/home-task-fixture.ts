@@ -10,8 +10,8 @@ import { NotificationService } from "../src/notifications/notification-service.j
 import { NotificationGrantStore } from "../src/notifications/grant-store.js";
 import type { PushRelayClient } from "../src/notifications/relay-client.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
-import { ManagedSubagents } from "../src/sessions/managed-subagents.js";
-import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
+import { ManagedSubagents } from "../src/kernel/delegation/managed-subagents.js";
+import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/kernel/delegation/delegated-provider.js";
 import { settingsDependencies } from "./settings-dependencies.js";
 import type { KnowledgeService } from "../src/knowledge/knowledge-service.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "../src/providers/model-queue-extension.js";

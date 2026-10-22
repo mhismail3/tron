@@ -180,11 +180,11 @@ Wire-traffic profiling and multi-session qualification:
 
 ## Session subagent activity
 
-See [delegated activity](src/sessions/delegated-activity.md#session-subagent-activity).
+See [delegated activity](src/kernel/delegation/delegated-activity.md#session-subagent-activity).
 
 ## Extension activity lifecycle and history
 
-See [delegated activity](src/sessions/delegated-activity.md#extension-activity-lifecycle-and-history).
+See [delegated activity](src/kernel/delegation/delegated-activity.md#extension-activity-lifecycle-and-history).
 
 ## Signals
 

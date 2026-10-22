@@ -25,9 +25,10 @@ env -i PATH="$PATH" HOME="$root/home" TMPDIR="$root/tmp" npm ci --no-audit --no-
 # The read-only package has no node_modules. Install its exact declared runtime
 # dependencies beside the historical SDK, never inside the source installation.
 env -i PATH="$PATH" HOME="$root/home" TMPDIR="$root/tmp" npm install --no-save --no-audit --no-fund jiti@2.7.0 acorn@8.18.0 yaml@2.8.3 typebox@1.1.38
-cp "$repo/packages/gateway/src/sessions/subagent-parity.integration.test.ts" src/sessions/
+mkdir -p src/kernel/delegation
+cp "$repo/packages/gateway/src/kernel/delegation/subagent-parity.integration.test.ts" src/kernel/delegation/
 cp "$repo/packages/gateway/test-support/fixture-process-owner.mjs" test-support/
 env -i PATH="$PATH" HOME="$root/home" TMPDIR="$root/tmp" PI_SKIP_VERSION_CHECK=1 \
   TRON_PARITY_LEG=old TRON_PARITY_OLD_PACKAGE="$package" TRON_PARITY_REPORT="$evidence/parity-old.json" \
   TRON_PARITY_BASELINE_OUTPUT="$repo/packages/gateway/test-support/subagent-parity-old.json" \
-  npx vitest run src/sessions/subagent-parity.integration.test.ts --maxWorkers=2
+  npx vitest run src/kernel/delegation/subagent-parity.integration.test.ts --maxWorkers=2

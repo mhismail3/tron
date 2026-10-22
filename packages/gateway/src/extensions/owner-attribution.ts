@@ -16,7 +16,7 @@ import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import type { ToolResultProjection } from "../kernel/projection/tool-result.js";
-import { isManagedSubagentExtension, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../sessions/managed-subagents.js";
+import { isManagedSubagentExtension, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
 
 type ExtensionHandlerList = Parameters<Extension["handlers"]["set"]>[1];

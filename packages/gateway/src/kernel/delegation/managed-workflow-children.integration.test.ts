@@ -2,9 +2,9 @@ import { copyFile, mkdir, readFile, realpath, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, expect, it } from "vitest";
-import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
-import { DETACHED_WORKFLOW_SCRIPT, startScriptedChild, type ChildModelServer } from "../../test-support/home-task-subagent-child.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { disposeFixtures, fixture } from "../../../test-support/home-task-fixture.js";
+import { DETACHED_WORKFLOW_SCRIPT, startScriptedChild, type ChildModelServer } from "../../../test-support/home-task-subagent-child.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 // Real managed-provider children, as in the Home task subagent cases: this file runs in the nested serial pass.
 type WorkflowStatus = { runId: string; state: string; steps: Array<{ label?: string; runId?: string; sessionFile?: string; sessionOwnerId?: string }> };

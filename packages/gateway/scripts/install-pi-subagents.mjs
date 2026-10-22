@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { ManagedSubagents } from "../dist/sessions/managed-subagents.js";
+import { ManagedSubagents } from "../dist/kernel/delegation/managed-subagents.js";
 
 // Activation supplies its exact isolated home. There is deliberately no default
 // home, registry operation, or user package-manager fallback.

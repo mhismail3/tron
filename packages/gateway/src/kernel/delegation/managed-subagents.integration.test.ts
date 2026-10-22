@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,13 +7,13 @@ import net from "node:net";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
-import { PackageService } from "../admin/package-service.js";
-import { GatewayLogger } from "../transport/logger.js";
-import { TrustService } from "../admin/trust-service.js";
+import { PackageService } from "../../admin/package-service.js";
+import { GatewayLogger } from "../../transport/logger.js";
+import { TrustService } from "../../admin/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 /** Real Gateway/SDK execution; only the external model output is scripted.
  * The fixture owns home/cache/session state and disposes the runtime before files. */

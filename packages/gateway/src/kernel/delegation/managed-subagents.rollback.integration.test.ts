@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -9,14 +9,14 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../../admin/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { delegatedProviderEnvironment } from "./delegated-provider.js";
-import { waitFor } from "../../test-support/wait-for.js";
-import { copyPayload, refuseUnjoinedFixture, retainedFiles } from "../../test-support/nested-vitest-payload.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { copyPayload, refuseUnjoinedFixture, retainedFiles } from "../../../test-support/nested-vitest-payload.js";
 
-const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
+const gatewayRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const leg = process.env.TRON_SUBAGENTS_ROLLBACK_LEG;
 interface Completion { parentId: string; parentFile: string; childId: string; childFile: string; runId: string; processId?: string }
 
@@ -49,7 +49,7 @@ it("executes previous → candidate → previous with detached resume through th
         parentBefore = await readFile(join(root, candidate!.completion.parentFile));
         childBefore = await readFile(join(root, candidate!.completion.childFile));
       }
-      const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", "src/sessions/managed-subagents.rollback.integration.test.ts"], {
+      const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", "src/kernel/delegation/managed-subagents.rollback.integration.test.ts"], {
         // Hang guard only: legs run alone in the nested pass (vitest.nested.config.ts);
         // a passing leg takes about 9-12 s, so a reached bound means a hung leg.
         cwd: payload, timeout: 120_000, maxBuffer: 1024 * 1024,
@@ -318,7 +318,7 @@ async function runLeg(): Promise<void> {
       // Join spawn-owned trees even if an assertion failed before asyncDir was
       // returned. The inherited preload also owns runner descendants and joins
       // on process exit/signals before the outer harness can remove roots.
-      const { disposeFixtureProcesses } = await import("../../test-support/fixture-process-owner.mjs");
+      const { disposeFixtureProcesses } = await import("../../../test-support/fixture-process-owner.mjs");
       await disposeFixtureProcesses();
       server?.closeAllConnections();
       if (server) await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));

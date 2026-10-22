@@ -1,17 +1,17 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../../admin/trust-service.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { ManagedSubagents } from "./managed-subagents.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
-import type { RuntimeSlot } from "./runtime-slot.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import type { RuntimeSlot } from "../../sessions/runtime-slot.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 // Failure modes: managed loader/admission leaks into Home, or its resource read
 // still discovers external agents. Exercise real profile owners and SDK reloads.

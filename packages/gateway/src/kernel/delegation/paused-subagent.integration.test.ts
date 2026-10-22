@@ -1,15 +1,15 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
-import type { ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
-import type { RuntimeSlot } from "./runtime-slot.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { TrustService } from "../../admin/trust-service.js";
+import type { ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../../protocol/types.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import type { RuntimeSlot } from "../../sessions/runtime-slot.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which lifecycle facts the

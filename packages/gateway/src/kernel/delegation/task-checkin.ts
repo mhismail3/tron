@@ -1,25 +1,10 @@
-import { Type } from "../kernel/pi/ai.js";
+import { Type } from "../pi/ai.js";
+import type { HomeTaskCheckin, HomeTaskCheckinRequest } from "../../protocol/types.js";
 
 /** Small durable progress snapshots, not another transcript or a result. */
 export const HOME_TASK_CHECKIN_LIMIT = 12;
 export const HOME_TASK_CHECKIN_VISIBLE = 3;
 export const HOME_TASK_ATTENTION_INTERVAL_MS = 30 * 60 * 1000;
-export interface HomeTaskCheckinRequest {
-  step: string;
-  done: string;
-  next: string;
-  blocker?: string;
-  refs?: { branch?: string; commit?: string; issue?: string };
-  needsAttention?: boolean;
-}
-export interface HomeTaskCheckin extends HomeTaskCheckinRequest {
-  id: string;
-  taskId: string;
-  sessionId: string;
-  operationId: string;
-  at: string;
-  attention: "none" | "requested" | "rate-limited" | "pending";
-}
 const short = (maxLength: number) => Type.String({ minLength: 1, maxLength });
 export const HOME_TASK_CHECKIN_PARAMETERS = Type.Object({
   step: short(256), done: short(512), next: short(512), blocker: Type.Optional(short(512)),

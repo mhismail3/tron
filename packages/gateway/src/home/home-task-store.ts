@@ -6,10 +6,10 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, isDurablePublicationUncertain, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { authorizationRequestId, type HomeTaskAuthorizationState, type HomeTaskAuthorizationStore } from "./home-task-authorization.js";
-import type { HomeTaskCounts } from "../protocol/types.js";
+import type { HomeTaskCheckin, HomeTaskCounts } from "../protocol/types.js";
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 import { homeTaskPromptTokens } from "./home-task-spend.js";
-import { HOME_TASK_CHECKIN_LIMIT, parseHomeTaskCheckin, type HomeTaskCheckin } from "./home-task-checkin.js";
+import { HOME_TASK_CHECKIN_LIMIT, parseHomeTaskCheckin } from "../kernel/delegation/task-checkin.js";
 
 const TASK_BYTES = 256 * 1_024;
 const AUTHORIZATION_BYTES = 4 * 1_024 * 1_024;

@@ -14,12 +14,12 @@ import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthori
 import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskFailureCause, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskPromptTokens, homeTaskSpend, type HomeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
-import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHECKIN_VISIBLE, type HomeTaskCheckin } from "./home-task-checkin.js";
-import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, homeTaskOperationSpan, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
+import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHECKIN_VISIBLE } from "../kernel/delegation/task-checkin.js";
+import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, homeTaskOperationSpan, parseHomeTaskReport, type HomeTaskReport } from "../kernel/delegation/task-report.js";
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
 import type { FixedSetting } from "../kernel/settings/tool-contract.js";
 import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
-import type { HomeTaskCounts, HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
+import type { HomeTaskCheckin, HomeTaskCounts, HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
 import { basename } from "node:path";
 import { TRON_ASK_USER_INTERRUPTED } from "../extensions/tron-ask-user-contract.js";
 import { abortableRead } from "../util/abortable-read.js";
@@ -47,7 +47,7 @@ export type HomeTaskDiagnostic =
   | HomeTaskAuthorizationDiagnostic
   | HomeTaskStoreDiagnostic
   | HomeWakeDiagnostic
-  | { event: "home.task.producer-refused"; taskHash: string; reason: import("./home-task-worker-extension.js").HomeTaskProducerRefusal }
+  | { event: "home.task.producer-refused"; taskHash: string; reason: import("../kernel/delegation/task-worker-extension.js").HomeTaskProducerRefusal }
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
   | { event: "home.task.subagents"; taskHash: string; operationHash: string; started: number; stoppedAtEnd: number | null; noticesUndelivered: number }
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null; errorCode?: string; failureCause?: HomeTaskFailureCause }

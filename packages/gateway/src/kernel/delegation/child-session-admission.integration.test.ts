@@ -3,10 +3,10 @@ import { basename, dirname, join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ExtensionRunActivity, ExtensionToolOrigin } from "../protocol/types.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
-import { waitFor } from "../../test-support/wait-for.js";
-import { createColdRegistryFixture } from "../../test-support/runtime-registry-fixture.js";
+import type { ExtensionRunActivity, ExtensionToolOrigin } from "../../protocol/types.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { createColdRegistryFixture } from "../../../test-support/runtime-registry-fixture.js";
 
 describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;

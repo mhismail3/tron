@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from "vitest";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { attributeExtensions } from "../extensions/owner-attribution.js";
+import { attributeExtensions } from "../../extensions/owner-attribution.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, delegatedProviderOrigin, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { loadSubagentCatalog } from "./subagent-catalog.js";
 import { ManagedSubagents } from "./managed-subagents.js";
@@ -85,7 +85,7 @@ it("installs the real pinned closure in an empty home, admits its tool, and disc
 it("loads one peer-free install through two host SDK payload paths with exact host export identity", () => {
   expect(existsSync(join(root, "node_modules", "@earendil-works", "pi-coding-agent"))).toBe(false);
   expect(existsSync(join(root, "node_modules", "typebox"))).toBe(false);
-  const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const gatewayRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const probe = join(home, "host-proof.mjs");
   writeFileSync(probe, `import { SessionManager } from '@earendil-works/pi-coding-agent';
     export default function(pi) { pi.registerTool({name:'host_proof',label:'Proof',description:'Proof',parameters:{type:'object'},

@@ -1,4 +1,4 @@
-import type { ManagedSubagents } from "../sessions/managed-subagents.js";
+import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import type { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import {
   createBashToolDefinition, createEditToolDefinition, createFindToolDefinition, createGrepToolDefinition,

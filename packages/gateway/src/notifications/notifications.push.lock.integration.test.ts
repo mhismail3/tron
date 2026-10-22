@@ -1,6 +1,6 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { HomeTaskReportOwner } from "../home/home-task-report.js";
+import { HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
 import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
 import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";

@@ -1,7 +1,7 @@
 import { closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
-import type { ExtensionRunActivity } from "../protocol/types.js";
-import { extensionRunChildProducerId, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
+import type { ExtensionRunActivity } from "../../protocol/types.js";
+import { extensionRunChildProducerId, type ExtensionRunChildIdentityStrategy } from "../projection/extension-run-projection.js";
 
 const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
 /** Only RuntimeSlot's private recovery descriptor builder mints this annotation.

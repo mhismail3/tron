@@ -1,4 +1,4 @@
-import type { ManagedSubagents } from "../sessions/managed-subagents.js";
+import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { basename } from "node:path";
 import { projectHookRegistrations, type HookRegistrationProjection } from "../kernel/projection/hook-projection.js";
 import type { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";

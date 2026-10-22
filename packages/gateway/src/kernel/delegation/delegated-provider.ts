@@ -2,11 +2,11 @@ import { lstatSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { mkdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { Extension, ToolDefinition } from "../kernel/pi/coding-agent.js";
-import { piHostPackageRoot } from "../kernel/pi/packages.js";
-import type { ExtensionToolOrigin } from "../protocol/types.js";
+import type { Extension, ToolDefinition } from "../pi/coding-agent.js";
+import { piHostPackageRoot } from "../pi/packages.js";
+import type { ExtensionToolOrigin } from "../../protocol/types.js";
 import { isManagedSubagentExtension, MANAGED_SUBAGENTS_VERSION } from "./managed-subagents.js";
-import { attributedToolOwner } from "../extensions/owner-attribution.js";
+import { attributedToolOwner } from "../../extensions/owner-attribution.js";
 
 /**
  * The delegated-work provider boundary.

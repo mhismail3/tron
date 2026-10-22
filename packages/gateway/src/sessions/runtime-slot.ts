@@ -5,7 +5,7 @@ import { modelQueueSessionExtension } from "./model-queue-session.js";
 import { createSettingsManager } from "../admin/settings-sdk-manager.js";
 import { applyModelAdmission, compactionAdmission } from "../admin/settings-admission.js";
 import { readWorkerQueueSelection } from "../providers/model-queue-extension.js";
-import type { ManagedSubagents } from "./managed-subagents.js";
+import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
 import { boundedSummaryText } from "./summary-text.js";
@@ -19,7 +19,7 @@ import {
   delegatedProviderToolVersion,
   isInstalledDelegatedTool,
   trustedDelegatedController,
-} from "./delegated-provider.js";
+} from "../kernel/delegation/delegated-provider.js";
 import type { AgentMessage, AgentTurnDecision, ThinkingLevel } from "../kernel/pi/agent-core.js";
 import { SESSION_SETTINGS_ENTRY, changeSessionSetting, readSessionSettings, readSessionRequestPins, readSessionFixedSettings, readSessionToolChoice } from "./session-settings.js";
 import { constants, existsSync, lstatSync, realpathSync, watch, type FSWatcher } from "node:fs";
@@ -58,9 +58,9 @@ import type { HomeMaterializationAuthority } from "../home/home-append-guard.js"
 import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { openAIModelEligibility, type OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
-import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
+import { createHomeTaskWorkerExtension } from "../kernel/delegation/task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
-import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
+import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../kernel/host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
@@ -129,7 +129,7 @@ import { type RunMarkerStore } from "../kernel/run/run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext } from "../extensions/owner-attribution.js";
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
-import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "./child-session-admission.js";
+import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "../kernel/delegation/child-session-admission.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../kernel/run/context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "../kernel/run/invocation-receipts.js";
@@ -160,7 +160,7 @@ import { projectHookRegistrations } from "../kernel/projection/hook-projection.j
 import { resourceDistribution } from "./resource-distribution.js";
 import { skillTitle } from "./skill-title.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
-import { availableSubagentRow, loadSubagentCatalog, subagentDetail, type SubagentCatalog, type SubagentDetail } from "./subagent-catalog.js";
+import { availableSubagentRow, loadSubagentCatalog, subagentDetail, type SubagentCatalog, type SubagentDetail } from "../kernel/delegation/subagent-catalog.js";
 import type { SessionStore } from "../admin/settings-resolver.js";
 import { KEYS, hasCompactionApplier, schemaKey } from "../admin/settings-schema.js";
 

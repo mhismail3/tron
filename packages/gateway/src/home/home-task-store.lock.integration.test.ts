@@ -5,7 +5,7 @@ import { it } from "vitest";
 import { storePathLock } from "../../test-support/store-path-lock.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { authorizationRequestId, type HomeTaskAuthorizationState } from "./home-task-authorization.js";
-import type { HomeTaskCheckin } from "./home-task-checkin.js";
+import type { HomeTaskCheckin } from "../protocol/types.js";
 import { HomeTaskStore, taskIntentDigest, type HomeTaskRecord, type HomeTaskWrite } from "./home-task-store.js";
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 

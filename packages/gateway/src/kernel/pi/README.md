@@ -58,7 +58,7 @@ One file per Pi package, each an explicit export list of the names the Gateway u
 - Resolution runs from this package, so it finds the same `node_modules` as the
   Gateway's own imports.
 - The `pi-subagents` fork stays an installed package behind delegation
-  (`sessions/managed-subagents.ts`), not a seam import.
+  (`kernel/delegation/managed-subagents.ts`), not a seam import.
 
 ## Entry points
 

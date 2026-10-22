@@ -71,6 +71,6 @@ scripts/tron test gateway src/sessions/tron-modules.integration.test.ts \
 
 ## Not here
 
-- Extension activity and history: [delegated activity](../sessions/delegated-activity.md).
+- Extension activity and history: [delegated activity](../kernel/delegation/delegated-activity.md).
 - Package install and trust: [admin](../admin/README.md).
 - Managed `pi-subagents`: [Pi SDK maintenance](../../docs/pi-sdk-maintenance.md#tron-owned-pi-subagents-build).

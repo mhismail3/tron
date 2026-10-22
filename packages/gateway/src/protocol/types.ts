@@ -1362,6 +1362,22 @@ export interface HomeTaskCounts {
   finished: number;
 }
 
+export interface HomeTaskCheckinRequest {
+  step: string;
+  done: string;
+  next: string;
+  blocker?: string;
+  refs?: { branch?: string; commit?: string; issue?: string };
+  needsAttention?: boolean;
+}
+export interface HomeTaskCheckin extends HomeTaskCheckinRequest {
+  id: string;
+  taskId: string;
+  sessionId: string;
+  operationId: string;
+  at: string;
+  attention: "none" | "requested" | "rate-limited" | "pending";
+}
 /** home.taskList: bounded newest-first task metadata; no canonical reports. */
 export interface HomeTaskSummary extends HomeTaskDisplay {
   taskId: string;
@@ -1376,7 +1392,7 @@ export interface HomeTaskSummary extends HomeTaskDisplay {
    * from before that omit both cache fields and count cache inside `inputTokens`. */
   spend: { sourceDigest: string; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number } | null;
   attention: boolean;
-  checkins: import("../home/home-task-checkin.js").HomeTaskCheckin[];
+  checkins: HomeTaskCheckin[];
   pendingGrant: boolean;
 }
 export interface HomeTaskPage {

@@ -88,7 +88,7 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
   `npm run test:pi-subagents-rollback` (previous → candidate → previous with resume; original
   JSONL prefixes unchanged; `TRON_SUBAGENTS_ROLLBACK_ROOT` keeps the home; join failures go to
   `TRON_TEST_PROCESS_OWNER_FAILURE`) and, after a build,
-  `src/sessions/managed-subagents.payload.integration.test.ts`. Reports in `test-results/`.
+  `src/kernel/delegation/managed-subagents.payload.integration.test.ts`. Reports in `test-results/`.
 
 ## Persisted-state corpus
 

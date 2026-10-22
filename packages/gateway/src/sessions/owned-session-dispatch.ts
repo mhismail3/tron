@@ -1,6 +1,6 @@
 import type { RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
-import type { HomeTaskReportOwner } from "../home/home-task-report.js";
+import type { HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
 
 /** Internal runaway ceiling for callers that explicitly opt into deadline ownership. */
 export const OWNED_OPERATION_DEADLINE_MS = 24 * 60 * 60 * 1_000;

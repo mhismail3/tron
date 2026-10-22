@@ -21,7 +21,10 @@
     "managed-workflow-children.integration.test.ts",
     "paused-subagent.integration.test.ts",
     "subagent-catalog.ts",
-    "subagent-parity.integration.test.ts"
+    "subagent-parity.integration.test.ts",
+    "task-checkin.ts",
+    "task-report.ts",
+    "task-worker-extension.ts"
   ],
   "dependsOn": [
     "gateway/pi"

@@ -8,12 +8,12 @@ import { promisify } from "node:util";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
-import { GatewayError } from "../errors.js";
-import { copyPayload, refuseUnjoinedFixture, retainedFiles } from "../../test-support/nested-vitest-payload.js";
+import { GatewayError } from "../../errors.js";
+import { copyPayload, refuseUnjoinedFixture, retainedFiles } from "../../../test-support/nested-vitest-payload.js";
 import { ManagedSubagents } from "./managed-subagents.js";
 import { delegatedProviderEnvironment } from "./delegated-provider.js";
 
-const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
+const gatewayRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const ownTestFile = "managed-subagents.invalid-entry.integration.test.ts";
 const leg = process.env.TRON_SUBAGENTS_INVALID_ENTRY_FIXTURE;
 
@@ -55,7 +55,7 @@ it.skipIf(Boolean(leg)).each([
     pin.closure = { path: "invalid-closure.tgz", sha512: createHash("sha512").update(archive).digest("hex") };
     await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(pin));
     for (const directory of ["agent", "workspace", "home", "tmp"]) await mkdir(join(root, directory));
-    await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", `src/sessions/${ownTestFile}`], {
+    await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", `src/kernel/delegation/${ownTestFile}`], {
       // Hang guard only: this file runs alone in the nested pass (vitest.nested.config.ts);
       // a passing cold child takes about 3-14 s, so a reached bound means a hung child.
       cwd: payload, timeout: 120_000, maxBuffer: 1024 * 1024,

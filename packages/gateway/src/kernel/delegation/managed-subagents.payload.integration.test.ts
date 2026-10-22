@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
-const gateway = fileURLToPath(new URL("../..", import.meta.url));
+const gateway = fileURLToPath(new URL("../../..", import.meta.url));
 const run = promisify(execFile);
 
 it("activates a real staged Mac app offline without checkout pin or artifact access", async () => {
@@ -22,8 +22,8 @@ it("activates a real staged Mac app offline without checkout pin or artifact acc
     await symlink(join(gateway, "node_modules"), join(app, "node_modules"));
     const script = `import net from 'node:net';
       net.Socket.prototype.connect = function () { throw new Error('network denied'); };
-      const { ManagedSubagents } = await import('./dist/sessions/managed-subagents.js');
-      const { delegatedArtifactRoot, delegatedProviderEnvironment } = await import('./dist/sessions/delegated-provider.js');
+      const { ManagedSubagents } = await import('./dist/kernel/delegation/managed-subagents.js');
+      const { delegatedArtifactRoot, delegatedProviderEnvironment } = await import('./dist/kernel/delegation/delegated-provider.js');
       delegatedProviderEnvironment(delegatedArtifactRoot(${JSON.stringify(join(root, "home"))}));
       const { SettingsManager } = await import('@earendil-works/pi-coding-agent');
       const managed = ManagedSubagents.activateForStartup(${JSON.stringify(join(root, "home"))});

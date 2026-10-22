@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,18 +8,18 @@ import { ChildProcess } from "node:child_process";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
-import { PackageService } from "../admin/package-service.js";
-import { contextDeliveryMetadataByEntry } from "../kernel/run/context-delivery-receipts.js";
-import { subagentProcessesFromActivity } from "../kernel/projection/process-activity.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { TrustService } from "../../admin/trust-service.js";
+import { PackageService } from "../../admin/package-service.js";
+import { contextDeliveryMetadataByEntry } from "../run/context-delivery-receipts.js";
+import { subagentProcessesFromActivity } from "../projection/process-activity.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 // This driver is also copied unchanged into the pre-cutover Gateway. Only
 // package selection and the released workflow input spelling vary by leg.
 const old = process.env.TRON_PARITY_LEG === "old";
-const baseline = fileURLToPath(new URL("../../test-support/subagent-parity-old.json", import.meta.url));
+const baseline = fileURLToPath(new URL("../../../test-support/subagent-parity-old.json", import.meta.url));
 type ParityResourceRow = { name: string; path?: string; [key: string]: unknown };
 type ParityReport = Record<string, unknown> & {
   leg: "old" | "new";
@@ -68,7 +68,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.TRON_TEST_PROCESS_OWNER = root;
     process.env.TRON_TEST_PROCESS_OWNER_FAILURE = join(root, "join-failure.jsonl");
-    process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} --import=${fileURLToPath(new URL("../../test-support/fixture-process-owner.mjs", import.meta.url))}`.trim();
+    process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} --import=${fileURLToPath(new URL("../../../test-support/fixture-process-owner.mjs", import.meta.url))}`.trim();
     await ensureDelegatedArtifactRoot(delegatedArtifactRoot(tronHome));
     delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
     let managedSubagents;
@@ -235,7 +235,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
       // Native process rows above own activity facts/timing. These additional
       // child fields own task and exact child/control admission; aggregate
       // extension counters are not consumed by the native process renderer.
-      const childIdentity = (child: import("../protocol/types.js").ExtensionRunChild): unknown => normalize({
+      const childIdentity = (child: import("../../protocol/types.js").ExtensionRunChild): unknown => normalize({
         id: child.id, producerId: child.producerId, label: child.label,
         task: child.task, childSessionRef: child.childSessionRef,
         sessionOwnerId: child.sessionOwnerId,
@@ -361,7 +361,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     // custom-message turn here; NEW retains its typed, hidden normal-input wake.
     const api = globals.parityPi!;
     const sender = old ? api : await (async () => {
-      const { managedProducerAPI } = await import("../extensions/managed-producer.js");
+      const { managedProducerAPI } = await import("../../extensions/managed-producer.js");
       const owner = { id: "parity-managed-owner", source: managedSource!, title: "Subagents", kind: "subagent" as const };
       return managedProducerAPI(api, owner, (...args) => slot.admitSubagentWake(...args));
     })();
@@ -420,7 +420,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     }
     if (!old) {
       const before = JSON.parse(await readFile(baseline, "utf8"));
-      const approved = JSON.parse(await readFile(fileURLToPath(new URL("../../test-support/subagent-parity-approved.json", import.meta.url)), "utf8"));
+      const approved = JSON.parse(await readFile(fileURLToPath(new URL("../../../test-support/subagent-parity-approved.json", import.meta.url)), "utf8"));
       const differences = compareParity(before, report, managedSource!, approved);
       report.differences = differences;
       expect(differences.filter(diff => !diff.approved), JSON.stringify(differences, null, 2)).toEqual([]);

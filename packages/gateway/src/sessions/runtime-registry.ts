@@ -1,7 +1,7 @@
 import { HOME_SESSION_PROFILE_NAME } from "../home/home-session-profile.js";
 import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
-import type { ManagedSubagents } from "./managed-subagents.js";
+import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "../kernel/pi/ai.js";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
@@ -2088,7 +2088,7 @@ export class RuntimeRegistry {
 
   /** The leased worker of a task resumed in place (#929). Viewing the session never blocks
    * this: an open slot keeps its subscribers and is rebound, not replaced. */
-  async resumeTaskWorker(sessionId: string, report: import("../home/home-task-report.js").HomeTaskReportOwner, exceptWorkToken?: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
+  async resumeTaskWorker(sessionId: string, report: import("../kernel/delegation/task-report.js").HomeTaskReportOwner, exceptWorkToken?: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
     const lease = await this.acquireOwnedSessionLease(sessionId);
     try {
       await lease.slot.bindTaskWorker(report, exceptWorkToken);
@@ -2984,7 +2984,7 @@ export class RuntimeRegistry {
     return admitTaskWorkerChoice(this.options.gatewayModelRuntime, choice);
   }
 
-  async create(cwdInput: string, profile: string = ORDINARY_SESSION_PROFILE.name, taskWorker?: import("../home/home-task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {
+  async create(cwdInput: string, profile: string = ORDINARY_SESSION_PROFILE.name, taskWorker?: import("../kernel/delegation/task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;

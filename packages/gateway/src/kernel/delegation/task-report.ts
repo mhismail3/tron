@@ -1,7 +1,8 @@
-import { Type } from "../kernel/pi/ai.js";
-import type { FileEntry, ToolDefinition } from "../kernel/pi/coding-agent.js";
-import { AsyncMutex } from "../util/async-mutex.js";
-import { HOME_TASK_CHECKIN_PARAMETERS, parseHomeTaskCheckinRequest, type HomeTaskCheckin, type HomeTaskCheckinRequest } from "./home-task-checkin.js";
+import { Type } from "../pi/ai.js";
+import type { FileEntry, ToolDefinition } from "../pi/coding-agent.js";
+import { AsyncMutex } from "../../util/async-mutex.js";
+import { HOME_TASK_CHECKIN_PARAMETERS, parseHomeTaskCheckinRequest } from "./task-checkin.js";
+import type { HomeTaskCheckin, HomeTaskCheckinRequest } from "../../protocol/types.js";
 
 export const HOME_TASK_MARKER = "tron-home-task";
 export const HOME_TASK_REPORT = "tron-home-task-report";

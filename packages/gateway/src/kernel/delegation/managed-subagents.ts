@@ -4,16 +4,16 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
-import { DefaultPackageManager, SettingsManager, type Extension, type ExtensionFactory, type InlineExtension, type DefaultResourceLoader, type PackageSource, type ResolvedPaths, type SourceInfo } from "../kernel/pi/coding-agent.js";
-import { piExtensionAliases } from "../kernel/pi/packages.js";
-import type { GatewayLogger } from "../transport/logger.js";
-import { GatewayError } from "../errors.js";
+import { DefaultPackageManager, SettingsManager, type Extension, type ExtensionFactory, type InlineExtension, type DefaultResourceLoader, type PackageSource, type ResolvedPaths, type SourceInfo } from "../pi/coding-agent.js";
+import { piExtensionAliases } from "../pi/packages.js";
+import type { GatewayLogger } from "../../transport/logger.js";
+import { GatewayError } from "../../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
-import { managedProducerAPI, type ManagedInternalWake } from "../extensions/managed-producer.js";
+import { managedProducerAPI, type ManagedInternalWake } from "../../extensions/managed-producer.js";
 import { loadSubagentCatalog } from "./subagent-catalog.js";
-import { producerIdentity, withExtensionOwner } from "../extensions/owner-attribution.js";
+import { producerIdentity, withExtensionOwner } from "../../extensions/owner-attribution.js";
 
-const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
+const gatewayRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {
   version: string; fork: { commit: string }; closure: { path: string; sha512: string };
 };

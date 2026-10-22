@@ -1,4 +1,4 @@
-import { isManagedSubagentExtension, isUserSubagentsPackage, IGNORED_SUBAGENTS_MESSAGE, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../sessions/managed-subagents.js";
+import { isManagedSubagentExtension, isUserSubagentsPackage, IGNORED_SUBAGENTS_MESSAGE, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, join, sep } from "node:path";
 import semver from "semver";
@@ -12,7 +12,7 @@ import type { PackageProvides, PackageConflict, PackageNodeRequirement } from ".
 import {
   loadSubagentCatalog,
   type AvailableSubagent,
-} from "../sessions/subagent-catalog.js";
+} from "../kernel/delegation/subagent-catalog.js";
 import {
   loadSessionFreeExtensions,
   type SessionFreeExtensionLoad,

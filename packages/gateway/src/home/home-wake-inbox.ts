@@ -2,13 +2,13 @@ import type { InputEnvelope, InputDelivery } from "../kernel/host/input-admissio
 import { estimateTokens } from "../kernel/pi/coding-agent.js";
 import { createHash } from "node:crypto";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../kernel/run/context-delivery-receipts.js";
-import { parseHomeTaskReport } from "./home-task-report.js";
+import { parseHomeTaskReport } from "../kernel/delegation/task-report.js";
 import { HOME_TASK_RESULT_MESSAGE, INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../kernel/run/invocation-receipts.js";
 import { GatewayError } from "../errors.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { HomeTaskRecord, HomeTaskStore } from "./home-task-store.js";
-import type { HomeTaskCheckin } from "./home-task-checkin.js";
+import type { HomeTaskCheckin } from "../protocol/types.js";
 import type { HomeTaskSubagents } from "./home-task-subagents.js";
 
 export { HOME_TASK_RESULT_MESSAGE };

@@ -1,4 +1,4 @@
-import { managedProviderSettingsView, type ManagedSubagents } from "../sessions/managed-subagents.js";
+import { managedProviderSettingsView, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";

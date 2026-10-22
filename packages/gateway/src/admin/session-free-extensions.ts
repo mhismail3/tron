@@ -1,4 +1,4 @@
-import type { ManagedSubagents } from "../sessions/managed-subagents.js";
+import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { attributeExtensions } from "../extensions/owner-attribution.js";
 import { homedir } from "node:os";
 import { DefaultResourceLoader, SettingsManager, type Extension } from "../kernel/pi/coding-agent.js";

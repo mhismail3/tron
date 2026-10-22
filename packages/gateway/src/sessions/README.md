@@ -144,7 +144,7 @@ rows). Locks: `run.lock`, `run.store.lock`, `run-markers.lock` (`.integration.te
 
 - Wire contracts: [transport](../transport/README.md). Projection rules:
   [`kernel/projection`](../kernel/projection/README.md). Delegated activity:
-  [delegated activity](delegated-activity.md).
+  [delegated activity](../kernel/delegation/delegated-activity.md).
 - Settings applied through the slot: [admin](../admin/README.md). Home:
   [home](../home/README.md). Terminal alerts: [notifications](../notifications/README.md).
 - SDK upgrades and the behavior trace: [Pi SDK maintenance](../../docs/pi-sdk-maintenance.md).
