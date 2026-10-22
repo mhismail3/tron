@@ -38,9 +38,8 @@ DAY = 86400
 T0 = 1_700_000_000  # 2023-11-14: far from the wall clock, so clock anchoring fails loudly.
 UNAVAILABLE = {
     "M1.lockCoverage", "M1.lockDeterminism", "M1.lockSensitivity",
-    "M2.layerViolations", "M2.directoryCycles", "M2.fileSizeExceptions",
+    "M2.layerViolations", "M2.directoryCycles",
     "M2.registrationFootprint", "M2.navigationProbe", "M4.sliceVerifyTime",
-    "ownership.ledger",
 }
 
 

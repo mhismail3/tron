@@ -102,11 +102,9 @@ owner, and never carry a number:
 | `M1.lockCoverage`, `M1.lockDeterminism` | 0.4 catalog, 0.8 Gateway and 0.9 iOS locks |
 | `M1.lockSensitivity` | 0.10 mutation evaluation (milestones) |
 | `M2.layerViolations`, `M2.directoryCycles` | 0.4 layers, 0.6 resolved import/reference graph |
-| `M2.fileSizeExceptions` | 0.4 manifests, 0.7 budget checker |
 | `M2.registrationFootprint` | Phase 2 module descriptors |
 | `M2.navigationProbe` | milestone steward (fresh-agent probe) |
 | `M4.sliceVerifyTime` | 0.11 `scripts/tron verify` |
-| `ownership.ledger` | 0.4 manifests, 0.5 ledger |
 
 Import edges are deliberately not inferred from text search: type-only, dynamic,
 re-exported and path-mapped imports make a grep graph wrong in both directions.

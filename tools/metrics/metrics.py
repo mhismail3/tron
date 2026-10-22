@@ -66,16 +66,12 @@ UNAVAILABLE = {
         "0.4 manifests; 0.6 layer checker #1354"),
     "M2.directoryCycles": ("Needs the resolved import/reference graph, not grep-inferred edges.",
         "0.6 layer checker #1354"),
-    "M2.fileSizeExceptions": ("Exceptions are recorded in module manifests, which do not exist yet.",
-        "0.4 manifests; 0.7 budget checker #1354"),
     "M2.registrationFootprint": ("Needs module descriptors and composition roots.",
         "Phase 2 K-0 and pilot module #1348"),
     "M2.navigationProbe": ("A fresh-agent probe run at milestones, not a repository computation.",
         "Milestone steward (plan §14.8)"),
     "M4.sliceVerifyTime": ("`scripts/tron verify --changed` does not exist yet.",
         "0.11 scripts/tron verify #1354"),
-    "ownership.ledger": ("Ownership and module checklists do not exist yet.",
-        "0.4 manifests; 0.5 ledger #1357"),
 }
 
 

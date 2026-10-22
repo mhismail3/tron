@@ -72,14 +72,10 @@ class Repo:
         self.write(".agents/skills/NOTICE.md", "# Notice\n")
         self.write(".agents/skills/tron-ios/SKILL.md", "---\nname: tron-ios\ndescription: iOS work.\n---\n\n"
                    "Tron Device on LocalDevice. Never install Release or DevicePerformance; signed artifacts are evidence.\n")
-        # The copied tools keep the over-budget exceptions they carry in the real repository.
-        oversized = [relative for relative in COPIED if relative.endswith(".py")
-                     and len((ROOT / relative).read_text().splitlines()) > 500]
         self.write("tooling.module.json", json.dumps({"layer": "L5", "owns": [
             "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
             "scripts/ios-test-build-identity.py", ".github/**", ".agents/**", "tools/**", "README.md", "AGENTS.md", ".gitignore",
-            "tooling.module.json"],
-            "exceptions": [{"path": path, "budget": "lines", "reason": "copied tool", "exit": "real repository"} for path in oversized]}))
+            "tooling.module.json"]}))
         for name, layer in (("alpha", "L3"), ("beta", "L3"), ("core", "L1"), ("docs", "L5")):
             self.write(f"mods/{name}/{name}.module.json", json.dumps({"layer": layer, "owns": ["**"]}))
             self.write(f"mods/{name}/{name}.py", f"VALUE = '{name}'\n")
