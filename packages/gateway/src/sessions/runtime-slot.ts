@@ -49,6 +49,7 @@ import { RunPersistence, CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WR
 import { RunWorkOwner } from "../kernel/run/run-work-owner.js";
 import { RunAbortOwner } from "../kernel/run/run-abort-owner.js";
 import { RunQueueOwner } from "../kernel/run/run-queue-owner.js";
+import { ManualCompactionOwner, type ManualCompactionContext } from "../kernel/run/manual-compaction.js";
 import type { HomeTaskControlRequest } from "../home/home-task-dispatcher.js";
 import type { PromptOwnership, PromptAdmissionContext } from "../kernel/run/prompt-input.js";
 import { admitPrompt } from "../kernel/run/prompt-admission.js";
@@ -231,14 +232,6 @@ type ExtensionArtifactDirectoryIdentity = { dev: number; ino: number };
 type OpenedExtensionArtifact = {
   handle: Awaited<ReturnType<typeof open>>;
   directory: ExtensionArtifactDirectoryIdentity;
-};
-
-type PendingManualCompaction = {
-  instructions?: string;
-  operationId: string;
-  work: GatewayWorkHandle;
-  resolve: () => void;
-  reject: (error: unknown) => void;
 };
 
 type PendingContextMessage = {
@@ -440,7 +433,7 @@ export interface RuntimeSlotDependencies {
   persistenceDiagnostic?: (sessionId: string, code: string) => void;
   compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
   stopSteeringDiagnostic?: (diagnostic: { sessionId: string; queuedSteerCount: number; outcome: "started" | "completed" | "stopped" | "failed" | "unknown" }) => void;
-  manualCompactionAdopted?: (diagnostic: { sessionId: string; operationId: string; reason: "manual" | "threshold" | "overflow" }) => void;
+  manualCompactionAdopted?: NonNullable<ManualCompactionContext["dependencies"]["manualCompactionAdopted"]>;
   codemodeDiagnostic?: (diagnostic: { sessionId: string; outcome: "completed" | "failed" | "aborted" | "timeout"; durationMs: number; nestedCallCount: number; complete: boolean }) => void;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
@@ -870,15 +863,12 @@ export class RuntimeSlot {
    * writes their exact context receipt itself, so generic custom-message
    * attribution must not claim them with a second, conflicting receipt. */
   private readonly inboxAttributedMessages = new Set<string>();
-  private pendingManualCompaction: PendingManualCompaction | undefined;
+  private readonly manualCompaction = new ManualCompactionOwner(this.manualCompactionBindings());
   private compactionBaselineEntryId: string | undefined;
   /** Exact operation installed at compaction_start. A hook may launch a
    * successor before compaction_end, so the current operation is not reliable
    * completion ownership. */
   private compactionOperation: SessionOperationState | undefined;
-  private manualCompactionClaim: symbol | undefined;
-  private queuedManualCompactionInFlight = false;
-  private adoptedManualCompaction: PendingManualCompaction | undefined;
   private unregisterConfigurationWork: (() => void) | undefined;
   private publishedConfigurationBlocker: SessionConfigurationBlocker | null | undefined;
   private shuttingDown = false;
@@ -3893,7 +3883,7 @@ export class RuntimeSlot {
         // final snapshot. Queue retirement must also publish configuration ready.
         this.publishConfiguration();
       }
-      this.startPendingManualCompaction();
+      this.manualCompaction.startPendingManualCompaction();
     })().finally(() => {
       this.runPersistence.pendingReceiptWrites.delete(operation);
       this.releaseSettleWaiters();
@@ -3986,7 +3976,7 @@ export class RuntimeSlot {
         this.publishSnapshot();
         return;
       }
-      if (this.pendingManualCompaction) {
+      if (this.manualCompaction.pendingManualCompaction) {
         // Compaction owns a separate marker. Start it only after the preceding
         // response's attention fact and exact marker retirement are durable.
         this.phase = "idle";
@@ -4207,7 +4197,7 @@ export class RuntimeSlot {
           this.publishSnapshot();
           break;
         }
-        if (this.queuedManualCompactionInFlight && !this.adoptedManualCompaction) {
+        if (this.manualCompaction.queuedManualCompactionInFlight && !this.manualCompaction.adoptedManualCompaction) {
           // Standalone queued maintenance owns the session after its prompt has
           // already settled. An adopted compaction still belongs to the enclosing
           // agent run, whose terminal receipt must retire independently.
@@ -4302,13 +4292,9 @@ export class RuntimeSlot {
             // receipt token or report drain completion while marker I/O is active.
             // Disposal still joins the chain, so its marker clear cannot land after it.
             this.runPersistence.trackSettlementChain(markerClear.then(
-              () => this.startPendingManualCompaction(),
+              () => this.manualCompaction.startPendingManualCompaction(),
               (error) => {
-                const pending = this.pendingManualCompaction;
-                if (pending) {
-                  this.pendingManualCompaction = undefined;
-                  pending.reject(error);
-                }
+                this.manualCompaction.cancelPending(error);
                 this.emit("session.diagnostic", safeJson({
                   code: "terminal-receipt-persistence-failed",
                   operationId: settledOperationId,
@@ -4330,17 +4316,7 @@ export class RuntimeSlot {
         this.publishSnapshot();
         break;
       case "compaction_start": {
-        const adoptedManual = this.pendingManualCompaction;
-        if (adoptedManual) {
-          this.pendingManualCompaction = undefined;
-          this.queuedManualCompactionInFlight = true;
-          this.adoptedManualCompaction = adoptedManual;
-          this.dependencies.manualCompactionAdopted?.({
-            sessionId: this.id,
-            operationId: adoptedManual.operationId,
-            reason: event.reason,
-          });
-        }
+        const adoptedManual = this.manualCompaction.adoptPending(event);
         this.phase = "compacting";
         // Canonical compaction is a hard transcript barrier. A provisional
         // generation keeps older unresolved calls terminal until the next
@@ -4396,35 +4372,7 @@ export class RuntimeSlot {
         }
         this.compactionBaselineEntryId = undefined;
         this.compactionOperation = undefined;
-        const adoptedManual = this.adoptedManualCompaction;
-        if (adoptedManual) {
-          void (async () => {
-            try {
-              await this.clearMarkerOwnership(adoptedManual.operationId, adoptedManual.work);
-              // The accepted command owns the first compaction after it queued;
-              // if that compaction fails or is cancelled, settle it as failed
-              // rather than launching a second manual compaction.
-              if (outcome === "success") adoptedManual.resolve();
-              else adoptedManual.reject(new GatewayError(
-                outcome === "cancelled" ? "conflict" : "internal",
-                errorMessage ?? (outcome === "cancelled" ? "Adopted compaction was cancelled" : "Adopted compaction failed"),
-                outcome === "cancelled",
-              ));
-            } catch (error) {
-              adoptedManual.reject(error);
-            } finally {
-              if (this.adoptedManualCompaction === adoptedManual) this.adoptedManualCompaction = undefined;
-              this.queuedManualCompactionInFlight = false;
-              if (this.operation?.id === adoptedManual.operationId && !this.hasActiveAgentRun && !this.activeOperationId) {
-                this.phase = "idle";
-                this.operation = undefined;
-              }
-              this.hooks.settled(this.id);
-              this.publishSnapshot();
-              adoptedManual.work.settle();
-            }
-          })();
-        }
+        this.manualCompaction.settleAdopted(outcome, errorMessage);
         // Retire only the completed compaction's abort intent. This remains
         // safe when a successor replaced `operation`, because its identity is
         // fenced by the captured compaction owner.
@@ -4463,7 +4411,7 @@ export class RuntimeSlot {
             startedAt: new Date().toISOString(),
           };
         } else if (completedOperation.kind === "compaction"
-          && completedOperation.reason === "manual" && !this.adoptedManualCompaction) {
+          && completedOperation.reason === "manual" && !this.manualCompaction.adoptedManualCompaction) {
           // The wrapper still owns durable marker retirement. Canonical presence
           // suppresses the spinner, while phase remains truthful until cleanup.
           this.phase = "compacting";
@@ -6858,7 +6806,7 @@ export class RuntimeSlot {
       get isHomeChapter() { return slot.isHomeChapter; },
       get queueRevision() { return slot.runQueue.queueRevision; },
       get pendingPrompt() { return slot.pendingPrompt; },
-      get pendingManualCompaction() { return slot.pendingManualCompaction; },
+      get pendingManualCompaction() { return slot.manualCompaction.pendingManualCompaction; },
       get operation() { return slot.operation; },
       get retry() { return slot.retry; },
       get toolExecutions() { return slot.toolExecutions; },
@@ -7265,7 +7213,7 @@ export class RuntimeSlot {
    * holds an input; a wake has no input, so it refuses and its results stay pending. */
   private async assertHomeWakeAdmissible(session: AgentSession): Promise<void> {
     if (this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined
-      || this.heldQueue.entries.length > 0 || this.pendingManualCompaction !== undefined || this.compactionOperation !== undefined
+      || this.heldQueue.entries.length > 0 || this.manualCompaction.pendingManualCompaction !== undefined || this.compactionOperation !== undefined
       || this.isAgentAdmissionSettling || session.isStreaming) {
       throw new GatewayError("busy", "Tron Home is busy; finished results wait for its next idle moment", true);
     }
@@ -7441,7 +7389,7 @@ export class RuntimeSlot {
       get completionOwnershipQueue() { return slot.completionOwnershipQueue; },
       get isAgentAdmissionSettling() { return slot.isAgentAdmissionSettling; },
       get hasActiveAgentRun() { return slot.hasActiveAgentRun; },
-      get queuedManualCompactionInFlight() { return slot.queuedManualCompactionInFlight; },
+      get queuedManualCompactionInFlight() { return slot.manualCompaction.queuedManualCompactionInFlight; },
       get shuttingDown() { return slot.shuttingDown; },
       get taskWorker() { return slot.taskWorker; },
       get taskWait() { return slot.taskWait; },
@@ -7507,13 +7455,13 @@ export class RuntimeSlot {
         clearActiveOperation: () => { slot.activeOperationId = undefined; },
         operation: () => slot.operation,
         clearOperation: () => { slot.operation = undefined; },
-        queuedManualCompactionInFlight: () => slot.queuedManualCompactionInFlight,
-        adoptedManualCompaction: () => slot.adoptedManualCompaction,
+        queuedManualCompactionInFlight: () => slot.manualCompaction.queuedManualCompactionInFlight,
+        adoptedManualCompaction: () => slot.manualCompaction.adoptedManualCompaction,
         pendingPrompt: () => slot.pendingPrompt,
         clearPendingPrompt: () => { slot.pendingPrompt = undefined; slot.pendingPromptMessage = undefined; },
         taskOperationId: () => slot.taskWorker?.identity.operationId,
         requestPolicy: () => slot.homeRequestPolicy,
-        pendingManualCompaction: () => slot.pendingManualCompaction,
+        pendingManualCompaction: () => slot.manualCompaction.pendingManualCompaction,
         pendingExtensionCommand: () => slot.pendingExtensionCommand,
         clearPendingExtensionCommand: () => { slot.pendingExtensionCommand = undefined; },
         pendingAssistantCompletion: () => slot.pendingAssistantCompletion,
@@ -7529,7 +7477,7 @@ export class RuntimeSlot {
         noteHomeIdle: () => slot.noteHomeIdle(),
         publishSnapshot: () => slot.publishSnapshot(),
         publishChanged: () => { slot.revision += 1; slot.publishSnapshot(); },
-        startPendingManualCompaction: () => slot.startPendingManualCompaction(),
+        startPendingManualCompaction: () => slot.manualCompaction.startPendingManualCompaction(),
         maybePerformExtensionShutdown: () => slot.maybePerformExtensionShutdown(),
         settled: () => slot.hooks.settled(slot.id),
         sessionId: () => slot.id,
@@ -7745,163 +7693,49 @@ export class RuntimeSlot {
     this.publishSnapshot();
   }
 
-  async compact(instructions?: string): Promise<{ queued: boolean }> {
-    this.assertUsable();
-    // Refused at admission: Home keeps its own history, and the SDK would only
-    // refuse this later, after the command was already accepted.
-    if (this.liveProfile().compaction === "disabled") {
-      throw new GatewayError("conflict", "Tron Home keeps its own history; manual compaction is unavailable");
-    }
-    if (this.manualCompactionClaim) {
-      throw new GatewayError("busy", "A manual compaction is already pending for this session");
-    }
-    const claim = Symbol("manual-compaction");
-    this.manualCompactionClaim = claim;
-    let work: GatewayWorkHandle;
-    try {
-      work = this.dependencies.workRegistry.begin({
-        kind: "compaction-export",
-        sessionId: this.id,
-        hostEpoch: this.ui.hostEpoch,
-      });
-    } catch (error) {
-      if (this.manualCompactionClaim === claim) this.manualCompactionClaim = undefined;
-      throw error;
-    }
-
-    const operationId = randomUUID();
-    try {
-      let queuedCompletion: Promise<void> | undefined;
-      const queued = await this.lane.run(async () => {
-        this.assertUsable();
-        if (this.manualCompactionClaim !== claim) {
-          throw new GatewayError("conflict", "Manual compaction ownership changed", true);
-        }
-        if (this.hasActiveAgentRun) {
-          // A run is live, so this hands off behind it rather than starting now.
-          // Clears retained archive state only after the ownership rejection
-          // above: a compaction that cannot be admitted must not unarchive the
-          // session.
-          await this.dependencies.beforeRunAdmission(this.id);
-          // Accepted maintenance owns its own durable marker, never a prior
-          // prompt's. A handoff can be deferred behind more than one run.
-          await this.runPersistence.trackOwnershipWrite(
-            () => this.runPersistence.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
-            work,
-          );
-          this.assertUsable();
-          queuedCompletion = new Promise<void>((resolve, reject) => {
-            this.pendingManualCompaction = {
-              ...(instructions === undefined ? {} : { instructions }),
-              operationId,
-              work,
-              resolve,
-              reject,
-            };
-          });
-          this.revision += 1;
-          this.publishSnapshot();
-          // The preceding run may have settled while the marker write awaited.
-          this.startPendingManualCompaction();
-          return true;
-        }
-
-        this.assertIdleForManualCompaction(claim);
-        // Only after every rejection above is retained archive state cleared, so
-        // a compaction refused here (an export in flight, Bash running) leaves
-        // the session archived.
-        await this.dependencies.beforeRunAdmission(this.id);
-        await this.performManualCompaction(instructions, false, operationId, work);
-        return false;
-      });
-
-      // Keep the command receipt pending until the exact queued mutation has
-      // completed. A disconnected client therefore cannot turn accepted work
-      // into an acknowledged-but-unperformed compaction.
-      if (queuedCompletion) await queuedCompletion;
-      return { queued };
-    } finally {
-      if (this.manualCompactionClaim === claim) this.manualCompactionClaim = undefined;
-      work.settle();
-    }
+  private manualCompactionBindings(): ManualCompactionContext {
+    const slot = this;
+    return {
+      get id() { return slot.id; },
+      get ui() { return slot.ui; },
+      get lane() { return slot.lane; },
+      get runtime() { return slot.runtime; },
+      get dependencies() { return slot.dependencies; },
+      get hooks() { return slot.hooks; },
+      get runPersistence() { return slot.runPersistence; },
+      get runAbort() { return slot.runAbort; },
+      get compactionPolicies() { return slot.compactionPolicies; },
+      get contextPolicies() { return slot.contextPolicies; },
+      get shuttingDown() { return slot.shuttingDown; },
+      get hasActiveAgentRun() { return slot.hasActiveAgentRun; },
+      get pendingAssistantCompletion() { return slot.pendingAssistantCompletion; },
+      get completionOwnershipQueue() { return slot.completionOwnershipQueue; },
+      get activeOperationId() { return slot.activeOperationId; },
+      get activeExports() { return slot.activeExports; },
+      get effectivePhase() { return slot.effectivePhase; },
+      get activityHeartbeat() { return slot.activityHeartbeat; },
+      get phase() { return slot.phase; },
+      set phase(value) { slot.phase = value; },
+      get operation() { return slot.operation; },
+      set operation(value) { slot.operation = value; },
+      get retry() { return slot.retry; },
+      set retry(value) { slot.retry = value; },
+      get revision() { return slot.revision; },
+      set revision(value) { slot.revision = value; },
+      liveProfile: () => slot.liveProfile(),
+      assertUsable: () => slot.assertUsable(),
+      clearMarkerOwnership: (operationId, work) => slot.clearMarkerOwnership(operationId, work),
+      operationMatches: (operation) => slot.operationMatches(operation),
+      noteDashboardActivity: (startedAt) => slot.noteDashboardActivity(startedAt),
+      startActivityHeartbeat: () => slot.startActivityHeartbeat(),
+      hasCurrentDashboardWork: () => slot.hasCurrentDashboardWork(),
+      stopActivityHeartbeat: () => slot.stopActivityHeartbeat(),
+      publishSnapshot: () => slot.publishSnapshot(),
+    };
   }
 
-  private startPendingManualCompaction(): void {
-    const pending = this.pendingManualCompaction;
-    if (!pending || this.shuttingDown) return;
-    void this.lane.run(async () => {
-      if (this.pendingManualCompaction !== pending || this.shuttingDown) return;
-      // Another prompt can enter SDK preflight before this lane handoff runs.
-      // Leave the exact compaction pending for that newer run's final settlement.
-      if (this.hasActiveAgentRun || this.pendingAssistantCompletion || this.completionOwnershipQueue.length > 0) return;
-      this.pendingManualCompaction = undefined;
-      this.queuedManualCompactionInFlight = true;
-      try {
-        await this.performManualCompaction(pending.instructions, true, pending.operationId, pending.work);
-        pending.resolve();
-      } catch (error) {
-        pending.reject(error);
-      }
-    }).catch((error) => {
-      if (this.pendingManualCompaction === pending) {
-        this.pendingManualCompaction = undefined;
-        this.revision += 1;
-        this.publishSnapshot();
-      }
-      pending.reject(error);
-    });
-  }
-
-  private async performManualCompaction(
-    instructions: string | undefined,
-    queued: boolean,
-    operationId: string,
-    work: GatewayWorkHandle,
-  ): Promise<void> {
-    let operationError: unknown;
-    if (!queued) {
-      await this.runPersistence.trackOwnershipWrite(
-        () => this.runPersistence.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
-        work,
-      );
-    }
-    const startedAt = new Date().toISOString();
-    this.phase = "compacting";
-    this.operation = { id: operationId, kind: "compaction", startedAt, reason: "manual" };
-    const compactionOwner = this.operation;
-    this.noteDashboardActivity(startedAt);
-    if (!this.activityHeartbeat) this.startActivityHeartbeat();
-    this.revision += 1;
-    this.publishSnapshot();
-    try {
-      await this.runtime.session.settingsManager.flush();
-      this.compactionPolicies.get(this.runtime.session)?.applyBudgets();
-      this.contextPolicies.get(this.runtime.session)?.apply();
-      await this.runtime.session.compact(instructions);
-    } catch (error) {
-      operationError = error;
-    }
-
-    await this.clearMarkerOwnership(operationId, work);
-    if (queued) {
-      this.queuedManualCompactionInFlight = false;
-      this.hooks.settled(this.id);
-    }
-
-    // Stop and a successor can arrive during marker I/O too. Retire the exact
-    // cancellation intent after that await, then re-check presentation ownership.
-    this.runAbort.abortedOperations.delete(operationId);
-    const ownerStillCurrent = this.operationMatches(compactionOwner);
-    if (ownerStillCurrent) {
-      this.phase = "idle";
-      this.operation = undefined;
-      this.retry = undefined;
-      this.noteDashboardActivity();
-      if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
-    }
-    this.revision += 1;
-    this.publishSnapshot();
-    if (operationError !== undefined) throw operationError;
+  compact(instructions?: string): Promise<{ queued: boolean }> {
+    return this.manualCompaction.compact(instructions);
   }
 
   async executeBash(command: string, excludeFromContext: boolean, initiatingWorkToken?: string): Promise<JsonValue> {
@@ -8587,11 +8421,7 @@ export class RuntimeSlot {
     if (interruptedSource) this.completionObserved(interruptedSource);
     this.shuttingDown = true;
     const cancellation = new GatewayError("cancelled", "Gateway shutdown cancelled queued compaction");
-    const pending = this.pendingManualCompaction;
-    if (pending) {
-      this.pendingManualCompaction = undefined;
-      pending.reject(cancellation);
-    }
+    this.manualCompaction.cancelPending(cancellation);
 
     // Abort every possible SDK owner before waiting on the lane it may hold.
     // These methods are idempotent no-ops when their owner is inactive.
@@ -8610,12 +8440,7 @@ export class RuntimeSlot {
     this.ui.cancelAll("Gateway shutdown interrupted extension interaction");
 
     await this.lane.run(async () => {
-      const latePending = this.pendingManualCompaction;
-      if (latePending) {
-        this.pendingManualCompaction = undefined;
-        latePending.reject(cancellation);
-      }
-      this.queuedManualCompactionInFlight = false;
+      this.manualCompaction.finishShutdown(cancellation);
       if (interruptedSource) {
         await this.terminalizeInvocation(interruptedOperationId, "outcomeUnknown", "runtime-disposed");
         await this.notifyAgentTerminal(interruptedSource, "interrupted");
@@ -8767,22 +8592,6 @@ export class RuntimeSlot {
     this.touch();
   }
 
-  private assertIdleForManualCompaction(claim: symbol): void {
-    this.assertUsable();
-    if (this.manualCompactionClaim !== claim) {
-      throw new GatewayError("conflict", "Manual compaction ownership changed", true);
-    }
-    if (this.runtime.session.isStreaming
-      || this.activeExports > 0
-      || this.queuedManualCompactionInFlight
-      || this.effectivePhase === "running"
-      || this.effectivePhase === "compacting"
-      || this.effectivePhase === "retrying"
-      || this.runtime.session.isBashRunning) {
-      throw new GatewayError("busy", "Session must be idle for this operation");
-    }
-  }
-
   private configurationBlocker(exceptWorkToken?: string): SessionConfigurationBlocker | null {
     if (this.disposed || this.shuttingDown || this.trustReloadPending) return "unavailable";
     if (this.runPersistence.hasBlockedOwnershipWrite) return "settling";
@@ -8790,7 +8599,7 @@ export class RuntimeSlot {
       || this.phase === "running" || this.phase === "compacting" || this.phase === "retrying"
       || this.activeOperationId !== undefined) return "running";
     if (this.pendingPrompt || this.runQueue.pendingQueueAdmission || this.runQueue.queuedMessages.length > 0
-      || this.heldQueue.entries.length > 0 || this.pendingManualCompaction || this.queuedManualCompactionInFlight) return "queued";
+      || this.heldQueue.entries.length > 0 || this.manualCompaction.pendingManualCompaction || this.manualCompaction.queuedManualCompactionInFlight) return "queued";
     if (this.pendingAssistantCompletion || this.completionOwnershipQueue.length > 0) return "settling";
     if (this.pendingExtensionCommand || this.lifecycle.preventsNonRuntimeQuiescence) return "interaction";
     const work = this.dependencies.workRegistry.facts().filter(fact => fact.sessionId === this.id && fact.token !== exceptWorkToken);

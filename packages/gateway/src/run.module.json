@@ -64,6 +64,7 @@
     "kernel/run/queue-commands.ts",
     "kernel/run/prompt-attempt.ts",
     "kernel/run/prompt-admission.ts",
+    "kernel/run/manual-compaction.ts",
     "kernel/run/prompt-input.ts",
     "kernel/run/held-prompt-queue.ts",
     "kernel/run/queue-input.ts",

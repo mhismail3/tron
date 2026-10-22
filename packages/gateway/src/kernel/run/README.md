@@ -30,6 +30,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
   and shared text/resource/queue bounds; public Slot ports return its promises directly.
 - `held-prompt-queue.ts`: accepted compaction/Stop-time input and its ordered deferred
   admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types/bounds.
+- `manual-compaction.ts`: manual admission/claim, deferred receipt, lane handoff,
+  SDK execution, automatic adoption and exact cancellation/settlement lifetime.
 - `prompt-admission.ts` and `prompt-input.ts`: serialized ordinary admission,
   exact SDK disposition, resource/intent preparation and opaque caller fences.
 - `prompt-attempt.ts`: each SDK prompt/command promise, admission finalization and
