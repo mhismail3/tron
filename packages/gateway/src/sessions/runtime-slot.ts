@@ -50,11 +50,11 @@ import { RunWorkOwner } from "../kernel/run/run-work-owner.js";
 import { RunAbortOwner } from "../kernel/run/run-abort-owner.js";
 import { RunQueueOwner } from "../kernel/run/run-queue-owner.js";
 import { RunInvocations, type RunInvocationContext, type CommandReplacement } from "../kernel/run/run-invocations.js";
+import { RunTerminalOwner, type RunTerminalContext } from "../kernel/run/run-terminal.js";
 import { ManualCompactionOwner, type ManualCompactionContext } from "../kernel/run/manual-compaction.js";
 import type { HomeTaskControlRequest } from "../home/home-task-dispatcher.js";
 import type { PromptOwnership, PromptAdmissionContext } from "../kernel/run/prompt-input.js";
 import { admitPrompt } from "../kernel/run/prompt-admission.js";
-import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../kernel/run/invocation-receipts.js";
 import { PromptAttempt } from "../kernel/run/prompt-attempt.js";
 import { RunQueueCommands, MAXIMUM_QUEUED_MESSAGE_BYTES, validateQueue, resourceIsInvocable } from "../kernel/run/queue-commands.js";
 import { HeldPromptQueue } from "../kernel/run/held-prompt-queue.js";
@@ -171,7 +171,7 @@ import { trustedExtensionOriginKind } from "../kernel/projection/extension-origi
 import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "../kernel/run/direct-bash-process-owner.js";
-import type { AgentTerminalOutcome, ModuleHost, SessionContext } from "../kernel/host/module-host.js";
+import type { ModuleHost, SessionContext } from "../kernel/host/module-host.js";
 import { projectHookRegistrations } from "../kernel/projection/hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
 import { skillTitle } from "./skill-title.js";
@@ -276,7 +276,6 @@ const MAXIMUM_PENDING_PROMPT_BYTES = MAXIMUM_QUEUED_MESSAGE_BYTES;
 const STREAMING_PROGRESS_FLUSH_MS = 150;
 const DEFAULT_RUNTIME_DISPOSAL_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
-const MAX_COMPLETION_DISPOSITIONS = 16;
 
 class OversizedExtensionArtifactError extends Error {
   constructor() {
@@ -321,12 +320,6 @@ const MAX_EXTENSION_EVENT_LINES = 256;
 export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "transient";
 
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
-
-interface OperationObservation {
-  cursor?: { entryIndex: number };
-  observedCompletionId?: string;
-  pendingCompletionId?: string;
-}
 
 export interface CanonicalAssistantCompletion {
   id: string;
@@ -517,7 +510,7 @@ export class RuntimeSlot {
     runLane: operation => this.lane.run(operation),
     assertAvailable: () => this.assertAvailable(),
     taskWorker: () => this.taskWorker,
-    liveTaskOperationId: () => this.liveTaskOperationId(),
+    liveTaskOperationId: () => this.runTerminal.liveTaskOperationId(),
     queued: () => this.runQueue.queuedMessages,
     replaceQueued: items => { this.runQueue.queuedMessages = items; },
     pendingAdmission: () => this.runQueue.pendingQueueAdmission,
@@ -542,7 +535,7 @@ export class RuntimeSlot {
     publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
   });
   private retainedLeaseCount = 0;
-  private readonly ownedTerminalObservers = new Map<string, (terminal: OwnedOperationTerminal) => Promise<void> | void>();
+  private readonly runTerminal = new RunTerminalOwner(this.runTerminalBindings());
   private snapshotTimer: NodeJS.Timeout | undefined;
   private progressFlushTimer: NodeJS.Timeout | undefined;
   /** The latest cumulative SDK message is projected only at the wire flush boundary. */
@@ -560,13 +553,6 @@ export class RuntimeSlot {
   private readonly canonicalizedStreamingMessages = new WeakSet<object>();
   /** Exact successful canonical assistant completion awaiting durable attention admission. */
   private pendingAssistantCompletion: CanonicalAssistantCompletion | undefined;
-  /** Only an admitted agent_start may own a terminal candidate. Later SDK
-   * progress can reconstruct a projection even for a drain-rejected run. */
-  private notificationRun: { assistant?: AgentMessage } | undefined;
-  private waitingNotificationEpisode: string | undefined;
-  /** One foreground-observation decision is shared by durable attention and
-   * automatic completion notification policy for the same canonical entry. */
-  private readonly completionDispositions = new Map<string, boolean>();
   /** `message_end` precedes Pi's synchronous canonical append. Capture immutable
    * operation ownership in that callback turn so an immediate extension
    * continuation cannot inherit the completion's already-consumed owner. */
@@ -582,7 +568,6 @@ export class RuntimeSlot {
   private rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
   /** The session replacement a running extension command requested. */
   private commandReplacement: CommandReplacement | undefined;
-  /** Commands settled in their origin at a replacement; bounded. */
   /** Disposable runtime-only bridge from canonical entry IDs to mounted turn IDs. */
   private readonly presentationIDs = new Map<string, string>();
   private readonly presentationIDOrder: string[] = [];
@@ -776,7 +761,7 @@ export class RuntimeSlot {
     ensureAgentProjection: () => this.ensureAgentProjection(),
     invocationForOperation: id => this.runInvocations.invocationForOperation(id),
     terminalizeTransferredOperation: id => this.runInvocations.terminalizeTransferredOperation(id),
-    retireOperationObservation: id => this.retireOperationObservation(id),
+    retireOperationObservation: id => this.runTerminal.retireOperationObservation(id),
     enqueueMarkerOwnership: id => this.enqueueMarkerOwnership(id),
     clearMarkerOwnership: id => this.clearMarkerOwnership(id),
     internalWakeSemantic: id => this.internalWakeSemantic(id),
@@ -876,11 +861,6 @@ export class RuntimeSlot {
   private homeWakeTrigger: { eventId: string; taskId: string; operationId: string } | undefined;
   /** Whether the admitted operation is a wake, so the activation's idle notice names it. */
   private operationWasHomeWake = false;
-  /** A task worker's operation between turns: its last turn ended with live owned runs and no
-   * report, so the dispatcher's observer is held here instead of settling the task. A provider
-   * wake starts the next turn of the same task (`wakeOperationId` set once that turn runs). Only
-   * this instance holds it: a restart leaves a waiting task to cold reconciliation. */
-  private taskWait: { observer: (terminal: OwnedOperationTerminal) => Promise<void> | void; terminal: OwnedOperationTerminal; wakeOperationId?: string } | undefined;
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */
@@ -1285,8 +1265,8 @@ export class RuntimeSlot {
     if (!worker?.acceptsSteering || this.disposed || this.shuttingDown || this.trustReloadPending || this.runPersistence.hasBlockedOwnershipWrite) return false;
     if (this.phase === "compacting" || this.activeOperationId !== undefined && this.runAbort.abortedOperations.has(this.activeOperationId)) return false;
     const session = this.runtime.session;
-    if (session.isStreaming) return this.liveTaskOperationId() === worker.identity.operationId;
-    return this.taskWait !== undefined && this.taskWait.wakeOperationId === undefined
+    if (session.isStreaming) return this.runTerminal.liveTaskOperationId() === worker.identity.operationId;
+    return this.runTerminal.taskWait !== undefined && this.runTerminal.taskWait.wakeOperationId === undefined
       && this.activeOperationId === undefined && this.operation === undefined;
   }
 
@@ -1617,7 +1597,7 @@ export class RuntimeSlot {
       this.pendingAssistantCompletion?.operationId,
       this.runQueue.pendingQueueAdmission?.id,
       ...this.completionOwnershipQueue.map((item) => item.completion.operationId),
-      ...[...this.operationObservations.entries()]
+      ...[...this.runTerminal.operationObservations.entries()]
         .filter(([, observation]) => observation.pendingCompletionId !== undefined)
         .map(([operationId]) => operationId),
       ...this.runQueue.queuedMessages.map((item) => item.id),
@@ -2146,7 +2126,7 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         ...(directBashProcesses ? { customTools: [
           directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
-          ...(this.taskWorker ? [this.taskWorker.checkinTool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined), this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined,
+          ...(this.taskWorker ? [this.taskWorker.checkinTool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.runTerminal.taskTurnOperationId(this.activeOperationId) : undefined), this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.runTerminal.taskTurnOperationId(this.activeOperationId) : undefined,
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
@@ -2597,7 +2577,7 @@ export class RuntimeSlot {
       if (this.liveProfile().chapter || this.dependencies.homeChapterState(this.id).homeId) {
         throw new GatewayError("conflict", "A Home chapter cannot run a task");
       }
-      if (this.taskWorker?.controlsActive || this.taskWait || this.activeOperationId !== undefined || this.operation !== undefined
+      if (this.taskWorker?.controlsActive || this.runTerminal.taskWait || this.activeOperationId !== undefined || this.operation !== undefined
         || this.catalogHasActiveSubagents || this.isAgentAdmissionSettling) {
         throw new GatewayError("conflict", "The worker session is still running; stop it before resuming");
       }
@@ -3308,65 +3288,6 @@ export class RuntimeSlot {
    * share the operation lifetime. Terminal receipts attribute their completion
    * from `observedCompletionId`; the cursor fences which completions belong to
    * this operation. (Knowledge observation no longer consumes these cuts, #1315.) */
-  private readonly operationObservations = new Map<string, OperationObservation>();
-
-  private observationFor(operationId: string): OperationObservation {
-    let observation = this.operationObservations.get(operationId);
-    if (!observation) {
-      observation = {};
-      this.operationObservations.set(operationId, observation);
-    }
-    return observation;
-  }
-
-  private retireOperationObservation(operationId: string | undefined): void {
-    if (operationId) this.operationObservations.delete(operationId);
-  }
-
-  private completionOperationId(completionId: string): string | undefined {
-    for (const [operationId, observation] of this.operationObservations) {
-      if (observation.pendingCompletionId === completionId) return operationId;
-    }
-    return undefined;
-  }
-
-  private completionObserved(completionId: string): boolean {
-    const existing = this.completionDispositions.get(completionId);
-    if (existing !== undefined) return existing;
-    const observed = this.dependencies.isSessionPresented(this.id);
-    this.completionDispositions.set(completionId, observed);
-    while (this.completionDispositions.size > MAX_COMPLETION_DISPOSITIONS) {
-      const oldest = this.completionDispositions.keys().next().value;
-      if (oldest === undefined) break;
-      this.completionDispositions.delete(oldest);
-    }
-    return observed;
-  }
-
-  private async notifyAgentTerminal(sourceId: string, outcome: AgentTerminalOutcome): Promise<void> {
-    // A task's durable result owner, never generic chat completion, decides push.
-    if (this.taskWorker) return;
-    const runTerminal = this.dependencies.modules.policy("runTerminal")?.();
-    if (!runTerminal) return;
-    try {
-      const pendingBackgroundProcesses = this.pendingBackgroundProcesses();
-      const waitingEpisode = pendingBackgroundProcesses.join("\0");
-      await runTerminal({
-        sessionId: this.id,
-        sourceId,
-        outcome,
-        sessionTitle: this.notificationTitle(),
-        observed: this.completionObserved(sourceId),
-        pendingBackgroundWork: pendingBackgroundProcesses.length,
-        waitingEpisode: waitingEpisode !== "" && waitingEpisode === this.waitingNotificationEpisode,
-      });
-      this.waitingNotificationEpisode = waitingEpisode || undefined;
-    } catch {
-      // Push admission is best-effort and must never fail canonical settlement.
-      this.emit("session.diagnostic", { code: "terminal-notification-failed" });
-    }
-  }
-
   /** The process activity projection owns live delegated work that may wake
    * this session; paused and recent history are not pending work. */
   private pendingBackgroundProcesses(): string[] {
@@ -3375,33 +3296,6 @@ export class RuntimeSlot {
         && ["asynchronous", "workflow"].includes(activity.mode?.toLowerCase() ?? ""))
       .map((activity) => `${activity.toolCallId}:${activity.runId ?? activity.activityId ?? activity.id}`)
       .sort();
-  }
-
-  private takeAgentTerminal(operationId: string | undefined): { sourceId: string; outcome: AgentTerminalOutcome } | undefined {
-    const run = this.notificationRun;
-    this.notificationRun = undefined;
-    if (!run || !operationId) return;
-    const { assistant } = run;
-    // Match the exact final run object, not the latest successful history row.
-    // Retry errors remain canonical even when Pi removes them from model context.
-    const entry = assistant && this.sessionManager.getBranch().findLast((candidate) =>
-      candidate.type === "message" && candidate.message === assistant);
-    const invocation = this.runInvocations.invocationForOperation(operationId);
-    const sourceId = entry?.id ?? (invocation ? `terminal:${invocation.invocationId}` : operationId);
-    const reason = assistant?.role === "assistant" ? assistant.stopReason : undefined;
-    // A task operation whose report is sealed ended at the report's tool boundary
-    // by design: that is its completion, not an unknown outcome.
-    const reportCompleted = reason === "toolUse" && this.taskWorker?.reportSealed === true
-      && this.taskWorker.identity.operationId === operationId;
-    const outcome: AgentTerminalOutcome = this.runAbort.abortedOperations.has(operationId) || reason === "aborted" ? "stopped"
-      : reason === "error" ? "failed"
-      : reason === "length" ? "limited"
-      : reason === "stop" || reportCompleted ? "completed"
-      : "unknown";
-    // Observation belongs to the terminal boundary, before receipt I/O can
-    // suspend and a phone can open/close the chat or a successor can start.
-    this.completionObserved(sourceId);
-    return { sourceId, outcome };
   }
 
   private notificationTitle(): string {
@@ -3564,6 +3458,25 @@ export class RuntimeSlot {
     );
   }
 
+  private runTerminalBindings(): RunTerminalContext {
+    const slot = this;
+    return {
+      get id() { return slot.id; },
+      get activeOperationId() { return slot.activeOperationId; },
+      get operation() { return slot.operation; },
+      get dependencies() { return slot.dependencies; },
+      get sessionManager() { return slot.sessionManager; },
+      get taskWorker() { return slot.taskWorker; },
+      get runInvocations() { return slot.runInvocations; },
+      get runAbort() { return slot.runAbort; },
+      pendingBackgroundProcesses: () => slot.pendingBackgroundProcesses(),
+      notificationTitle: () => slot.notificationTitle(),
+      hasDetachedDashboardWork: () => slot.hasDetachedDashboardWork(),
+      abort: (...args) => slot.abort(...args),
+      emit: (...args) => slot.emit(...args),
+    };
+  }
+
   private runInvocationBindings(): RunInvocationContext {
     const slot = this;
     return {
@@ -3575,7 +3488,7 @@ export class RuntimeSlot {
       get commandReplacement() { return slot.commandReplacement; },
       get pendingExtensionCommand() { return slot.pendingExtensionCommand; },
       get completionOwnershipQueue() { return slot.completionOwnershipQueue; },
-      get operationObservations() { return slot.operationObservations; },
+      get operationObservations() { return slot.runTerminal.operationObservations; },
       get attentionBarrier() { return slot.attentionBarrier; },
       get runPersistence() { return slot.runPersistence; },
       get runWork() { return slot.runWork; },
@@ -3583,60 +3496,9 @@ export class RuntimeSlot {
       get runQueue() { return slot.runQueue; },
       persistCanonicalCustomEntry: (...args) => slot.persistCanonicalCustomEntry(...args),
       clearMarkerOwnership: operationId => slot.clearMarkerOwnership(operationId),
-      notifyOwnedTerminal: terminal => slot.notifyOwnedTerminal(terminal),
+      notifyOwnedTerminal: terminal => slot.runTerminal.notifyOwnedTerminal(terminal),
       emit: (topic, data) => slot.emit(topic, data),
     };
-  }
-
-  private async notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void> {
-    // A held task's next turn reports to the task, even when Home's steering started that turn;
-    // the steering's own observer still learns its terminal.
-    const own = this.ownedTerminalObservers.get(terminal.operationId);
-    const wake = this.taskWait?.wakeOperationId === terminal.operationId ? this.taskWait.observer : undefined;
-    const observer = wake ?? own;
-    if (!observer) return;
-    this.ownedTerminalObservers.delete(terminal.operationId);
-    if (wake && own) await own(terminal);
-    // Only the task's own turns (its first operation, then each wake) hold or settle it; a steer
-    // or other owned operation reports to its own observer and never touches the wait.
-    if (this.taskWorker && (terminal.operationId === this.taskWorker.identity.operationId || this.taskWait?.wakeOperationId === terminal.operationId)) {
-      if (this.taskTurnAwaitsWake(terminal)) {
-        this.taskWait = { observer, terminal };
-        return;
-      }
-      this.taskWait = undefined;
-    }
-    await observer(terminal);
-  }
-
-  /** A message the maintainer sent, or Home's exact-operation steering, to this worker's task. */
-  private sharedTaskSteering(ownership: PromptOwnership<HomeTaskControlRequest> | undefined): boolean {
-    if (!this.taskWorker) return false;
-    if (!ownership) return true;
-    const fence = ownership.taskFence;
-    return !!fence && fence.taskId === this.taskWorker.identity.taskId && fence.operationId === this.taskWorker.identity.operationId;
-  }
-
-  /** The task operation a turn reports under. A wake that continues the held task is the task's
-   * next turn, so its report seals the task's operation, not the wake's own. */
-  private taskTurnOperationId(operationId: string): string {
-    return this.taskWait?.wakeOperationId === operationId && this.taskWorker ? this.taskWorker.identity.operationId : operationId;
-  }
-
-  /** The task operation the live turn belongs to, or undefined when no turn runs. Task controls
-   * target the task's operation, so a provider wake's turn (its own operation) is the live task turn (#1251). */
-  private liveTaskOperationId(): string | undefined {
-    return this.activeOperationId === undefined ? undefined : this.taskTurnOperationId(this.activeOperationId);
-  }
-
-  /** A task turn that completed normally, without a report, while owned runs are live. The
-   * provider's completion or supervisor request wakes the same task for its next turn. A sealed or
-   * stopping task, a length, error or aborted turn, and a task with no live run settle now. */
-  private taskTurnAwaitsWake(terminal: OwnedOperationTerminal): boolean {
-    if (terminal.lifecycle !== "completed" || !this.taskWorker?.acceptsSteering) return false;
-    const last = this.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant");
-    return last?.type === "message" && last.message.role === "assistant" && last.message.stopReason === "stop"
-      && this.hasDetachedDashboardWork();
   }
 
   private enqueueMarkerOwnership(operationId: string): Promise<void> {
@@ -3695,15 +3557,15 @@ export class RuntimeSlot {
       // Canonical append admission is the single observation boundary. Later
       // attention settlement and agent_settled notification handling must read
       // this same disposition rather than resampling a close/completion race.
-      this.completionObserved(completion.id);
-      const operationId = completion.operationId ?? this.completionOperationId(completion.id);
+      this.runTerminal.completionObserved(completion.id);
+      const operationId = completion.operationId ?? this.runTerminal.completionOperationId(completion.id);
       const exactOwner = operationId ? this.runWork.get(operationId) : undefined;
       item = {
         completion: operationId && !completion.operationId ? { ...completion, operationId } : completion,
         stamp: undefined,
         observationSettled: false,
-        ...(operationId && this.operationObservations.get(operationId)?.cursor
-          ? { observationCursor: this.operationObservations.get(operationId)!.cursor }
+        ...(operationId && this.runTerminal.operationObservations.get(operationId)?.cursor
+          ? { observationCursor: this.runTerminal.operationObservations.get(operationId)!.cursor }
           : {}),
         ...(exactOwner ? {} : {
           fallbackWork: this.dependencies.workRegistry.beginDerived({
@@ -3759,7 +3621,7 @@ export class RuntimeSlot {
     _error: unknown,
     fallbackWork?: GatewayWorkHandle,
   ): void {
-    const operationId = completion.operationId ?? this.completionOperationId(completion.id);
+    const operationId = completion.operationId ?? this.runTerminal.completionOperationId(completion.id);
     this.dependencies.persistenceDiagnostic?.(this.id, "terminal-receipt-persistence-failed");
     this.emit("session.diagnostic", {
       code: "terminal-receipt-persistence-failed",
@@ -3767,16 +3629,16 @@ export class RuntimeSlot {
     });
     this.runWork.settleOperationWork(operationId);
     fallbackWork?.settle();
-    const pendingOwnerId = this.completionOperationId(completion.id);
-    if (pendingOwnerId) delete this.operationObservations.get(pendingOwnerId)!.pendingCompletionId;
+    const pendingOwnerId = this.runTerminal.completionOperationId(completion.id);
+    if (pendingOwnerId) delete this.runTerminal.operationObservations.get(pendingOwnerId)!.pendingCompletionId;
     if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
   }
 
   private admitCompletionObservation(item: CompletionOwnershipItem): void {
     if (item.observationSettled) return;
-    const operationId = item.completion.operationId ?? this.completionOperationId(item.completion.id);
+    const operationId = item.completion.operationId ?? this.runTerminal.completionOperationId(item.completion.id);
     if (!operationId) return;
-    const start = item.observationCursor ?? this.operationObservations.get(operationId)?.cursor;
+    const start = item.observationCursor ?? this.runTerminal.operationObservations.get(operationId)?.cursor;
     if (!start) return;
     const entries = this.canonicalSessionEntries();
     const completionIndex = entries.findIndex(entry => entry.id === item.completion.id);
@@ -3786,15 +3648,15 @@ export class RuntimeSlot {
     // agent_settled callback can consume it. A completion from an earlier
     // operation in a queued run may settle after its callback ownership ended.
     if (this.activeOperationId === operationId) {
-      this.observationFor(operationId).observedCompletionId = item.completion.id;
+      this.runTerminal.observationFor(operationId).observedCompletionId = item.completion.id;
     }
     if (this.hasActiveAgentRun && this.activeOperationId === operationId) {
       // The same foreground operation can continue after a completion (for
       // example, a consumed steer). Advance to the exact next canonical entry;
       // its later completion owns only the remaining range.
-      this.observationFor(operationId).cursor = { entryIndex: completionIndex + 1 };
+      this.runTerminal.observationFor(operationId).cursor = { entryIndex: completionIndex + 1 };
     } else {
-      this.retireOperationObservation(operationId);
+      this.runTerminal.retireOperationObservation(operationId);
     }
   }
 
@@ -3808,7 +3670,7 @@ export class RuntimeSlot {
             this.id,
             completion,
             false,
-            this.completionObserved(completion.id),
+            this.runTerminal.completionObserved(completion.id),
           );
           lastError = undefined;
           break;
@@ -3821,10 +3683,10 @@ export class RuntimeSlot {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
       this.admitCompletionObservation(item);
-      const completionWorkOwner = completion.operationId ?? this.completionOperationId(completion.id);
+      const completionWorkOwner = completion.operationId ?? this.runTerminal.completionOperationId(completion.id);
       this.runWork.settleOperationWork(completionWorkOwner);
-      const pendingOwner = this.completionOperationId(completion.id);
-      if (pendingOwner) delete this.operationObservations.get(pendingOwner)!.pendingCompletionId;
+      const pendingOwner = this.runTerminal.completionOperationId(completion.id);
+      if (pendingOwner) delete this.runTerminal.operationObservations.get(pendingOwner)!.pendingCompletionId;
       if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
       // A continuation may already own the agent while this older durable write
       // unwinds. Settlement retires only its exact completion; the newer run
@@ -3909,8 +3771,8 @@ export class RuntimeSlot {
     }
     switch (event.type) {
       case "agent_start": {
-        const precedingAssistant = this.notificationRun?.assistant;
-        this.notificationRun = undefined;
+        const precedingAssistant = this.runTerminal.notificationRun?.assistant;
+        this.runTerminal.notificationRun = undefined;
         const continuationFromSettlement = this.pendingAssistantCompletion !== undefined
           || this.pendingAssistantBindings.size > 0;
         const dequeuedOwner = this.runQueue.dequeuedFollowUpOwners[0];
@@ -3946,7 +3808,7 @@ export class RuntimeSlot {
             if (!this.pendingAssistantCompletion.operationId && this.activeOperationId) {
               this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: this.activeOperationId };
             }
-            if (this.activeOperationId) this.observationFor(this.activeOperationId).pendingCompletionId = this.pendingAssistantCompletion.id;
+            if (this.activeOperationId) this.runTerminal.observationFor(this.activeOperationId).pendingCompletionId = this.pendingAssistantCompletion.id;
             // Pi may start an extension continuation before the older settlement
             // callback unwinds. Preserve and immediately commit the prior exact
             // completion, then give the continuation a distinct marker owner so
@@ -3983,25 +3845,25 @@ export class RuntimeSlot {
             : undefined;
           const rejectedSource = precedingEntry?.id
             ?? (rejectedInvocation ? `terminal:${rejectedInvocation.invocationId}` : rejectedOperationId);
-          if (rejectedSource) this.completionObserved(rejectedSource);
+          if (rejectedSource) this.runTerminal.completionObserved(rejectedSource);
           void this.runtime.session.abort().then(async () => {
             // The preceding completion already owns its terminal receipt. A
             // rejected extension continuation must not overwrite that receipt
             // with a contradictory interruption under the same invocation ID.
             if (continuationFromSettlement) await this.reconcileAttention();
             else await this.runInvocations.terminalizeInvocation(rejectedOperationId, "interrupted", "drain-cutoff");
-            if (rejectedSource) await this.notifyAgentTerminal(rejectedSource, "stopped");
+            if (rejectedSource) await this.runTerminal.notifyAgentTerminal(rejectedSource, "stopped");
           }).catch(() => {
             this.emit("session.diagnostic", { code: "drain-cutoff-settlement-failed" });
           }).finally(() => this.runWork.settleOperationWork(rejectedOperationId));
           this.publishSnapshot();
           break;
         }
-        this.notificationRun = {};
+        this.runTerminal.notificationRun = {};
         if (dequeuedOwner && preflightOwner === dequeuedOwner) this.runQueue.dequeuedFollowUpOwners.shift();
         if (queuedOwner && preflightOwner === queuedOwner && this.activeOperationId !== queuedOwner) {
           this.runInvocations.terminalizeTransferredOperation(this.activeOperationId);
-          this.retireOperationObservation(this.activeOperationId);
+          this.runTerminal.retireOperationObservation(this.activeOperationId);
           this.activeOperationId = undefined;
           this.operation = undefined;
         }
@@ -4011,7 +3873,7 @@ export class RuntimeSlot {
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
-        this.observationFor(this.activeOperationId).cursor = { entryIndex: this.canonicalSessionEntries().length };
+        this.runTerminal.observationFor(this.activeOperationId).cursor = { entryIndex: this.canonicalSessionEntries().length };
         if (!continuesToolSegment) {
           if (beginsWithUserInput) {
             this.ownToolSegment(this.activeOperationId);
@@ -4040,9 +3902,9 @@ export class RuntimeSlot {
         break;
       }
       case "agent_end":
-        if (this.notificationRun) {
+        if (this.runTerminal.notificationRun) {
           const assistant = event.messages.findLast((message) => message.role === "assistant");
-          this.notificationRun = assistant ? { assistant } : {};
+          this.runTerminal.notificationRun = assistant ? { assistant } : {};
         }
         break;
       case "agent_settled":
@@ -4072,7 +3934,7 @@ export class RuntimeSlot {
         // Restore that still-live owner instead of publishing false idle.
         this.phase = this.compactionOperation ? "compacting" : "idle";
         const settledOperationId = this.activeOperationId;
-        const terminalNotification = this.takeAgentTerminal(settledOperationId);
+        const terminalNotification = this.runTerminal.takeAgentTerminal(settledOperationId);
         const terminalLifecycle = terminalNotification?.outcome === "stopped" ? "interrupted" as const
           : terminalNotification?.outcome === "failed" ? "failed" as const
           : terminalNotification?.outcome === "unknown" ? "outcomeUnknown" as const
@@ -4120,16 +3982,16 @@ export class RuntimeSlot {
                 settledOperationId === completion.operationId ? completion.id : undefined,
               );
               await this.beginAttentionSettlement(completion);
-              if (terminal) await this.notifyOwnedTerminal(terminal);
-              const completionOperationId = completion.operationId ?? this.completionOperationId(completion.id);
-              if (completionOperationId) this.retireOperationObservation(completionOperationId);
-              this.retireOperationObservation(settledOperationId);
+              if (terminal) await this.runTerminal.notifyOwnedTerminal(terminal);
+              const completionOperationId = completion.operationId ?? this.runTerminal.completionOperationId(completion.id);
+              if (completionOperationId) this.runTerminal.retireOperationObservation(completionOperationId);
+              this.runTerminal.retireOperationObservation(settledOperationId);
               if (settledOperationId && settledOperationId !== completion.operationId) {
                 await this.clearMarkerOwnership(settledOperationId);
                 this.runWork.settleOperationWork(settledOperationId);
               }
               if (settledOperationId) this.runAbort.abortedOperations.delete(settledOperationId);
-              if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
+              if (terminalNotification) await this.runTerminal.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
             })().catch(() => {}));
             break;
           }
@@ -4140,10 +4002,10 @@ export class RuntimeSlot {
               terminalLifecycle,
               terminalErrorCode,
               undefined,
-              this.operationObservations.get(settledOperationId)?.observedCompletionId,
+              this.runTerminal.operationObservations.get(settledOperationId)?.observedCompletionId,
             ).then(async () => {
-              this.retireOperationObservation(settledOperationId);
-              if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
+              this.runTerminal.retireOperationObservation(settledOperationId);
+              if (terminalNotification) await this.runTerminal.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
               await this.clearMarkerOwnership(settledOperationId);
             });
             // The foreground token remains the exact owner; do not create a second
@@ -4366,7 +4228,7 @@ export class RuntimeSlot {
               const displacedOwner = this.activeOperationId;
               if (displacedOwner !== reclassifiedAdmission.id) {
                 this.runInvocations.terminalizeTransferredOperation(displacedOwner);
-                this.retireOperationObservation(displacedOwner);
+                this.runTerminal.retireOperationObservation(displacedOwner);
               }
               this.activeOperationId = reclassifiedAdmission.id;
               this.homeRequestPolicy?.transferOperation(displacedOwner, reclassifiedAdmission.id);
@@ -4778,10 +4640,10 @@ export class RuntimeSlot {
             // Steering is nested input in the foreground run, not an observation owner.
             const isConsumedSteering = this.runQueue.consumedSteeringOperationIDs.has(operationID);
             const observationOwnerId = isConsumedSteering ? this.activeOperationId ?? operationID : operationID;
-            if (isConsumedSteering || !this.operationObservations.get(observationOwnerId)?.cursor) {
+            if (isConsumedSteering || !this.runTerminal.operationObservations.get(observationOwnerId)?.cursor) {
               const canonical = this.canonicalSessionEntries();
               const entryIndex = canonical.findIndex(entry => entry.id === candidate.id);
-              if (entryIndex >= 0) this.observationFor(observationOwnerId).cursor = { entryIndex };
+              if (entryIndex >= 0) this.runTerminal.observationFor(observationOwnerId).cursor = { entryIndex };
             }
             // The live map is only an optimization. A fast run may already
             // have terminalized and evicted it; recover immutable ownership
@@ -7041,20 +6903,8 @@ export class RuntimeSlot {
 
   /** Task cancellation follows the root prompt owner, not its disposable
    * presentation primitive (automatic compaction/retry may have another ID). */
-  async cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
-    if (!this.taskWorker || this.taskWorker.identity.operationId !== operationId) throw new GatewayError("conflict", "Task cancellation owner changed");
-    // Between turns no turn runs to abort: the held observer settles the waiting task now. The
-    // runs it still owns are stopped and joined by settlement, as for an interrupted turn.
-    if (this.taskWait && this.taskWait.wakeOperationId === undefined) {
-      const { observer, terminal } = this.taskWait;
-      this.taskWait = undefined;
-      await observer({ lifecycle: "interrupted", operationId, invocationId: terminal.invocationId, errorCode: TASK_STOP_WAITING });
-      return;
-    }
-    // A provider wake's turn is the task's running turn: its abort is the task's Stop.
-    const turnOperationId = this.taskWait?.wakeOperationId ?? operationId;
-    if (this.activeOperationId !== turnOperationId && this.operation?.id !== turnOperationId) return;
-    await this.abort("agent", turnOperationId, reason);
+  cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
+    return this.runTerminal.cancelHomeTaskOperation(operationId, reason);
   }
 
   /** Starts one Home wake: the inbox's pending results start the run. */
@@ -7250,7 +7100,7 @@ export class RuntimeSlot {
       get queuedManualCompactionInFlight() { return slot.manualCompaction.queuedManualCompactionInFlight; },
       get shuttingDown() { return slot.shuttingDown; },
       get taskWorker() { return slot.taskWorker; },
-      get taskWait() { return slot.taskWait; },
+      get taskWait() { return slot.runTerminal.taskWait; },
       get homeRequestPolicy() { return slot.homeRequestPolicy; },
       get sessionFile() { return slot.sessionFile; },
       get canonicalEntryCount() { return slot.canonicalEntryCount; },
@@ -7260,7 +7110,7 @@ export class RuntimeSlot {
       get runWork() { return slot.runWork; },
       get heldQueue() { return slot.heldQueue; },
       get invocations() { return slot.runInvocations.invocations; },
-      get ownedTerminalObservers() { return slot.ownedTerminalObservers; },
+      get ownedTerminalObservers() { return slot.runTerminal.ownedTerminalObservers; },
       get compactionPolicies() { return slot.compactionPolicies; },
       get contextPolicies() { return slot.contextPolicies; },
       get lane() { return slot.lane; },
@@ -7270,8 +7120,8 @@ export class RuntimeSlot {
       assertHomePromptAdmission: (...args) => slot.assertHomePromptAdmission(...args),
       assertHomeWakeAdmissible: (...args) => slot.assertHomeWakeAdmissible(...args),
       attentionPendingError: (...args) => slot.attentionPendingError(...args),
-      liveTaskOperationId: (...args) => slot.liveTaskOperationId(...args),
-      sharedTaskSteering: (...args) => slot.sharedTaskSteering(...args),
+      liveTaskOperationId: (...args) => slot.runTerminal.liveTaskOperationId(...args),
+      sharedTaskSteering: (...args) => slot.runTerminal.sharedTaskSteering(...args),
       waitForStateChange: (...args) => slot.waitForStateChange(...args),
       applyLiveRunSettings: (...args) => slot.applyLiveRunSettings(...args),
       assertInvocableResources: (...args) => slot.assertInvocableResources(...args),
@@ -7283,9 +7133,9 @@ export class RuntimeSlot {
       persistCanonicalCustomEntry: (...args) => slot.persistCanonicalCustomEntry(...args),
       enqueueMarkerOwnership: (...args) => slot.enqueueMarkerOwnership(...args),
       clearMarkerOwnership: (...args) => slot.clearMarkerOwnership(...args),
-      notifyOwnedTerminal: (...args) => slot.notifyOwnedTerminal(...args),
-      notifyAgentTerminal: (...args) => slot.notifyAgentTerminal(...args),
-      completionObserved: (...args) => slot.completionObserved(...args),
+      notifyOwnedTerminal: (...args) => slot.runTerminal.notifyOwnedTerminal(...args),
+      notifyAgentTerminal: (...args) => slot.runTerminal.notifyAgentTerminal(...args),
+      completionObserved: (...args) => slot.runTerminal.completionObserved(...args),
       terminalizeInvocation: (...args) => slot.runInvocations.terminalizeInvocation(...args),
       startHomeWake: (...args) => slot.startHomeWake(...args),
       publishSnapshot: (...args) => slot.publishSnapshot(...args),
@@ -7325,11 +7175,11 @@ export class RuntimeSlot {
         pendingAssistantCompletion: () => slot.pendingAssistantCompletion,
         beginAttentionSettlement: completion => slot.beginAttentionSettlement(completion),
         queuesIntoActiveRun,
-        completionObserved: id => slot.completionObserved(id),
+        completionObserved: id => slot.runTerminal.completionObserved(id),
         terminalizeInvocation: (id, lifecycle, errorCode) => slot.runInvocations.terminalizeInvocation(id, lifecycle, errorCode),
         clearMarkerOwnership: id => slot.clearMarkerOwnership(id),
         enqueueMarkerOwnership: id => slot.enqueueMarkerOwnership(id),
-        notifyAgentTerminal: (id, outcome) => slot.notifyAgentTerminal(id, outcome),
+        notifyAgentTerminal: (id, outcome) => slot.runTerminal.notifyAgentTerminal(id, outcome),
         persistInvocationReceipt: (receipt, owner) => slot.runInvocations.persistInvocationReceipt(receipt, owner),
         setIdle: () => { slot.phase = "idle"; },
         noteHomeIdle: () => slot.noteHomeIdle(),
@@ -8278,7 +8128,7 @@ export class RuntimeSlot {
     const interruptedOperationId = this.operation?.kind === "command" ? undefined : this.activeOperationId ?? this.pendingPrompt?.id;
     const interruptedInvocation = this.runInvocations.invocationForOperation(interruptedOperationId);
     const interruptedSource = interruptedInvocation ? `terminal:${interruptedInvocation.invocationId}` : interruptedOperationId;
-    if (interruptedSource) this.completionObserved(interruptedSource);
+    if (interruptedSource) this.runTerminal.completionObserved(interruptedSource);
     this.shuttingDown = true;
     const cancellation = new GatewayError("cancelled", "Gateway shutdown cancelled queued compaction");
     this.manualCompaction.cancelPending(cancellation);
@@ -8303,7 +8153,7 @@ export class RuntimeSlot {
       this.manualCompaction.finishShutdown(cancellation);
       if (interruptedSource) {
         await this.runInvocations.terminalizeInvocation(interruptedOperationId, "outcomeUnknown", "runtime-disposed");
-        await this.notifyAgentTerminal(interruptedSource, "interrupted");
+        await this.runTerminal.notifyAgentTerminal(interruptedSource, "interrupted");
       }
       await this.disposeRuntime();
       // Forced interruption intentionally leaves evidence for restart. Only a
@@ -8321,7 +8171,7 @@ export class RuntimeSlot {
   }
 
   private async disposeRuntime(): Promise<void> {
-    this.operationObservations.clear();
+    this.runTerminal.operationObservations.clear();
     // Borrowed Home views have no attachment to detach; the shared Gateway
     // installation outlives this slot and is retired by its own runtime owner.
     this.detachOpenAIEligibility?.();
@@ -8346,7 +8196,7 @@ export class RuntimeSlot {
     this.progressFlushTimer = undefined;
     this.pendingProgressMessage = undefined;
     this.latestStreamingMessage = undefined;
-    this.notificationRun = undefined;
+    this.runTerminal.notificationRun = undefined;
     this.streamIdentityMessage = undefined;
     this.streamAnchorId = undefined;
     this.streamPresentationId = undefined;
@@ -8365,12 +8215,12 @@ export class RuntimeSlot {
     // An admitted automation must never lose its terminal waiter when runtime
     // teardown wins a callback race. Persist uncertainty while the canonical
     // manager is still writable; recovery can then block instead of replaying.
-    for (const operationId of [...this.ownedTerminalObservers.keys()]) {
+    for (const operationId of [...this.runTerminal.ownedTerminalObservers.keys()]) {
       const invocation = this.runInvocations.invocationForOperation(operationId);
       if (invocation) {
         await this.runInvocations.terminalizeInvocation(operationId, "outcomeUnknown", "runtime-disposed");
       } else {
-        await this.notifyOwnedTerminal({
+        await this.runTerminal.notifyOwnedTerminal({
           lifecycle: "outcomeUnknown",
           operationId,
           invocationId: operationId,

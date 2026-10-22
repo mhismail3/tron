@@ -109,8 +109,8 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     await waitBetweenTurns(slot);
     await f.registry.homeOwner().steerTask(f.home.sessionId, { taskId: run.taskId, operationId: run.operationId, text: "Home between turns" });
     await waitFor(() => turns.length === 1, "Home's steering starts the task's next turn", bound);
-    await waitFor(() => (slot as unknown as { taskWait?: { wakeOperationId?: string } }).taskWait?.wakeOperationId === undefined
-      && (slot as unknown as { taskWait?: unknown }).taskWait !== undefined, "task waits again", bound);
+    await waitFor(() => (slot as unknown as { runTerminal: { taskWait?: { wakeOperationId?: string } } }).runTerminal.taskWait?.wakeOperationId === undefined
+      && (slot as unknown as { runTerminal: { taskWait?: unknown } }).runTerminal.taskWait !== undefined, "task waits again", bound);
     // The maintainer's composer sends an ordinary prompt; it joins the same lane, not refused.
     await slot.prompt("Maintainer between turns");
     await waitFor(() => turns.length === 2, "the maintainer's message starts the task's next turn", bound);

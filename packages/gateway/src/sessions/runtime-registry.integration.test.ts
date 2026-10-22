@@ -7430,7 +7430,7 @@ export default function (pi) {
     });
     // This lifecycle-only record has no public projection. Inspect private
     // state rather than adding a production accessor for the regression.
-    const slotInternals = slot as unknown as { operationObservations: Map<string, unknown> };
+    const slotInternals = (slot as unknown as { runTerminal: { operationObservations: Map<string, unknown> } }).runTerminal;
 
     const initial = slot.prompt("initial");
     await waitFor(() => slot.snapshot().phase === "running", "the initial run");
@@ -7546,7 +7546,7 @@ export default function (pi) {
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
-    const slotInternals = slot as unknown as { operationObservations: Map<string, { observedCompletionId?: string }> };
+    const slotInternals = (slot as unknown as { runTerminal: { operationObservations: Map<string, { observedCompletionId?: string }> } }).runTerminal;
 
     const initial = slot.prompt("initial");
     await waitFor(() => slot.snapshot().phase === "running", "the initial run");

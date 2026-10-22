@@ -40,6 +40,7 @@ export interface RunInvocationContext {
 export class RunInvocations {
   readonly invocations = new Map<string, LiveInvocation>();
   readonly invocationFailures = new Map<string, string>();
+  /** Commands settled in their origin at a replacement; bounded. */
   private readonly handedOffInvocations = new Set<string>();
 
   constructor(private readonly context: RunInvocationContext) {}
