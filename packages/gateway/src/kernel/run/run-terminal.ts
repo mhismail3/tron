@@ -1,28 +1,9 @@
+import type { RunOperations } from "./run-operations.js";
 import type { AgentMessage } from "../pi/agent-core.js";
-import type { AgentSession } from "../pi/coding-agent.js";
-import type { AgentTerminalOutcome, ModuleHost } from "../host/module-host.js";
-import type { JsonValue } from "../../protocol/types.js";
+import type { AgentTerminalOutcome } from "../host/module-host.js";
 import { GatewayError } from "../../errors.js";
 import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "./invocation-receipts.js";
 import type { PromptOwnership } from "./prompt-input.js";
-import type { RunInvocations } from "./run-invocations.js";
-import type { RunAbortOwner } from "./run-abort-owner.js";
-
-export interface RunTerminalContext {
-  readonly id: string;
-  readonly activeOperationId: string | undefined;
-  readonly operation: { readonly id?: string } | undefined;
-  readonly dependencies: { modules: ModuleHost; isSessionPresented(id: string): boolean };
-  readonly sessionManager: Pick<AgentSession["sessionManager"], "getBranch">;
-  readonly taskWorker: { readonly identity: { readonly taskId: string; readonly operationId: string }; readonly acceptsSteering: boolean; readonly reportSealed: boolean } | undefined;
-  readonly runInvocations: RunInvocations;
-  readonly runAbort: Pick<RunAbortOwner, "abortedOperations">;
-  pendingBackgroundProcesses(): string[];
-  notificationTitle(): string;
-  hasDetachedDashboardWork(): boolean;
-  abort(command: "agent", operationId: string, reason: string): Promise<void>;
-  emit(topic: string, data: JsonValue): void;
-}
 
 interface OperationObservation {
   cursor?: { entryIndex: number };
@@ -48,7 +29,7 @@ export class RunTerminalOwner {
    * this instance holds it: a restart leaves a waiting task to cold reconciliation. */
   taskWait: { observer: (terminal: OwnedOperationTerminal) => Promise<void> | void; terminal: OwnedOperationTerminal; wakeOperationId?: string } | undefined;
 
-  constructor(private readonly context: RunTerminalContext) {}
+  constructor(private readonly operations: RunOperations<unknown>) {}
 
   readonly operationObservations = new Map<string, OperationObservation>();
 
@@ -75,7 +56,7 @@ export class RunTerminalOwner {
   completionObserved(completionId: string): boolean {
     const existing = this.completionDispositions.get(completionId);
     if (existing !== undefined) return existing;
-    const observed = this.context.dependencies.isSessionPresented(this.context.id);
+    const observed = this.operations.dependencies.isSessionPresented(this.operations.id);
     this.completionDispositions.set(completionId, observed);
     while (this.completionDispositions.size > MAX_COMPLETION_DISPOSITIONS) {
       const oldest = this.completionDispositions.keys().next().value;
@@ -87,17 +68,17 @@ export class RunTerminalOwner {
 
   async notifyAgentTerminal(sourceId: string, outcome: AgentTerminalOutcome): Promise<void> {
     // A task's durable result owner, never generic chat completion, decides push.
-    if (this.context.taskWorker) return;
-    const runTerminal = this.context.dependencies.modules.policy("runTerminal")?.();
+    if (this.operations.taskWorker) return;
+    const runTerminal = this.operations.dependencies.modules.policy("runTerminal")?.();
     if (!runTerminal) return;
     try {
-      const pendingBackgroundProcesses = this.context.pendingBackgroundProcesses();
+      const pendingBackgroundProcesses = this.operations.pendingBackgroundProcesses();
       const waitingEpisode = pendingBackgroundProcesses.join("\0");
       await runTerminal({
-        sessionId: this.context.id,
+        sessionId: this.operations.id,
         sourceId,
         outcome,
-        sessionTitle: this.context.notificationTitle(),
+        sessionTitle: this.operations.notificationTitle(),
         observed: this.completionObserved(sourceId),
         pendingBackgroundWork: pendingBackgroundProcesses.length,
         waitingEpisode: waitingEpisode !== "" && waitingEpisode === this.waitingNotificationEpisode,
@@ -105,7 +86,7 @@ export class RunTerminalOwner {
       this.waitingNotificationEpisode = waitingEpisode || undefined;
     } catch {
       // Push admission is best-effort and must never fail canonical settlement.
-      this.context.emit("session.diagnostic", { code: "terminal-notification-failed" });
+      this.operations.emit("session.diagnostic", { code: "terminal-notification-failed" });
     }
   }
 
@@ -116,16 +97,16 @@ export class RunTerminalOwner {
     const { assistant } = run;
     // Match the exact final run object, not the latest successful history row.
     // Retry errors remain canonical even when Pi removes them from model context.
-    const entry = assistant && this.context.sessionManager.getBranch().findLast((candidate) =>
+    const entry = assistant && this.operations.sessionManager.getBranch().findLast((candidate) =>
       candidate.type === "message" && candidate.message === assistant);
-    const invocation = this.context.runInvocations.invocationForOperation(operationId);
+    const invocation = this.operations.runInvocations.invocationForOperation(operationId);
     const sourceId = entry?.id ?? (invocation ? `terminal:${invocation.invocationId}` : operationId);
     const reason = assistant?.role === "assistant" ? assistant.stopReason : undefined;
     // A task operation whose report is sealed ended at the report's tool boundary
     // by design: that is its completion, not an unknown outcome.
-    const reportCompleted = reason === "toolUse" && this.context.taskWorker?.reportSealed === true
-      && this.context.taskWorker.identity.operationId === operationId;
-    const outcome: AgentTerminalOutcome = this.context.runAbort.abortedOperations.has(operationId) || reason === "aborted" ? "stopped"
+    const reportCompleted = reason === "toolUse" && this.operations.taskWorker?.reportSealed === true
+      && this.operations.taskWorker.identity.operationId === operationId;
+    const outcome: AgentTerminalOutcome = this.operations.runAbort.abortedOperations.has(operationId) || reason === "aborted" ? "stopped"
       : reason === "error" ? "failed"
       : reason === "length" ? "limited"
       : reason === "stop" || reportCompleted ? "completed"
@@ -147,7 +128,7 @@ export class RunTerminalOwner {
     if (wake && own) await own(terminal);
     // Only the task's own turns (its first operation, then each wake) hold or settle it; a steer
     // or other owned operation reports to its own observer and never touches the wait.
-    if (this.context.taskWorker && (terminal.operationId === this.context.taskWorker.identity.operationId || this.taskWait?.wakeOperationId === terminal.operationId)) {
+    if (this.operations.taskWorker && (terminal.operationId === this.operations.taskWorker.identity.operationId || this.taskWait?.wakeOperationId === terminal.operationId)) {
       if (this.taskTurnAwaitsWake(terminal)) {
         this.taskWait = { observer, terminal };
         return;
@@ -159,38 +140,38 @@ export class RunTerminalOwner {
 
   /** A message the maintainer sent, or Home's exact-operation steering, to this worker's task. */
   sharedTaskSteering(ownership: PromptOwnership<{ taskId: string; operationId: string }> | undefined): boolean {
-    if (!this.context.taskWorker) return false;
+    if (!this.operations.taskWorker) return false;
     if (!ownership) return true;
     const fence = ownership.taskFence;
-    return !!fence && fence.taskId === this.context.taskWorker.identity.taskId && fence.operationId === this.context.taskWorker.identity.operationId;
+    return !!fence && fence.taskId === this.operations.taskWorker.identity.taskId && fence.operationId === this.operations.taskWorker.identity.operationId;
   }
 
   /** The task operation a turn reports under. A wake that continues the held task is the task's
    * next turn, so its report seals the task's operation, not the wake's own. */
   taskTurnOperationId(operationId: string): string {
-    return this.taskWait?.wakeOperationId === operationId && this.context.taskWorker ? this.context.taskWorker.identity.operationId : operationId;
+    return this.taskWait?.wakeOperationId === operationId && this.operations.taskWorker ? this.operations.taskWorker.identity.operationId : operationId;
   }
 
   /** The task operation the live turn belongs to, or undefined when no turn runs. Task controls
    * target the task's operation, so a provider wake's turn (its own operation) is the live task turn (#1251). */
   liveTaskOperationId(): string | undefined {
-    return this.context.activeOperationId === undefined ? undefined : this.taskTurnOperationId(this.context.activeOperationId);
+    return this.operations.activeOperationId === undefined ? undefined : this.taskTurnOperationId(this.operations.activeOperationId);
   }
 
   /** A task turn that completed normally, without a report, while owned runs are live. The
    * provider's completion or supervisor request wakes the same task for its next turn. A sealed or
    * stopping task, a length, error or aborted turn, and a task with no live run settle now. */
   private taskTurnAwaitsWake(terminal: OwnedOperationTerminal): boolean {
-    if (terminal.lifecycle !== "completed" || !this.context.taskWorker?.acceptsSteering) return false;
-    const last = this.context.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant");
+    if (terminal.lifecycle !== "completed" || !this.operations.taskWorker?.acceptsSteering) return false;
+    const last = this.operations.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant");
     return last?.type === "message" && last.message.role === "assistant" && last.message.stopReason === "stop"
-      && this.context.hasDetachedDashboardWork();
+      && this.operations.hasDetachedDashboardWork();
   }
 
   /** Task cancellation follows the root prompt owner, not its disposable
    * presentation primitive (automatic compaction/retry may have another ID). */
   async cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
-    if (!this.context.taskWorker || this.context.taskWorker.identity.operationId !== operationId) throw new GatewayError("conflict", "Task cancellation owner changed");
+    if (!this.operations.taskWorker || this.operations.taskWorker.identity.operationId !== operationId) throw new GatewayError("conflict", "Task cancellation owner changed");
     // Between turns no turn runs to abort: the held observer settles the waiting task now. The
     // runs it still owns are stopped and joined by settlement, as for an interrupted turn.
     if (this.taskWait && this.taskWait.wakeOperationId === undefined) {
@@ -201,8 +182,8 @@ export class RunTerminalOwner {
     }
     // A provider wake's turn is the task's running turn: its abort is the task's Stop.
     const turnOperationId = this.taskWait?.wakeOperationId ?? operationId;
-    if (this.context.activeOperationId !== turnOperationId && this.context.operation?.id !== turnOperationId) return;
-    await this.context.abort("agent", turnOperationId, reason);
+    if (this.operations.activeOperationId !== turnOperationId && this.operations.operation?.id !== turnOperationId) return;
+    await this.operations.abort("agent", turnOperationId, reason);
   }
 
 }

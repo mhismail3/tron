@@ -6,6 +6,11 @@ Gateway-owned execution primitives layered on Pi's session loop.
 
 ## Owns
 
+- `run-operations.ts`: shared run state, peer lifetimes, public admission/queue/Stop/
+  compaction routes, configuration/idle admission gates and actual model/thinking/context/tools/bash algorithms.
+- `run-events.ts`: agent, compaction and retry transitions, exact foreground/receipt
+  settlement and successor fencing on the same run authority.
+- `run-runtime.ts`: abstract native frame contract; settings provenance stays opaque.
 - `bounded-tool-cancellation.ts`: per-call abort controllers, bounded cancellation
   settlement and rejection of late results.
 - `direct-bash-process-owner.ts`: foreground shell process trees, timeout and abort
@@ -15,7 +20,7 @@ Gateway-owned execution primitives layered on Pi's session loop.
   parsing, folding, owned terminal facts and canonical inbox delivery; persisted bytes remain stable.
 - `run-markers.ts`: durable per-operation crash/interruption evidence.
 - `run-persistence.ts`: sole pending-receipt join and durable-write fence, bounded
-  retry/retention and conflict handling; the slot supplies live Pi stop/diagnostic cuts.
+  retry/retention, conflicts and actual SDK stop/diagnostic cuts through the native frame.
 - `gateway-work-registry.ts`: bounded admission/drain tokens and joined settlement.
 - `run-work-owner.ts`: exact per-operation handles, retirement and marker-before-token
   orphan repair, with live retained-owner rechecks after persistence.
@@ -27,7 +32,7 @@ Gateway-owned execution primitives layered on Pi's session loop.
 - `run-queue-owner.ts`: SDK queue identities, reconciliation, pending admission and shared
   revision/ordinal clock, retaining exact work owners across Pi callback gaps.
 - `queue-commands.ts`: serialized clear/replace, receipt settlement, resource validation
-  and shared text/resource/queue bounds; public Slot ports return its promises directly.
+  and shared text/resource/queue bounds; public run ports return its promises directly.
 - `held-prompt-queue.ts`: accepted compaction/Stop-time input and its ordered deferred
   admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types/bounds.
 - `completion-facts.ts` / `run-attention.ts`: canonical completion evidence,
@@ -47,6 +52,12 @@ Gateway-owned execution primitives layered on Pi's session loop.
 
 ## Contract
 
+`RuntimeSlot` extends the kernel's `RunOperations`: one actual runtime object, not a
+binding DTO or forwarded run algorithm. Peer owners read that authority directly;
+there are no per-owner context interfaces, accessor/callback bundles or binding factories.
+The native frame supplies SDK resources, physical publication and full Home policy/
+identity effects. No run state is copied into it. Per-attempt observer registration
+retains its raw promises and one live queue-decision callback, never a rebuilt context.
 `RuntimeSlot` installs bounded tool cancellation on its Pi session and owns one
 `DirectBashProcessOwner`. The process owner exposes the existing bash definition,
 active-process state and joined abort operation; it does not own prompt admission.
@@ -86,5 +97,6 @@ scripts/tron verify --module gateway/run
 
 ## Not here
 
-Prompt admission, canonical Pi appends, profiles, queue commands and compaction orchestration remain with
-`RuntimeSlot`; delegated worker lifecycle is separate.
+Canonical Pi resource binding/publication and profiles remain with the concrete native
+frame; delegated worker lifecycle is separate. Durable attention is owned by its store,
+not by a second run-state authority.

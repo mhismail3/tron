@@ -45,22 +45,10 @@ import {
   type FileEntry,
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
-import { RunPersistence, CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS } from "../kernel/run/run-persistence.js";
-import { RunWorkOwner } from "../kernel/run/run-work-owner.js";
-import { RunAbortOwner } from "../kernel/run/run-abort-owner.js";
-import { RunQueueOwner } from "../kernel/run/run-queue-owner.js";
-import { RunInvocations, type RunInvocationContext, type CommandReplacement } from "../kernel/run/run-invocations.js";
-import { RunTerminalOwner, type RunTerminalContext } from "../kernel/run/run-terminal.js";
-import { RunAttentionOwner, type RunAttentionContext } from "../kernel/run/run-attention.js";
+import { CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS } from "../kernel/run/run-persistence.js";
+import { type CommandReplacement } from "../kernel/run/run-invocations.js";
+import { RunOperations } from "../kernel/run/run-operations.js";
 import { successfulAssistantCompletion, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "../kernel/run/completion-facts.js";
-import { ManualCompactionOwner, type ManualCompactionContext } from "../kernel/run/manual-compaction.js";
-import type { HomeTaskControlRequest } from "../home/home-task-dispatcher.js";
-import type { PromptOwnership, PromptAdmissionContext } from "../kernel/run/prompt-input.js";
-import { admitPrompt } from "../kernel/run/prompt-admission.js";
-import { PromptAttempt } from "../kernel/run/prompt-attempt.js";
-import { RunQueueCommands, MAXIMUM_QUEUED_MESSAGE_BYTES, validateQueue, resourceIsInvocable } from "../kernel/run/queue-commands.js";
-import { HeldPromptQueue } from "../kernel/run/held-prompt-queue.js";
-import { type QueueBehavior, type PromptQueueDisplay } from "../kernel/run/queue-input.js";
 import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../kernel/run/compaction-policy.js";
@@ -92,18 +80,13 @@ import type {
   SessionProcessActivity,
   SessionProcessHistoryPage,
   JsonValue,
-  QueuedMessageState,
-  RetryState,
-  SessionOperationState,
   SessionPhase,
   AdministrativeDrainBlockerCategory,
   SessionSnapshot,
-  PendingPromptState,
   SessionSummaryUpdate,
   SessionTreeNode,
   ToolExecutionState,
   NestedToolExecutionState,
-  ResourceInvocation,
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { stage } from "../transport/request-span.js";
@@ -152,10 +135,9 @@ import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../ke
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "../kernel/run/invocation-receipts.js";
 import type { InputTrigger } from "../kernel/host/input-admission.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
-import { parsePiLiteralCommand, userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
+import { userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "../kernel/projection/process-activity-recency.js";
-import { redactProcessText } from "../kernel/projection/process-activity.js";
 import {
   processHistoryDetail,
   subagentAbortRoute,
@@ -266,7 +248,6 @@ type PendingExtensionCanonicalEffect =
       createdAt: string;
     };
 
-const MAXIMUM_PENDING_PROMPT_BYTES = MAXIMUM_QUEUED_MESSAGE_BYTES;
 /**
  * Streaming progress events republish the cumulative live message. Emitting
  * one per SDK update multiplies that payload across every subscribed mobile
@@ -387,7 +368,7 @@ export interface RuntimeSlotDependencies {
   persistenceDiagnostic?: (sessionId: string, code: string) => void;
   compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
   stopSteeringDiagnostic?: (diagnostic: { sessionId: string; queuedSteerCount: number; outcome: "started" | "completed" | "stopped" | "failed" | "unknown" }) => void;
-  manualCompactionAdopted?: NonNullable<ManualCompactionContext["dependencies"]["manualCompactionAdopted"]>;
+  manualCompactionAdopted?: NonNullable<RunOperations<FixedSetting>["dependencies"]["manualCompactionAdopted"]>;
   codemodeDiagnostic?: (diagnostic: { sessionId: string; outcome: "completed" | "failed" | "aborted" | "timeout"; durationMs: number; nestedCallCount: number; complete: boolean }) => void;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
@@ -433,69 +414,38 @@ function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefin
   return Number.isFinite(ended) && ended <= Date.parse(observedAt) ? producerEndedAt : observedAt;
 }
 
-export class RuntimeSlot {
-  private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
+export class RuntimeSlot extends RunOperations<FixedSetting> {
+  public readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private readonly newSettingsSessions = new WeakSet<AgentSession>();
-  private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
+  public readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
   /** The open Home activation of the live runtime, undefined for every ordinary
    * runtime. Re-resolved in `runtimeFactory`, so a profile change takes effect
    * with the runtime it applies to. */
-  private homeRequestPolicy: RequestPolicy | undefined;
+  public homeRequestPolicy: RequestPolicy | undefined;
   private detachOpenAIEligibility: (() => void) | undefined;
-  private runtime!: AgentSessionRuntime;
+  public runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
-  private readonly lane = new AsyncMutex();
-  private ui: SemanticUIBroker;
+  public readonly lane = new AsyncMutex();
+  public ui: SemanticUIBroker;
   private extensionHost: RemotePiExtensionHost;
-  private lifecycle: ExtensionLifecycleCoordinator;
+  public lifecycle: ExtensionLifecycleCoordinator;
   private hasBoundSession = false;
-  private readonly runtimeGeneration = randomUUID();
+  protected readonly runtimeGeneration = randomUUID();
   /** Stable runtime-only catalog identity for a new session before Pi creates JSONL. */
   private readonly createdAt = new Date().toISOString();
   /** Disposable derived annotation; canonical JSONL remains the authority. */
   private forkBoundary: ForkBoundaryAnchor | undefined;
-  private revision = 0;
   private displayArtifactReferenceKey: string | undefined;
   private displayArtifactReferences: string[] = [];
   private browserLiveReferences = new Set<string>();
   private eventSequence = 0;
-  private phase: SessionPhase;
-  private disposed = false;
+  public disposed = false;
   /** Set by the registry when it publishes this slot as a live runtime. Only a
    * published slot is an eviction when it is disposed; a start that was retired
    * before publication never was one. */
   private published = false;
   private readonly stateChangeWaiters = new Set<() => void>();
-  private readonly runAbort = new RunAbortOwner({
-    runLane: operation => this.lane.run(operation),
-    assertAvailable: () => this.assertAvailable(),
-    taskWorker: () => this.taskWorker,
-    liveTaskOperationId: () => this.runTerminal.liveTaskOperationId(),
-    queued: () => this.runQueue.queuedMessages,
-    replaceQueued: items => { this.runQueue.queuedMessages = items; },
-    pendingAdmission: () => this.runQueue.pendingQueueAdmission,
-    operation: () => this.operation,
-    operationMatches: target => this.operationMatches(target),
-    activeOperationId: () => this.activeOperationId,
-    hasActiveAgentRun: () => this.hasActiveAgentRun,
-    pendingPromptId: () => this.pendingPrompt?.id,
-    session: () => this.runtime.session,
-    sessionId: () => this.id,
-    suppressQueueEvents: value => { this.runQueue.suppressQueueEvents = value; },
-    clearSdkSteeringIds: () => this.runQueue.sdkQueuedSteeringIDs.clear(),
-    bumpQueueRevision: () => { this.runQueue.queueRevision += 1; },
-    cancelRequest: operationId => this.homeRequestPolicy?.cancel(operationId),
-    invocation: operationId => this.runInvocations.invocationForOperation(operationId),
-    directBashProcesses: () => this.directBashProcesses,
-    terminalizeInvocation: (operationId, lifecycle, errorCode) => this.runInvocations.terminalizeInvocation(operationId, lifecycle, errorCode),
-    settleOperationWork: operationId => this.runWork.settleOperationWork(operationId),
-    diagnostic: () => this.dependencies.stopSteeringDiagnostic?.bind(this.dependencies),
-    heldQueue: () => this.heldQueue,
-    admitPrompt: (...args) => admitPrompt(this.promptAdmissionBindings(), ...args),
-    publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
-  });
   private retainedLeaseCount = 0;
-  private readonly runTerminal = new RunTerminalOwner(this.runTerminalBindings());
   private snapshotTimer: NodeJS.Timeout | undefined;
   private progressFlushTimer: NodeJS.Timeout | undefined;
   /** The latest cumulative SDK message is projected only at the wire flush boundary. */
@@ -511,65 +461,29 @@ export class RuntimeSlot {
   /** Exact SDK assistant objects already bound to canonical entries cannot be
    * re-admitted if Pi briefly retains them as streaming state. */
   private readonly canonicalizedStreamingMessages = new WeakSet<object>();
-  private readonly runAttention = new RunAttentionOwner(this.runAttentionBindings());
-  /** `message_end` precedes Pi's synchronous canonical append. Capture immutable
-   * operation ownership in that callback turn so an immediate extension
-   * continuation cannot inherit the completion's already-consumed owner. */
-  private readonly pendingAssistantBindings = new Map<object, {
-    operationId?: string;
-    ownsPromptOperation: boolean;
-  }>();
   /** The session replacement a running extension command requested. */
-  private commandReplacement: CommandReplacement | undefined;
+  public commandReplacement: CommandReplacement | undefined;
   /** Disposable runtime-only bridge from canonical entry IDs to mounted turn IDs. */
   private readonly presentationIDs = new Map<string, string>();
   private readonly presentationIDOrder: string[] = [];
-  private activityHeartbeat: NodeJS.Timeout | undefined;
+  public activityHeartbeat: NodeJS.Timeout | undefined;
   private readonly toolProgressTimers = new Map<string, NodeJS.Timeout>();
   private readonly toolProgressPublishedAt = new Map<string, number>();
   /** Monotonic invocation starts keep duration independent of wall-clock changes. */
   private readonly toolStartedAtMonotonicMs = new Map<string, number>();
   private readonly nestedToolRoots = new Map<string, string>();
   private readonly nestedToolStartedAt = new Map<string, number>();
-  private activeOperationId: string | undefined;
   /** Display lineage survives tool-only agent continuations even when lifecycle
    * settlement rotates the operation owner. User, visible content, and compaction
    * barriers rotate it so live projection matches cold transcript derivation. */
-  private activeToolSegmentOwnerId: string | undefined;
+  public activeToolSegmentOwnerId: string | undefined;
   /** A provisional no-match owner prevents old calls from reviving between a
    * canonical barrier and the next assistant message's stable presentation ID. */
-  private toolSegmentAwaitsAssistantOwner = false;
-  private readonly runWork = new RunWorkOwner({
-    registry: () => this.dependencies.workRegistry,
-    metadata: () => ({ sessionId: this.id, hostEpoch: this.ui.hostEpoch }),
-    beforeSettle: operationId => {
-      this.releaseSettleWaiters();
-      if (!operationId) return;
-      this.lifecycle.cancelPreflight(operationId);
-      // PendingPrompt is a provisional projection, not independent ownership.
-      // Once its exact operation settles it must not keep an idle composer row
-      // alive merely because Pi omitted or replaced the expected user callback.
-      if (this.pendingPrompt?.id === operationId) {
-        this.pendingPrompt = undefined;
-        this.pendingPromptMessage = undefined;
-      }
-    },
-    retained: () => this.retainedOperationWorkIDs(),
-    administrativeRetained: () => this.administrativeRetainedOperationWorkIDs(),
-    hasActiveAgentRun: () => this.hasActiveAgentRun,
-    clearMarker: (operationId, work) => this.clearMarkerOwnership(operationId, work),
-    enqueueMarker: operationId => this.enqueueMarkerOwnership(operationId),
-  });
-  private activeExports = 0;
-  private operation: SessionOperationState | undefined;
-  private pendingExtensionCommand: SessionOperationState | undefined;
-  /** Gateway-owned causal graph. Canonical receipts remain the durable source;
-   * these bounded maps are only the live projection used by snapshots. */
-  private readonly runInvocations = new RunInvocations(this.runInvocationBindings());
-  private retry: RetryState | undefined;
+  public toolSegmentAwaitsAssistantOwner = false;
+  public activeExports = 0;
   private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
   private projectTrustReloadOverride: boolean | undefined;
-  private trustReloadPending = false;
+  public trustReloadPending = false;
   private trustReloadWork: GatewayWorkHandle | undefined;
   private readonly toolExecutions = new Map<string, ToolExecutionState>();
   /** Tool-result message_end is Pi's ordinary persistence handoff. Keep a
@@ -621,30 +535,6 @@ export class RuntimeSlot {
   private readonly extensionActivityReadGenerations = new Map<string, number>();
   private readonly extensionArtifactMissingSince = new Map<string, number>();
   private readonly extensionArtifactWarnings = new Map<string, number>();
-  private readonly runPersistence = new RunPersistence({
-    beginWriteWork: () => this.dependencies.workRegistry.beginDerived({
-      kind: "terminal-receipt-persistence", sessionId: this.id, hostEpoch: this.ui.hostEpoch,
-    }),
-    releaseSettleWaiters: () => this.releaseSettleWaiters(),
-    isPreAppendRefusal: error => this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).isPreAppendRefusal(error),
-    block: () => {
-      this.lifecycle.beginDrain();
-      // Stop further foreground effects through their SDK owners, without
-      // claiming they have settled or disposing the potentially staged branch.
-      const session = this.runtime?.session;
-      if (session) {
-        for (const cancel of [() => session.abortCompaction(), () => session.abortRetry(), () => session.abortBranchSummary(), () => session.abortBash()]) {
-          try { cancel(); } catch { /* Continue requesting each independent stop. */ }
-        }
-        void session.abort().catch(() => {});
-        void this.directBashProcesses?.abortAll().catch(() => {});
-      }
-    },
-    diagnostic: code => {
-      this.dependencies.persistenceDiagnostic?.(this.id, code);
-      this.emit("session.diagnostic", { code, message: "Canonical ownership persistence requires attention" });
-    },
-  });
   private readonly extensionReceiptWrites = new Map<string, Promise<void>>();
   private readonly extensionReceiptOwners = new Map<string, GatewayWorkHandle>();
   private extensionShutdownWork: GatewayWorkHandle | undefined;
@@ -672,7 +562,7 @@ export class RuntimeSlot {
    * JSONL. Identity domains remain separate so provider tool-call IDs cannot
    * collide with canonical direct-Bash entry IDs. */
   private readonly toolMetadata = new Map<string, ToolProjectionMetadata>();
-  private readonly bashMetadata = new Map<string, ToolProjectionMetadata>();
+  protected readonly bashMetadata = new Map<string, ToolProjectionMetadata>();
   private nextToolOrder = 0;
   private lastPublishedSummary: SessionSummaryUpdate | undefined;
   /** Disposable live activity overlays the canonical tail timestamp in catalog
@@ -702,80 +592,6 @@ export class RuntimeSlot {
     lastEntryId: string | undefined;
   } | undefined;
   private lastTouchedAt = Date.now();
-  private readonly runQueue = new RunQueueOwner({
-    session: () => this.runtime.session,
-    runWork: () => this.runWork,
-    runAbort: () => this.runAbort,
-    homeRequestPolicy: () => this.homeRequestPolicy,
-    hasActiveAgentRun: () => this.hasActiveAgentRun,
-    activeOperationId: () => this.activeOperationId,
-    setActiveOperationId: id => { this.activeOperationId = id; },
-    setOperation: operation => { this.operation = operation; },
-    ensureAgentProjection: () => this.runAttention.ensureAgentProjection(),
-    invocationForOperation: id => this.runInvocations.invocationForOperation(id),
-    terminalizeTransferredOperation: id => this.runInvocations.terminalizeTransferredOperation(id),
-    retireOperationObservation: id => this.runTerminal.retireOperationObservation(id),
-    enqueueMarkerOwnership: id => this.enqueueMarkerOwnership(id),
-    clearMarkerOwnership: id => this.clearMarkerOwnership(id),
-    internalWakeSemantic: id => this.internalWakeSemantic(id),
-    held: () => this.heldQueue.entries,
-  });
-  private readonly queueCommands = new RunQueueCommands({
-    assertUsable: () => this.assertUsable(),
-    queue: () => this.runQueue,
-    held: () => this.heldQueue,
-    session: () => this.runtime.session,
-    runWork: () => this.runWork,
-    run: operation => this.lane.run(operation),
-    commands: () => this.commands(),
-    resourceExpansionCatalog: () => this.resourceExpansionCatalog(),
-    invocationForOperation: id => this.runInvocations.invocationForOperation(id),
-    terminalizeInvocation: (id, lifecycle, errorCode) => this.runInvocations.terminalizeInvocation(id, lifecycle, errorCode),
-    persistInvocationReceipt: (receipt, owner) => this.runInvocations.persistInvocationReceipt(receipt, owner),
-    setInvocation: (id, invocation) => this.runInvocations.invocations.set(id, invocation),
-    sessionId: () => this.id,
-    revision: () => this.revision,
-    publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
-  });
-  private pendingPrompt: PendingPromptState | undefined;
-  private readonly heldQueue = new HeldPromptQueue({
-    assertUsable: () => this.assertUsable(),
-    compacting: () => this.phase === "compacting",
-    draining: () => this.lifecycle.isDraining,
-    disposed: () => this.disposed,
-    shuttingDown: () => this.shuttingDown,
-    queueClosed: () => this.runAbort.stopRecoveryQueueClosed,
-    isMessage: text => {
-      const command = parsePiLiteralCommand(text)?.name;
-      return command === undefined || this.runtime.session.extensionRunner.getCommand(command) === undefined;
-    },
-    reconcileQueuedMessages: () => this.runQueue.reconcileQueuedMessages(),
-    queued: () => this.runQueue.queuedMessages,
-    nextOrdinal: () => this.runQueue.nextQueueOrdinal++,
-    validateQueue: items => validateQueue(items),
-    beginWork: id => this.runWork.beginOperationWork(id, "queued-mutation"),
-    settleWork: id => this.runWork.settleOperationWork(id),
-    markRecovery: id => this.runAbort.stopRecoveryHoldIDs.add(id),
-    bumpQueueRevision: () => { this.runQueue.queueRevision += 1; },
-    publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
-    queueRevision: () => this.runQueue.queueRevision,
-    projectedQueue: () => this.runQueue.projectedQueue(),
-    editedQueueItem: (previous, item, composed) => this.queueCommands.editedQueueItem(previous, item, composed),
-    assertQueueableResources: items => this.queueCommands.assertQueueableResources(items),
-    admitHeld: entry => admitPrompt(this.promptAdmissionBindings(), entry.runtimeText, entry.images, entry.behavior, {
-          text: entry.text,
-          attachmentEnvelope: entry.attachmentEnvelope,
-          attachmentCount: entry.attachmentCount,
-          ...(entry.photoCount === undefined ? {} : { photoCount: entry.photoCount }),
-          ...(entry.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: entry.fileAttachmentCount }),
-          ...(entry.attachments === undefined ? {} : { attachments: entry.attachments }),
-          ...(entry.resourceInvocations === undefined ? {} : { resourceInvocations: entry.resourceInvocations }),
-        }, undefined, undefined, entry.id, entry),
-    waitForStateChange: () => this.waitForStateChange(),
-    emit: (topic, data) => this.emit(topic, data),
-  });
-  /** Exact Pi message object claimed by the foreground pending prompt. */
-  private pendingPromptMessage: AgentMessage | undefined;
   /** Canonical user messages produced by queued resource/plain invocations. */
   private readonly pendingInvocationUserMessages = new WeakMap<AgentMessage, {
     operationId: string;
@@ -791,44 +607,40 @@ export class RuntimeSlot {
   /** Event IDs of the Home inbox messages being appended right now. The inbox
    * writes their exact context receipt itself, so generic custom-message
    * attribution must not claim them with a second, conflicting receipt. */
-  private readonly inboxAttributedMessages = new Set<string>();
-  private readonly manualCompaction = new ManualCompactionOwner(this.manualCompactionBindings());
-  private compactionBaselineEntryId: string | undefined;
-  /** Exact operation installed at compaction_start. A hook may launch a
-   * successor before compaction_end, so the current operation is not reliable
-   * completion ownership. */
-  private compactionOperation: SessionOperationState | undefined;
+  public readonly inboxAttributedMessages = new Set<string>();
   private unregisterConfigurationWork: (() => void) | undefined;
   private publishedConfigurationBlocker: SessionConfigurationBlocker | null | undefined;
-  private shuttingDown = false;
+  public shuttingDown = false;
   private shutdownPromise: Promise<void> | undefined;
   /** Retirement waiters parked until this slot may have settled. */
   private readonly settleWaiters = new Set<() => void>();
   /** Exact process ownership for the built-in foreground bash tool only.
    * Extension-managed detached subagents remain outside this stop boundary. */
-  private directBashProcesses: DirectBashProcessOwner | undefined;
+  public directBashProcesses: DirectBashProcessOwner | undefined;
   /** One-shot creation recipe, used only while its id is unrecorded. */
   private explicitProfile: { sessionId: string; profile: SessionProfile } | undefined;
-  private readonly canonicalAppendContext: CanonicalAppendContext;
+  public readonly canonicalAppendContext: CanonicalAppendContext;
   /** The Home wake whose trigger is being sent: its canonical binding and receipt follow its message_end. */
   private homeWakeTrigger: { eventId: string; taskId: string; operationId: string } | undefined;
   /** Whether the admitted operation is a wake, so the activation's idle notice names it. */
-  private operationWasHomeWake = false;
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */
   private readonly runtimeProfiles = new WeakMap<AgentSession, SessionProfile>();
 
+  protected get virtualModelAPI(): string { return VIRTUAL_MODEL_API; }
+
   private constructor(
-    private sessionManager: SessionManager,
-    private readonly dependencies: RuntimeSlotDependencies,
-    private readonly hooks: RuntimeSlotHooks,
+    public sessionManager: SessionManager,
+    public readonly dependencies: RuntimeSlotDependencies,
+    public readonly hooks: RuntimeSlotHooks,
     interrupted: boolean,
     creationProfile: SessionProfile = ORDINARY_SESSION_PROFILE,
     homeMaterializationAuthority?: HomeMaterializationAuthority,
     // Rebound only by `bindTaskWorker` when a settled task resumes in place (#929).
-    private taskWorker?: HomeTaskReportOwner,
+    public taskWorker?: HomeTaskReportOwner,
   ) {
+    super();
     this.explicitProfile = { sessionId: sessionManager.getSessionId(), profile: creationProfile };
     this.canonicalAppendContext = {
       owner: this,
@@ -1211,35 +1023,6 @@ export class RuntimeSlot {
     };
   }
 
-  /** A running task worker takes configuration between provider requests (#1336): Pi reads model
-   * and thinking per turn and request, so the in-flight request never changes. Compaction refuses. */
-  private liveTaskConfiguration(): boolean {
-    const worker = this.taskWorker;
-    if (!worker?.acceptsSteering || this.disposed || this.shuttingDown || this.trustReloadPending || this.runPersistence.hasBlockedOwnershipWrite) return false;
-    if (this.phase === "compacting" || this.activeOperationId !== undefined && this.runAbort.abortedOperations.has(this.activeOperationId)) return false;
-    const session = this.runtime.session;
-    if (session.isStreaming) return this.runTerminal.liveTaskOperationId() === worker.identity.operationId;
-    return this.runTerminal.taskWait !== undefined && this.runTerminal.taskWait.wakeOperationId === undefined
-      && this.activeOperationId === undefined && this.operation === undefined;
-  }
-
-  /** A running worker's context window and tool loadout have no supported mid-run
-   * boundary here: say so instead of the generic busy refusal (#1336). */
-  private assertNoLiveTaskConfiguration(what: string): void {
-    if (!this.liveTaskConfiguration()) return;
-    throw new GatewayError("busy", `A running task worker's ${what} change only between runs: change it after task ${this.taskWorker!.identity.taskId} settles (it applies on resume). Model, thinking and Run settings apply from the worker's next model request.`, true);
-  }
-
-  /** Idle configuration, or a running Home task worker's live configuration (#1336). */
-  private assertConfigurationAdmissible(initiatingWorkToken?: string): void {
-    if (this.liveTaskConfiguration()) {
-      this.assertUsable();
-      this.assertChapterWritable();
-      return;
-    }
-    this.assertConfigurationIdle(initiatingWorkToken);
-  }
-
   /** One steer in the worker's ordered steering lane (#1336), read at the boundary whose request
    * first uses the change. Never throws: the change is stored, so a refused steer is reported. */
   async announceSettingsChange(notice: SettingsNotice): Promise<SettingsSignal | undefined> {
@@ -1322,7 +1105,7 @@ export class RuntimeSlot {
     };
   }
 
-  private async applyLiveRunSettings(session: AgentSession): Promise<ReturnType<SettingsManager["getSettings"]> | undefined> {
+  public async applyLiveRunSettings(session: AgentSession): Promise<ReturnType<SettingsManager["getSettings"]> | undefined> {
     const owners = this.dependencies.settings();
     if (!owners) return;
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed before settings application");
@@ -1495,7 +1278,7 @@ export class RuntimeSlot {
    * that counted it would always reject the very request that owns it. Nothing
    * else is excluded: another request's entry and administrative drain blockers
    * still make the session busy. */
-  private drainBusyExcept(exceptWorkToken?: string): boolean {
+  public drainBusyExcept(exceptWorkToken?: string): boolean {
     return this.dependencies.workRegistry.hasSessionWork(this.id, exceptWorkToken)
       || this.administrativeDrainBlockers().length > 0;
   }
@@ -1541,40 +1324,7 @@ export class RuntimeSlot {
     this.beginAdministrativeDrainCutoff();
   }
 
-  private retainedOperationWorkIDs(): Set<string> {
-    return new Set([
-      this.activeOperationId,
-      this.operation?.id,
-      this.pendingPrompt?.id,
-      this.pendingExtensionCommand?.id,
-      this.runAttention.pendingAssistantCompletion?.operationId,
-      this.runQueue.pendingQueueAdmission?.id,
-      ...this.runAttention.completionOwnershipQueue.map((item) => item.completion.operationId),
-      ...[...this.runTerminal.operationObservations.entries()]
-        .filter(([, observation]) => observation.pendingCompletionId !== undefined)
-        .map(([operationId]) => operationId),
-      ...this.runQueue.queuedMessages.map((item) => item.id),
-      ...this.heldQueue.entries.map((item) => item.id),
-      ...this.runQueue.dequeuedFollowUpOwners,
-      ...this.runQueue.dequeuedSteeringOwners,
-      ...this.runQueue.consumedSteeringOperationIDs,
-    ].filter((value): value is string => typeof value === "string"));
-  }
 
-  private administrativeRetainedOperationWorkIDs(): Set<string> {
-    const retained = this.retainedOperationWorkIDs();
-    // A provisional prompt cannot represent foreground work after both Pi and
-    // the Gateway have reached an operation-free terminal phase.
-    if (!this.hasActiveAgentRun
-      && (this.phase === "idle" || this.phase === "interrupted")
-      && this.activeOperationId === undefined
-      && this.operation === undefined
-      && this.runAttention.pendingAssistantCompletion === undefined
-      && this.pendingPrompt) {
-      retained.delete(this.pendingPrompt.id);
-    }
-    return retained;
-  }
 
   administrativeSuspectForegroundWorkTokens(): ReadonlySet<string> {
     return this.runWork.administrativeSuspectForegroundWorkTokens();
@@ -1591,7 +1341,7 @@ export class RuntimeSlot {
    * administrative work can keep operational drain busy but must not leave a
    * dashboard row stuck in the running phase. A settled paused run owns no live
    * process, so it stops being live work and a drain blocker. */
-  private hasDetachedDashboardWork(): boolean {
+  public hasDetachedDashboardWork(): boolean {
     return this.liveExtensionActivities().length > 0;
   }
 
@@ -1671,36 +1421,14 @@ export class RuntimeSlot {
   /** AgentSession can start an extension-triggered continuation while an older
    * `agent_settled` callback is still unwinding. AgentSession's full streaming
    * lifecycle is the authoritative foreground owner in that overlap. */
-  private get hasActiveAgentRun(): boolean {
+  public get hasActiveAgentRun(): boolean {
     const session = this.runtime?.session;
     return session?.isStreaming === true || session?.state.isStreaming === true;
   }
 
-  /** Pi can clear isStreaming before its agent_settled choreography has
-   * reached this runtime. Keep ordinary admission behind the existing Gateway
-   * operation owner until the sequenced state transition is published. */
-  private get isAgentAdmissionSettling(): boolean {
-    // Compaction has its own Pi abort controller and cannot accept Agent input,
-    // even when the SDK's broad streaming flag remains true. Wait until the
-    // continuation or idle transition, then re-evaluate steer/follow-up.
-    if (this.phase === "compacting") return true;
-    if (this.hasActiveAgentRun) return false;
-    return this.phase === "running"
-      || this.phase === "retrying"
-      || this.activeOperationId !== undefined
-      || this.operation !== undefined
-      || this.runAttention.pendingAssistantCompletion !== undefined;
-  }
 
-  private waitForStateChange(): Promise<void> {
+  public waitForStateChange(): Promise<void> {
     return new Promise((resolve) => { this.stateChangeWaiters.add(resolve); });
-  }
-
-  private operationMatches(target: SessionOperationState): boolean {
-    const current = this.operation;
-    return current?.id === target.id
-      && current?.kind === target.kind
-      && current?.startedAt === target.startedAt;
   }
 
   private publishStateChange(): void {
@@ -1711,10 +1439,6 @@ export class RuntimeSlot {
     this.heldQueue.scheduleHeldPromptFlush();
   }
 
-  private get effectivePhase(): SessionPhase {
-    if (this.hasActiveAgentRun && (this.phase === "idle" || this.phase === "interrupted")) return "running";
-    return this.phase;
-  }
 
   /** Dashboard activity includes detached extension work even after the
    * foreground Pi turn settles. Chat snapshots retain the narrower foreground
@@ -1726,12 +1450,12 @@ export class RuntimeSlot {
       : phase;
   }
 
-  private hasCurrentDashboardWork(): boolean {
+  public hasCurrentDashboardWork(): boolean {
     const phase = this.dashboardPhase;
     return phase === "running" || phase === "compacting" || phase === "retrying";
   }
 
-  private noteDashboardActivity(at = new Date().toISOString()): void {
+  public noteDashboardActivity(at = new Date().toISOString()): void {
     const candidate = Date.parse(at);
     if (!Number.isFinite(candidate)) return;
     const current = this.latestDashboardActivityAt === undefined
@@ -1876,7 +1600,7 @@ export class RuntimeSlot {
   }
 
   /** The profile the live runtime was built with, not a fresh record decision. */
-  private liveProfile(): SessionProfile {
+  public liveProfile(): SessionProfile {
     return this.runtimeProfiles.get(this.runtime.session) ?? ORDINARY_SESSION_PROFILE;
   }
 
@@ -2247,7 +1971,7 @@ export class RuntimeSlot {
     return value;
   }
 
-  private async recordFixedSetting(key: string, value: unknown, origin?: FixedSetting): Promise<void> {
+  protected async recordFixedSetting(key: string, value: unknown, origin?: FixedSetting): Promise<void> {
     const fixed = readSessionFixedSettings(this.sessionManager.getBranch());
     fixed[key] = { ...(origin ?? { from: "session", at: new Date().toISOString(), ref: randomUUID() }), value };
     await this.persistSessionSettings({ fixed });
@@ -2359,7 +2083,7 @@ export class RuntimeSlot {
     }
   }
 
-  private assertSessionIdentityReplacement(): void {
+  public assertSessionIdentityReplacement(): void {
     this.assertChapterWritable();
     if (this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)) {
       throw new GatewayError("conflict", "Task worker session identity cannot be replaced");
@@ -2969,7 +2693,7 @@ export class RuntimeSlot {
     this.maybePerformExtensionShutdown();
   }
 
-  private maybePerformExtensionShutdown(): void {
+  public maybePerformExtensionShutdown(): void {
     if (!this.lifecycle.isShutdownRequested || this.lifecycle.hasPendingCommands || this.lifecycle.hasPendingPrompts
       || this.extensionShutdownInFlight || this.extensionShutdownRetryTimer || this.shuttingDown || this.disposed) return;
     this.extensionShutdownInFlight = true;
@@ -3007,7 +2731,7 @@ export class RuntimeSlot {
     });
   }
 
-  private emit(topic: string, data: JsonValue): void {
+  public emit(topic: string, data: JsonValue): void {
     this.eventSequence += 1;
     this.hooks.broadcast(this.id, topic, {
       runtimeGeneration: this.runtimeGeneration,
@@ -3017,12 +2741,12 @@ export class RuntimeSlot {
     });
   }
 
-  private ownToolSegment(ownerId: string | undefined): void {
+  public ownToolSegment(ownerId: string | undefined): void {
     this.activeToolSegmentOwnerId = ownerId;
     this.toolSegmentAwaitsAssistantOwner = false;
   }
 
-  private prepareAssistantOwnedToolSegment(): void {
+  public prepareAssistantOwnedToolSegment(): void {
     // Publish a fresh provisional generation immediately. It intentionally
     // matches no declaration and is replaced by the next assistant's stable
     // presentation ID before that message can publish tool progress.
@@ -3157,7 +2881,7 @@ export class RuntimeSlot {
     this.finalizedStreamPresentationId = undefined;
   }
 
-  private rememberPresentationID(canonicalID: string, presentationID: string): void {
+  public rememberPresentationID(canonicalID: string, presentationID: string): void {
     if (!this.presentationIDs.has(canonicalID)) this.presentationIDOrder.push(canonicalID);
     this.presentationIDs.set(canonicalID, presentationID);
     const excess = this.presentationIDOrder.length - MAX_PRESENTATION_IDENTITY_BINDINGS;
@@ -3169,12 +2893,9 @@ export class RuntimeSlot {
   private bindCanonicalPresentation(message: AgentMessage): void {
     if (message.role !== "assistant") return;
     const presentationID = this.streamPresentationId;
-    const binding = {
-      ...(this.activeOperationId ? { operationId: this.activeOperationId } : {}),
-      ownsPromptOperation: this.operation?.kind === "prompt",
-    };
+    const binding = this.runAttention.captureAssistantBinding();
     const mayComplete = message.stopReason === "stop" || message.stopReason === "length";
-    if (mayComplete && binding.ownsPromptOperation) this.pendingAssistantBindings.set(message, binding);
+    if (mayComplete && binding.ownsPromptOperation) this.runAttention.bindAssistant(message, binding);
     // Pi notifies listeners before synchronously appending the finalized
     // message. Mutable operation state may advance before this microtask; the
     // callback-turn binding above remains the exact owner of this completion.
@@ -3212,7 +2933,7 @@ export class RuntimeSlot {
         }
         this.scheduleSnapshot();
       } finally {
-        this.pendingAssistantBindings.delete(message);
+        this.runAttention.releaseAssistant(message);
       }
     });
   }
@@ -3223,7 +2944,7 @@ export class RuntimeSlot {
    * this operation. (Knowledge observation no longer consumes these cuts, #1315.) */
   /** The process activity projection owns live delegated work that may wake
    * this session; paused and recent history are not pending work. */
-  private pendingBackgroundProcesses(): string[] {
+  public pendingBackgroundProcesses(): string[] {
     return [...this.extensionActivities.values()]
       .filter((activity) => this.extensionActivityOwnsLiveWork(activity)
         && ["asynchronous", "workflow"].includes(activity.mode?.toLowerCase() ?? ""))
@@ -3231,7 +2952,7 @@ export class RuntimeSlot {
       .sort();
   }
 
-  private notificationTitle(): string {
+  public notificationTitle(): string {
     if (this.isHomeChapter) return "Home";
     // Read canonical input rather than a deferred summary projection so a new
     // session's first terminal notification cannot be titled "New session".
@@ -3360,7 +3081,7 @@ export class RuntimeSlot {
     }
   }
 
-  private persistCanonicalCustomEntry(
+  public persistCanonicalCustomEntry(
     customType: string,
     data: JsonValue,
     identity: string,
@@ -3391,84 +3112,7 @@ export class RuntimeSlot {
     );
   }
 
-  private runAttentionBindings(): RunAttentionContext {
-    const slot = this;
-    return {
-      get id() { return slot.id; },
-      get dependencies() { return slot.dependencies; },
-      get ui() { return slot.ui; },
-      get hooks() { return slot.hooks; },
-      get runPersistence() { return slot.runPersistence; },
-      get runWork() { return slot.runWork; },
-      get runTerminal() { return slot.runTerminal; },
-      get manualCompaction() { return slot.manualCompaction; },
-      get taskWorker() { return slot.taskWorker; },
-      get compactionOperation() { return slot.compactionOperation; },
-      get hasActiveAgentRun() { return slot.hasActiveAgentRun; },
-      get sessionManager() { return slot.sessionManager; },
-      get activeToolSegmentOwnerId() { return slot.activeToolSegmentOwnerId; },
-      get activityHeartbeat() { return slot.activityHeartbeat; },
-      get phase() { return slot.phase; }, set phase(value) { slot.phase = value; },
-      get revision() { return slot.revision; }, set revision(value) { slot.revision = value; },
-      get operation() { return slot.operation; }, set operation(value) { slot.operation = value; },
-      get activeOperationId() { return slot.activeOperationId; }, set activeOperationId(value) { slot.activeOperationId = value; },
-      assertSessionIdentityReplacement: () => slot.assertSessionIdentityReplacement(),
-      ownToolSegment: id => slot.ownToolSegment(id),
-      startActivityHeartbeat: () => slot.startActivityHeartbeat(),
-      canonicalSessionEntries: () => slot.canonicalSessionEntries(),
-      clearMarkerOwnership: (...args) => slot.clearMarkerOwnership(...args),
-      publishConfiguration: () => slot.publishConfiguration(),
-      releaseSettleWaiters: () => slot.releaseSettleWaiters(),
-      publishSnapshot: () => slot.publishSnapshot(),
-      noteHomeIdle: () => slot.noteHomeIdle(),
-      emit: (...args) => slot.emit(...args),
-    };
-  }
-
-  private runTerminalBindings(): RunTerminalContext {
-    const slot = this;
-    return {
-      get id() { return slot.id; },
-      get activeOperationId() { return slot.activeOperationId; },
-      get operation() { return slot.operation; },
-      get dependencies() { return slot.dependencies; },
-      get sessionManager() { return slot.sessionManager; },
-      get taskWorker() { return slot.taskWorker; },
-      get runInvocations() { return slot.runInvocations; },
-      get runAbort() { return slot.runAbort; },
-      pendingBackgroundProcesses: () => slot.pendingBackgroundProcesses(),
-      notificationTitle: () => slot.notificationTitle(),
-      hasDetachedDashboardWork: () => slot.hasDetachedDashboardWork(),
-      abort: (...args) => slot.abort(...args),
-      emit: (...args) => slot.emit(...args),
-    };
-  }
-
-  private runInvocationBindings(): RunInvocationContext {
-    const slot = this;
-    return {
-      get id() { return slot.id; },
-      get revision() { return slot.revision; },
-      get sessionManager() { return slot.sessionManager; },
-      get homeRequestPolicy() { return slot.homeRequestPolicy; },
-      get dependencies() { return slot.dependencies; },
-      get commandReplacement() { return slot.commandReplacement; },
-      get pendingExtensionCommand() { return slot.pendingExtensionCommand; },
-      get completionOwnershipQueue() { return slot.runAttention.completionOwnershipQueue; },
-      get operationObservations() { return slot.runTerminal.operationObservations; },
-      get attentionBarrier() { return slot.runAttention.attentionBarrier; },
-      get runPersistence() { return slot.runPersistence; },
-      get runWork() { return slot.runWork; },
-      get runAbort() { return slot.runAbort; },
-      get runQueue() { return slot.runQueue; },
-      persistCanonicalCustomEntry: (...args) => slot.persistCanonicalCustomEntry(...args),
-      clearMarkerOwnership: operationId => slot.clearMarkerOwnership(operationId),
-      notifyOwnedTerminal: terminal => slot.runTerminal.notifyOwnedTerminal(terminal),
-      emit: (topic, data) => slot.emit(topic, data),
-    };
-  }
-
-  private enqueueMarkerOwnership(operationId: string): Promise<void> {
+  public enqueueMarkerOwnership(operationId: string): Promise<void> {
     // An existing operation token already owns this marker write. Avoid spending
     // derived capacity for a second representation of the same accepted work.
     return this.runPersistence.trackOwnershipWrite(
@@ -3477,7 +3121,7 @@ export class RuntimeSlot {
     );
   }
 
-  private async clearMarkerOwnership(operationId?: string, existingOwner?: GatewayWorkHandle): Promise<void> {
+  public async clearMarkerOwnership(operationId?: string, existingOwner?: GatewayWorkHandle): Promise<void> {
     const key = operationId ?? "all";
     // A foreground prompt can answer before its exact marker fsync. Never let a
     // later clear overtake that publication and leave a stale marker on disk.
@@ -3491,11 +3135,21 @@ export class RuntimeSlot {
     );
   }
 
-  /** Join live settlement and reconcile bounded canonical evidence before open. */
-  async reconcileAttention(): Promise<void> {
-    // Marker evidence and any pending settlement are disk work on the open path;
-    // the request span names them instead of leaving them unaccounted.
-    return stage("attention.reconcile", () => this.runAttention.reconcileAttentionBody());
+
+  public resetToolExecutionProjection(): void {
+    this.toolExecutions.clear();
+    this.toolInvocationGroups.clear();
+    this.toolStartedAtMonotonicMs.clear();
+    this.nextToolOrder = 0;
+  }
+
+  public resetStreamingProjection(): void {
+    this.latestStreamingMessage = undefined;
+    this.streamIdentityMessage = undefined;
+    this.streamAnchorId = undefined;
+    this.streamPresentationId = undefined;
+    this.streamStartedAt = undefined;
+    this.finalizedStreamPresentationId = undefined;
   }
 
   private onEvent(event: AgentSessionEvent): void {
@@ -3512,418 +3166,17 @@ export class RuntimeSlot {
       this.noteDashboardActivity();
     }
     switch (event.type) {
-      case "agent_start": {
-        const precedingAssistant = this.runTerminal.notificationRun?.assistant;
-        this.runTerminal.notificationRun = undefined;
-        const continuationFromSettlement = this.runAttention.pendingAssistantCompletion !== undefined
-          || this.pendingAssistantBindings.size > 0;
-        const dequeuedOwner = this.runQueue.dequeuedFollowUpOwners[0];
-        const queuedOwner = dequeuedOwner
-          ?? this.runQueue.queuedMessages.find((item) => item.behavior === "followUp")?.id;
-        if (this.compactionOperation && this.pendingPrompt?.id === this.activeOperationId
-          && this.runInvocations.invocationForOperation(this.activeOperationId)?.lifecycle === "staged") {
-          // An extension triggerTurn during pre-prompt compaction is not the
-          // pending user's admitted turn. Give it a separate owner; the public
-          // preflight callback will reject the displaced request without replay.
-          this.activeOperationId = undefined;
-          this.operation = undefined;
-        }
-        const preflightOwner = this.pendingExtensionCommand?.id
-          ?? queuedOwner
-          ?? this.activeOperationId
-          // A prompt initially offered as queue work can become ordinary only
-          // inside Pi's async input hook. Until queue_update proves otherwise,
-          // its durable preflight owner is the sole valid owner for a new run.
-          ?? this.runQueue.pendingQueueAdmission?.id;
-        const continuesToolSegment = continuationFromSettlement
-          && queuedOwner === undefined
-          && this.pendingExtensionCommand === undefined
-          && this.activeToolSegmentOwnerId !== undefined
-          && !this.toolSegmentAwaitsAssistantOwner;
-        const beginsWithUserInput = queuedOwner !== undefined
-          || this.pendingPrompt?.id === preflightOwner
-          || this.runQueue.pendingQueueAdmission?.id === preflightOwner;
-        const requiresDistinctAgentOwner = queuedOwner === undefined
-          && (continuationFromSettlement || this.pendingExtensionCommand !== undefined);
-        if (continuationFromSettlement) {
-          if (this.runAttention.pendingAssistantCompletion) {
-            if (!this.runAttention.pendingAssistantCompletion.operationId && this.activeOperationId) {
-              this.runAttention.pendingAssistantCompletion = { ...this.runAttention.pendingAssistantCompletion, operationId: this.activeOperationId };
-            }
-            if (this.activeOperationId) this.runTerminal.observationFor(this.activeOperationId).pendingCompletionId = this.runAttention.pendingAssistantCompletion.id;
-            // Pi may start an extension continuation before the older settlement
-            // callback unwinds. Preserve and immediately commit the prior exact
-            // completion, then give the continuation a distinct marker owner so
-            // cleanup from the older settlement cannot erase the newer run.
-            // Attention is ordered durable presentation state, not authorization
-            // to continue already-accepted canonical agent work. A failed queue
-            // head remains marked/interrupted and blocks later attention commits,
-            // while the continuation may finish and stamp its own completion for
-            // ordered restart recovery. Aborting here would silently discard that
-            // accepted continuation and strand its durable ownership test.
-            const completion = this.runAttention.pendingAssistantCompletion;
-            void this.runAttention.beginAttentionSettlement(completion).catch((error) => this.runAttention.settleCompletionPersistenceFailure(completion, error));
-          }
-          // `message_end` may still be waiting for Pi's canonical append. Its
-          // callback-turn binding owns the preceding operation even before a
-          // completion object exists, so the new run must rotate now.
-          this.runInvocations.terminalizeTransferredOperation(this.activeOperationId);
-          this.activeOperationId = undefined;
-          this.operation = undefined;
-        }
-        if (!this.lifecycle.admitAgentStartDuringDrain(preflightOwner)) {
-          const rejectedOperationId = preflightOwner;
-          if (dequeuedOwner && rejectedOperationId === dequeuedOwner) this.runQueue.dequeuedFollowUpOwners.shift();
-          this.phase = "interrupted";
-          this.operation = undefined;
-          this.activeOperationId = undefined;
-          if (this.pendingExtensionCommand?.id === rejectedOperationId) this.pendingExtensionCommand = undefined;
-          this.emit("session.operationFailed", {
-            message: "Extension continuation was rejected after the administrative drain cutoff",
-          });
-          const rejectedInvocation = this.runInvocations.invocationForOperation(rejectedOperationId);
-          const precedingEntry = continuationFromSettlement && precedingAssistant
-            ? this.sessionManager.getBranch().findLast((entry) => entry.type === "message" && entry.message === precedingAssistant)
-            : undefined;
-          const rejectedSource = precedingEntry?.id
-            ?? (rejectedInvocation ? `terminal:${rejectedInvocation.invocationId}` : rejectedOperationId);
-          if (rejectedSource) this.runTerminal.completionObserved(rejectedSource);
-          void this.runtime.session.abort().then(async () => {
-            // The preceding completion already owns its terminal receipt. A
-            // rejected extension continuation must not overwrite that receipt
-            // with a contradictory interruption under the same invocation ID.
-            if (continuationFromSettlement) await this.reconcileAttention();
-            else await this.runInvocations.terminalizeInvocation(rejectedOperationId, "interrupted", "drain-cutoff");
-            if (rejectedSource) await this.runTerminal.notifyAgentTerminal(rejectedSource, "stopped");
-          }).catch(() => {
-            this.emit("session.diagnostic", { code: "drain-cutoff-settlement-failed" });
-          }).finally(() => this.runWork.settleOperationWork(rejectedOperationId));
-          this.publishSnapshot();
-          break;
-        }
-        this.runTerminal.notificationRun = {};
-        if (dequeuedOwner && preflightOwner === dequeuedOwner) this.runQueue.dequeuedFollowUpOwners.shift();
-        if (queuedOwner && preflightOwner === queuedOwner && this.activeOperationId !== queuedOwner) {
-          this.runInvocations.terminalizeTransferredOperation(this.activeOperationId);
-          this.runTerminal.retireOperationObservation(this.activeOperationId);
-          this.activeOperationId = undefined;
-          this.operation = undefined;
-        }
-        this.phase = "running";
-        this.toolExecutions.clear();
-        this.toolInvocationGroups.clear();
-        this.toolStartedAtMonotonicMs.clear();
-        this.nextToolOrder = 0;
-        this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
-        this.runTerminal.observationFor(this.activeOperationId).cursor = { entryIndex: this.canonicalSessionEntries().length };
-        if (!continuesToolSegment) {
-          if (beginsWithUserInput) {
-            this.ownToolSegment(this.activeOperationId);
-            // Recency follows the admitted user run, so a background or
-            // assistant-continuation start never reports the selected model.
-            const usedModel = this.runtime.session.model;
-            if (usedModel) this.dependencies.noteModelUsed?.(this.id, { provider: usedModel.provider, id: usedModel.id });
-          } else this.prepareAssistantOwnedToolSegment();
-        }
-        const activeInvocation = this.runInvocations.invocationForOperation(this.activeOperationId);
-        // A public session_compact hook can start the next Agent turn before
-        // compaction_end. Keep the captured compaction owner for its cleanup,
-        // but give the live turn its own visible Stop identity now.
-        if (this.operation?.kind === "compaction") this.operation = undefined;
-        this.operation ??= {
-          id: this.activeOperationId,
-          kind: "prompt",
-          startedAt: new Date().toISOString(),
-          ...(activeInvocation ? { invocationId: activeInvocation.invocationId } : {}),
-        };
-        this.runWork.beginDerivedOperationWork(this.activeOperationId, "foreground-agent-operation");
-        void this.enqueueMarkerOwnership(this.activeOperationId)
-          .catch(() => this.runtime.session.abort());
-        if (!this.activityHeartbeat) this.startActivityHeartbeat();
-        this.publishSnapshot();
-        break;
-      }
+      case "agent_start":
       case "agent_end":
-        if (this.runTerminal.notificationRun) {
-          const assistant = event.messages.findLast((message) => message.role === "assistant");
-          this.runTerminal.notificationRun = assistant ? { assistant } : {};
-        }
-        break;
       case "agent_settled":
-        if (this.shuttingDown) break;
-        // An extension completion can trigger the next turn while the previous
-        // settlement callback is still unwinding. Never let that older callback
-        // mark a newer agent-core run idle or erase its live tools.
-        if (this.hasActiveAgentRun) {
-          this.runAttention.ensureAgentProjection();
-          this.publishSnapshot();
-          break;
-        }
-        if (this.manualCompaction.queuedManualCompactionInFlight && !this.manualCompaction.adoptedManualCompaction) {
-          // Standalone queued maintenance owns the session after its prompt has
-          // already settled. An adopted compaction still belongs to the enclosing
-          // agent run, whose terminal receipt must retire independently.
-          this.publishSnapshot();
-          break;
-        }
-        this.latestStreamingMessage = undefined;
-        this.streamIdentityMessage = undefined;
-        this.streamAnchorId = undefined;
-        this.streamPresentationId = undefined;
-        this.streamStartedAt = undefined;
-        this.finalizedStreamPresentationId = undefined;
-        // A short extension turn can finish before the outer compaction hook.
-        // Restore that still-live owner instead of publishing false idle.
-        this.phase = this.compactionOperation ? "compacting" : "idle";
-        const settledOperationId = this.activeOperationId;
-        const terminalNotification = this.runTerminal.takeAgentTerminal(settledOperationId);
-        const terminalLifecycle = terminalNotification?.outcome === "stopped" ? "interrupted" as const
-          : terminalNotification?.outcome === "failed" ? "failed" as const
-          : terminalNotification?.outcome === "unknown" ? "outcomeUnknown" as const
-          : "completed" as const;
-        const terminalErrorCode = terminalLifecycle === "interrupted"
-          ? (settledOperationId && this.runAbort.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
-          : terminalLifecycle === "failed" ? "agent-error" : undefined;
-        this.runAbort.completeContinuation(terminalLifecycle);
-        // Observation admission is issued only after the exact terminal receipt
-        // path below settles; before that point canonical durability is still
-        // provisional and must not be projected as memory coverage.
-        this.activeOperationId = undefined;
-        this.homeRequestPolicy?.settle(settledOperationId);
-        this.ownToolSegment(undefined);
-        this.operation = this.compactionOperation;
-        this.retry = undefined;
-        this.toolExecutions.clear();
-        this.toolInvocationGroups.clear();
-        this.toolStartedAtMonotonicMs.clear();
-        this.nextToolOrder = 0;
-        if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
-        this.clearToolProgressTimers();
-        // A command-triggered turn owns a distinct foreground token. The
-        // command may still be unwinding when agent_settled arrives; only skip
-        // this lane if the command itself somehow owns the settled identity.
-        if (this.pendingExtensionCommand === undefined
-          || this.pendingExtensionCommand.id !== settledOperationId) {
-          if (this.runAttention.pendingAssistantCompletion) {
-            this.runWork.get(settledOperationId ?? "")?.transition("terminal-receipt-persistence");
-            // Pi has settled, but the Gateway remains operationally running until
-            // the exact canonical completion is durable. This is the open/drain
-            // barrier that prevents a snapshot from outrunning attention truth.
-            this.phase = "running";
-            this.publishSnapshot();
-            const completion = this.runAttention.pendingAssistantCompletion;
-            // The whole chain is one durable owner from its first await: disposal
-            // joins pendingReceiptWrites, so a chain admitted only at its later
-            // attention drain could write its marker clear after dispose (#723).
-            this.runPersistence.trackSettlementChain((async () => {
-              // An earlier success can still await attention while a queued
-              // follow-up fails. Its receipt cannot stand in for this exact
-              // terminal owner (or overwrite its failure when owners coincide).
-              const terminal = await this.runInvocations.persistInvocationTerminal(
-                settledOperationId, terminalLifecycle, terminalErrorCode, undefined,
-                settledOperationId === completion.operationId ? completion.id : undefined,
-              );
-              await this.runAttention.beginAttentionSettlement(completion);
-              if (terminal) await this.runTerminal.notifyOwnedTerminal(terminal);
-              const completionOperationId = completion.operationId ?? this.runTerminal.completionOperationId(completion.id);
-              if (completionOperationId) this.runTerminal.retireOperationObservation(completionOperationId);
-              this.runTerminal.retireOperationObservation(settledOperationId);
-              if (settledOperationId && settledOperationId !== completion.operationId) {
-                await this.clearMarkerOwnership(settledOperationId);
-                this.runWork.settleOperationWork(settledOperationId);
-              }
-              if (settledOperationId) this.runAbort.abortedOperations.delete(settledOperationId);
-              if (terminalNotification) await this.runTerminal.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
-            })().catch(() => {}));
-            break;
-          }
-          if (settledOperationId) {
-            this.runWork.get(settledOperationId)?.transition("terminal-receipt-persistence");
-            const markerClear = this.runInvocations.terminalizeInvocation(
-              settledOperationId,
-              terminalLifecycle,
-              terminalErrorCode,
-              undefined,
-              this.runTerminal.operationObservations.get(settledOperationId)?.observedCompletionId,
-            ).then(async () => {
-              this.runTerminal.retireOperationObservation(settledOperationId);
-              if (terminalNotification) await this.runTerminal.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
-              await this.clearMarkerOwnership(settledOperationId);
-            });
-            // The foreground token remains the exact owner; do not create a second
-            // receipt token or report drain completion while marker I/O is active.
-            // Disposal still joins the chain, so its marker clear cannot land after it.
-            this.runPersistence.trackSettlementChain(markerClear.then(
-              () => this.manualCompaction.startPendingManualCompaction(),
-              (error) => {
-                this.manualCompaction.cancelPending(error);
-                this.emit("session.diagnostic", safeJson({
-                  code: "terminal-receipt-persistence-failed",
-                  operationId: settledOperationId,
-                  message: error instanceof Error ? error.message : String(error),
-                }));
-              },
-            ).finally(() => {
-              this.runAbort.abortedOperations.delete(settledOperationId);
-              this.runWork.settleOperationWork(settledOperationId);
-              this.hooks.settled(this.id);
-              this.publishSnapshot();
-            }));
-          } else {
-            // A duplicate/late SDK callback has no exact marker authority. Never
-            // interpret undefined as permission to clear every session marker.
-            this.hooks.settled(this.id);
-          }
-        }
-        this.publishSnapshot();
-        break;
-      case "compaction_start": {
-        const adoptedManual = this.manualCompaction.adoptPending(event);
-        this.phase = "compacting";
-        // Canonical compaction is a hard transcript barrier. A provisional
-        // generation keeps older unresolved calls terminal until the next
-        // assistant message supplies its stable presentation identity.
-        this.prepareAssistantOwnedToolSegment();
-        this.compactionBaselineEntryId = [...this.sessionManager.getBranch()]
-          .reverse()
-          .find((entry) => entry.type === "compaction")?.id;
-        // Manual compaction already has its own command identity. Automatic
-        // preflight compaction receives a distinct runtime identity so repeated
-        // maintenance within one prompt can never collide with the prompt row
-        // or another canonical compaction.
-        const compactionOperation: SessionOperationState = {
-          id: adoptedManual?.operationId ?? (this.operation?.kind === "compaction"
-            ? (this.operation.id ?? randomUUID())
-            : randomUUID()),
-          kind: "compaction",
-          // Manual admission already owns this identity, including its start
-          // time. SDK preparation must not invalidate Stop/cleanup matching.
-          startedAt: this.operation?.kind === "compaction" && event.reason === "manual"
-            ? this.operation.startedAt : new Date().toISOString(),
-          reason: event.reason,
-        };
-        this.operation = compactionOperation;
-        this.compactionOperation = compactionOperation;
-        this.publishSnapshot();
-        break;
-      }
-      case "compaction_end": {
-        const completedOperation = this.compactionOperation;
-        const ownerStillCurrent = completedOperation !== undefined && this.operationMatches(completedOperation);
-        const outcome = event.aborted ? "cancelled" : event.result ? "success" : "failure";
-        const errorMessage = event.errorMessage
-          ? redactProcessText(event.errorMessage).slice(0, 512)
-          : undefined;
-        // Exhausted overflow recovery emits an end without a new start. Keep
-        // that failure observable without inventing a compaction operation ID.
-        this.dependencies.compactionDiagnostic?.({
-          sessionId: this.id,
-          ...(completedOperation?.id ? { operationId: completedOperation.id } : {}),
-          reason: event.reason,
-          outcome,
-          ...(errorMessage ? { errorMessage } : {}),
-        });
-        if (ownerStillCurrent) this.retry = undefined;
-        if (completedOperation?.kind === "compaction" && completedOperation.id) {
-          const canonicalCompaction = [...this.sessionManager.getBranch()]
-            .reverse()
-            .find((entry) => entry.type === "compaction");
-          if (canonicalCompaction && canonicalCompaction.id !== this.compactionBaselineEntryId) {
-            this.rememberPresentationID(canonicalCompaction.id, completedOperation.id);
-          }
-        }
-        this.compactionBaselineEntryId = undefined;
-        this.compactionOperation = undefined;
-        this.manualCompaction.settleAdopted(outcome, errorMessage);
-        // Retire only the completed compaction's abort intent. This remains
-        // safe when a successor replaced `operation`, because its identity is
-        // fenced by the captured compaction owner.
-        if (completedOperation?.id) this.runAbort.abortedOperations.delete(completedOperation.id);
-        if (outcome === "failure" && event.reason !== "manual"
-          && (ownerStillCurrent || completedOperation === undefined)) {
-          this.emit("session.operationFailed", {
-            ...(completedOperation?.id ? { operationId: completedOperation.id } : {}),
-            message: errorMessage
-              ? `Automatic compaction failed: ${errorMessage}`
-              : "Automatic compaction failed. Check Gateway logs for details.",
-          });
-        }
-        // A successor may have started from a compaction hook before this event;
-        // never rebuild its phase or operation from the completed compaction.
-        if (!ownerStillCurrent) {
-          this.publishSnapshot();
-          break;
-        }
-        // Hooks may append canonical entries after the compaction. A single-row
-        // delta cannot describe that branch and consumes the client's next
-        // cursor when rejected. Publish one immediate bounded authority frame.
-        if (this.pendingPrompt) {
-          this.phase = "running";
-          this.operation = {
-            id: this.pendingPrompt.id,
-            kind: "prompt",
-            startedAt: this.pendingPrompt.createdAt ?? new Date().toISOString(),
-          };
-        } else if (this.hasActiveAgentRun) {
-          this.phase = "running";
-          this.activeOperationId ??= randomUUID();
-          this.operation = {
-            id: this.activeOperationId,
-            kind: "prompt",
-            startedAt: new Date().toISOString(),
-          };
-        } else if (completedOperation.kind === "compaction"
-          && completedOperation.reason === "manual" && !this.manualCompaction.adoptedManualCompaction) {
-          // The wrapper still owns durable marker retirement. Canonical presence
-          // suppresses the spinner, while phase remains truthful until cleanup.
-          this.phase = "compacting";
-          this.operation = completedOperation;
-        } else {
-          this.phase = "idle";
-          this.operation = undefined;
-        }
-        this.publishSnapshot();
-        break;
-      }
+      case "compaction_start":
+      case "compaction_end":
       case "auto_retry_start":
-        this.phase = "retrying";
-        this.retry = {
-          source: "agent",
-          attempt: event.attempt,
-          maxAttempts: event.maxAttempts,
-          delayMs: event.delayMs,
-          errorMessage: event.errorMessage,
-        };
-        this.operation = { kind: "retry", startedAt: new Date().toISOString() };
-        this.publishSnapshot();
-        break;
       case "summarization_retry_scheduled":
-        this.phase = "retrying";
-        this.retry = {
-          source: this.operation?.kind === "branchSummary" ? "branchSummary" : "compaction",
-          attempt: event.attempt,
-          maxAttempts: event.maxAttempts,
-          delayMs: event.delayMs,
-          errorMessage: event.errorMessage,
-        };
-        this.publishSnapshot();
-        break;
       case "summarization_retry_attempt_start":
-        this.retry = this.retry ? { ...this.retry, source: event.source } : { source: event.source, attempt: 1 };
-        this.publishSnapshot();
-        break;
       case "summarization_retry_finished":
-        this.retry = undefined;
-        this.scheduleSnapshot();
-        break;
       case "auto_retry_end":
-        this.emit("session.retry", safeJson(event));
-        // Retry completion is nested inside the overall AgentSession run. Only
-        // `agent_settled` owns the foreground-to-idle transition; otherwise an
-        // aborted/failed retry can hide a continuation that is already active.
-        this.runAttention.ensureAgentProjection();
-        this.retry = undefined;
-        this.scheduleSnapshot();
+        this.runEvents.onEvent(event);
         break;
       case "message_start": {
         if (event.message.role === "assistant") {
@@ -5952,14 +5205,14 @@ export class RuntimeSlot {
     if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
   }
 
-  private clearToolProgressTimers(): void {
+  public clearToolProgressTimers(): void {
     for (const timer of this.toolProgressTimers.values()) clearTimeout(timer);
     this.toolProgressTimers.clear();
     this.toolProgressPublishedAt.clear();
     this.toolStartedAtMonotonicMs.clear();
   }
 
-  private startActivityHeartbeat(): void {
+  public startActivityHeartbeat(): void {
     this.stopActivityHeartbeat();
     this.activityHeartbeat = setInterval(() => this.publishActivityHeartbeat(), 10_000);
     this.activityHeartbeat.unref();
@@ -5978,7 +5231,7 @@ export class RuntimeSlot {
     this.publishSummary();
   }
 
-  private stopActivityHeartbeat(): void {
+  public stopActivityHeartbeat(): void {
     if (this.activityHeartbeat) clearInterval(this.activityHeartbeat);
     this.activityHeartbeat = undefined;
   }
@@ -6014,7 +5267,7 @@ export class RuntimeSlot {
     return owners.length === 1 ? { source: owners[0]!.source, owner: owners[0]! } : undefined;
   }
 
-  private extensionCommandOrigin(commandName: string): ChatOrigin {
+  public extensionCommandOrigin(commandName: string): ChatOrigin {
     const contextOrigin = this.extensionCommandContextOrigin(commandName);
     if (!contextOrigin?.owner) return { kind: "unknown", confidence: "unknown" };
     return {
@@ -6156,7 +5409,7 @@ export class RuntimeSlot {
     });
   }
 
-  private rememberProjectionMetadata(
+  protected rememberProjectionMetadata(
     store: Map<string, ToolProjectionMetadata>,
     id: string,
     metadata: ToolProjectionMetadata
@@ -6209,7 +5462,7 @@ export class RuntimeSlot {
     this.publishSnapshot();
   }
 
-  private scheduleSnapshot(): void {
+  public scheduleSnapshot(): void {
     if (this.snapshotTimer) return;
     this.snapshotTimer = setTimeout(() => {
       this.snapshotTimer = undefined;
@@ -6217,7 +5470,7 @@ export class RuntimeSlot {
     }, 20);
   }
 
-  private internalWakeSemantic(operationId: string): ChatSemanticMetadata | undefined {
+  public internalWakeSemantic(operationId: string): ChatSemanticMetadata | undefined {
     const invocation = this.runInvocations.invocationForOperation(operationId);
     return invocation?.source === "subagentWake" ? {
       version: 1, kind: "prompt", direction: "hiddenInternal", contextEffect: "modelInput",
@@ -6661,7 +5914,7 @@ export class RuntimeSlot {
 
   /** A wake starts only when nothing else owns this runtime. Pi's prompt() queues or
    * holds an input; a wake has no input, so it refuses and its results stay pending. */
-  private async assertHomeWakeAdmissible(session: AgentSession): Promise<void> {
+  public async assertHomeWakeAdmissible(session: AgentSession): Promise<void> {
     if (this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined
       || this.heldQueue.entries.length > 0 || this.manualCompaction.pendingManualCompaction !== undefined || this.compactionOperation !== undefined
       || this.isAgentAdmissionSettling || session.isStreaming) {
@@ -6677,7 +5930,7 @@ export class RuntimeSlot {
   }
 
   /** Starts a wake's run with its trigger, or completes an operation with nothing to deliver. */
-  private startHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger | undefined,
+  public startHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger | undefined,
     accept: (accepted: boolean) => void): Promise<void> {
     accept(true);
     return trigger ? this.sendHomeWake(session, operationId, trigger) : Promise.resolve();
@@ -6740,7 +5993,7 @@ export class RuntimeSlot {
   }
 
   /** The Home session has no operation left: a user activation or a wake ended. */
-  private noteHomeIdle(): void {
+  public noteHomeIdle(): void {
     if (!this.homeRequestPolicy || this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined) return;
     this.dependencies.modules.policy("runSettled")?.().idle(this.id, this.operationWasHomeWake ? "wake" : "user");
   }
@@ -6764,219 +6017,18 @@ export class RuntimeSlot {
     }
   };
 
-  async prompt(
-    text: string,
-    images: ImageContent[] = [],
-    behavior?: QueueBehavior,
-    queueDisplay?: PromptQueueDisplay,
-    onAdmitted?: (result: { operationId: string }) => void,
-    ownership?: PromptOwnership<HomeTaskControlRequest>,
-  ): Promise<{ operationId: string }> {
-    // Once Stop closes Pi's queue, new client work stays Gateway-owned until
-    // the stopped originals are admitted as one serialized continuation.
-    if (!ownership && this.runAbort.stopRecoveryQueueClosed) {
-      return this.heldQueue.holdPrompt(text, images, behavior, queueDisplay, true);
-    }
-    // Automation owns its own dispatch and terminal observers, so only client
-    // prompts join the Gateway-owned compaction queue.
-    this.assertHomePromptAdmission();
-    if (!ownership && !this.taskWorker && this.heldQueue.holdsPromptsForCompaction(text, queueDisplay)) {
-      const result = this.heldQueue.holdPrompt(text, images, behavior, queueDisplay);
-      onAdmitted?.(result);
-      return result;
-    }
-    return admitPrompt(this.promptAdmissionBindings(),
-      text, images, behavior, queueDisplay, onAdmitted, ownership,
-      ownership?.operationId ?? randomUUID(),
-    );
+  public persistTaskMarker(operationId: string): Promise<void> {
+    return this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
+      JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker!.identity, sessionId: this.id })), `task:${operationId}`);
   }
 
-  private attentionPendingError(): GatewayError {
-    const completion = this.runAttention.pendingAssistantCompletion ?? this.runAttention.completionOwnershipQueue[0]?.completion;
-    const ageMs = completion ? Math.max(0, Date.now() - Date.parse(completion.completedAt)) : undefined;
-    const completionId = completion?.operationId ?? completion?.id;
-    this.emit("session.diagnostic", {
-      code: "attention-pending",
-      ...(completionId ? { operationId: completionId } : {}),
-      ...(ageMs !== undefined ? { ageMs } : {}),
-    });
-    return new GatewayError(
-      "busy",
-      completion
-        ? `The prior response is still committing durable attention state (completion ${completionId} pending for ${Math.floor((ageMs ?? 0) / 1000)} s)`
-        : "The prior response is still committing durable attention state",
-      true,
-      { reason: "attention-pending", ...(completionId ? { operationId: completionId } : {}), ...(ageMs !== undefined ? { ageMs } : {}) },
-      "attention-pending",
-    );
-  }
-
-  private promptAdmissionBindings(): PromptAdmissionContext<HomeTaskControlRequest, CanonicalAssistantCompletion> {
-    const slot = this;
-    return {
-      get runtime() { return slot.runtime; },
-      get dependencies() { return slot.dependencies; },
-      get id() { return slot.id; },
-      get cwd() { return slot.cwd; },
-      get revision() { return slot.revision; },
-      set revision(value) { slot.revision = value; },
-      get phase() { return slot.phase; },
-      set phase(value) { slot.phase = value; },
-      get operation() { return slot.operation; },
-      set operation(value) { slot.operation = value; },
-      get activeOperationId() { return slot.activeOperationId; },
-      set activeOperationId(value) { slot.activeOperationId = value; },
-      get pendingPrompt() { return slot.pendingPrompt; },
-      set pendingPrompt(value) { slot.pendingPrompt = value; },
-      get pendingPromptMessage() { return slot.pendingPromptMessage; },
-      set pendingPromptMessage(value) { slot.pendingPromptMessage = value; },
-      get pendingExtensionCommand() { return slot.pendingExtensionCommand; },
-      set pendingExtensionCommand(value) { slot.pendingExtensionCommand = value; },
-      get operationWasHomeWake() { return slot.operationWasHomeWake; },
-      set operationWasHomeWake(value) { slot.operationWasHomeWake = value; },
-      get pendingAssistantCompletion() { return slot.runAttention.pendingAssistantCompletion; },
-      get attentionBarrier() { return slot.runAttention.attentionBarrier; },
-      get completionOwnershipQueue() { return slot.runAttention.completionOwnershipQueue; },
-      get isAgentAdmissionSettling() { return slot.isAgentAdmissionSettling; },
-      get hasActiveAgentRun() { return slot.hasActiveAgentRun; },
-      get queuedManualCompactionInFlight() { return slot.manualCompaction.queuedManualCompactionInFlight; },
-      get shuttingDown() { return slot.shuttingDown; },
-      get taskWorker() { return slot.taskWorker; },
-      get taskWait() { return slot.runTerminal.taskWait; },
-      get homeRequestPolicy() { return slot.homeRequestPolicy; },
-      get sessionFile() { return slot.sessionFile; },
-      get canonicalEntryCount() { return slot.canonicalEntryCount; },
-      get lifecycle() { return slot.lifecycle; },
-      get runAbort() { return slot.runAbort; },
-      get runQueue() { return slot.runQueue; },
-      get runWork() { return slot.runWork; },
-      get heldQueue() { return slot.heldQueue; },
-      get invocations() { return slot.runInvocations.invocations; },
-      get ownedTerminalObservers() { return slot.runTerminal.ownedTerminalObservers; },
-      get compactionPolicies() { return slot.compactionPolicies; },
-      get contextPolicies() { return slot.contextPolicies; },
-      get lane() { return slot.lane; },
-      get hooks() { return slot.hooks; },
-      get inboxAttributedMessages() { return slot.inboxAttributedMessages; },
-      assertUsable: (...args) => slot.assertUsable(...args),
-      assertHomePromptAdmission: (...args) => slot.assertHomePromptAdmission(...args),
-      assertHomeWakeAdmissible: (...args) => slot.assertHomeWakeAdmissible(...args),
-      attentionPendingError: (...args) => slot.attentionPendingError(...args),
-      liveTaskOperationId: (...args) => slot.runTerminal.liveTaskOperationId(...args),
-      sharedTaskSteering: (...args) => slot.runTerminal.sharedTaskSteering(...args),
-      waitForStateChange: (...args) => slot.waitForStateChange(...args),
-      applyLiveRunSettings: (...args) => slot.applyLiveRunSettings(...args),
-      assertInvocableResources: (...args) => slot.assertInvocableResources(...args),
-      resourceExpansionCatalog: (...args) => slot.resourceExpansionCatalog(...args),
-      invocationForOperation: (...args) => slot.runInvocations.invocationForOperation(...args),
-      extensionCommandOrigin: (...args) => slot.extensionCommandOrigin(...args),
-      promptDisplay: (...args) => slot.promptDisplay(...args),
-      persistInvocationReceipt: (...args) => slot.runInvocations.persistInvocationReceipt(...args),
-      persistCanonicalCustomEntry: (...args) => slot.persistCanonicalCustomEntry(...args),
-      enqueueMarkerOwnership: (...args) => slot.enqueueMarkerOwnership(...args),
-      clearMarkerOwnership: (...args) => slot.clearMarkerOwnership(...args),
-      notifyOwnedTerminal: (...args) => slot.runTerminal.notifyOwnedTerminal(...args),
-      notifyAgentTerminal: (...args) => slot.runTerminal.notifyAgentTerminal(...args),
-      completionObserved: (...args) => slot.runTerminal.completionObserved(...args),
-      terminalizeInvocation: (...args) => slot.runInvocations.terminalizeInvocation(...args),
-      startHomeWake: (...args) => slot.startHomeWake(...args),
-      publishSnapshot: (...args) => slot.publishSnapshot(...args),
-      emit: (...args) => slot.emit(...args),
-      persistTaskMarker: operationId => slot.persistCanonicalCustomEntry(HOME_TASK_MARKER,
-            JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...slot.taskWorker!.identity, sessionId: slot.id })), `task:${operationId}`),
-      noteAcceptedSteering: operationId => {
-      if (slot.taskWorker && operationId !== slot.taskWorker.identity.operationId) {
-        slot.dependencies.homeTaskDiagnostic?.({ event: "home.task.control",
-          taskHash: createHash("sha256").update(slot.taskWorker.identity.taskId).digest("hex").slice(0, 16),
-          operationHash: createHash("sha256").update(slot.taskWorker.identity.operationId).digest("hex").slice(0, 16),
+  public noteAcceptedSteering(operationId: string): void {
+      if (this.taskWorker && operationId !== this.taskWorker.identity.operationId) {
+        this.dependencies.homeTaskDiagnostic?.({ event: "home.task.control",
+          taskHash: createHash("sha256").update(this.taskWorker.identity.taskId).digest("hex").slice(0, 16),
+          operationHash: createHash("sha256").update(this.taskWorker.identity.operationId).digest("hex").slice(0, 16),
           action: "steer", disposition: "accepted" });
       }
-      },
-      createAttempt: (sdkRun, input, queuesIntoActiveRun) => new PromptAttempt<CanonicalAssistantCompletion>({
-        lifecycle: slot.lifecycle,
-        runQueue: slot.runQueue,
-        runAbort: slot.runAbort,
-        runWork: slot.runWork,
-        invocations: slot.runInvocations.invocations,
-        invocationFailures: slot.runInvocations.invocationFailures,
-        shuttingDown: () => slot.shuttingDown,
-        hasActiveAgentRun: () => slot.hasActiveAgentRun,
-        activeOperationId: () => slot.activeOperationId,
-        clearActiveOperation: () => { slot.activeOperationId = undefined; },
-        operation: () => slot.operation,
-        clearOperation: () => { slot.operation = undefined; },
-        queuedManualCompactionInFlight: () => slot.manualCompaction.queuedManualCompactionInFlight,
-        adoptedManualCompaction: () => slot.manualCompaction.adoptedManualCompaction,
-        pendingPrompt: () => slot.pendingPrompt,
-        clearPendingPrompt: () => { slot.pendingPrompt = undefined; slot.pendingPromptMessage = undefined; },
-        taskOperationId: () => slot.taskWorker?.identity.operationId,
-        requestPolicy: () => slot.homeRequestPolicy,
-        pendingManualCompaction: () => slot.manualCompaction.pendingManualCompaction,
-        pendingExtensionCommand: () => slot.pendingExtensionCommand,
-        clearPendingExtensionCommand: () => { slot.pendingExtensionCommand = undefined; },
-        pendingAssistantCompletion: () => slot.runAttention.pendingAssistantCompletion,
-        beginAttentionSettlement: completion => slot.runAttention.beginAttentionSettlement(completion),
-        queuesIntoActiveRun,
-        completionObserved: id => slot.runTerminal.completionObserved(id),
-        terminalizeInvocation: (id, lifecycle, errorCode) => slot.runInvocations.terminalizeInvocation(id, lifecycle, errorCode),
-        clearMarkerOwnership: id => slot.clearMarkerOwnership(id),
-        enqueueMarkerOwnership: id => slot.enqueueMarkerOwnership(id),
-        notifyAgentTerminal: (id, outcome) => slot.runTerminal.notifyAgentTerminal(id, outcome),
-        persistInvocationReceipt: (receipt, owner) => slot.runInvocations.persistInvocationReceipt(receipt, owner),
-        setIdle: () => { slot.phase = "idle"; },
-        noteHomeIdle: () => slot.noteHomeIdle(),
-        publishSnapshot: () => slot.publishSnapshot(),
-        publishChanged: () => { slot.revision += 1; slot.publishSnapshot(); },
-        startPendingManualCompaction: () => slot.manualCompaction.startPendingManualCompaction(),
-        maybePerformExtensionShutdown: () => slot.maybePerformExtensionShutdown(),
-        settled: () => slot.hooks.settled(slot.id),
-        sessionId: () => slot.id,
-        revision: () => slot.revision,
-        emit: (topic, data) => slot.emit(topic, data),
-      }, input, sdkRun),
-    };
-  }
-
-  private promptDisplay(
-    operationId: string,
-    text: string,
-    images: ImageContent[],
-    queueDisplay: PromptQueueDisplay | undefined,
-  ): PendingPromptState {
-    const semantic = this.internalWakeSemantic(operationId);
-    return {
-      id: operationId,
-      ...(semantic ? { semantic } : {}),
-      createdAt: new Date().toISOString(),
-      // Requested queue behavior is advisory until Pi actually enqueues.
-      // A prompt admitted after the run settles remains ordinary.
-      text: boundedSummaryText(
-        queueDisplay?.text ?? text,
-        MAXIMUM_PENDING_PROMPT_BYTES
-      ),
-      attachmentCount: queueDisplay?.attachmentCount ?? images.length,
-      ...(queueDisplay?.resourceInvocations === undefined
-        ? {}
-        : { resourceInvocations: queueDisplay.resourceInvocations }),
-      ...(queueDisplay?.photoCount === undefined && images.length === 0
-        ? {}
-        : { photoCount: queueDisplay?.photoCount ?? images.length }),
-      ...(queueDisplay?.fileAttachmentCount === undefined && images.length === 0
-        ? {}
-        : {
-            fileAttachmentCount: queueDisplay?.fileAttachmentCount
-              ?? Math.max(0, (queueDisplay?.attachmentCount ?? images.length) - (queueDisplay?.photoCount ?? images.length)),
-          }),
-      ...(queueDisplay?.attachments === undefined ? {} : { attachments: queueDisplay.attachments }),
-    };
-  }
-
-  abort(
-    kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash" = "agent",
-    expectedOperationId?: string,
-    terminalErrorCode = "user-abort",
-  ): Promise<void> {
-    return this.runAbort.abort(kind, expectedOperationId, terminalErrorCode);
   }
 
   /** Republish this snapshot because the Gateway-owned archive projection
@@ -6995,30 +6047,12 @@ export class RuntimeSlot {
     this.publishSnapshot();
   }
 
-  clearQueue(): Promise<void> {
-    return this.queueCommands.clearQueue();
-  }
-
-  private resourceExpansionCatalog(): ResourceExpansionCatalog {
+  public resourceExpansionCatalog(): ResourceExpansionCatalog {
     const session = this.runtime.session;
     return { skills: session.resourceLoader.getSkills().skills, promptTemplates: session.promptTemplates };
   }
 
   /** Every resource a message invokes names exactly one loaded, unshadowed command. */
-  assertInvocableResources(resources: readonly ResourceInvocation[]): void {
-    const commands = this.commands();
-    if (!resources.every(resource => resourceIsInvocable(commands, resource))) {
-      throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
-    }
-  }
-
-  replaceQueue(
-    expectedRevision: number,
-    items: Array<Pick<QueuedMessageState, "id" | "behavior" | "text">>,
-  ): Promise<{ queueRevision: number; items: QueuedMessageState[] }> {
-    return this.queueCommands.replaceQueue(expectedRevision, items);
-  }
-
   /** The settings receipt coordinator publishes Home's recipe and adopts it
    * without releasing this runtime's lane or recursively entering its setters.
    * The fence is this runtime still being Home's, not the snapshot revision: a
@@ -7050,228 +6084,12 @@ export class RuntimeSlot {
     };
   }
 
-  async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
-    if (this.usesHomeSettings && this.dependencies.settings()) return this.changeHomeRecipe("model.ref[role=chat]", { provider, id: modelId }, initiatingWorkToken);
-    return this.lane.run(() => this.applyModelConfiguration(provider, modelId, initiatingWorkToken, expectation, fixedAt));
-  }
-
-  private async applyModelConfiguration(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
-    this.assertConfigurationAdmissible(initiatingWorkToken);
-    this.assertChapterWritable();
-    if (expectation) this.assertConfigurationExpectation(expectation);
-    const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
-    if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
-    // Home must stay on a fixed physical model: a virtual model routes on the
-    // canonical transcript, which Home's profile does not own. The live
-    // runtime's profile decides, so an ordinary session keeps the choice.
-    if (this.liveProfile().physicalModelsOnly && model.api === VIRTUAL_MODEL_API) {
-      throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
-    }
-    const previousThinking = this.runtime.session.thinkingLevel;
-    await this.runtime.session.setModel(model as Model<never>);
-    await this.recordFixedSetting("model.ref[role=chat]", { provider, id: modelId }, fixedAt);
-    if (this.runtime.session.thinkingLevel !== previousThinking) await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel);
-    this.revision += 1;
-    this.publishSnapshot();
-    return this.revision;
-  }
-
-  async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<number> {
-    return this.lane.run(async () => {
-      this.assertNoLiveTaskConfiguration("context window");
-      this.assertConfigurationIdle(initiatingWorkToken);
-      this.assertChapterWritable();
-      if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
-        throw new GatewayError("conflict", "Session changed; refresh before changing its context window");
-      }
-      const policy = this.contextPolicies.get(this.runtime.session);
-      if (!policy) throw new GatewayError("conflict", "Session context configuration is unavailable");
-      try {
-        policy.set({ provider, id: modelId }, contextWindow);
-        await this.recordFixedSetting("model.contextWindow", policy.snapshot()?.effective, fixedAt);
-      } finally {
-        // Pi may have staged the entry even when its disk append failed. Always
-        // project the exact runtime outcome rather than leaving clients stale.
-        this.revision += 1;
-        this.emit("session.contextChanged", {});
-        this.publishSnapshot();
-      }
-      return this.revision;
-    });
-  }
-
-  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
-    if (this.usesHomeSettings && this.dependencies.settings()) return this.changeHomeRecipe("model.thinking[role=chat]", level, initiatingWorkToken);
-    return this.lane.run(() => this.applyThinkingConfiguration(level, initiatingWorkToken, expectation, fixedAt));
-  }
-
-  private async applyThinkingConfiguration(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
-    this.assertConfigurationAdmissible(initiatingWorkToken);
-    this.assertChapterWritable();
-    if (expectation) this.assertConfigurationExpectation(expectation);
-    this.runtime.session.setThinkingLevel(level);
-    await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel, fixedAt);
-    this.revision += 1;
-    this.publishSnapshot();
-    return this.revision;
-  }
-
-  async setTools(toolNames: string[], initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<void> {
-    if (this.usesHomeSettings && this.dependencies.settings()) { await this.changeHomeRecipe("tools.active", toolNames, initiatingWorkToken); return; }
-    return this.lane.run(() => this.applyToolsConfiguration(toolNames, initiatingWorkToken, fixedAt));
-  }
-
   /** Home's saved settings own its model, thinking and tools: a direct choice is
    * that change, adopted under this lane like any other. */
-  private async changeHomeRecipe(key: string, value: unknown, initiatingWorkToken?: string): Promise<number> {
+  protected async changeHomeRecipe(key: string, value: unknown, initiatingWorkToken?: string): Promise<number> {
     await this.dependencies.settings()!.changes.change({ kind: "home" }, [{ key, layer: "session", op: "set", value }],
       { actor: { kind: "ui", id: "tron-home" }, commandId: randomUUID(), homeChapter: this.homeSettingsChapter(initiatingWorkToken) });
     return this.revision;
-  }
-
-  private async applyToolsConfiguration(toolNames: string[], initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<void> {
-    this.assertNoLiveTaskConfiguration("active tools");
-    this.assertIdle(false, initiatingWorkToken);
-    const tools = this.runtime.session.getAllTools();
-    const known = new Set(tools.map((tool) => tool.name));
-    const unknown = toolNames.filter((name) => !known.has(name));
-    if (unknown.length > 0) throw new GatewayError("invalid_request", `Unknown agent tools: ${unknown.join(", ")}`);
-    const hidden = toolNames.filter((name) => tools.find((tool) => tool.name === name)?.exposure === "hidden");
-    if (hidden.length > 0) throw new GatewayError("invalid_request", `Hidden agent tools cannot be activated: ${hidden.join(", ")}`);
-    this.runtime.session.setActiveToolsByName(toolNames);
-    await this.recordFixedSetting("tools.active", this.runtime.session.getActiveToolNames(), fixedAt);
-    this.revision += 1;
-    this.emit("session.contextChanged", {});
-    this.publishSnapshot();
-  }
-
-  private manualCompactionBindings(): ManualCompactionContext {
-    const slot = this;
-    return {
-      get id() { return slot.id; },
-      get ui() { return slot.ui; },
-      get lane() { return slot.lane; },
-      get runtime() { return slot.runtime; },
-      get dependencies() { return slot.dependencies; },
-      get hooks() { return slot.hooks; },
-      get runPersistence() { return slot.runPersistence; },
-      get runAbort() { return slot.runAbort; },
-      get compactionPolicies() { return slot.compactionPolicies; },
-      get contextPolicies() { return slot.contextPolicies; },
-      get shuttingDown() { return slot.shuttingDown; },
-      get hasActiveAgentRun() { return slot.hasActiveAgentRun; },
-      get pendingAssistantCompletion() { return slot.runAttention.pendingAssistantCompletion; },
-      get completionOwnershipQueue() { return slot.runAttention.completionOwnershipQueue; },
-      get activeOperationId() { return slot.activeOperationId; },
-      get activeExports() { return slot.activeExports; },
-      get effectivePhase() { return slot.effectivePhase; },
-      get activityHeartbeat() { return slot.activityHeartbeat; },
-      get phase() { return slot.phase; },
-      set phase(value) { slot.phase = value; },
-      get operation() { return slot.operation; },
-      set operation(value) { slot.operation = value; },
-      get retry() { return slot.retry; },
-      set retry(value) { slot.retry = value; },
-      get revision() { return slot.revision; },
-      set revision(value) { slot.revision = value; },
-      liveProfile: () => slot.liveProfile(),
-      assertUsable: () => slot.assertUsable(),
-      clearMarkerOwnership: (operationId, work) => slot.clearMarkerOwnership(operationId, work),
-      operationMatches: (operation) => slot.operationMatches(operation),
-      noteDashboardActivity: (startedAt) => slot.noteDashboardActivity(startedAt),
-      startActivityHeartbeat: () => slot.startActivityHeartbeat(),
-      hasCurrentDashboardWork: () => slot.hasCurrentDashboardWork(),
-      stopActivityHeartbeat: () => slot.stopActivityHeartbeat(),
-      publishSnapshot: () => slot.publishSnapshot(),
-    };
-  }
-
-  compact(instructions?: string): Promise<{ queued: boolean }> {
-    return this.manualCompaction.compact(instructions);
-  }
-
-  async executeBash(command: string, excludeFromContext: boolean, initiatingWorkToken?: string): Promise<JsonValue> {
-    let work: GatewayWorkHandle | undefined;
-    try {
-      return await this.lane.run(async () => {
-        this.assertIdle(false, initiatingWorkToken);
-        // Bash is Gateway-admitted agent work, so it clears retained archive
-        // state on the same lane turn that admits it.
-        await this.dependencies.beforeRunAdmission(this.id);
-        // Admission and the first canonical Bash call are in one lane turn with
-        // no suspension between them. The new token therefore cannot make its
-        // own idle check fail and no competing session mutation can enter.
-        work = this.dependencies.workRegistry.begin({
-          kind: "foreground-agent-operation",
-          sessionId: this.id,
-          hostEpoch: this.ui.hostEpoch,
-        });
-        const operationId = randomUUID();
-        // The marker is written before dispatch: a failure here is definitive
-        // (the shell command never started) and stays retryable.
-        await this.runPersistence.trackOwnershipWrite(
-          () => this.runPersistence.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
-          work,
-        );
-        try {
-          const startedAt = new Date().toISOString();
-          this.phase = "running";
-          this.operation = { id: operationId, kind: "bash", startedAt };
-          this.noteDashboardActivity(startedAt);
-          if (!this.activityHeartbeat) this.startActivityHeartbeat();
-          this.revision += 1;
-          this.publishSnapshot();
-          const previousEntryIDs = new Set(this.sessionManager.getBranch().map((entry) => entry.id));
-          const startedMonotonicMs = performance.now();
-          const result = await this.runtime.session.executeBash(command, undefined, {
-            excludeFromContext,
-            id: operationId,
-            operations: this.directBashProcesses!.shellOperations(),
-          });
-          const completedAt = new Date().toISOString();
-          const bashEntries = this.sessionManager.getBranch().filter((entry) =>
-            !previousEntryIDs.has(entry.id)
-              && entry.type === "message"
-              && entry.message.role === "bashExecution");
-          // Pi currently appends exactly one Bash entry. Match by branch delta
-          // rather than leaf position so a future post-execution hook cannot
-          // silently detach timing by appending another canonical entry.
-          if (bashEntries.length === 1) {
-            this.rememberProjectionMetadata(this.bashMetadata, bashEntries[0]!.id, {
-              startedAt,
-              completedAt,
-              durationMs: Math.max(0, Math.round(performance.now() - startedMonotonicMs)),
-              lastProgressAt: completedAt,
-              progressSequence: 1,
-            });
-          }
-          return safeJson(result);
-        } catch (error) {
-          // The shell command may already have run: a duplicate replay is worse
-          // than an explicit uncertainty, so the idempotency receipt must keep
-          // its fence instead of reporting a definitive rejection.
-          throw asUncertainOutcome(error, "Bash execution was dispatched but its outcome could not be confirmed; refresh session state instead of replaying");
-        } finally {
-          let cleanupFailure: unknown;
-          try {
-            await this.clearMarkerOwnership(operationId, work);
-          } catch (error) {
-            cleanupFailure = error;
-          }
-          this.phase = "idle";
-          this.operation = undefined;
-          this.noteDashboardActivity();
-          if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
-          this.revision += 1;
-          this.publishSnapshot();
-          if (cleanupFailure !== undefined) {
-            throw asUncertainOutcome(cleanupFailure, "Bash completed but its ownership marker could not be cleared; refresh session state instead of replaying");
-          }
-        }
-      });
-    } finally {
-      work?.settle();
-    }
   }
 
   async rename(name: string): Promise<void> {
@@ -7804,7 +6622,7 @@ export class RuntimeSlot {
   }
 
   /** Wakes `retireAfterSettled` waiters so each rechecks settled state. */
-  private releaseSettleWaiters(): void {
+  public releaseSettleWaiters(): void {
     for (const wake of [...this.settleWaiters]) wake();
   }
 
@@ -8032,35 +6850,20 @@ export class RuntimeSlot {
     }
   }
 
-  private assertUsable(allowTrustReload = false): void {
+  public assertUsable(allowTrustReload = false): void {
     this.assertAvailable(allowTrustReload);
     this.runPersistence.assertOwnershipPersistence();
   }
 
-  private assertAvailable(allowTrustReload = false): void {
+  public assertAvailable(allowTrustReload = false): void {
     if (this.disposed) throw new GatewayError("conflict", "Session runtime was disposed", true);
     if (this.shuttingDown) throw new GatewayError("conflict", "Session runtime is shutting down", true);
     if (!allowTrustReload) this.assertNoTrustReload();
     this.touch();
   }
 
-  private configurationBlocker(exceptWorkToken?: string): SessionConfigurationBlocker | null {
-    if (this.disposed || this.shuttingDown || this.trustReloadPending) return "unavailable";
-    if (this.runPersistence.hasBlockedOwnershipWrite) return "settling";
-    if (this.runtime.session.isStreaming || this.runtime.session.isBashRunning
-      || this.phase === "running" || this.phase === "compacting" || this.phase === "retrying"
-      || this.activeOperationId !== undefined) return "running";
-    if (this.pendingPrompt || this.runQueue.pendingQueueAdmission || this.runQueue.queuedMessages.length > 0
-      || this.heldQueue.entries.length > 0 || this.manualCompaction.pendingManualCompaction || this.manualCompaction.queuedManualCompactionInFlight) return "queued";
-    if (this.runAttention.pendingAssistantCompletion || this.runAttention.completionOwnershipQueue.length > 0) return "settling";
-    if (this.pendingExtensionCommand || this.lifecycle.preventsNonRuntimeQuiescence) return "interaction";
-    const work = this.dependencies.workRegistry.facts().filter(fact => fact.sessionId === this.id && fact.token !== exceptWorkToken);
-    if (work.some(fact => fact.kind === "terminal-receipt-persistence" || fact.kind === "automation-terminal-persistence")) return "settling";
-    if (work.length > 0) return "mutation";
-    return null;
-  }
 
-  private publishConfiguration(): void {
+  public publishConfiguration(): void {
     if (!this.published || this.disposed) return;
     const configurationBlocker = this.configurationBlocker();
     if (configurationBlocker === this.publishedConfigurationBlocker) return;
@@ -8070,37 +6873,14 @@ export class RuntimeSlot {
     this.publishedConfigurationBlocker = configurationBlocker;
   }
 
-  private assertConfigurationIdle(initiatingWorkToken?: string): void {
-    this.assertUsable();
-    const blocker = this.configurationBlocker(initiatingWorkToken);
-    if (blocker) throw new GatewayError("busy", "Session configuration is waiting for " + blocker, true,
-      { configurationBlocker: blocker, phase: this.effectivePhase }, `session_configuration_${blocker}`);
-  }
 
-  private assertConfigurationExpectation(expectation: { runtimeGeneration: string; model: { provider: string; id: string } | null }): void {
-    const model = this.runtime.session.model;
-    if (expectation.runtimeGeneration !== this.runtimeGeneration
-      || (expectation.model?.provider ?? null) !== (model?.provider ?? null)
-      || (expectation.model?.id ?? null) !== (model?.id ?? null)) {
-      throw new GatewayError("conflict", "Session model or runtime changed; refresh before changing configuration", true);
-    }
-  }
 
-  private assertChapterWritable(manager: SessionManager = this.sessionManager): void {
+  protected assertChapterWritable(manager: SessionManager = this.sessionManager): void {
     this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).assertWritable(manager);
   }
 
-  private assertHomePromptAdmission(): void {
+  public assertHomePromptAdmission(): void {
     this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).admission();
-  }
-
-  /** `exceptWorkToken` is the initiating request's own work entry, which is not
-   * the session running. Every other entry, including a different request's,
-   * still makes this busy. */
-  private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {
-    this.assertUsable(allowTrustReload);
-    this.assertChapterWritable();
-    if (this.isRunningWork(exceptWorkToken)) throw new GatewayError("busy", "Session must be idle for this operation");
   }
 
   /** The same idle predicate `assertIdle` applies, classified retryably because
@@ -8112,7 +6892,4 @@ export class RuntimeSlot {
     }
   }
 
-  private isRunningWork(exceptWorkToken?: string): boolean {
-    return this.runtime.session.isStreaming || this.drainBusyExcept(exceptWorkToken);
-  }
 }

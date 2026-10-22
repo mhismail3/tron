@@ -1,11 +1,5 @@
-import type { JsonValue, SessionOperationState } from "../../protocol/types.js";
-import type { SessionManager } from "../pi/coding-agent.js";
-import type { ModuleHost } from "../host/module-host.js";
+import type { RunOperations } from "./run-operations.js";
 import type { GatewayWorkHandle } from "./gateway-work-registry.js";
-import type { RunPersistence } from "./run-persistence.js";
-import type { RunWorkOwner } from "./run-work-owner.js";
-import type { RunQueueOwner } from "./run-queue-owner.js";
-import type { RunAbortOwner } from "./run-abort-owner.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection, type OwnedOperationTerminal } from "./invocation-receipts.js";
 
 /** Volatile cancellation attribution shares the invocation's receipt lifetime. */
@@ -16,44 +10,23 @@ export interface CommandReplacement {
   settlement?: Promise<void>;
 }
 
-export interface RunInvocationContext {
-  readonly id: string;
-  readonly revision: number;
-  readonly sessionManager: Pick<SessionManager, "getBranch">;
-  readonly homeRequestPolicy: unknown;
-  readonly dependencies: { modules: ModuleHost };
-  readonly commandReplacement: CommandReplacement | undefined;
-  readonly pendingExtensionCommand: SessionOperationState | undefined;
-  readonly completionOwnershipQueue: readonly { completion: { id: string; operationId?: string | undefined } }[];
-  readonly operationObservations: ReadonlyMap<string, { observedCompletionId?: string | undefined }>;
-  readonly attentionBarrier: Promise<void> | undefined;
-  readonly runPersistence: RunPersistence;
-  readonly runWork: RunWorkOwner;
-  readonly runAbort: Pick<RunAbortOwner, "abortedOperations">;
-  readonly runQueue: RunQueueOwner;
-  persistCanonicalCustomEntry(customType: string, data: JsonValue, identity: string, owner?: GatewayWorkHandle): Promise<void>;
-  clearMarkerOwnership(operationId?: string): Promise<void>;
-  notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void>;
-  emit(topic: string, data: JsonValue): void;
-}
-
 export class RunInvocations {
   readonly invocations = new Map<string, LiveInvocation>();
   readonly invocationFailures = new Map<string, string>();
   /** Commands settled in their origin at a replacement; bounded. */
   private readonly handedOffInvocations = new Set<string>();
 
-  constructor(private readonly context: RunInvocationContext) {}
+  constructor(private readonly operations: RunOperations<unknown>) {}
 
   async persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
     if (this.handedOffInvocations.has(receipt.invocationId)) return;
-    await this.context.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
-    if (receipt.receiptKind === "terminal" && this.context.homeRequestPolicy) {
+    await this.operations.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
+    if (receipt.receiptKind === "terminal" && this.operations.homeRequestPolicy) {
       // The terminal receipt is already canonical. A failed settlement leaves its
       // delivery admitted for the next activation to re-prove; it must not strand
       // this operation's work entry or its terminal observers.
-      await this.context.dependencies.modules.policy("inputAdmission")?.().settle(this.context.id, receipt.operationId).catch(error => {
-        this.context.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
+      await this.operations.dependencies.modules.policy("inputAdmission")?.().settle(this.operations.id, receipt.operationId).catch(error => {
+        this.operations.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
       });
     }
   }
@@ -65,8 +38,8 @@ export class RunInvocations {
       .at(-1);
     if (live) return live;
     const canonical = invocationProjection(invocationReceipts(
-      this.context.sessionManager.getBranch(),
-      this.context.id,
+      this.operations.sessionManager.getBranch(),
+      this.operations.id,
     )).filter(invocation => invocation.operationId === operationId).at(-1);
     if (canonical) this.invocations.set(canonical.invocationId, canonical);
     return canonical;
@@ -80,7 +53,7 @@ export class RunInvocations {
     assistantCompletionId?: string,
   ): Promise<void> {
     const terminal = await this.persistInvocationTerminal(operationId, lifecycle, errorCode, owner, assistantCompletionId);
-    if (terminal) await this.context.notifyOwnedTerminal(terminal);
+    if (terminal) await this.operations.runTerminal.notifyOwnedTerminal(terminal);
   }
 
   async persistInvocationTerminal(
@@ -90,8 +63,8 @@ export class RunInvocations {
     owner?: GatewayWorkHandle,
     assistantCompletionId?: string,
   ): Promise<OwnedOperationTerminal | undefined> {
-    if (operationId) this.context.runQueue.retireTerminalOwnership(operationId);
-    this.context.runPersistence.assertOwnershipPersistence();
+    if (operationId) this.operations.runQueue.retireTerminalOwnership(operationId);
+    this.operations.runPersistence.assertOwnershipPersistence();
     const invocation = this.invocationForOperation(operationId);
     if (!invocation || ["completed", "failed", "interrupted", "outcomeUnknown"].includes(invocation.lifecycle)) return;
     // Stop records attribution before cancellation yields. All terminal
@@ -104,10 +77,10 @@ export class RunInvocations {
     // retirement yield. A second terminal observer must join the first exact
     // receipt, not manufacture a second timestamp/lifecycle while that live map
     // still looks active. The first observer owns terminal notification.
-    const priorTerminal = invocationReceipts(this.context.sessionManager.getBranch(), this.context.id)
+    const priorTerminal = invocationReceipts(this.operations.sessionManager.getBranch(), this.operations.id)
       .find(receipt => receipt.invocationId === invocation.invocationId && receipt.receiptKind === "terminal");
     if (priorTerminal) {
-      await this.persistInvocationReceipt(priorTerminal, owner ?? this.context.runWork.get(invocation.operationId));
+      await this.persistInvocationReceipt(priorTerminal, owner ?? this.operations.runWork.get(invocation.operationId));
       return;
     }
     await this.persistInvocationReceipt(makeInvocationReceipt({
@@ -116,15 +89,15 @@ export class RunInvocations {
       receiptKind: "terminal",
       invocationId: invocation.invocationId,
       operationId: invocation.operationId,
-      sessionId: this.context.id,
+      sessionId: this.operations.id,
       source: invocation.source,
       ...(invocation.name ? { name: invocation.name } : {}),
       lifecycle,
       ...(errorCode ? { errorCode } : {}),
       origin: invocation.origin,
-      sequence: this.context.revision + 1,
+      sequence: this.operations.revision + 1,
       createdAt: new Date().toISOString(),
-    }), owner ?? this.context.runWork.get(invocation.operationId));
+    }), owner ?? this.operations.runWork.get(invocation.operationId));
     this.invocations.delete(invocation.invocationId);
     return {
       lifecycle,
@@ -140,18 +113,18 @@ export class RunInvocations {
    * the transfer retires its operation observation. */
   terminalizeTransferredOperation(operationId: string | undefined): void {
     if (!operationId) return;
-    const completionId = this.context.completionOwnershipQueue.findLast(item => item.completion.operationId === operationId)?.completion.id
-      ?? this.context.operationObservations.get(operationId)?.observedCompletionId;
+    const completionId = this.operations.runAttention.completionOwnershipQueue.findLast(item => item.completion.operationId === operationId)?.completion.id
+      ?? this.operations.runTerminal.operationObservations.get(operationId)?.observedCompletionId;
     if (!completionId) return;
-    const interrupted = this.context.runAbort.abortedOperations.has(operationId);
-    const attention = this.context.attentionBarrier;
+    const interrupted = this.operations.runAbort.abortedOperations.has(operationId);
+    const attention = this.operations.runAttention.attentionBarrier;
     void this.persistInvocationTerminal(
       operationId, interrupted ? "interrupted" : "completed", interrupted ? "user-abort" : undefined,
-      this.context.runWork.get(operationId), completionId,
+      this.operations.runWork.get(operationId), completionId,
     ).then(async terminal => {
       if (attention) await attention;
-      if (terminal) await this.context.notifyOwnedTerminal(terminal);
-      this.context.runAbort.abortedOperations.delete(operationId);
+      if (terminal) await this.operations.runTerminal.notifyOwnedTerminal(terminal);
+      this.operations.runAbort.abortedOperations.delete(operationId);
     }).catch(() => {});
   }
 
@@ -160,15 +133,15 @@ export class RunInvocations {
     // SDK-owned between-turn entries (such as tool-loadout system messages)
     // emitted before that exact boundary. Their relative order proves nothing.
     const prefix = `canonical:${INVOCATION_RECEIPT_TYPE}:terminal:`;
-    await Promise.all([...this.context.runPersistence.durableWrites.entries()]
+    await Promise.all([...this.operations.runPersistence.durableWrites.entries()]
       .filter(([key]) => key.startsWith(prefix))
       .map(([, write]) => write.waiter));
-    this.context.runPersistence.assertOwnershipPersistence();
+    this.operations.runPersistence.assertOwnershipPersistence();
   }
 
   handOffReplacedCommand(): void {
-    const replacement = this.context.commandReplacement;
-    const command = this.context.pendingExtensionCommand;
+    const replacement = this.operations.commandReplacement;
+    const command = this.operations.pendingExtensionCommand;
     const operationId = command?.id;
     const invocation = command?.invocationId ? this.invocations.get(command.invocationId) : undefined;
     if (!replacement || replacement.settlement || !operationId || !invocation) return;
@@ -178,21 +151,21 @@ export class RunInvocations {
     // which is why every later receipt for it is refused.
     this.handedOffInvocations.add(invocation.invocationId);
     while (this.handedOffInvocations.size > 32) this.handedOffInvocations.delete(this.handedOffInvocations.values().next().value!);
-    const terminal = this.context.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(makeInvocationReceipt({
+    const terminal = this.operations.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(makeInvocationReceipt({
       version: 1,
       receiptId: `terminal:${invocation.invocationId}`,
       receiptKind: "terminal",
       invocationId: invocation.invocationId,
       operationId,
-      sessionId: this.context.id,
+      sessionId: this.operations.id,
       source: invocation.source,
       ...(invocation.name ? { name: invocation.name } : {}),
       lifecycle: "completed",
       origin: invocation.origin,
-      sequence: this.context.revision + 1,
+      sequence: this.operations.revision + 1,
       createdAt: new Date().toISOString(),
-    })), `terminal:${invocation.invocationId}`, this.context.runWork.get(operationId));
-    replacement.settlement = Promise.all([terminal, this.context.clearMarkerOwnership(operationId)]).then(() => {});
+    })), `terminal:${invocation.invocationId}`, this.operations.runWork.get(operationId));
+    replacement.settlement = Promise.all([terminal, this.operations.clearMarkerOwnership(operationId)]).then(() => {});
   }
 
 }

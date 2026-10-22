@@ -1,22 +1,13 @@
-import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
+import type { RunOperations } from "./run-operations.js";
+import type { GatewayWorkHandle, GatewayWorkKind} from "./gateway-work-registry.js";
 
-interface RunWorkContext {
-  registry(): GatewayWorkRegistry;
-  metadata(): { sessionId: string; hostEpoch: string };
-  beforeSettle(operationId: string | undefined): void;
-  retained(): Set<string>;
-  administrativeRetained(): Set<string>;
-  hasActiveAgentRun(): boolean;
-  clearMarker(operationId: string, work: GatewayWorkHandle): Promise<void>;
-  enqueueMarker(operationId: string): Promise<void>;
-}
 
 /** Per-runtime operation-handle authority; GatewayWorkRegistry owns the tokens.
  * Live retained-owner projections are sampled again after marker persistence. */
 export class RunWorkOwner {
   private readonly operationWork = new Map<string, GatewayWorkHandle>();
 
-  constructor(private readonly context: RunWorkContext) {}
+  constructor(private readonly operations: RunOperations<unknown>) {}
 
   get(operationId: string): GatewayWorkHandle | undefined { return this.operationWork.get(operationId); }
   has(operationId: string): boolean { return this.operationWork.has(operationId); }
@@ -30,9 +21,9 @@ export class RunWorkOwner {
       existing.transition(kind);
       return existing;
     }
-    const work = this.context.registry().begin({
+    const work = this.operations.dependencies.workRegistry.begin({
       kind,
-      ...this.context.metadata(),
+      ...{ sessionId: this.operations.id, hostEpoch: this.operations.ui.hostEpoch },
     });
     this.operationWork.set(operationId, work);
     return work;
@@ -44,16 +35,16 @@ export class RunWorkOwner {
       existing.transition(kind);
       return existing;
     }
-    const work = this.context.registry().beginDerived({
+    const work = this.operations.dependencies.workRegistry.beginDerived({
       kind,
-      ...this.context.metadata(),
+      ...{ sessionId: this.operations.id, hostEpoch: this.operations.ui.hostEpoch },
     });
     this.operationWork.set(operationId, work);
     return work;
   }
 
   settleOperationWork(operationId: string | undefined): void {
-    this.context.beforeSettle(operationId);
+    this.beforeSettle(operationId);
     if (!operationId) return;
     const work = this.operationWork.get(operationId);
     if (!work) return;
@@ -66,15 +57,15 @@ export class RunWorkOwner {
   administrativeSuspectForegroundWorkTokens(): ReadonlySet<string> {
     // Pi's broad streaming state is authoritative even if a projection callback
     // is temporarily missing. Ambiguous live ownership must wait, never repair.
-    if (this.context.hasActiveAgentRun()) return new Set();
-    const retained = this.context.administrativeRetained();
+    if (this.operations.hasActiveAgentRun) return new Set();
+    const retained = this.administrativeRetainedOperationWorkIDs();
     return new Set([...this.operationWork.entries()].flatMap(([operationId, work]) =>
       retained.has(operationId) ? [] : [work.token]
     ));
   }
 
   settleRetiredOperationWork(): void {
-    const retained = this.context.retained();
+    const retained = this.retainedOperationWorkIDs();
     for (const operationId of [...this.operationWork.keys()]) {
       if (!retained.has(operationId)) this.settleOperationWork(operationId);
     }
@@ -86,23 +77,71 @@ export class RunWorkOwner {
   async reconcileOrphanedForegroundWorkForDrain(): Promise<void> {
     // Never synthesize or transfer identity during repair. Once Pi settles, its
     // sequenced callback or the next reconciliation pass can prove an orphan.
-    if (this.context.hasActiveAgentRun()) return;
-    const workFacts = new Map(this.context.registry().facts().map((fact) => [fact.token, fact]));
-    const retained = this.context.administrativeRetained();
+    if (this.operations.hasActiveAgentRun) return;
+    const workFacts = new Map(this.operations.dependencies.workRegistry.facts().map((fact) => [fact.token, fact]));
+    const retained = this.administrativeRetainedOperationWorkIDs();
     const candidates = [...this.operationWork.entries()].filter(([operationId, work]) => {
       const fact = workFacts.get(work.token);
       return fact?.kind === "foreground-agent-operation" && !retained.has(operationId);
     });
     for (const [operationId, work] of candidates) {
-      await this.context.clearMarker(operationId, work);
+      await this.operations.clearMarkerOwnership(operationId, work);
       // A delayed exact callback may have restored ownership while marker I/O
       // yielded. Reassert its marker rather than retiring live work.
-      if (this.context.administrativeRetained().has(operationId)) {
-        await this.context.enqueueMarker(operationId);
+      if (this.administrativeRetainedOperationWorkIDs().has(operationId)) {
+        await this.operations.enqueueMarkerOwnership(operationId);
         continue;
       }
       this.settleOperationWork(operationId);
     }
+  }
+
+  private beforeSettle(operationId: string | undefined): void {
+    this.operations.releaseSettleWaiters();
+    if (!operationId) return;
+    this.operations.lifecycle.cancelPreflight(operationId);
+    // PendingPrompt is a provisional projection, not independent ownership.
+    // Once its exact operation settles it must not keep an idle composer row
+    // alive merely because Pi omitted or replaced the expected user callback.
+    if (this.operations.pendingPrompt?.id === operationId) {
+      this.operations.pendingPrompt = undefined;
+      this.operations.pendingPromptMessage = undefined;
+    }
+  }
+
+  public retainedOperationWorkIDs(): Set<string> {
+    return new Set([
+      this.operations.activeOperationId,
+      this.operations.operation?.id,
+      this.operations.pendingPrompt?.id,
+      this.operations.pendingExtensionCommand?.id,
+      this.operations.runAttention.pendingAssistantCompletion?.operationId,
+      this.operations.runQueue.pendingQueueAdmission?.id,
+      ...this.operations.runAttention.completionOwnershipQueue.map((item) => item.completion.operationId),
+      ...[...this.operations.runTerminal.operationObservations.entries()]
+        .filter(([, observation]) => observation.pendingCompletionId !== undefined)
+        .map(([operationId]) => operationId),
+      ...this.operations.runQueue.queuedMessages.map((item) => item.id),
+      ...this.operations.heldQueue.entries.map((item) => item.id),
+      ...this.operations.runQueue.dequeuedFollowUpOwners,
+      ...this.operations.runQueue.dequeuedSteeringOwners,
+      ...this.operations.runQueue.consumedSteeringOperationIDs,
+    ].filter((value): value is string => typeof value === "string"));
+  }
+
+  public administrativeRetainedOperationWorkIDs(): Set<string> {
+    const retained = this.retainedOperationWorkIDs();
+    // A provisional prompt cannot represent foreground work after both Pi and
+    // the Gateway have reached an operation-free terminal phase.
+    if (!this.operations.hasActiveAgentRun
+      && (this.operations.phase === "idle" || this.operations.phase === "interrupted")
+      && this.operations.activeOperationId === undefined
+      && this.operations.operation === undefined
+      && this.operations.runAttention.pendingAssistantCompletion === undefined
+      && this.operations.pendingPrompt) {
+      retained.delete(this.operations.pendingPrompt.id);
+    }
+    return retained;
   }
 
 }

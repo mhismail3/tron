@@ -1,45 +1,7 @@
+import type { RunOperations } from "./run-operations.js";
 import { randomUUID } from "node:crypto";
-import type { FileEntry, SessionManager } from "../pi/coding-agent.js";
-import type { ModuleHost } from "../host/module-host.js";
-import type { JsonValue, SessionOperationState, SessionPhase } from "../../protocol/types.js";
-import type { GatewayWorkHandle, GatewayWorkRegistry } from "./gateway-work-registry.js";
-import type { RunMarkerStore } from "./run-markers.js";
-import type { RunPersistence } from "./run-persistence.js";
-import type { RunWorkOwner } from "./run-work-owner.js";
-import type { RunTerminalOwner } from "./run-terminal.js";
-import type { ManualCompactionOwner } from "./manual-compaction.js";
+import type { GatewayWorkHandle } from "./gateway-work-registry.js";
 import { completionOwnedByMarker, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "./completion-facts.js";
-
-export interface RunAttentionContext {
-  readonly id: string;
-  readonly dependencies: { markers: RunMarkerStore; workRegistry: GatewayWorkRegistry; modules: ModuleHost; persistenceDiagnostic?: (id: string, code: "terminal-receipt-persistence-failed") => void };
-  readonly ui: { readonly hostEpoch: string };
-  readonly hooks: { assistantResponseCompleted(id: string, completion: CanonicalAssistantCompletion, recovery: boolean, observed: boolean): Promise<void>; settled(id: string): void };
-  readonly runPersistence: RunPersistence;
-  readonly runWork: RunWorkOwner;
-  readonly runTerminal: RunTerminalOwner;
-  readonly manualCompaction: ManualCompactionOwner;
-  readonly taskWorker: { readonly identity: { readonly operationId: string } } | undefined;
-  readonly compactionOperation: SessionOperationState | undefined;
-  readonly hasActiveAgentRun: boolean;
-  readonly sessionManager: Pick<SessionManager, "getEntry">;
-  readonly activeToolSegmentOwnerId: string | undefined;
-  readonly activityHeartbeat: unknown;
-  phase: SessionPhase;
-  revision: number;
-  operation: SessionOperationState | undefined;
-  activeOperationId: string | undefined;
-  assertSessionIdentityReplacement(): void;
-  ownToolSegment(id: string): void;
-  startActivityHeartbeat(): void;
-  canonicalSessionEntries(): FileEntry[];
-  clearMarkerOwnership(id: string | undefined, work?: GatewayWorkHandle): Promise<void>;
-  publishConfiguration(): void;
-  releaseSettleWaiters(): void;
-  publishSnapshot(): void;
-  noteHomeIdle(): void;
-  emit(topic: string, data: JsonValue): void;
-}
 
 type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
@@ -51,6 +13,29 @@ type CompletionOwnershipItem = {
 
 /** Runtime completion ownership; durable attention remains with its store. */
 export class RunAttentionOwner {
+  /** `message_end` precedes Pi's synchronous canonical append. Capture immutable
+   * operation ownership in that callback turn so an immediate extension
+   * continuation cannot inherit the completion's already-consumed owner. */
+  private readonly pendingAssistantBindings = new Map<object, {
+    operationId?: string;
+    ownsPromptOperation: boolean;
+  }>();
+
+  captureAssistantBinding(): { operationId?: string; ownsPromptOperation: boolean } {
+    return {
+      ...(this.operations.activeOperationId ? { operationId: this.operations.activeOperationId } : {}),
+      ownsPromptOperation: this.operations.operation?.kind === "prompt",
+    };
+  }
+
+  get hasPendingAssistantBinding(): boolean { return this.pendingAssistantBindings.size > 0; }
+
+  bindAssistant(message: object, binding: { operationId?: string; ownsPromptOperation: boolean }): void {
+    this.pendingAssistantBindings.set(message, binding);
+  }
+
+  releaseAssistant(message: object): void { this.pendingAssistantBindings.delete(message); }
+
   /** Exact successful canonical assistant completion awaiting durable attention admission. */
   pendingAssistantCompletion: CanonicalAssistantCompletion | undefined;
   /** Exact completions retain canonical attention order. Their durable stamps
@@ -60,31 +45,31 @@ export class RunAttentionOwner {
   attentionBarrier: Promise<void> | undefined;
   rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
 
-  constructor(private readonly context: RunAttentionContext) {}
+  constructor(private readonly operations: RunOperations<unknown>) {}
 
   ensureAgentProjection(): void {
-    if (!this.context.hasActiveAgentRun) return;
-    if (this.context.phase === "idle" || this.context.phase === "interrupted") this.context.phase = "running";
-    this.context.activeOperationId ??= randomUUID();
-    if (!this.context.activeToolSegmentOwnerId) this.context.ownToolSegment(this.context.activeOperationId);
-    this.context.operation ??= { id: this.context.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
-    this.context.runWork.beginDerivedOperationWork(this.context.activeOperationId, "foreground-agent-operation");
-    if (!this.context.activityHeartbeat) this.context.startActivityHeartbeat();
+    if (!this.operations.hasActiveAgentRun) return;
+    if (this.operations.phase === "idle" || this.operations.phase === "interrupted") this.operations.phase = "running";
+    this.operations.activeOperationId ??= randomUUID();
+    if (!this.operations.activeToolSegmentOwnerId) this.operations.ownToolSegment(this.operations.activeOperationId);
+    this.operations.operation ??= { id: this.operations.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
+    this.operations.runWork.beginDerivedOperationWork(this.operations.activeOperationId, "foreground-agent-operation");
+    if (!this.operations.activityHeartbeat) this.operations.startActivityHeartbeat();
   }
 
   private startCompletionStamp(item: CompletionOwnershipItem): Promise<void> {
     if (item.stamp) return item.stamp;
     const { completion } = item;
     if (!completion.operationId) return Promise.resolve();
-    const stamp = this.context.runPersistence.trackOwnershipWrite(() => this.context.runPersistence.retryDurableWrite(
+    const stamp = this.operations.runPersistence.trackOwnershipWrite(() => this.operations.runPersistence.retryDurableWrite(
       `marker:completion:${completion.operationId}:${completion.id}`,
-      () => this.context.dependencies.markers.reassertAssistantCompletion(
-        this.context.id,
+      () => this.operations.dependencies.markers.reassertAssistantCompletion(
+        this.operations.id,
         completion.operationId!,
         completion.id,
         completion.completedAt,
       ),
-    ), this.context.runWork.get(completion.operationId) ?? item.fallbackWork);
+    ), this.operations.runWork.get(completion.operationId) ?? item.fallbackWork);
     item.stamp = stamp;
     void stamp.catch(() => {
       if (item.stamp === stamp) item.stamp = undefined;
@@ -105,21 +90,21 @@ export class RunAttentionOwner {
       // Canonical append admission is the single observation boundary. Later
       // attention settlement and agent_settled notification handling must read
       // this same disposition rather than resampling a close/completion race.
-      this.context.runTerminal.completionObserved(completion.id);
-      const operationId = completion.operationId ?? this.context.runTerminal.completionOperationId(completion.id);
-      const exactOwner = operationId ? this.context.runWork.get(operationId) : undefined;
+      this.operations.runTerminal.completionObserved(completion.id);
+      const operationId = completion.operationId ?? this.operations.runTerminal.completionOperationId(completion.id);
+      const exactOwner = operationId ? this.operations.runWork.get(operationId) : undefined;
       item = {
         completion: operationId && !completion.operationId ? { ...completion, operationId } : completion,
         stamp: undefined,
         observationSettled: false,
-        ...(operationId && this.context.runTerminal.operationObservations.get(operationId)?.cursor
-          ? { observationCursor: this.context.runTerminal.operationObservations.get(operationId)!.cursor }
+        ...(operationId && this.operations.runTerminal.operationObservations.get(operationId)?.cursor
+          ? { observationCursor: this.operations.runTerminal.operationObservations.get(operationId)!.cursor }
           : {}),
         ...(exactOwner ? {} : {
-          fallbackWork: this.context.dependencies.workRegistry.beginDerived({
+          fallbackWork: this.operations.dependencies.workRegistry.beginDerived({
             kind: "terminal-receipt-persistence",
-            sessionId: this.context.id,
-            hostEpoch: this.context.ui.hostEpoch,
+            sessionId: this.operations.id,
+            hostEpoch: this.operations.ui.hostEpoch,
           }),
         }),
       };
@@ -149,17 +134,17 @@ export class RunAttentionOwner {
         item.fallbackWork?.settle();
         // Normal completions already retired their operation token before the
         // final snapshot. Queue retirement must also publish configuration ready.
-        this.context.publishConfiguration();
+        this.operations.publishConfiguration();
       }
-      this.context.manualCompaction.startPendingManualCompaction();
+      this.operations.manualCompaction.startPendingManualCompaction();
     })().finally(() => {
-      this.context.runPersistence.pendingReceiptWrites.delete(operation);
-      this.context.releaseSettleWaiters();
+      this.operations.runPersistence.pendingReceiptWrites.delete(operation);
+      this.operations.releaseSettleWaiters();
       if (this.attentionBarrier === operation) this.attentionBarrier = undefined;
-      this.context.runWork.settleRetiredOperationWork();
+      this.operations.runWork.settleRetiredOperationWork();
     });
     this.attentionBarrier = operation;
-    this.context.runPersistence.pendingReceiptWrites.add(operation);
+    this.operations.runPersistence.pendingReceiptWrites.add(operation);
     void operation.catch(() => {});
     return operation;
   }
@@ -169,42 +154,42 @@ export class RunAttentionOwner {
     _error: unknown,
     fallbackWork?: GatewayWorkHandle,
   ): void {
-    const operationId = completion.operationId ?? this.context.runTerminal.completionOperationId(completion.id);
-    this.context.dependencies.persistenceDiagnostic?.(this.context.id, "terminal-receipt-persistence-failed");
-    this.context.emit("session.diagnostic", {
+    const operationId = completion.operationId ?? this.operations.runTerminal.completionOperationId(completion.id);
+    this.operations.dependencies.persistenceDiagnostic?.(this.operations.id, "terminal-receipt-persistence-failed");
+    this.operations.emit("session.diagnostic", {
       code: "terminal-receipt-persistence-failed",
       message: "Terminal receipt was not proven durable; the run remains marked for interrupted recovery",
     });
-    this.context.runWork.settleOperationWork(operationId);
+    this.operations.runWork.settleOperationWork(operationId);
     fallbackWork?.settle();
-    const pendingOwnerId = this.context.runTerminal.completionOperationId(completion.id);
-    if (pendingOwnerId) delete this.context.runTerminal.operationObservations.get(pendingOwnerId)!.pendingCompletionId;
+    const pendingOwnerId = this.operations.runTerminal.completionOperationId(completion.id);
+    if (pendingOwnerId) delete this.operations.runTerminal.operationObservations.get(pendingOwnerId)!.pendingCompletionId;
     if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
   }
 
   private admitCompletionObservation(item: CompletionOwnershipItem): void {
     if (item.observationSettled) return;
-    const operationId = item.completion.operationId ?? this.context.runTerminal.completionOperationId(item.completion.id);
+    const operationId = item.completion.operationId ?? this.operations.runTerminal.completionOperationId(item.completion.id);
     if (!operationId) return;
-    const start = item.observationCursor ?? this.context.runTerminal.operationObservations.get(operationId)?.cursor;
+    const start = item.observationCursor ?? this.operations.runTerminal.operationObservations.get(operationId)?.cursor;
     if (!start) return;
-    const entries = this.context.canonicalSessionEntries();
+    const entries = this.operations.canonicalSessionEntries();
     const completionIndex = entries.findIndex(entry => entry.id === item.completion.id);
     if (completionIndex < start.entryIndex) return;
     item.observationSettled = true;
     // The deduplication record belongs only to the operation whose eventual
     // agent_settled callback can consume it. A completion from an earlier
     // operation in a queued run may settle after its callback ownership ended.
-    if (this.context.activeOperationId === operationId) {
-      this.context.runTerminal.observationFor(operationId).observedCompletionId = item.completion.id;
+    if (this.operations.activeOperationId === operationId) {
+      this.operations.runTerminal.observationFor(operationId).observedCompletionId = item.completion.id;
     }
-    if (this.context.hasActiveAgentRun && this.context.activeOperationId === operationId) {
+    if (this.operations.hasActiveAgentRun && this.operations.activeOperationId === operationId) {
       // The same foreground operation can continue after a completion (for
       // example, a consumed steer). Advance to the exact next canonical entry;
       // its later completion owns only the remaining range.
-      this.context.runTerminal.observationFor(operationId).cursor = { entryIndex: completionIndex + 1 };
+      this.operations.runTerminal.observationFor(operationId).cursor = { entryIndex: completionIndex + 1 };
     } else {
-      this.context.runTerminal.retireOperationObservation(operationId);
+      this.operations.runTerminal.retireOperationObservation(operationId);
     }
   }
 
@@ -214,11 +199,11 @@ export class RunAttentionOwner {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          await this.context.hooks.assistantResponseCompleted(
-            this.context.id,
+          await this.operations.hooks.assistantResponseCompleted(
+            this.operations.id,
             completion,
             false,
-            this.context.runTerminal.completionObserved(completion.id),
+            this.operations.runTerminal.completionObserved(completion.id),
           );
           lastError = undefined;
           break;
@@ -227,45 +212,45 @@ export class RunAttentionOwner {
         }
       }
       if (lastError !== undefined) throw lastError;
-      if (!completion.operationId?.startsWith("automation:") && completion.operationId !== this.context.taskWorker?.identity.operationId) {
-        await this.context.clearMarkerOwnership(completion.operationId, item.fallbackWork);
+      if (!completion.operationId?.startsWith("automation:") && completion.operationId !== this.operations.taskWorker?.identity.operationId) {
+        await this.operations.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
       this.admitCompletionObservation(item);
-      const completionWorkOwner = completion.operationId ?? this.context.runTerminal.completionOperationId(completion.id);
-      this.context.runWork.settleOperationWork(completionWorkOwner);
-      const pendingOwner = this.context.runTerminal.completionOperationId(completion.id);
-      if (pendingOwner) delete this.context.runTerminal.operationObservations.get(pendingOwner)!.pendingCompletionId;
+      const completionWorkOwner = completion.operationId ?? this.operations.runTerminal.completionOperationId(completion.id);
+      this.operations.runWork.settleOperationWork(completionWorkOwner);
+      const pendingOwner = this.operations.runTerminal.completionOperationId(completion.id);
+      if (pendingOwner) delete this.operations.runTerminal.operationObservations.get(pendingOwner)!.pendingCompletionId;
       if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
       // A continuation may already own the agent while this older durable write
       // unwinds. Settlement retires only its exact completion; the newer run
       // remains operationally running and owns final idle transition.
-      if (this.context.hasActiveAgentRun) {
+      if (this.operations.hasActiveAgentRun) {
         this.ensureAgentProjection();
-        this.context.publishSnapshot();
+        this.operations.publishSnapshot();
         return;
       }
-      if (this.context.manualCompaction.pendingManualCompaction) {
+      if (this.operations.manualCompaction.pendingManualCompaction) {
         // Compaction owns a separate marker. Start it only after the preceding
         // response's attention fact and exact marker retirement are durable.
-        this.context.phase = "idle";
-        this.context.revision += 1;
-        this.context.publishSnapshot();
+        this.operations.phase = "idle";
+        this.operations.revision += 1;
+        this.operations.publishSnapshot();
         return;
       }
-      this.context.hooks.settled(this.context.id);
-      await this.context.dependencies.modules.policy("runSettled")?.().quiescent(this.context.id);
-      this.context.phase = this.context.compactionOperation ? "compacting" : "idle";
-      this.context.noteHomeIdle();
-      this.context.operation ??= this.context.compactionOperation;
-      this.context.revision += 1;
-      this.context.publishSnapshot();
+      this.operations.hooks.settled(this.operations.id);
+      await this.operations.dependencies.modules.policy("runSettled")?.().quiescent(this.operations.id);
+      this.operations.phase = this.operations.compactionOperation ? "compacting" : "idle";
+      this.operations.noteHomeIdle();
+      this.operations.operation ??= this.operations.compactionOperation;
+      this.operations.revision += 1;
+      this.operations.publishSnapshot();
     } catch (error) {
       // The failed exact completion stays at the ownership-lane head and retains
       // its durable marker. Reconciliation retries it before any continuation
       // marker or later completion can advance.
-      this.context.phase = "interrupted";
-      this.context.revision += 1;
-      this.context.publishSnapshot();
+      this.operations.phase = "interrupted";
+      this.operations.revision += 1;
+      this.operations.publishSnapshot();
       throw error;
     }
   }
@@ -288,12 +273,12 @@ export class RunAttentionOwner {
       await this.beginAttentionSettlement(this.pendingAssistantCompletion);
       return;
     }
-    const markers = await this.context.dependencies.markers.evidenceFor(this.context.id);
+    const markers = await this.operations.dependencies.markers.evidenceFor(this.operations.id);
     for (const marker of markers) {
-      const completion = completionOwnedByMarker(this.context.sessionManager, marker);
+      const completion = completionOwnedByMarker(this.operations.sessionManager, marker);
       if (!completion) continue;
-      await this.context.hooks.assistantResponseCompleted(this.context.id, completion, true, false);
-      await this.context.clearMarkerOwnership(marker.operationId);
+      await this.operations.hooks.assistantResponseCompleted(this.operations.id, completion, true, false);
+      await this.operations.clearMarkerOwnership(marker.operationId);
     }
   }
 
@@ -301,7 +286,7 @@ export class RunAttentionOwner {
     disposition: SessionAttentionRebindDisposition,
     operation: () => Promise<T>,
   ): Promise<T> {
-    this.context.assertSessionIdentityReplacement();
+    this.operations.assertSessionIdentityReplacement();
     const previous = this.rebindAttentionDisposition;
     this.rebindAttentionDisposition = disposition;
     try {

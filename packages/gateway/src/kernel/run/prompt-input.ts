@@ -1,93 +1,14 @@
+import type { RunOperations } from "./run-operations.js";
 import { randomUUID } from "node:crypto";
 import { GatewayError } from "../../errors.js";
 import { admitResourceInvocations, composeResourcePrompt, parsePiLiteralCommand } from "../../sessions/resource-invocation.js";
 import { invocationResources } from "./queue-commands.js";
-import type { AgentSession, SettingsManager } from "../pi/coding-agent.js";
+import type { AgentSession} from "../pi/coding-agent.js";
 import type { ImageContent } from "../pi/ai.js";
-import type { AgentMessage } from "../pi/agent-core.js";
-import type { ChatOrigin, JsonValue, PendingPromptState, ResourceInvocation, SessionOperationState, SessionPhase } from "../../protocol/types.js";
-import type { TrustService } from "../../admin/trust-service.js";
-import type { ExtensionLifecycleCoordinator } from "../../sessions/extension-lifecycle-coordinator.js";
-import type { ResourceExpansionCatalog } from "../../sessions/resource-invocation.js";
-import type { ModuleHost, AgentTerminalOutcome, ContextPolicyLifecycle } from "../host/module-host.js";
-import type { RequestPolicy } from "../host/request-policy.js";
-import type { InputTrigger } from "../host/input-admission.js";
-import type { GatewayWorkHandle } from "./gateway-work-registry.js";
-import type { CompactionOperationPolicy } from "./compaction-policy.js";
-import type { RunAbortOwner } from "./run-abort-owner.js";
-import type { RunQueueOwner } from "./run-queue-owner.js";
-import type { RunWorkOwner } from "./run-work-owner.js";
-import type { HeldPromptQueue } from "./held-prompt-queue.js";
-import type { PromptAttempt, PromptAttemptInput } from "./prompt-attempt.js";
+import type { ChatOrigin} from "../../protocol/types.js";
 import { makeInvocationReceipt, type InvocationProjection, type OwnedOperationTerminal } from "./invocation-receipts.js";
 import { MAXIMUM_PROMPT_ATTACHMENTS, type PromptQueueDisplay, type QueueBehavior, type RuntimeQueuedMessage } from "./queue-input.js";
 
-/** Live bindings to the frame and existing owners; no copied admission state. */
-export interface PromptAdmissionContext<TaskFence, Completion> {
-  runtime: { session: AgentSession };
-  dependencies: { trust: Pick<TrustService, "requireResolved">; modules: ModuleHost; beforeRunAdmission(id: string): Promise<void> };
-  id: string;
-  cwd: string;
-  revision: number;
-  phase: SessionPhase;
-  operation: SessionOperationState | undefined;
-  activeOperationId: string | undefined;
-  pendingPrompt: PendingPromptState | undefined;
-  pendingPromptMessage: AgentMessage | undefined;
-  pendingExtensionCommand: SessionOperationState | undefined;
-  operationWasHomeWake: boolean;
-  readonly pendingAssistantCompletion: Completion | undefined;
-  readonly attentionBarrier: Promise<void> | undefined;
-  readonly completionOwnershipQueue: { readonly length: number };
-  readonly isAgentAdmissionSettling: boolean;
-  readonly hasActiveAgentRun: boolean;
-  readonly queuedManualCompactionInFlight: boolean;
-  readonly shuttingDown: boolean;
-  readonly taskWorker: { identity: { taskId: string; operationId: string }; acceptsSteering: boolean } | undefined;
-  readonly taskWait: { wakeOperationId?: string } | undefined;
-  readonly homeRequestPolicy: RequestPolicy | undefined;
-  readonly sessionFile: string | undefined;
-  readonly canonicalEntryCount: number;
-  readonly lifecycle: ExtensionLifecycleCoordinator;
-  readonly runAbort: RunAbortOwner;
-  readonly runQueue: RunQueueOwner;
-  readonly runWork: RunWorkOwner;
-  readonly heldQueue: HeldPromptQueue;
-  readonly invocations: Map<string, InvocationProjection>;
-  readonly ownedTerminalObservers: Map<string, (terminal: OwnedOperationTerminal) => Promise<void> | void>;
-  readonly compactionPolicies: WeakMap<AgentSession, CompactionOperationPolicy>;
-  readonly contextPolicies: WeakMap<AgentSession, Pick<ContextPolicyLifecycle, "apply">>;
-  readonly lane: { run<T>(work: () => Promise<T>): Promise<T> };
-  readonly hooks: { settled(id: string): void };
-  readonly inboxAttributedMessages: Set<string>;
-  assertUsable(): void;
-  assertHomePromptAdmission(): void;
-  assertHomeWakeAdmissible(session: AgentSession): Promise<void>;
-  attentionPendingError(): Error;
-  liveTaskOperationId(): string | undefined;
-  sharedTaskSteering(ownership: PromptOwnership<TaskFence> | undefined): boolean;
-  persistTaskMarker(operationId: string): Promise<void>;
-  noteAcceptedSteering(operationId: string): void;
-  waitForStateChange(): Promise<void>;
-  applyLiveRunSettings(session: AgentSession): Promise<ReturnType<SettingsManager["getSettings"]> | undefined>;
-  assertInvocableResources(resources: readonly ResourceInvocation[]): void;
-  resourceExpansionCatalog(): ResourceExpansionCatalog;
-  invocationForOperation(operationId: string): InvocationProjection | undefined;
-  extensionCommandOrigin(name: string): ChatOrigin;
-  promptDisplay(operationId: string, text: string, images: ImageContent[], display?: PromptQueueDisplay): PendingPromptState;
-  persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void>;
-  persistCanonicalCustomEntry(type: string, data: JsonValue, identity: string): Promise<void>;
-  enqueueMarkerOwnership(operationId: string): Promise<void>;
-  clearMarkerOwnership(operationId: string): Promise<void>;
-  notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void>;
-  notifyAgentTerminal(id: string, outcome: AgentTerminalOutcome): Promise<void>;
-  completionObserved(id: string): void;
-  terminalizeInvocation(operationId: string, lifecycle: "failed", errorCode?: string, owner?: GatewayWorkHandle): Promise<void>;
-  startHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger | undefined, accepted: (value: boolean) => void): Promise<void>;
-  createAttempt(sdkRun: Promise<void>, input: PromptAttemptInput, queuesIntoActiveRun: () => boolean): PromptAttempt<Completion>;
-  publishSnapshot(): void;
-  emit(topic: string, data: JsonValue): void;
-}
 
 interface AutomationPromptOwnership<TaskFence> {
   kind?: never;
@@ -125,8 +46,8 @@ export type PromptOwnership<TaskFence> = AutomationPromptOwnership<TaskFence> | 
 };
 
 
-export function preparePromptInput<TaskFence, Completion>(
-  context: PromptAdmissionContext<TaskFence, Completion>, session: AgentSession,
+export function preparePromptInput<TaskFence>(
+  operations: RunOperations<unknown>, session: AgentSession,
   text: string, images: ImageContent[], queueDisplay: PromptQueueDisplay | undefined,
   ownership: PromptOwnership<TaskFence> | undefined,
 ) {
@@ -143,12 +64,12 @@ export function preparePromptInput<TaskFence, Completion>(
     if (composedResources === undefined && (images.length > 0 || (queueDisplay!.attachments?.length ?? 0) > 0)) {
       throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
     }
-    context.assertInvocableResources(resources);
+    operations.assertInvocableResources(resources);
   }
   // Every caller passes the visible prompt; the expansions are composed
   // here, in the lane, against the catalog just validated.
   if (composedResources !== undefined) {
-    text = composeResourcePrompt(composedResources, text, context.resourceExpansionCatalog());
+    text = composeResourcePrompt(composedResources, text, operations.resourceExpansionCatalog());
   }
   // Pi uses the first literal ASCII space as its command
   // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
@@ -168,15 +89,15 @@ export function preparePromptInput<TaskFence, Completion>(
   return { text, resources, composedResources, extensionCommandName, isExactExtensionCommand };
 }
 
-export function preparePromptIntent<TaskFence, Completion>(
-  context: PromptAdmissionContext<TaskFence, Completion>, session: AgentSession,
+export function preparePromptIntent<TaskFence>(
+  operations: RunOperations<unknown>, session: AgentSession,
   text: string, images: ImageContent[], behavior: QueueBehavior | undefined,
   queueDisplay: PromptQueueDisplay | undefined, ownership: PromptOwnership<TaskFence> | undefined,
   operationId: string, redelivery: RuntimeQueuedMessage | undefined,
-  prepared: ReturnType<typeof preparePromptInput<TaskFence, Completion>>,
+  prepared: ReturnType<typeof preparePromptInput<TaskFence>>,
 ) {
   const { resources, composedResources, extensionCommandName, isExactExtensionCommand } = prepared;
-  const existingInvocation = redelivery ? context.invocationForOperation(operationId) : undefined;
+  const existingInvocation = redelivery ? operations.runInvocations.invocationForOperation(operationId) : undefined;
   if (redelivery && !existingInvocation) {
     throw new GatewayError("conflict", "Accepted queued invocation identity is no longer available", true);
   }
@@ -202,13 +123,13 @@ export function preparePromptIntent<TaskFence, Completion>(
     ...(resources === undefined ? {} : { resourceInvocations: resources }),
     lifecycle: "staged",
     origin: ownership?.origin ?? (invocationSource === "extension" && invocationName
-      ? context.extensionCommandOrigin(invocationName)
+      ? operations.extensionCommandOrigin(invocationName)
       : { kind: "user", confidence: "boundary" }),
-    sequence: context.revision + 1,
+    sequence: operations.revision + 1,
     updatedAt: new Date().toISOString(),
   };
   if (session.isStreaming && !behavior && !isExactExtensionCommand) {
-    if (!redelivery) context.invocations.delete(invocationId);
+    if (!redelivery) operations.runInvocations.invocations.delete(invocationId);
     throw new GatewayError("busy", "Session is running; choose steer or follow-up");
   }
   const queueAdmissionDisplay = queueDisplay ?? {
@@ -221,9 +142,9 @@ export function preparePromptIntent<TaskFence, Completion>(
   return { invocationId, invocationSource, invocationName, invokedResources, extensionArguments, submittedText, invocation, queueAdmissionDisplay };
 }
 
-export function promptStartReceipt<TaskFence, Completion>(
-  context: PromptAdmissionContext<TaskFence, Completion>, operationId: string,
-  intent: ReturnType<typeof preparePromptIntent<TaskFence, Completion>>,
+export function promptStartReceipt<TaskFence>(
+  operations: RunOperations<unknown>, operationId: string,
+  intent: ReturnType<typeof preparePromptIntent<TaskFence>>,
 ): ReturnType<typeof makeInvocationReceipt> {
   const { invocationId, invocationSource, invocationName, extensionArguments, invokedResources, submittedText, invocation } = intent;
   return makeInvocationReceipt({
@@ -232,7 +153,7 @@ export function promptStartReceipt<TaskFence, Completion>(
     receiptKind: "start",
     invocationId,
     operationId,
-    sessionId: context.id,
+    sessionId: operations.id,
     source: invocationSource,
     ...(invocationName ? { name: invocationName } : {}),
     ...(extensionArguments ? { arguments: extensionArguments } : {}),
@@ -240,7 +161,7 @@ export function promptStartReceipt<TaskFence, Completion>(
     ...(submittedText === undefined ? {} : { submittedText }),
     lifecycle: "staged",
     origin: invocation.origin,
-    sequence: context.revision + 1,
+    sequence: operations.revision + 1,
     createdAt: new Date().toISOString(),
   });
 }

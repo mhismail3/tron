@@ -1,33 +1,11 @@
+import type { RunOperations } from "./run-operations.js";
 import { randomUUID } from "node:crypto";
-import type { ChatSemanticMetadata, QueuedMessageState, SessionOperationState } from "../../protocol/types.js";
-import type { InvocationProjection } from "./invocation-receipts.js";
-import type { AgentSession } from "../pi/coding-agent.js";
-import type { RequestPolicy } from "../host/request-policy.js";
-import type { RunWorkOwner } from "./run-work-owner.js";
-import type { RunAbortOwner } from "./run-abort-owner.js";
-import type { HeldPrompt, PendingQueueAdmission, QueueBehavior, RuntimeQueuedMessage, PromptQueueDisplay, QueueAdmissionDisposition } from "./queue-input.js";
+import type { QueuedMessageState} from "../../protocol/types.js";
+import type { PendingQueueAdmission, QueueBehavior, RuntimeQueuedMessage, PromptQueueDisplay, QueueAdmissionDisposition } from "./queue-input.js";
 import type { ImageContent } from "../pi/ai.js";
 import { GatewayError } from "../../errors.js";
 import { validateQueue } from "./queue-commands.js";
 
-interface RunQueueContext {
-  session(): AgentSession;
-  runWork(): RunWorkOwner;
-  runAbort(): RunAbortOwner;
-  homeRequestPolicy(): Pick<RequestPolicy, "transferOperation"> | undefined;
-  hasActiveAgentRun(): boolean;
-  activeOperationId(): string | undefined;
-  setActiveOperationId(id: string): void;
-  setOperation(operation: SessionOperationState): void;
-  ensureAgentProjection(): void;
-  invocationForOperation(id: string): InvocationProjection | undefined;
-  terminalizeTransferredOperation(id: string | undefined): void;
-  retireOperationObservation(id: string | undefined): void;
-  enqueueMarkerOwnership(id: string): Promise<void>;
-  clearMarkerOwnership(id: string): Promise<void>;
-  internalWakeSemantic(id: string): ChatSemanticMetadata | undefined;
-  held(): readonly HeldPrompt[];
-}
 
 /** Per-runtime accepted SDK queue identities and shared presentation clock.
  * Pi owns its message text; reconciliation retains exact receipt/work owners
@@ -49,7 +27,7 @@ export class RunQueueOwner {
    * still needs its canonical binding/terminal receipt persisted. */
   readonly consumedSteeringOperationIDs = new Set<string>();
 
-  constructor(private readonly context: RunQueueContext) {}
+  constructor(private readonly operations: RunOperations<unknown>) {}
 
   retireTerminalOwnership(operationId: string): void {
     this.consumedSteeringOperationIDs.delete(operationId);
@@ -112,7 +90,7 @@ export class RunQueueOwner {
   }
 
   reconcileQueuedMessages(): void {
-    const session = this.context.session();
+    const session = this.operations.runtime.session;
     const actual: Record<QueueBehavior, readonly string[]> = {
       steer: session.getSteeringMessages(),
       followUp: session.getFollowUpMessages(),
@@ -169,7 +147,7 @@ export class RunQueueOwner {
     const sdkPresentSteeringIDs = new Set(reconciled.filter((item) => item.behavior === "steer").map((item) => item.id));
     const reconciledIDs = new Set(sdkPresentIDs);
     for (const item of previous) {
-      if (this.context.runAbort().stopSteeringRecoveryIDs.has(item.id) && !reconciledIDs.has(item.id)) {
+      if (this.operations.runAbort.stopSteeringRecoveryIDs.has(item.id) && !reconciledIDs.has(item.id)) {
         if (this.sdkQueuedSteeringIDs.has(item.id) && item.behavior === "steer"
           && !this.dequeuedSteeringOwners.includes(item.id)) {
           this.dequeuedSteeringOwners.push(item.id);
@@ -182,68 +160,68 @@ export class RunQueueOwner {
       ? left.ordinal - right.ordinal
       : left.behavior === "steer" ? -1 : 1);
     for (const item of reconciled) {
-      if (!this.context.runWork().has(item.id)) this.context.runWork().beginDerivedOperationWork(item.id, "queued-mutation");
+      if (!this.operations.runWork.has(item.id)) this.operations.runWork.beginDerivedOperationWork(item.id, "queued-mutation");
     }
     const removed = previous.filter((item) => !reconciled.some((candidate) => candidate.id === item.id));
-    if (removed.length > 0 && this.context.hasActiveAgentRun()) {
-      this.context.ensureAgentProjection();
-      if (this.context.activeOperationId()) this.context.runWork().beginDerivedOperationWork(this.context.activeOperationId()!, "foreground-agent-operation");
+    if (removed.length > 0 && this.operations.hasActiveAgentRun) {
+      this.operations.runAttention.ensureAgentProjection();
+      if (this.operations.activeOperationId) this.operations.runWork.beginDerivedOperationWork(this.operations.activeOperationId!, "foreground-agent-operation");
     }
     for (const item of removed) {
-      if (item.behavior === "steer" && this.context.invocationForOperation(item.id)) {
+      if (item.behavior === "steer" && this.operations.runInvocations.invocationForOperation(item.id)) {
         // Agent-core's queue_update precedes message_start for steering. Do
         // not settle this operation or let the enclosing activeOperationId
         // impersonate it during that exact callback window.
         if (!this.dequeuedSteeringOwners.includes(item.id)) {
           this.dequeuedSteeringOwners.push(item.id);
         }
-        const work = this.context.runWork().get(item.id)
-          ?? this.context.runWork().beginDerivedOperationWork(item.id, "queued-mutation");
+        const work = this.operations.runWork.get(item.id)
+          ?? this.operations.runWork.beginDerivedOperationWork(item.id, "queued-mutation");
         work.transition("foreground-agent-operation");
         continue;
       }
-      if (item.behavior === "followUp" && this.context.runWork().has(item.id)) {
-        if (!this.context.hasActiveAgentRun()) {
+      if (item.behavior === "followUp" && this.operations.runWork.has(item.id)) {
+        if (!this.operations.hasActiveAgentRun) {
           // Pi can remove a follow-up immediately before emitting its next
           // agent_start. Retain the exact accepted owner across that event gap;
           // the start consumes this FIFO latch instead of deriving new work.
           if (!this.dequeuedFollowUpOwners.includes(item.id)) this.dequeuedFollowUpOwners.push(item.id);
-          this.context.runWork().get(item.id)?.transition("foreground-agent-operation");
+          this.operations.runWork.get(item.id)?.transition("foreground-agent-operation");
           continue;
         }
-        if (this.context.activeOperationId() !== item.id) {
+        if (this.operations.activeOperationId !== item.id) {
           // Pi can emit agent_start before queue_update. The exact removed
           // follow-up then retrospectively transfers its pre-cutoff token into
           // the already-started foreground run; retire only the synthetic owner.
-          const syntheticOwner = this.context.activeOperationId();
-          this.context.terminalizeTransferredOperation(syntheticOwner);
-          if (syntheticOwner !== item.id) this.context.retireOperationObservation(syntheticOwner);
-          this.context.setActiveOperationId(item.id);
+          const syntheticOwner = this.operations.activeOperationId;
+          this.operations.runInvocations.terminalizeTransferredOperation(syntheticOwner);
+          if (syntheticOwner !== item.id) this.operations.runTerminal.retireOperationObservation(syntheticOwner);
+          (this.operations.activeOperationId = item.id);
           // The follow-up is part of the same activation: its boundary entry and
           // its frozen memory view must not change, only the operation identity
           // Tron now reports.
-          this.context.homeRequestPolicy()?.transferOperation(syntheticOwner, item.id);
-          this.context.setOperation({
+          this.operations.homeRequestPolicy?.transferOperation(syntheticOwner, item.id);
+          (this.operations.operation = {
             id: item.id,
             kind: "prompt",
             startedAt: new Date().toISOString(),
-            ...(this.context.invocationForOperation(item.id)?.invocationId
-              ? { invocationId: this.context.invocationForOperation(item.id)!.invocationId }
+            ...(this.operations.runInvocations.invocationForOperation(item.id)?.invocationId
+              ? { invocationId: this.operations.runInvocations.invocationForOperation(item.id)!.invocationId }
               : {}),
           });
           // Queue removal can follow agent_start. Durably transfer the marker
           // before retiring the synthetic event-time owner, so completion stamps
           // cannot race a missing exact marker.
-          void this.context.enqueueMarkerOwnership(item.id).then(async () => {
-            if (syntheticOwner) await this.context.clearMarkerOwnership(syntheticOwner);
-            this.context.runWork().settleOperationWork(syntheticOwner);
-          }).catch(() => this.context.session().abort());
+          void this.operations.enqueueMarkerOwnership(item.id).then(async () => {
+            if (syntheticOwner) await this.operations.clearMarkerOwnership(syntheticOwner);
+            this.operations.runWork.settleOperationWork(syntheticOwner);
+          }).catch(() => this.operations.runtime.session.abort());
         }
-        this.context.runWork().get(item.id)?.transition("foreground-agent-operation");
+        this.operations.runWork.get(item.id)?.transition("foreground-agent-operation");
         const pendingIndex = this.dequeuedFollowUpOwners.indexOf(item.id);
         if (pendingIndex >= 0) this.dequeuedFollowUpOwners.splice(pendingIndex, 1);
       } else {
-        this.context.runWork().settleOperationWork(item.id);
+        this.operations.runWork.settleOperationWork(item.id);
       }
     }
     const changed = previous.length !== reconciled.length || previous.some((item, index) => {
@@ -277,11 +255,11 @@ export class RunQueueOwner {
     const piQueued = new Set(this.queuedMessages.map((item) => item.id));
     return [
       ...this.queuedMessages,
-      ...this.context.held().filter((item) => !piQueued.has(item.id)),
+      ...this.operations.heldQueue.entries.filter((item) => !piQueued.has(item.id)),
     ].map(({
       id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments, resourceInvocations,
     }) => {
-      const semantic = this.context.internalWakeSemantic(id);
+      const semantic = this.operations.internalWakeSemantic(id);
       return {
         id,
         ...(semantic ? { semantic } : {}),
