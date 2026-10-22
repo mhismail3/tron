@@ -11,7 +11,7 @@ settlement. Other session modules have their own manifests here; projection live
 ## Owns
 
 `runtime-registry.ts` (`RuntimeRegistry`), `runtime-slot.ts` (`RuntimeSlot`),
-[`kernel/run`](../kernel/run/README.md) receipts, markers, per-operation work, held/SDK queues, serialized queue edits, serialized prompt admission/completion, manual compaction, durable invocation terminals/observers, task waits, write fences and cancellation;
+[`kernel/run`](../kernel/run/README.md) receipts, markers, per-operation work, held/SDK queues, serialized queue edits, serialized prompt admission/completion, manual compaction, durable terminals/observers, attention, task waits, write fences and cancellation;
 `owned-session-dispatch.ts`, `semantic-ui-broker.ts`, `restart-drain.ts`
 and the rest of `../run.module.json`. State: Gateway-owned
 bounded run markers and command receipts; Pi owns JSONL. Host recipes are fixed per runtime; append policies resolve recorded identity live.

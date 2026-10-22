@@ -67,6 +67,8 @@
     "kernel/run/manual-compaction.ts",
     "kernel/run/run-invocations.ts",
     "kernel/run/run-terminal.ts",
+    "kernel/run/run-attention.ts",
+    "kernel/run/completion-facts.ts",
     "kernel/run/prompt-input.ts",
     "kernel/run/held-prompt-queue.ts",
     "kernel/run/queue-input.ts",

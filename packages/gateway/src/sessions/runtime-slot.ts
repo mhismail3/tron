@@ -51,6 +51,8 @@ import { RunAbortOwner } from "../kernel/run/run-abort-owner.js";
 import { RunQueueOwner } from "../kernel/run/run-queue-owner.js";
 import { RunInvocations, type RunInvocationContext, type CommandReplacement } from "../kernel/run/run-invocations.js";
 import { RunTerminalOwner, type RunTerminalContext } from "../kernel/run/run-terminal.js";
+import { RunAttentionOwner, type RunAttentionContext } from "../kernel/run/run-attention.js";
+import { successfulAssistantCompletion, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "../kernel/run/completion-facts.js";
 import { ManualCompactionOwner, type ManualCompactionContext } from "../kernel/run/manual-compaction.js";
 import type { HomeTaskControlRequest } from "../home/home-task-dispatcher.js";
 import type { PromptOwnership, PromptAdmissionContext } from "../kernel/run/prompt-input.js";
@@ -140,7 +142,7 @@ import {
   type TranscriptPage,
 } from "../kernel/projection/projection.js";
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
-import { type RunMarkerEvidence, type RunMarkerStore } from "../kernel/run/run-markers.js";
+import { type RunMarkerStore } from "../kernel/run/run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext } from "../extensions/owner-attribution.js";
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
@@ -319,40 +321,6 @@ const MAX_EXTENSION_EVENT_LINES = 256;
  * later pass may resolve — so the same artifact must be offered again. */
 export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "transient";
 
-export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
-
-export interface CanonicalAssistantCompletion {
-  id: string;
-  completedAt: string;
-  operationId?: string;
-}
-
-type CanonicalCompletionEntry = {
-  id: string;
-  timestamp: string;
-  type: string;
-  message?: { role?: string; stopReason?: string };
-};
-
-function successfulAssistantCompletion(
-  entry: CanonicalCompletionEntry | undefined,
-): CanonicalAssistantCompletion | undefined {
-  if (entry?.type !== "message" || entry.message?.role !== "assistant") return undefined;
-  if (entry.message.stopReason !== "stop" && entry.message.stopReason !== "length") return undefined;
-  return { id: entry.id, completedAt: entry.timestamp };
-}
-
-/** Recover only the canonical completion owned by durable run-marker evidence. */
-export function completionOwnedByMarker(
-  manager: Pick<SessionManager, "getEntry">,
-  marker: RunMarkerEvidence,
-): CanonicalAssistantCompletion | undefined {
-  if (marker.assistantCompletionId === undefined) return undefined;
-  const completion = successfulAssistantCompletion(manager.getEntry(marker.assistantCompletionId));
-  return completion ? { ...completion, operationId: marker.operationId } : undefined;
-}
-
-
 interface RuntimeSlotHooks {
   broadcast: SessionBroadcast;
   summaryChanged: (summary: SessionSummaryUpdate) => void;
@@ -440,14 +408,6 @@ export interface RuntimeSlotDependencies {
    * answers it from the Home chapter ledger; any other session is unsealed. */
   homeChapterState: (sessionId: string) => HomeChapterState;
 }
-
-type CompletionOwnershipItem = {
-  completion: CanonicalAssistantCompletion;
-  stamp: Promise<void> | undefined;
-  observationSettled: boolean;
-  observationCursor?: { entryIndex: number };
-  fallbackWork?: GatewayWorkHandle;
-};
 
 interface RuntimeDrainBlockerFact {
   key: string;
@@ -551,8 +511,7 @@ export class RuntimeSlot {
   /** Exact SDK assistant objects already bound to canonical entries cannot be
    * re-admitted if Pi briefly retains them as streaming state. */
   private readonly canonicalizedStreamingMessages = new WeakSet<object>();
-  /** Exact successful canonical assistant completion awaiting durable attention admission. */
-  private pendingAssistantCompletion: CanonicalAssistantCompletion | undefined;
+  private readonly runAttention = new RunAttentionOwner(this.runAttentionBindings());
   /** `message_end` precedes Pi's synchronous canonical append. Capture immutable
    * operation ownership in that callback turn so an immediate extension
    * continuation cannot inherit the completion's already-consumed owner. */
@@ -560,12 +519,6 @@ export class RuntimeSlot {
     operationId?: string;
     ownsPromptOperation: boolean;
   }>();
-  /** Exact completions retain canonical attention order. Their durable stamps
-   * are started independently so a failed projection head cannot hide a newer
-   * continuation from restart reconciliation. */
-  private readonly completionOwnershipQueue: CompletionOwnershipItem[] = [];
-  private attentionBarrier: Promise<void> | undefined;
-  private rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
   /** The session replacement a running extension command requested. */
   private commandReplacement: CommandReplacement | undefined;
   /** Disposable runtime-only bridge from canonical entry IDs to mounted turn IDs. */
@@ -758,7 +711,7 @@ export class RuntimeSlot {
     activeOperationId: () => this.activeOperationId,
     setActiveOperationId: id => { this.activeOperationId = id; },
     setOperation: operation => { this.operation = operation; },
-    ensureAgentProjection: () => this.ensureAgentProjection(),
+    ensureAgentProjection: () => this.runAttention.ensureAgentProjection(),
     invocationForOperation: id => this.runInvocations.invocationForOperation(id),
     terminalizeTransferredOperation: id => this.runInvocations.terminalizeTransferredOperation(id),
     retireOperationObservation: id => this.runTerminal.retireOperationObservation(id),
@@ -1474,7 +1427,7 @@ export class RuntimeSlot {
     return this.runPersistence.hasBlockedOwnershipWrite
       || this.lifecycle.preventsNonRuntimeQuiescence
       || this.hasRuntimeWork(exceptWorkToken)
-      || this.pendingAssistantCompletion !== undefined
+      || this.runAttention.pendingAssistantCompletion !== undefined
       || this.activeExports > 0
       || this.retainedLeaseCount > 0;
   }
@@ -1488,7 +1441,7 @@ export class RuntimeSlot {
     if (this.runPersistence.hasBlockedOwnershipWrite
       || this.lifecycle.preventsNonRuntimeQuiescence
       || this.hasDetachedDashboardWork()
-      || this.pendingAssistantCompletion !== undefined
+      || this.runAttention.pendingAssistantCompletion !== undefined
       || this.retainedLeaseCount > 0) return "active";
     return this.dependencies.workRegistry.hasSessionWork(this.id, exceptWorkToken) || this.activeExports > 0
       ? "transient"
@@ -1594,9 +1547,9 @@ export class RuntimeSlot {
       this.operation?.id,
       this.pendingPrompt?.id,
       this.pendingExtensionCommand?.id,
-      this.pendingAssistantCompletion?.operationId,
+      this.runAttention.pendingAssistantCompletion?.operationId,
       this.runQueue.pendingQueueAdmission?.id,
-      ...this.completionOwnershipQueue.map((item) => item.completion.operationId),
+      ...this.runAttention.completionOwnershipQueue.map((item) => item.completion.operationId),
       ...[...this.runTerminal.operationObservations.entries()]
         .filter(([, observation]) => observation.pendingCompletionId !== undefined)
         .map(([operationId]) => operationId),
@@ -1616,7 +1569,7 @@ export class RuntimeSlot {
       && (this.phase === "idle" || this.phase === "interrupted")
       && this.activeOperationId === undefined
       && this.operation === undefined
-      && this.pendingAssistantCompletion === undefined
+      && this.runAttention.pendingAssistantCompletion === undefined
       && this.pendingPrompt) {
       retained.delete(this.pendingPrompt.id);
     }
@@ -1736,7 +1689,7 @@ export class RuntimeSlot {
       || this.phase === "retrying"
       || this.activeOperationId !== undefined
       || this.operation !== undefined
-      || this.pendingAssistantCompletion !== undefined;
+      || this.runAttention.pendingAssistantCompletion !== undefined;
   }
 
   private waitForStateChange(): Promise<void> {
@@ -1799,16 +1752,6 @@ export class RuntimeSlot {
         : this.latestDashboardActivityAt ?? new Date().toISOString();
     }
     return this.dashboardActiveSince;
-  }
-
-  private ensureAgentProjection(): void {
-    if (!this.hasActiveAgentRun) return;
-    if (this.phase === "idle" || this.phase === "interrupted") this.phase = "running";
-    this.activeOperationId ??= randomUUID();
-    if (!this.activeToolSegmentOwnerId) this.ownToolSegment(this.activeOperationId);
-    this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
-    this.runWork.beginDerivedOperationWork(this.activeOperationId, "foreground-agent-operation");
-    if (!this.activityHeartbeat) this.startActivityHeartbeat();
   }
 
   /** Lightweight dashboard projection. Catalog listing must not construct a
@@ -2406,7 +2349,7 @@ export class RuntimeSlot {
     const replacement: CommandReplacement = {};
     this.commandReplacement = replacement;
     try {
-      return await this.withRebindAttentionDisposition(disposition, operation);
+      return await this.runAttention.withRebindAttentionDisposition(disposition, operation);
     } finally {
       if (this.commandReplacement === replacement) this.commandReplacement = undefined;
       await replacement.settlement?.catch((error) => this.emit("session.diagnostic", safeJson({
@@ -2416,23 +2359,13 @@ export class RuntimeSlot {
     }
   }
 
-  private async withRebindAttentionDisposition<T>(
-    disposition: SessionAttentionRebindDisposition,
-    operation: () => Promise<T>,
-  ): Promise<T> {
+  private assertSessionIdentityReplacement(): void {
     this.assertChapterWritable();
     if (this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)) {
       throw new GatewayError("conflict", "Task worker session identity cannot be replaced");
     }
     if (this.dependencies.homeChapterState(this.id).homeId || this.liveProfile().chapter) {
       throw new HomeChapterIdentityReplacementError(this.id);
-    }
-    const previous = this.rebindAttentionDisposition;
-    this.rebindAttentionDisposition = disposition;
-    try {
-      return await operation();
-    } finally {
-      this.rebindAttentionDisposition = previous;
     }
   }
 
@@ -2470,7 +2403,7 @@ export class RuntimeSlot {
           previousId,
           nextId,
           this,
-          this.rebindAttentionDisposition,
+          this.runAttention.rebindAttentionDisposition,
           () => {
             this.sessionManager = nextManager;
             this.clearExtensionActivityWatchers();
@@ -2520,7 +2453,7 @@ export class RuntimeSlot {
     previousManager: SessionManager,
     nextManager: SessionManager,
   ): Promise<void> {
-    if (this.rebindAttentionDisposition !== "reset") return;
+    if (this.runAttention.rebindAttentionDisposition !== "reset") return;
     const previousFile = previousManager.getSessionFile();
     const nextFile = nextManager.getSessionFile();
     const parentFile = nextManager.getHeader()?.parentSession;
@@ -3258,16 +3191,16 @@ export class RuntimeSlot {
         if (presentationID) this.rememberPresentationID(candidate.id, presentationID);
         const completion = successfulAssistantCompletion(candidate);
         if (completion && binding.ownsPromptOperation) {
-          const item = this.recordCompletionOwnership({
+          const item = this.runAttention.recordCompletionOwnership({
             ...completion,
             ...(binding.operationId ? { operationId: binding.operationId } : {}),
           });
-          this.pendingAssistantCompletion = item.completion;
+          this.runAttention.pendingAssistantCompletion = item.completion;
           // Pi has synchronously appended the canonical entry. Settle this exact
           // completion immediately: a queued follow-up can start inside the same
           // agent loop without a continuation/agent-settled boundary in between.
-          void this.beginAttentionSettlement(item.completion).catch((error) =>
-            this.settleCompletionPersistenceFailure(item.completion, error, item.fallbackWork));
+          void this.runAttention.beginAttentionSettlement(item.completion).catch((error) =>
+            this.runAttention.settleCompletionPersistenceFailure(item.completion, error, item.fallbackWork));
         }
         if (presentationID && this.streamPresentationId === presentationID) {
           this.latestStreamingMessage = undefined;
@@ -3458,6 +3391,40 @@ export class RuntimeSlot {
     );
   }
 
+  private runAttentionBindings(): RunAttentionContext {
+    const slot = this;
+    return {
+      get id() { return slot.id; },
+      get dependencies() { return slot.dependencies; },
+      get ui() { return slot.ui; },
+      get hooks() { return slot.hooks; },
+      get runPersistence() { return slot.runPersistence; },
+      get runWork() { return slot.runWork; },
+      get runTerminal() { return slot.runTerminal; },
+      get manualCompaction() { return slot.manualCompaction; },
+      get taskWorker() { return slot.taskWorker; },
+      get compactionOperation() { return slot.compactionOperation; },
+      get hasActiveAgentRun() { return slot.hasActiveAgentRun; },
+      get sessionManager() { return slot.sessionManager; },
+      get activeToolSegmentOwnerId() { return slot.activeToolSegmentOwnerId; },
+      get activityHeartbeat() { return slot.activityHeartbeat; },
+      get phase() { return slot.phase; }, set phase(value) { slot.phase = value; },
+      get revision() { return slot.revision; }, set revision(value) { slot.revision = value; },
+      get operation() { return slot.operation; }, set operation(value) { slot.operation = value; },
+      get activeOperationId() { return slot.activeOperationId; }, set activeOperationId(value) { slot.activeOperationId = value; },
+      assertSessionIdentityReplacement: () => slot.assertSessionIdentityReplacement(),
+      ownToolSegment: id => slot.ownToolSegment(id),
+      startActivityHeartbeat: () => slot.startActivityHeartbeat(),
+      canonicalSessionEntries: () => slot.canonicalSessionEntries(),
+      clearMarkerOwnership: (...args) => slot.clearMarkerOwnership(...args),
+      publishConfiguration: () => slot.publishConfiguration(),
+      releaseSettleWaiters: () => slot.releaseSettleWaiters(),
+      publishSnapshot: () => slot.publishSnapshot(),
+      noteHomeIdle: () => slot.noteHomeIdle(),
+      emit: (...args) => slot.emit(...args),
+    };
+  }
+
   private runTerminalBindings(): RunTerminalContext {
     const slot = this;
     return {
@@ -3487,9 +3454,9 @@ export class RuntimeSlot {
       get dependencies() { return slot.dependencies; },
       get commandReplacement() { return slot.commandReplacement; },
       get pendingExtensionCommand() { return slot.pendingExtensionCommand; },
-      get completionOwnershipQueue() { return slot.completionOwnershipQueue; },
+      get completionOwnershipQueue() { return slot.runAttention.completionOwnershipQueue; },
       get operationObservations() { return slot.runTerminal.operationObservations; },
-      get attentionBarrier() { return slot.attentionBarrier; },
+      get attentionBarrier() { return slot.runAttention.attentionBarrier; },
       get runPersistence() { return slot.runPersistence; },
       get runWork() { return slot.runWork; },
       get runAbort() { return slot.runAbort; },
@@ -3524,236 +3491,11 @@ export class RuntimeSlot {
     );
   }
 
-  private startCompletionStamp(item: CompletionOwnershipItem): Promise<void> {
-    if (item.stamp) return item.stamp;
-    const { completion } = item;
-    if (!completion.operationId) return Promise.resolve();
-    const stamp = this.runPersistence.trackOwnershipWrite(() => this.runPersistence.retryDurableWrite(
-      `marker:completion:${completion.operationId}:${completion.id}`,
-      () => this.dependencies.markers.reassertAssistantCompletion(
-        this.id,
-        completion.operationId!,
-        completion.id,
-        completion.completedAt,
-      ),
-    ), this.runWork.get(completion.operationId) ?? item.fallbackWork);
-    item.stamp = stamp;
-    void stamp.catch(() => {
-      if (item.stamp === stamp) item.stamp = undefined;
-    });
-    return stamp;
-  }
-
-  private recordCompletionOwnership(completion: CanonicalAssistantCompletion): CompletionOwnershipItem {
-    let item = this.completionOwnershipQueue.find((candidate) => candidate.completion.id === completion.id);
-    if (item) {
-      const existingOperationId = item.completion.operationId;
-      // The first callback-turn binding is immutable. A later settlement view
-      // may fill a missing owner, but mutable runtime state cannot replace one.
-      if (!existingOperationId && completion.operationId) {
-        item.completion = { ...item.completion, operationId: completion.operationId };
-      }
-    } else {
-      // Canonical append admission is the single observation boundary. Later
-      // attention settlement and agent_settled notification handling must read
-      // this same disposition rather than resampling a close/completion race.
-      this.runTerminal.completionObserved(completion.id);
-      const operationId = completion.operationId ?? this.runTerminal.completionOperationId(completion.id);
-      const exactOwner = operationId ? this.runWork.get(operationId) : undefined;
-      item = {
-        completion: operationId && !completion.operationId ? { ...completion, operationId } : completion,
-        stamp: undefined,
-        observationSettled: false,
-        ...(operationId && this.runTerminal.operationObservations.get(operationId)?.cursor
-          ? { observationCursor: this.runTerminal.operationObservations.get(operationId)!.cursor }
-          : {}),
-        ...(exactOwner ? {} : {
-          fallbackWork: this.dependencies.workRegistry.beginDerived({
-            kind: "terminal-receipt-persistence",
-            sessionId: this.id,
-            hostEpoch: this.ui.hostEpoch,
-          }),
-        }),
-      };
-      this.completionOwnershipQueue.push(item);
-    }
-    void this.startCompletionStamp(item).catch(() => {});
-    return item;
-  }
-
-  private beginAttentionSettlement(completion: CanonicalAssistantCompletion): Promise<void> {
-    this.recordCompletionOwnership(completion);
-    return this.drainCompletionOwnership();
-  }
-
-  private drainCompletionOwnership(): Promise<void> {
-    if (this.attentionBarrier) return this.attentionBarrier;
-    const operation = (async () => {
-      while (this.completionOwnershipQueue.length > 0) {
-        const item = this.completionOwnershipQueue[0]!;
-        try {
-          await this.startCompletionStamp(item);
-          await this.settleAssistantCompletion(item);
-        } catch (error) {
-          this.settleCompletionPersistenceFailure(item.completion, error, item.fallbackWork);
-        }
-        this.completionOwnershipQueue.shift();
-        item.fallbackWork?.settle();
-        // Normal completions already retired their operation token before the
-        // final snapshot. Queue retirement must also publish configuration ready.
-        this.publishConfiguration();
-      }
-      this.manualCompaction.startPendingManualCompaction();
-    })().finally(() => {
-      this.runPersistence.pendingReceiptWrites.delete(operation);
-      this.releaseSettleWaiters();
-      if (this.attentionBarrier === operation) this.attentionBarrier = undefined;
-      this.runWork.settleRetiredOperationWork();
-    });
-    this.attentionBarrier = operation;
-    this.runPersistence.pendingReceiptWrites.add(operation);
-    void operation.catch(() => {});
-    return operation;
-  }
-
-  private settleCompletionPersistenceFailure(
-    completion: CanonicalAssistantCompletion,
-    _error: unknown,
-    fallbackWork?: GatewayWorkHandle,
-  ): void {
-    const operationId = completion.operationId ?? this.runTerminal.completionOperationId(completion.id);
-    this.dependencies.persistenceDiagnostic?.(this.id, "terminal-receipt-persistence-failed");
-    this.emit("session.diagnostic", {
-      code: "terminal-receipt-persistence-failed",
-      message: "Terminal receipt was not proven durable; the run remains marked for interrupted recovery",
-    });
-    this.runWork.settleOperationWork(operationId);
-    fallbackWork?.settle();
-    const pendingOwnerId = this.runTerminal.completionOperationId(completion.id);
-    if (pendingOwnerId) delete this.runTerminal.operationObservations.get(pendingOwnerId)!.pendingCompletionId;
-    if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
-  }
-
-  private admitCompletionObservation(item: CompletionOwnershipItem): void {
-    if (item.observationSettled) return;
-    const operationId = item.completion.operationId ?? this.runTerminal.completionOperationId(item.completion.id);
-    if (!operationId) return;
-    const start = item.observationCursor ?? this.runTerminal.operationObservations.get(operationId)?.cursor;
-    if (!start) return;
-    const entries = this.canonicalSessionEntries();
-    const completionIndex = entries.findIndex(entry => entry.id === item.completion.id);
-    if (completionIndex < start.entryIndex) return;
-    item.observationSettled = true;
-    // The deduplication record belongs only to the operation whose eventual
-    // agent_settled callback can consume it. A completion from an earlier
-    // operation in a queued run may settle after its callback ownership ended.
-    if (this.activeOperationId === operationId) {
-      this.runTerminal.observationFor(operationId).observedCompletionId = item.completion.id;
-    }
-    if (this.hasActiveAgentRun && this.activeOperationId === operationId) {
-      // The same foreground operation can continue after a completion (for
-      // example, a consumed steer). Advance to the exact next canonical entry;
-      // its later completion owns only the remaining range.
-      this.runTerminal.observationFor(operationId).cursor = { entryIndex: completionIndex + 1 };
-    } else {
-      this.runTerminal.retireOperationObservation(operationId);
-    }
-  }
-
-  private async settleAssistantCompletion(item: CompletionOwnershipItem): Promise<void> {
-    const { completion } = item;
-    try {
-      let lastError: unknown;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-          await this.hooks.assistantResponseCompleted(
-            this.id,
-            completion,
-            false,
-            this.runTerminal.completionObserved(completion.id),
-          );
-          lastError = undefined;
-          break;
-        } catch (error) {
-          lastError = error;
-        }
-      }
-      if (lastError !== undefined) throw lastError;
-      if (!completion.operationId?.startsWith("automation:") && completion.operationId !== this.taskWorker?.identity.operationId) {
-        await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
-      }
-      this.admitCompletionObservation(item);
-      const completionWorkOwner = completion.operationId ?? this.runTerminal.completionOperationId(completion.id);
-      this.runWork.settleOperationWork(completionWorkOwner);
-      const pendingOwner = this.runTerminal.completionOperationId(completion.id);
-      if (pendingOwner) delete this.runTerminal.operationObservations.get(pendingOwner)!.pendingCompletionId;
-      if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
-      // A continuation may already own the agent while this older durable write
-      // unwinds. Settlement retires only its exact completion; the newer run
-      // remains operationally running and owns final idle transition.
-      if (this.hasActiveAgentRun) {
-        this.ensureAgentProjection();
-        this.publishSnapshot();
-        return;
-      }
-      if (this.manualCompaction.pendingManualCompaction) {
-        // Compaction owns a separate marker. Start it only after the preceding
-        // response's attention fact and exact marker retirement are durable.
-        this.phase = "idle";
-        this.revision += 1;
-        this.publishSnapshot();
-        return;
-      }
-      this.hooks.settled(this.id);
-      await this.dependencies.modules.policy("runSettled")?.().quiescent(this.id);
-      this.phase = this.compactionOperation ? "compacting" : "idle";
-      this.noteHomeIdle();
-      this.operation ??= this.compactionOperation;
-      this.revision += 1;
-      this.publishSnapshot();
-    } catch (error) {
-      // The failed exact completion stays at the ownership-lane head and retains
-      // its durable marker. Reconciliation retries it before any continuation
-      // marker or later completion can advance.
-      this.phase = "interrupted";
-      this.revision += 1;
-      this.publishSnapshot();
-      throw error;
-    }
-  }
-
   /** Join live settlement and reconcile bounded canonical evidence before open. */
   async reconcileAttention(): Promise<void> {
     // Marker evidence and any pending settlement are disk work on the open path;
     // the request span names them instead of leaving them unaccounted.
-    return stage("attention.reconcile", () => this.reconcileAttentionBody());
-  }
-
-  private async reconcileAttentionBody(): Promise<void> {
-    if (this.attentionBarrier) {
-      try {
-        await this.attentionBarrier;
-      } catch (error) {
-        // A failed queue head remains retryable below; only an unowned barrier
-        // failure is terminal to reconciliation.
-        if (this.completionOwnershipQueue.length === 0) throw error;
-      }
-    }
-    if (this.completionOwnershipQueue.length > 0) {
-      await this.drainCompletionOwnership();
-      return;
-    }
-    if (this.pendingAssistantCompletion) {
-      await this.beginAttentionSettlement(this.pendingAssistantCompletion);
-      return;
-    }
-    const markers = await this.dependencies.markers.evidenceFor(this.id);
-    for (const marker of markers) {
-      const completion = completionOwnedByMarker(this.sessionManager, marker);
-      if (!completion) continue;
-      await this.hooks.assistantResponseCompleted(this.id, completion, true, false);
-      await this.clearMarkerOwnership(marker.operationId);
-    }
+    return stage("attention.reconcile", () => this.runAttention.reconcileAttentionBody());
   }
 
   private onEvent(event: AgentSessionEvent): void {
@@ -3773,7 +3515,7 @@ export class RuntimeSlot {
       case "agent_start": {
         const precedingAssistant = this.runTerminal.notificationRun?.assistant;
         this.runTerminal.notificationRun = undefined;
-        const continuationFromSettlement = this.pendingAssistantCompletion !== undefined
+        const continuationFromSettlement = this.runAttention.pendingAssistantCompletion !== undefined
           || this.pendingAssistantBindings.size > 0;
         const dequeuedOwner = this.runQueue.dequeuedFollowUpOwners[0];
         const queuedOwner = dequeuedOwner
@@ -3804,11 +3546,11 @@ export class RuntimeSlot {
         const requiresDistinctAgentOwner = queuedOwner === undefined
           && (continuationFromSettlement || this.pendingExtensionCommand !== undefined);
         if (continuationFromSettlement) {
-          if (this.pendingAssistantCompletion) {
-            if (!this.pendingAssistantCompletion.operationId && this.activeOperationId) {
-              this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: this.activeOperationId };
+          if (this.runAttention.pendingAssistantCompletion) {
+            if (!this.runAttention.pendingAssistantCompletion.operationId && this.activeOperationId) {
+              this.runAttention.pendingAssistantCompletion = { ...this.runAttention.pendingAssistantCompletion, operationId: this.activeOperationId };
             }
-            if (this.activeOperationId) this.runTerminal.observationFor(this.activeOperationId).pendingCompletionId = this.pendingAssistantCompletion.id;
+            if (this.activeOperationId) this.runTerminal.observationFor(this.activeOperationId).pendingCompletionId = this.runAttention.pendingAssistantCompletion.id;
             // Pi may start an extension continuation before the older settlement
             // callback unwinds. Preserve and immediately commit the prior exact
             // completion, then give the continuation a distinct marker owner so
@@ -3819,8 +3561,8 @@ export class RuntimeSlot {
             // while the continuation may finish and stamp its own completion for
             // ordered restart recovery. Aborting here would silently discard that
             // accepted continuation and strand its durable ownership test.
-            const completion = this.pendingAssistantCompletion;
-            void this.beginAttentionSettlement(completion).catch((error) => this.settleCompletionPersistenceFailure(completion, error));
+            const completion = this.runAttention.pendingAssistantCompletion;
+            void this.runAttention.beginAttentionSettlement(completion).catch((error) => this.runAttention.settleCompletionPersistenceFailure(completion, error));
           }
           // `message_end` may still be waiting for Pi's canonical append. Its
           // callback-turn binding owns the preceding operation even before a
@@ -3913,7 +3655,7 @@ export class RuntimeSlot {
         // settlement callback is still unwinding. Never let that older callback
         // mark a newer agent-core run idle or erase its live tools.
         if (this.hasActiveAgentRun) {
-          this.ensureAgentProjection();
+          this.runAttention.ensureAgentProjection();
           this.publishSnapshot();
           break;
         }
@@ -3962,14 +3704,14 @@ export class RuntimeSlot {
         // this lane if the command itself somehow owns the settled identity.
         if (this.pendingExtensionCommand === undefined
           || this.pendingExtensionCommand.id !== settledOperationId) {
-          if (this.pendingAssistantCompletion) {
+          if (this.runAttention.pendingAssistantCompletion) {
             this.runWork.get(settledOperationId ?? "")?.transition("terminal-receipt-persistence");
             // Pi has settled, but the Gateway remains operationally running until
             // the exact canonical completion is durable. This is the open/drain
             // barrier that prevents a snapshot from outrunning attention truth.
             this.phase = "running";
             this.publishSnapshot();
-            const completion = this.pendingAssistantCompletion;
+            const completion = this.runAttention.pendingAssistantCompletion;
             // The whole chain is one durable owner from its first await: disposal
             // joins pendingReceiptWrites, so a chain admitted only at its later
             // attention drain could write its marker clear after dispose (#723).
@@ -3981,7 +3723,7 @@ export class RuntimeSlot {
                 settledOperationId, terminalLifecycle, terminalErrorCode, undefined,
                 settledOperationId === completion.operationId ? completion.id : undefined,
               );
-              await this.beginAttentionSettlement(completion);
+              await this.runAttention.beginAttentionSettlement(completion);
               if (terminal) await this.runTerminal.notifyOwnedTerminal(terminal);
               const completionOperationId = completion.operationId ?? this.runTerminal.completionOperationId(completion.id);
               if (completionOperationId) this.runTerminal.retireOperationObservation(completionOperationId);
@@ -4179,7 +3921,7 @@ export class RuntimeSlot {
         // Retry completion is nested inside the overall AgentSession run. Only
         // `agent_settled` owns the foreground-to-idle transition; otherwise an
         // aborted/failed retry can hide a continuation that is already active.
-        this.ensureAgentProjection();
+        this.runAttention.ensureAgentProjection();
         this.retry = undefined;
         this.scheduleSnapshot();
         break;
@@ -4313,7 +4055,7 @@ export class RuntimeSlot {
       }
       case "message_update": {
         if (!this.hasActiveAgentRun) break;
-        this.ensureAgentProjection();
+        this.runAttention.ensureAgentProjection();
         this.captureStreamIdentity(event.message);
         this.emitProgress(event.message);
         break;
@@ -4326,7 +4068,7 @@ export class RuntimeSlot {
           break;
         }
         if (this.canonicalToolResultHandoffs.has(event.toolCallId)) break;
-        this.ensureAgentProjection();
+        this.runAttention.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
         if (!existing) {
@@ -4387,7 +4129,7 @@ export class RuntimeSlot {
           break;
         }
         if (this.canonicalToolResultHandoffs.has(event.toolCallId)) break;
-        this.ensureAgentProjection();
+        this.runAttention.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
         const output = mergeLiveToolOutput(existing, projectToolOutput(event.partialResult, undefined, event.toolName));
@@ -4454,7 +4196,7 @@ export class RuntimeSlot {
           this.projectNestedToolExecution(event, event.isError ? "failed" : "completed");
           break;
         }
-        this.ensureAgentProjection();
+        this.runAttention.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
         // Canonical handoff can precede a compatibility terminal callback.
@@ -5227,8 +4969,8 @@ export class RuntimeSlot {
    * exact-owned artifacts instead of depending on watcher delivery or ambient
    * discovery scheduling. Genuine nonterminal work remains a blocker. */
   async reconcileOwnedExtensionArtifactsForDrain(): Promise<void> {
-    if (this.completionOwnershipQueue.length > 0 && !this.attentionBarrier) {
-      await this.drainCompletionOwnership().catch(() => {
+    if (this.runAttention.completionOwnershipQueue.length > 0 && !this.runAttention.attentionBarrier) {
+      await this.runAttention.drainCompletionOwnership().catch(() => {
         this.emit("session.diagnostic", safeJson({
           code: "canonical-completion-persistence-retrying",
           message: "Canonical completion persistence is retrying",
@@ -6497,7 +6239,7 @@ export class RuntimeSlot {
       displayProjection: this.displayProjection,
       assertNoTrustReload: (...args) => slot.assertNoTrustReload(...args),
       get runtime() { return slot.runtime; },
-      ensureAgentProjection: (...args) => slot.ensureAgentProjection(...args),
+      ensureAgentProjection: (...args) => slot.runAttention.ensureAgentProjection(...args),
       get revision() { return slot.revision; },
       latestCacheHitRate: (...args) => slot.latestCacheHitRate(...args),
       get contextPolicies() { return slot.contextPolicies; },
@@ -6848,7 +6590,7 @@ export class RuntimeSlot {
     // `buildSnapshot` also settles this slot's agent projection. That settlement
     // belongs to every publication, not only to the ones with an audience, so it
     // runs here rather than inside the build.
-    this.ensureAgentProjection();
+    this.runAttention.ensureAgentProjection();
     if (this.dependencies.sessionAudience(this.id) > 0) {
       this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
     }
@@ -7050,7 +6792,7 @@ export class RuntimeSlot {
   }
 
   private attentionPendingError(): GatewayError {
-    const completion = this.pendingAssistantCompletion ?? this.completionOwnershipQueue[0]?.completion;
+    const completion = this.runAttention.pendingAssistantCompletion ?? this.runAttention.completionOwnershipQueue[0]?.completion;
     const ageMs = completion ? Math.max(0, Date.now() - Date.parse(completion.completedAt)) : undefined;
     const completionId = completion?.operationId ?? completion?.id;
     this.emit("session.diagnostic", {
@@ -7092,9 +6834,9 @@ export class RuntimeSlot {
       set pendingExtensionCommand(value) { slot.pendingExtensionCommand = value; },
       get operationWasHomeWake() { return slot.operationWasHomeWake; },
       set operationWasHomeWake(value) { slot.operationWasHomeWake = value; },
-      get pendingAssistantCompletion() { return slot.pendingAssistantCompletion; },
-      get attentionBarrier() { return slot.attentionBarrier; },
-      get completionOwnershipQueue() { return slot.completionOwnershipQueue; },
+      get pendingAssistantCompletion() { return slot.runAttention.pendingAssistantCompletion; },
+      get attentionBarrier() { return slot.runAttention.attentionBarrier; },
+      get completionOwnershipQueue() { return slot.runAttention.completionOwnershipQueue; },
       get isAgentAdmissionSettling() { return slot.isAgentAdmissionSettling; },
       get hasActiveAgentRun() { return slot.hasActiveAgentRun; },
       get queuedManualCompactionInFlight() { return slot.manualCompaction.queuedManualCompactionInFlight; },
@@ -7172,8 +6914,8 @@ export class RuntimeSlot {
         pendingManualCompaction: () => slot.manualCompaction.pendingManualCompaction,
         pendingExtensionCommand: () => slot.pendingExtensionCommand,
         clearPendingExtensionCommand: () => { slot.pendingExtensionCommand = undefined; },
-        pendingAssistantCompletion: () => slot.pendingAssistantCompletion,
-        beginAttentionSettlement: completion => slot.beginAttentionSettlement(completion),
+        pendingAssistantCompletion: () => slot.runAttention.pendingAssistantCompletion,
+        beginAttentionSettlement: completion => slot.runAttention.beginAttentionSettlement(completion),
         queuesIntoActiveRun,
         completionObserved: id => slot.runTerminal.completionObserved(id),
         terminalizeInvocation: (id, lifecycle, errorCode) => slot.runInvocations.terminalizeInvocation(id, lifecycle, errorCode),
@@ -7418,8 +7160,8 @@ export class RuntimeSlot {
       get contextPolicies() { return slot.contextPolicies; },
       get shuttingDown() { return slot.shuttingDown; },
       get hasActiveAgentRun() { return slot.hasActiveAgentRun; },
-      get pendingAssistantCompletion() { return slot.pendingAssistantCompletion; },
-      get completionOwnershipQueue() { return slot.completionOwnershipQueue; },
+      get pendingAssistantCompletion() { return slot.runAttention.pendingAssistantCompletion; },
+      get completionOwnershipQueue() { return slot.runAttention.completionOwnershipQueue; },
       get activeOperationId() { return slot.activeOperationId; },
       get activeExports() { return slot.activeExports; },
       get effectivePhase() { return slot.effectivePhase; },
@@ -7559,7 +7301,7 @@ export class RuntimeSlot {
   async fork(entryId: string, position: "before" | "at" = "at", initiatingWorkToken?: string): Promise<{ sessionId: string; selectedText?: string }> {
     return this.lane.run(async () => {
       this.assertIdle(false, initiatingWorkToken);
-      const result = await this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
+      const result = await this.runAttention.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
       const next = this.id;
       this.summaryContentDirty = true;
@@ -8310,7 +8052,7 @@ export class RuntimeSlot {
       || this.activeOperationId !== undefined) return "running";
     if (this.pendingPrompt || this.runQueue.pendingQueueAdmission || this.runQueue.queuedMessages.length > 0
       || this.heldQueue.entries.length > 0 || this.manualCompaction.pendingManualCompaction || this.manualCompaction.queuedManualCompactionInFlight) return "queued";
-    if (this.pendingAssistantCompletion || this.completionOwnershipQueue.length > 0) return "settling";
+    if (this.runAttention.pendingAssistantCompletion || this.runAttention.completionOwnershipQueue.length > 0) return "settling";
     if (this.pendingExtensionCommand || this.lifecycle.preventsNonRuntimeQuiescence) return "interaction";
     const work = this.dependencies.workRegistry.facts().filter(fact => fact.sessionId === this.id && fact.token !== exceptWorkToken);
     if (work.some(fact => fact.kind === "terminal-receipt-persistence" || fact.kind === "automation-terminal-persistence")) return "settling";

@@ -6587,7 +6587,7 @@ export default function (pi) {
     await slot.prompt("start");
     await secondStampEntry;
     await waitFor(() => slot.snapshot().phase === "interrupted", "the interrupted phase");
-    const blockedQueue = (slot as unknown as { completionOwnershipQueue: unknown[] }).completionOwnershipQueue;
+    const blockedQueue = (slot as unknown as { runAttention: { completionOwnershipQueue: unknown[] } }).runAttention.completionOwnershipQueue;
     expect(blockedQueue).toHaveLength(1);
     let disposalSettled = false;
     const disposal = registry.dispose().finally(() => { disposalSettled = true; });
@@ -7744,10 +7744,10 @@ export default function (pi) {
     };
     const rejectedBarrier = Promise.reject(new Error("injected blocked completion"));
     void rejectedBarrier.catch(() => {});
-    const internal = slot as unknown as {
+    const internal = (slot as unknown as { runAttention: {
       attentionBarrier: Promise<void>;
       pendingAssistantCompletion: typeof completion;
-    };
+    } }).runAttention;
     internal.pendingAssistantCompletion = completion;
     internal.attentionBarrier = rejectedBarrier;
 

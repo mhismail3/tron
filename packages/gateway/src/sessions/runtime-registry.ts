@@ -56,12 +56,10 @@ import {
 import { RunMarkerStore, type RunMarkerEvidence } from "../kernel/run/run-markers.js";
 import {
   RuntimeSlot,
-  completionOwnedByMarker,
-  type CanonicalAssistantCompletion,
-  type SessionAttentionRebindDisposition,
   type SessionBroadcast,
   type RuntimeSlotDependencies,
 } from "./runtime-slot.js";
+import { completionOwnedByMarker, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "../kernel/run/completion-facts.js";
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { ProcessActivityRecency } from "../kernel/projection/process-activity-recency.js";
 import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";

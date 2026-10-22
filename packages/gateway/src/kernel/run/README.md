@@ -30,6 +30,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
   and shared text/resource/queue bounds; public Slot ports return its promises directly.
 - `held-prompt-queue.ts`: accepted compaction/Stop-time input and its ordered deferred
   admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types/bounds.
+- `completion-facts.ts` / `run-attention.ts`: canonical completion evidence,
+  runtime ownership lane, full settlement/reconciliation and rebind scope.
 - `run-terminal.ts`: operation observation and the bounded presentation latch,
   final-run notification, exact terminal observers and held task/wake dispatch.
 - `run-invocations.ts`: live invocation/failure state, canonical terminal dedupe,

@@ -743,10 +743,10 @@ describe("session archive over the real Gateway", () => {
     };
     const barrier = Promise.reject(new Error("injected pending-attention failure"));
     void barrier.catch(() => {});
-    const internals = slot as unknown as {
+    const internals = (slot as unknown as { runAttention: {
       attentionBarrier: Promise<void> | undefined;
       pendingAssistantCompletion: typeof completion | undefined;
-    };
+    } }).runAttention;
     const previousBarrier = internals.attentionBarrier;
     const previousCompletion = internals.pendingAssistantCompletion;
     internals.attentionBarrier = barrier;
