@@ -240,10 +240,13 @@ struct HostedHomeDashboardFixture: View {
         // Each launch is a different scripted catalog. A secondary profile's
         // retained offline cache from a prior journey is valid production state,
         // but must not seed this unrelated synthetic scenario.
+        // Composer drafts likewise: a draft one journey typed must not appear in
+        // the next launch's composer (#1669).
         let cacheRoot = FileManager.default.temporaryDirectory.appending(path: "home-shell-fixture")
         try? FileManager.default.removeItem(at: cacheRoot)
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
-            cache: SnapshotCache(root: cacheRoot)))
+            cache: SnapshotCache(root: cacheRoot.appending(path: "cache")),
+            composerDraftStore: ComposerDraftStore(root: cacheRoot.appending(path: "drafts"))))
     }
 
     var body: some View {

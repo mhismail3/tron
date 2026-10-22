@@ -211,20 +211,7 @@ final class TronForegroundCaptureUITests: XCTestCase {
         app.buttons["settings-done"].tap()
         let composer = app.textViews["Message input"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20)); composer.tap()
-        if let previous = composer.value as? String, !previous.isEmpty {
-            composer.press(forDuration: 0.8)
-            let selectAll = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Select All")).firstMatch
-            XCTAssertTrue(selectAll.waitForExistence(timeout: 2)); selectAll.tap()
-            composer.typeText(XCUIKeyboardKey.delete.rawValue)
-            XCTAssertEqual(composer.value as? String, "")
-        }
-        let draft = "Reveal authority 1607"
-        composer.typeText(draft)
-        defer {
-            // This UI-port test owns its unsent draft, not the following golden run.
-            composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: draft.count))
-            XCTAssertEqual(composer.value as? String, "")
-        }
+        composer.typeText("Reveal authority 1607")
         XCTAssertTrue(waitFor { app.buttons["Send message"].isEnabled }, "A revealed chat must re-subscribe and regain command admission")
         let revealed = try observation(app)
         XCTAssertEqual(revealed.rpc["session.open", default: 0] - initial.rpc["session.open", default: 0], 2,
