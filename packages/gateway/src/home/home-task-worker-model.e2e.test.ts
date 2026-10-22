@@ -290,6 +290,18 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(homeContexts[0]).toContain("Current Home thinking level: high");
   });
 
+  it("adopts a Home model change queued behind a Home resource reload (#1672)", async () => {
+    const f = await fixture();
+    installSettings(f);
+    const home = await f.registry.acquire(f.home.sessionId);
+    // The reload holds Home's lane and publishes a new snapshot revision while the
+    // change plans; the runtime and its Home role are unchanged, so the change applies.
+    const reloaded = home.reload();
+    await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
+    await reloaded;
+    expect(home.snapshot().model).toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
+  });
+
   it("accepts thinking alone for Home's current model", async () => {
     const f = await fixture();
     installSettings(f);

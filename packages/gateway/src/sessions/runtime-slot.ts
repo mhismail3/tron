@@ -7570,17 +7570,19 @@ export class RuntimeSlot {
   }
 
   /** The settings receipt coordinator publishes Home's recipe and adopts it
-   * without releasing this runtime's lane or recursively entering its setters. */
+   * without releasing this runtime's lane or recursively entering its setters.
+   * The fence is this runtime still being Home's, not the snapshot revision: a
+   * resource reload publishes a new revision without changing the runtime, and
+   * the appliers validate the recipe against the live runtime (#1672). */
   homeSettingsChapter(initiatingWorkToken?: string): NonNullable<ChangeContext["homeChapter"]> {
     const session = this.runtime.session;
-    const revision = this.revision;
     return {
       ...this.settingsSource(), sessionId: this.id,
       mutate: operation => this.lane.run(async () => {
         try {
           this.assertConfigurationIdle(initiatingWorkToken);
           this.assertChapterWritable();
-          if (!this.usesHomeSettings || this.runtime.session !== session || this.revision !== revision) {
+          if (!this.usesHomeSettings || this.runtime.session !== session) {
             throw new GatewayError("conflict", "Home runtime changed before settings publication");
           }
         } catch (error) {
