@@ -197,9 +197,9 @@ legacy undo applier may retire only when no retained undoable entry references i
   stage replacements; an automatic backup precedes publication; crash recovery completes the same
   transaction; rerun is a no-op. It never fails startup: a refusal changes nothing, logs
   `settings.migration-failed` and retries next start (#1649).
-- Session JSONL is never rewritten. The Session reader (`sessions/session-settings.ts`
-  `RETIRED_SCOPES`) maps retired scope names (`mac`/`builtin` → Global, `chat`/`profile` →
-  Session) and the next settings write persists current names. Remove the map once no retained
+- Session JSONL is never rewritten. `RETIRED_SCOPES` (`kernel/settings/tool-contract.ts`), shared
+  by the Session reader and shared-store migration, maps `mac`/`builtin` → Global and
+  `chat`/`profile` → Session; the next settings write persists current names. Remove it once no retained
   session predates #1634. The Home record model moves into the Profile when none is saved.
 - Preserve saved Global values in their owned stores as Global. Active Home chapter sessions are
   not read or folded; Home's saved choices live in the Profile.
