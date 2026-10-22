@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SwiftUI
 
 struct PresentationDismissalLease: Equatable {
@@ -60,6 +61,29 @@ struct PresentationDismissalLease: Equatable {
     }
 }
 
+/// The live views that resolve to one presenter key in one presentation scope.
+/// Presenter state is keyed by call site (plus the identity string and
+/// `instance:`) so it survives a sheet content rebuild (#1073); a presenter
+/// repeated in one scope without a distinct key shares that state, and only the
+/// last-rendered sibling can present (#1652, #1656). Sharing is a programming
+/// error reported the moment one of them starts presenting.
+@MainActor
+final class ManagedSheetPresenterClaims {
+    private var live: Set<UUID> = []
+
+    func appear(_ claimant: UUID) { live.insert(claimant) }
+    func disappear(_ claimant: UUID) { live.remove(claimant) }
+
+    func willPresent(site: String) {
+        guard live.count > 1 else { return }
+        let message = "Managed sheet presenter \(site) is shared by \(live.count) live views; a repeated presenter needs a distinct identity or instance:"
+        Logger(subsystem: "com.tron.mobile", category: "ManagedSheetPresentation").fault("\(message, privacy: .public)")
+        #if HOSTED_TEST
+        preconditionFailure(message)
+        #endif
+    }
+}
+
 private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @Binding var isPresented: Bool
     let identity: String
@@ -80,6 +104,8 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @Environment(\.tronPresentationStateScope) private var parentStateScope
     @PresentationState private var lease: PresentationDismissalLease
     @PresentationState private var nativeHost = RetainedNativeSheetHost()
+    @PresentationState private var claims: ManagedSheetPresenterClaims
+    @State private var claimant = UUID() // view-local: this view's claim on the shared key
     @State private var localStateStore = PresentationStateStore() // view-local: standalone fallback outside a scene store
 
     init(isPresented: Binding<Bool>, identity: String, dependencies: Set<PresentationRefreshDependency>?, site: String, onDismiss: (() -> Void)?,
@@ -93,6 +119,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         self.sheetContent = sheetContent
         _lease = PresentationState(wrappedValue: PresentationDismissalLease(), key: "presenter:\(identity)@\(site)")
         _nativeHost = PresentationState(wrappedValue: RetainedNativeSheetHost(), key: "native:\(identity)@\(site)")
+        _claims = PresentationState(wrappedValue: ManagedSheetPresenterClaims(), key: "claims:\(identity)@\(site)")
     }
 
     private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
@@ -124,12 +151,15 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
                 HostedPresentationProbe.record?("binding", "\(identity) \(wasPresented)→\(presented) parent=\(parentStateScope?.path ?? "nil")")
                 #endif
                 if presented {
+                    if !wasPresented { claims.willPresent(site: "\(identity)@\(site)") }
                     registerIfPossible(playHaptic: !wasPresented)
                 } else {
                     lease.beginDismissal()
                 }
             }
             .onPresentationRetire(fileID: "native-source:\(identity)@\(site)", line: 0, perform: sourceDidDisappear)
+            .onAppear { claims.appear(claimant) }
+            .onDisappear { claims.disappear(claimant) }
     }
 
     private func sourceDidDisappear() {
@@ -192,6 +222,8 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     @Environment(\.tronPresentationStateScope) private var parentStateScope
     @PresentationState private var lease: PresentationDismissalLease
     @PresentationState private var nativeHost = RetainedNativeSheetHost()
+    @PresentationState private var claims: ManagedSheetPresenterClaims
+    @State private var claimant = UUID() // view-local: this view's claim on the shared key
     @State private var localStateStore = PresentationStateStore() // view-local: standalone fallback outside a scene store
     /// The identity whose state scope this presenter last showed, so a
     /// replacement or dismissal retires exactly that scope.
@@ -209,6 +241,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         _lease = PresentationState(wrappedValue: PresentationDismissalLease(), key: "presenter@\(site)")
         _nativeHost = PresentationState(wrappedValue: RetainedNativeSheetHost(), key: "native@\(site)")
         _presentedStatePath = PresentationState(wrappedValue: nil, key: "presented-path@\(site)")
+        _claims = PresentationState(wrappedValue: ManagedSheetPresenterClaims(), key: "claims@\(site)")
     }
 
     private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
@@ -238,12 +271,15 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                 if let source { sources.append(source) }
             }
             .onChange(of: item.map(identity), initial: true) { previous, current in
+                if previous == nil, current != nil { claims.willPresent(site: site) }
                 itemChanged()
                 // Replacing a presented item is not a new presentation.
                 if previous == nil, current != nil, lease.dismissingToken == nil,
                    let haptic { TronHaptics.shared.play(haptic) }
             }
             .onPresentationRetire(fileID: "native-source:\(site)", line: 0, perform: sourceDidDisappear)
+            .onAppear { claims.appear(claimant) }
+            .onDisappear { claims.disappear(claimant) }
     }
 
     private func sourceDidDisappear() {
@@ -338,8 +374,11 @@ private struct TronManagedSystemPresentationModifier: ViewModifier {
 }
 
 extension View {
+    /// `instance` names a presenter that repeats inside one surface (a chip in
+    /// a `ForEach`) when its `identity` does not; see `ManagedSheetPresenterClaims`.
     func tronManagedSheet<SheetContent: View>(
         isPresented: Binding<Bool>,
+        instance: String? = nil,
         identity: String,
         dependencies: Set<PresentationRefreshDependency>? = nil,
         onDismiss: (() -> Void)? = nil,
@@ -352,7 +391,7 @@ extension View {
             isPresented: isPresented,
             identity: identity,
             dependencies: dependencies,
-            site: "\(fileID):\(line)",
+            site: "\(fileID):\(line)" + (instance.map { "#\($0)" } ?? ""),
             onDismiss: onDismiss,
             haptic: presentationHaptic,
             sheetContent: content
@@ -360,8 +399,8 @@ extension View {
     }
 
     /// `instance` names a presenter that repeats inside one surface (a chip in
-    /// a `ForEach`): presenter state is keyed by call site, so without it every
-    /// repetition shares one presentation and only the last one presents.
+    /// a `ForEach`); item presenter state is keyed by call site, not by the
+    /// item's identity. See `ManagedSheetPresenterClaims`.
     func tronManagedSheet<Item: Identifiable, SheetContent: View>(
         item: Binding<Item?>,
         instance: String? = nil,

@@ -162,7 +162,7 @@ private struct HomeGrantRequestRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home-permission-request-\(request.id)")
         .contextMenu { Text(request.request.intentDigest) }
-        .tronManagedSheet(item: $editingExpiryComponent, identity: { "home.grant.\(request.id).expiry.\($0.id)" }) { component in
+        .tronManagedSheet(item: $editingExpiryComponent, instance: request.id, identity: { "home.grant.\(request.id).expiry.\($0.id)" }) { component in
             TronDatePickerSheet(title: component == .date ? "Expiry date" : "Expiry time", component: component,
                                 date: $expiry, earliestDate: .now, accent: visualTheme?.accent ?? .tronEmerald)
         }

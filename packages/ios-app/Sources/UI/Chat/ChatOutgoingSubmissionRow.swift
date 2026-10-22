@@ -146,7 +146,7 @@ struct ChatPendingPromptRow: View, Equatable {
             HStack(alignment: .top, spacing: 10) {
                 Spacer(minLength: 24)
                 VStack(alignment: .trailing, spacing: 4) {
-                    CanonicalResourceChips(resources: presentation.resourceInvocations)
+                    CanonicalResourceChips(owner: presentation.id, resources: presentation.resourceInvocations)
                     Label(presentation.statusTitle, systemImage: "clock.arrow.circlepath")
                         .font(TronTypography.caption)
                         .foregroundStyle(Color.tronTextSecondary)
@@ -193,7 +193,7 @@ struct ChatPendingPromptRow: View, Equatable {
             attachments: presentation.attachments
         )
         VStack(alignment: .trailing, spacing: 4) {
-            CanonicalResourceChips(resources: presentation.resourceInvocations)
+            CanonicalResourceChips(owner: presentation.id, resources: presentation.resourceInvocations)
             if let parsed = ChatAnnotationEnvelope.parse(displayText) {
                 ChatSentAnnotationChips(annotations: parsed.annotations)
             }
@@ -289,7 +289,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
 
     @ViewBuilder
     private var resourceChip: some View {
-        CanonicalResourceChips(resources: presentation.resourceInvocations)
+        CanonicalResourceChips(owner: presentation.id, resources: presentation.resourceInvocations)
     }
 
     @ViewBuilder

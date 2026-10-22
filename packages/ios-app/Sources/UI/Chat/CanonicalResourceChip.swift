@@ -73,14 +73,16 @@ enum CanonicalResourceChipPresentation {
 /// The skills and prompts one message invoked, in order, wrapping like tool
 /// chips. An extension command owns its own command row, so it never shows here.
 struct CanonicalResourceChips: View, Equatable {
+    /// The message row's identity: each chip's detail presenter is distinct per row.
+    let owner: String
     let resources: [ComposerResourceInvocation]
 
     var body: some View {
         let shown = Self.messageResources(resources)
         if !shown.isEmpty {
             ToolChipFlowLayout(spacing: 6) {
-                ForEach(Array(shown.enumerated()), id: \.offset) { _, resource in
-                    CanonicalResourceChip(resource: resource)
+                ForEach(Array(shown.enumerated()), id: \.offset) { offset, resource in
+                    CanonicalResourceChip(instance: "\(owner)#\(offset)", resource: resource)
                 }
             }
         }
@@ -104,12 +106,13 @@ struct CanonicalResourceChips: View, Equatable {
 /// resource invocation. Transcript identity and scrolling stay with the row;
 /// the chip owns only its detail-sheet route.
 struct CanonicalResourceChip: View, Equatable {
+    let instance: String
     let resource: ComposerResourceInvocation
 
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @State private var showsDetail = false
 
-    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.resource == rhs.resource }
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.instance == rhs.instance && lhs.resource == rhs.resource }
 
     var body: some View {
         ChatCompactPillSurface(
@@ -137,6 +140,7 @@ struct CanonicalResourceChip: View, Equatable {
         }
         .tronManagedSheet(
             isPresented: $showsDetail,
+            instance: instance,
             identity: "chat.canonical-resource"
         ) {
             if let detailEntry {

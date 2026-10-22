@@ -83,7 +83,7 @@ struct ChatSentAnnotationChip: View, Equatable {
         ) {
             showsDetail = true
         }
-        .tronManagedSheet(isPresented: $showsDetail, identity: "chat.sent-annotation") {
+        .tronManagedSheet(isPresented: $showsDetail, instance: annotation.id, identity: "chat.sent-annotation") {
             ChatAnnotationSheet(annotation: annotation, editing: nil)
         }
     }

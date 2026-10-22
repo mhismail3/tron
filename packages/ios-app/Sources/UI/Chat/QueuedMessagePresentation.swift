@@ -373,6 +373,8 @@ struct QueuedMessageAttachmentChipRow: View {
         .accessibilityLabel(QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips))
         .tronManagedSheet(
             item: $previewRequest,
+            // Rows repeat per queued/outgoing message; their chips name the row.
+            instance: chips.map(\.id).joined(separator: ","),
             identity: { "chat.queued-attachment.\($0.id)" }
         ) { request in
             AttachmentFilePreviewSheet(
@@ -465,7 +467,7 @@ struct QueuedMessageRow: View {
     private var card: some View {
         let attachmentChips = QueuedMessageAttachmentPresentation.chips(for: message)
         return VStack(alignment: .trailing, spacing: 4) {
-            CanonicalResourceChips(resources: message.resourceInvocations ?? [])
+            CanonicalResourceChips(owner: message.id, resources: message.resourceInvocations ?? [])
             if let parsed = ChatAnnotationEnvelope.parse(displayText) {
                 ChatSentAnnotationChips(annotations: parsed.annotations)
             }

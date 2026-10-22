@@ -152,6 +152,7 @@ struct PendingAttachmentChip: View {
             .overlay(alignment: .topTrailing) { removeButton }
             .tronManagedSheet(
                 isPresented: $showPreview,
+                instance: attachment.id,
                 identity: "chat.pending-attachment-preview"
             ) { previewSheet }
     }

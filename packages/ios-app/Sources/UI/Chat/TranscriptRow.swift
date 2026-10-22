@@ -201,7 +201,7 @@ struct TranscriptRow: View, Equatable {
             AutomationPromptMessageView(item: item)
         } else {
             VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
-                CanonicalResourceChips(resources: item.semantic?.resourceInvocations ?? [])
+                CanonicalResourceChips(owner: item.id, resources: item.semantic?.resourceInvocations ?? [])
                 if !displayedAttachments.isEmpty {
                     attachmentStrip
                 }

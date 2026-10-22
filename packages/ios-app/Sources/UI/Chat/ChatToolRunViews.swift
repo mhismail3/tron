@@ -107,6 +107,7 @@ struct ToolCard: View {
         #endif
         .toolDetailSheet(
             route: $detailPresentation,
+            instance: detailTool.id,
             detent: $detailDetent,
             tool: detailPresentation?.resolve(in: [detailTool])
         )
@@ -1293,12 +1294,15 @@ struct ToolDetailRoute: Identifiable, Hashable {
 
 private struct ToolDetailSheetHost: ViewModifier {
     @Binding var route: ToolDetailRoute?
+    /// The presenting card: tool cards repeat in one transcript surface.
+    let instance: String
     @Binding var detent: PresentationDetent
     let tool: ChatToolPresentation?
 
     func body(content: Content) -> some View {
         content.tronManagedSheet(
             item: $route,
+            instance: instance,
             identity: { "chat.tool-detail.\($0.id)" }
         ) { _ in
             if let tool {
@@ -1334,9 +1338,10 @@ private struct ToolDetailSheetHost: ViewModifier {
 private extension View {
     func toolDetailSheet(
         route: Binding<ToolDetailRoute?>,
+        instance: String,
         detent: Binding<PresentationDetent>,
         tool: ChatToolPresentation?
     ) -> some View {
-        modifier(ToolDetailSheetHost(route: route, detent: detent, tool: tool))
+        modifier(ToolDetailSheetHost(route: route, instance: instance, detent: detent, tool: tool))
     }
 }
