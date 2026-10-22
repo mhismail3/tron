@@ -118,6 +118,10 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   gateway.registerNativeProvider(faux.provider);
   gateway.registerVirtualModel({ provider: model.provider, id: TASK_VIRTUAL_MODEL_ID, name: "Fixture router",
     route: () => ({ model: gateway.getModel(model.provider, model.id)!, thinkingLevel: "off" }) });
+  // Registration starts a background catalog refresh. Join an explicit offline pass
+  // before returning the fixture, including when the test refuses before opening Home;
+  // otherwise models-store.json.lock can outlive disposal of this fixture (#1673).
+  await gateway.refresh({ allowNetwork: false });
   const settings: Record<string, unknown> = { sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id };
   if (contextWindow) settings.compaction = { enabled: false, reserveTokens: 1024, keepRecentTokens: 0 };
   if (codemode) {
@@ -171,7 +175,10 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
       // Every runtime reads the agent directory's models.json, as production does, so a test
       // can register a scripted child model or a local wire-protocol endpoint there.
       const runtime = await ModelRuntime.create({ modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
-      runtime.registerNativeProvider(faux.provider); return runtime;
+      runtime.registerNativeProvider(faux.provider);
+      // The runtime factory has the same registration/readiness boundary as gateway.
+      await runtime.refresh({ allowNetwork: false });
+      return runtime;
     },
     broadcast: (_sessionId: string, topic: string, payload: unknown) => { events.push({ topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     notifications: { enqueue: async (input: Parameters<NotificationService["enqueue"]>[0]) => {

@@ -46,6 +46,9 @@ and crash fixtures.
 - **Fixture processes.** `fixture-process-owner.mjs` records spawned handles and
   groups, stops and joins them (TERM then one KILL) before roots are removed, and
   writes join failures to `TRON_TEST_PROCESS_OWNER_FAILURE`.
+- Home task fixtures await an offline model refresh after provider registration,
+  before returning either the Gateway-wide or a session runtime. Early refusal tests
+  can otherwise delete their root while registration still holds its catalog lock.
 - MCP fixtures join the direct-tool registration boundary before scripting a call
   (runtime creation does not mean HTTP discovery finished). Git cleanup proof is
   `ENOENT` plus the branch decision, never an arbitrary filesystem error.
