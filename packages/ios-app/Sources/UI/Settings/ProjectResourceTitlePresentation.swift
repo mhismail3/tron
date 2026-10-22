@@ -44,7 +44,7 @@ enum ProjectResourceTitlePresentation {
 
     /// Extension identities come from package resolutions or inline factory
     /// paths, so they need their own naming rule; the Hooks sheet owns this
-    /// presentation now that Project Resources lists no extensions.
+    /// presentation now that Resources lists no extensions.
     static func extensionTitle(name: String?, object: [String: JSONValue]) -> String {
         let path = nonempty(object["path"]?.stringValue)
             ?? nonempty(object["resolvedPath"]?.stringValue) ?? name ?? ""

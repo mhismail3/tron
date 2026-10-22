@@ -128,17 +128,12 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
             case .available(let used, let window, let percent):
                 let headline = "\(max(0, window - used).formatted(.number.notation(.compactName))) tokens left"
                 let detail = usage.usedSummary ?? ""
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(headline).font(SessionSummaryTypography.headline)
-                            .accessibilityIdentifier("session-usage-headline")
-                        Text(detail).font(SessionSummaryTypography.usageDetail)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .accessibilityIdentifier("session-usage-detail")
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    if let action { action }
+                header {
+                    Text(headline).font(SessionSummaryTypography.headline)
+                        .accessibilityIdentifier("session-usage-headline")
+                    Text(detail).font(SessionSummaryTypography.usageDetail)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .accessibilityIdentifier("session-usage-detail")
                 }
                 if let segments {
                     SessionContextSegmentedBar(segments: segments)
@@ -150,20 +145,17 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
                         .accessibilityValue("\(Int(percent.rounded())) percent")
                 }
             case .unavailable:
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("0% used")
-                            .font(SessionSummaryTypography.headline)
-                        Text(SessionContextUsageRefreshPresentation(
-                            lastTranscriptKind: snapshot.lastTranscriptKind,
-                            assistantMessages: snapshot.stats.assistantMessages
-                        ).detail)
-                            .font(SessionSummaryTypography.detail)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 0)
-                    if let action { action }
+                header {
+                    Text("0% used")
+                        .font(SessionSummaryTypography.headline)
+                        .accessibilityIdentifier("session-usage-headline")
+                    Text(SessionContextUsageRefreshPresentation(
+                        lastTranscriptKind: snapshot.lastTranscriptKind,
+                        assistantMessages: snapshot.stats.assistantMessages
+                    ).detail)
+                        .font(SessionSummaryTypography.detail)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .accessibilityIdentifier("session-usage-detail")
                 }
                 ProgressView(value: 0, total: 100)
                     .tint(Color.tronEmerald)
@@ -192,6 +184,19 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(usage.accessibilityLabel)
         .accessibilityIdentifier("session-usage-summary")
+    }
+
+    /// The headline over its detail line, with the action trailing and centered
+    /// on both; at accessibility sizes it moves below them, trailing like a row's.
+    private func header(@ViewBuilder lines: () -> some View) -> some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 8)) : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return layout {
+            VStack(alignment: .leading, spacing: 2) { lines() }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let action { action }
+        }
     }
 
     private func metric(_ value: String, _ label: String) -> some View {

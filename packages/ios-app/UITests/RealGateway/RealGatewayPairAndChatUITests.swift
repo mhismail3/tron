@@ -1060,8 +1060,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(ring.waitForExistence(timeout: 60), app.debugDescription)
         ring.tap()
+        // Terminal is a row above the exports at the sheet's end (#1655).
         let terminalButton = app.buttons["manage-session-terminal"]
         XCTAssertTrue(waitForEnabled(terminalButton, timeout: 60), app.debugDescription)
+        for _ in 0..<8 where !terminalButton.isHittable { app.swipeUp() }
         terminalButton.tap()
         let terminalTitle = app.descendants(matching: .any)["terminal-sheet-title"].firstMatch
         XCTAssertTrue(waitForValue(terminalTitle, "Connected", timeout: 60), "the session terminal never connected: \(app.debugDescription)")
@@ -1466,8 +1468,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.buttons["chat-settings-link"].waitForExistence(timeout: 15),
                       "Manage Session must link to Session Settings: \(app.debugDescription)")
-        XCTAssertTrue(app.buttons["project-settings-link"].exists,
-                      "Manage Session must retain the Project Settings row")
+        XCTAssertFalse(app.buttons["project-settings-link"].exists,
+                       "Project Settings is a section of Session Settings, not a Manage Session row (#1655)")
         app.buttons["chat-settings-link"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
         // The shared renderer lists the session's overridable keys in place.
@@ -1518,7 +1520,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(none.waitForExistence(timeout: 30), "An untrusted override is not applied: \(app.debugDescription)")
         XCTAssertFalse(row.exists, "An unapplied repository override has no row or mutation route")
         XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes, "Inspection must not change repository bytes")
-        dismissTopSheet(app) // Project Settings; overrides are direct groups.
+        dismissTopSheet(app) // Session Settings; overrides are direct groups.
         openProjectCard(app)
         XCTAssertTrue(none.waitForExistence(timeout: 30) && !row.exists, "Reopening reads the same repository state")
         XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes)
@@ -2052,22 +2054,17 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         done.tap()
     }
 
-    /// The Project card from Manage Session's shared Project settings link.
+    /// The Project section at the end of Manage Session's Session Settings (#1655).
     @MainActor
     private func openProjectCard(_ app: XCUIApplication) {
-        // The link can be below a newly opened medium sheet or above its current
-        // scroll position. Swipe toward it; swiping down blindly dismisses the sheet.
-        let link = app.buttons["project-settings-link"]
-        XCTAssertTrue(link.waitForExistence(timeout: 30), "Manage Session has no Project settings link: \(app.debugDescription)")
-        func barBottom() -> CGFloat { app.navigationBars.allElementsBoundByIndex.last?.frame.maxY ?? 0 }
-        for _ in 0..<24 where !(link.isHittable && link.frame.minY >= barBottom()) {
-            if link.frame.minY < barBottom() + 40 { app.swipeDown() } else { app.swipeUp() }
-        }
-        XCTAssertTrue(link.isHittable && link.frame.minY >= barBottom(),
-                      "the Project settings link is not reachable: \(app.debugDescription)")
+        let link = app.buttons["chat-settings-link"]
+        XCTAssertTrue(link.waitForExistence(timeout: 30), "Manage Session has no Session Settings link: \(app.debugDescription)")
+        for _ in 0..<12 where !link.isHittable { app.swipeUp() }
         link.tap()
-        XCTAssertTrue(waitUntil(timeout: 30) { !app.buttons["project-settings-link"].isHittable },
-                      "the Project card did not cover Manage Session: \(app.debugDescription)")
+        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
+        let section = app.descendants(matching: .any)["session-project-settings"]
+        XCTAssertTrue(section.waitForExistence(timeout: 30), "Session Settings has no Project section: \(app.debugDescription)")
+        for _ in 0..<12 where !app.buttons["project-settings-trust"].isHittable { app.swipeUp() }
     }
 
     /// A switch row's value, read from the row's own switch.

@@ -3,8 +3,8 @@ import TronMobileCore
 
 /// One kind of resource an installed package provides, in the order the detail
 /// sheet presents them. Skills, subagents, prompts, tools and commands reuse the
-/// Project Resources kind they share a name with, so their group icon and colour
-/// cannot drift from that sheet's; themes have no Project Resources kind and
+/// Resources kind they share a name with, so their group icon and colour
+/// cannot drift from that sheet's; themes have no Resources kind and
 /// keep the terminal-theme icon/colour Extensions and Locations already use.
 enum PackageProvidesKind: String, CaseIterable, Identifiable, Sendable {
     case skills = "Skills"
@@ -32,7 +32,7 @@ enum PackageProvidesKind: String, CaseIterable, Identifiable, Sendable {
 
     /// What the group's names are, in this session-free read's own terms: a
     /// package's tools and commands exist when its extensions load, not in the
-    /// session Project Resources describes.
+    /// session Resources describes.
     var detail: String {
         switch self {
         case .skills: "Guidance the agent can load when a task matches."
@@ -196,7 +196,7 @@ struct PackageDetailSheet: View {
             }
         }
         // Resource kinds keep their own accents; the sheet theme belongs to the
-        // package chrome, as it does on Project Resources.
+        // package chrome, as it does on Resources.
         .environment(\.tronSettingsVisualTheme, nil)
     }
 }
