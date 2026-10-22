@@ -151,6 +151,7 @@ struct ProjectSettingsSections: View {
                             TronSettingsRow(icon: "folder.badge.gearshape", title: "No repository overrides",
                                             subtitle: "Sessions inherit Global settings.", subtitleColor: .tronTextSecondary)
                         }
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("project-settings-no-overrides")
                     }
                 } else if let settingsError {

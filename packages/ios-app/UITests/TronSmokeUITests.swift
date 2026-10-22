@@ -2494,16 +2494,16 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(reset.isHittable, "The canonical Thinking reset must stay reachable at XXXL")
             closeTopSheet(app)
             closeTopSheet(app)
-            // The shared row moves a competing trailing control below its labels at
-            // accessibility sizes, so titles and values wrap only at word
-            // boundaries (#868): a compact action and a plain value both stack.
+            // At accessibility sizes a competing trailing control moves below its
+            // labels, so titles and values wrap only at word boundaries (#868): the
+            // usage card's Compact Now (#1655) and a row's plain value both stack.
             let compactNow = app.buttons["Compact Now"]
-            let compactTitle = app.staticTexts["Compact conversation"]
+            let compactTitle = app.descendants(matching: .any)["session-usage-detail"]
             XCTAssertTrue(compactNow.waitForExistence(timeout: 5), app.debugDescription)
             for _ in 0..<6 where !(compactNow.isHittable && compactTitle.isHittable) { app.swipeDown() }
             keepScreenshot(named: "868-manage-session-\(appearance)-xxxl-compact-row")
             assertStacked(compactNow, below: compactTitle, in: app)
-            let branchTitle = app.staticTexts["Current Branch"]
+            let branchTitle = app.staticTexts["Workspace"]
             let branchValue = app.staticTexts["Unavailable"]
             XCTAssertTrue(branchValue.waitForExistence(timeout: 5), app.debugDescription)
             for _ in 0..<6 where !(branchTitle.isHittable && branchValue.isHittable) { app.swipeUp() }

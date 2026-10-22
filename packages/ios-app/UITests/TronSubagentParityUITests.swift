@@ -278,7 +278,7 @@ final class TronSubagentParityUITests: XCTestCase {
         for scheme in ["light", "dark"] {
             let app = launch(scheme: scheme, resources: true)
             defer { app.terminate() }
-            XCTAssertTrue(app.staticTexts["Project Resources"].waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["Resources"].waitForExistence(timeout: 10), app.debugDescription)
             XCTAssertTrue(app.staticTexts["Pi Subagents"].exists, app.debugDescription)
             XCTAssertTrue(app.staticTexts["Council"].exists, app.debugDescription)
             XCTAssertTrue(app.buttons["project-resource-subagents-0"].exists, app.debugDescription)

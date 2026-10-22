@@ -5,7 +5,7 @@ import XCTest
 /// lengths (#1651), through the hosted Home and Manage Session fixtures: values
 /// paint in full beside a title-line Overridden pill and a separate Revert,
 /// Session and Home use Global's group cards, ignored repository fields are
-/// listed once (Project Settings) in plain language, and summaries skip unset values.
+/// listed once (the Project section) in plain language, and summaries skip unset values.
 final class TronSettingsScopeRowsUITests: XCTestCase {
     @MainActor func testHomeModelsLight() { homeModels(dark: false) }
     @MainActor func testHomeModelsDark() { homeModels(dark: true) }
@@ -68,7 +68,7 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         XCTAssertTrue(content.staticTexts["Agent"].exists, content.debugDescription)
         XCTAssertTrue(content.staticTexts["Tools & Extensions"].exists, content.debugDescription)
         XCTAssertFalse(element(app, "settings-row-tools.active").exists, "Tools opens from its row")
-        // The ignored repository field is Project Settings' to list, once.
+        // The ignored repository field is the Project section's to list, once.
         XCTAssertEqual(labels(content, containing: "Ignored").count, 0, content.debugDescription)
         XCTAssertEqual(labels(content, containing: "tools.active").count, 0, content.debugDescription)
         // The unset context window is not part of what the chat uses.
@@ -88,16 +88,10 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         shot("1651-session-models-\(dark ? "dark" : "light")")
         app.navigationBars.containing(.staticText, identifier: "Models").buttons["Done"].firstMatch.tap()
         _ = waitFor(modelsLink, "hittable == true", timeout: 5)
-        app.navigationBars.containing(.staticText, identifier: "Session Settings").buttons["Done"].firstMatch.tap()
-        let project = app.buttons["project-settings-link"]
-        XCTAssertTrue(project.waitForExistence(timeout: 5), app.debugDescription)
-        // The pop back to Manage Session settles before its rows take taps.
-        _ = waitFor(project, "hittable == true", timeout: 5)
-        for _ in 0..<4 where !project.isHittable { app.swipeUp() }
-        for _ in 0..<8 where !project.isHittable { app.swipeDown() }
-        project.tap()
-        expandSheet(app, title: "Project Settings")
-        _ = app.staticTexts["No repository overrides"].waitForExistence(timeout: 8)
+        // The project's read-only section ends Session Settings (#1655).
+        let projectSection = element(app, "session-project-settings")
+        XCTAssertTrue(projectSection.waitForExistence(timeout: 8), app.debugDescription)
+        for _ in 0..<6 where !app.staticTexts["No repository overrides"].isHittable { app.swipeUp() }
         shot("1651-project-settings-\(dark ? "dark" : "light")")
         let ignored = element(app, "settings-ignored-defaultTools")
         XCTAssertTrue(ignored.waitForExistence(timeout: 5), app.debugDescription)
@@ -105,8 +99,8 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         XCTAssertFalse(ignored.label.contains("tools.active"), ignored.label)
     }
 
-    /// An overridden row: the value paints whole, the Overridden pill sits on the
-    /// title's line before the value, and Revert stays its own 44-point target.
+    /// An overridden row: the value paints whole, the Overridden pill sits centered
+    /// on the title's line before the value, and Revert stays its own 44-point target.
     @MainActor private func assertOverriddenRow(_ app: XCUIApplication, _ prefix: String, title: String, value pattern: String,
                                                 file: StaticString = #filePath, line: UInt = #line) {
         let row = app.descendants(matching: .any).matching(NSPredicate(
@@ -117,10 +111,10 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
         XCTAssertTrue(editor.exists && pill.exists && heading.exists && revert.exists, row.debugDescription, file: file, line: line)
         XCTAssertLessThanOrEqual(pill.frame.maxX, editor.frame.minX, "\(title): Overridden precedes the value", file: file, line: line)
-        // Beside the title, on its first line when a long title wraps.
+        // Beside the title and centered on its line (#1655); these titles are one line.
         XCTAssertGreaterThan(pill.frame.minX, heading.frame.minX, "\(title): Overridden follows the title", file: file, line: line)
-        XCTAssertTrue(pill.frame.minY >= heading.frame.minY - 4 && pill.frame.midY <= heading.frame.minY + 20,
-                      "\(title): Overridden is on the title line: \(pill.frame) vs \(heading.frame)", file: file, line: line)
+        XCTAssertEqual(pill.frame.midY, heading.frame.midY, accuracy: 0.75,
+                       "\(title): Overridden is centered on the title line: \(pill.frame) vs \(heading.frame)", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.minX, editor.frame.maxX, "\(title): Revert follows the value", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.width, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.height, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)
