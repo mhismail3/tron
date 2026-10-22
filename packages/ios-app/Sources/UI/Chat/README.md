@@ -95,7 +95,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   container: Workspace (`workspace-inspector.v1`), Instructions, Resources (tags Global, Project or
   External; Commands and Subagents preview a body whose View All opens the shared reader), Session
   History (`session-history-pages.v1`), Subagent History; Session Settings (Project section last);
-  Terminal and Export as HTML/JSON.
+  Terminal and Export as HTML/JSON. Manage Session, Manage Home and every sheet they open take
+  the emerald sheet theme (semantic colors aside); a sub-sheet's `title` constant (or
+  `HomeSheetDestination.title`) is also its row's label.
 - **Home.** The pinned row routes the `openSessionId` from `home.status`; Home's composer sends
   `home.prompt` and follows a successor chapter carrying the unsent draft. A chat claiming Home has
   no header bar (#740) and its title reads **Home**: its ring opens Manage Home, its gear opens
