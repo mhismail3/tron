@@ -36,7 +36,7 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
         }
     }
     /// Prompt and skill accents are shared with the chat composer; the other
-    /// Project Resources categories retain their existing destination colors.
+    /// Resources categories retain their existing destination colors.
     @MainActor var accent: Color {
         switch self {
         case .prompts: ChatSemanticPillRole.prompt.accent
@@ -150,11 +150,19 @@ enum ProjectResourceOverviewPresentation {
                 title: title,
                 subtitle: kind == .subagents ? subagentSubtitle(value) : subtitle(value),
                 value: value,
-                resourceScope: value.objectValue?["scope"]?.stringValue.flatMap(CommandInfo.ResourceScope.init(rawValue:)),
+                resourceScope: scope(kind: kind, value),
                 resourceOrigin: value.objectValue?["origin"]?.stringValue.flatMap(CommandInfo.ResourceOrigin.init(rawValue:)),
                 distribution: value.objectValue?["distribution"]?.stringValue.flatMap(ResourceDistribution.init(rawValue:))
             )
         }
+    }
+
+    /// Skills and prompts name their scope; commands carry the command catalog's
+    /// `resourceScope`, and a subagent's discovery source is its scope.
+    private static func scope(kind: ProjectResourceKind, _ value: JSONValue) -> CommandInfo.ResourceScope? {
+        let object = value.objectValue ?? [:]
+        let raw = kind == .subagents ? object["source"]?.stringValue : (object["scope"] ?? object["resourceScope"])?.stringValue
+        return raw.flatMap(CommandInfo.ResourceScope.init(rawValue:))
     }
 
     /// Only extension commands belong in the Commands group: prompt- and
@@ -362,7 +370,7 @@ struct ProjectResourcesView: View {
                             .environment(\.tronSettingsVisualTheme, nil)
                         }
                     } else if loading {
-                        TronSheetLoadingState(label: "Loading project resources…", accent: .tronSessionTeal)
+                        TronSheetLoadingState(label: "Loading resources…", accent: .tronSessionTeal)
                     } else {
                         TronPlaceholderState(
                             title: "Resources Unavailable",
@@ -391,7 +399,7 @@ struct ProjectResourcesView: View {
                     .accessibilityValue(loading || reloading ? "In progress" : "")
                 }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Project Resources", accent: .tronSessionTeal)
+                    TronSheetTitle(title: "Resources", accent: .tronSessionTeal)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
@@ -462,6 +470,7 @@ struct ProjectResourcesView: View {
                                 HStack(spacing: 4) {
                                     ResourceDistributionTag(
                                         distribution: row.distribution,
+                                        scope: row.resourceScope,
                                         accent: kind.accent
                                     )
                                     ComposerResourceBadges(
@@ -527,11 +536,13 @@ struct ProjectResourceDetailSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var detail: CommandResourceDetail?
+    @PresentationState private var subagentDetail: SubagentResourceDetail?
     @PresentationState private var loadError: String?
     @PresentationState private var loadRevision = 0
     @PresentationState private var detailGeneration = 0
     @PresentationState private var loadedIdentity: String?
     @PresentationState private var showsResourceInfo = false
+    @PresentationState private var reading: ProjectResourceReading?
 
     private var presentation: ProjectResourceDetailPresentation {
         ProjectResourceDetailPresentation(kind: selection.kind, value: selection.value)
@@ -582,6 +593,9 @@ struct ProjectResourceDetailSheet: View {
             }
             .tint(accent)
         }
+        .tronManagedSheet(item: $reading, identity: { "project-resource-reading.\($0.id)" }) { reading in
+            ProjectResourceReader(reading: reading)
+        }
         .tronManagedSheet(isPresented: $showsResourceInfo, identity: "project-resource-info.\(selection.id)") {
             ComposerResourceInfoSheet(
                 items: metadata,
@@ -604,7 +618,8 @@ struct ProjectResourceDetailSheet: View {
     }
 
     private var resolvedPurpose: String {
-        guard let description = detail?.description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty else {
+        guard let description = (detail?.description ?? subagentDetail?.description)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty else {
             return presentation.purpose
         }
         return ProjectResourceTextPresentation.readableDescription(description)
@@ -646,45 +661,89 @@ struct ProjectResourceDetailSheet: View {
         }
     }
 
+    /// Commands and subagents preview their body in a glass card and open the
+    /// whole of it in the shared document reader; prompts and skills read in full.
+    private var readsInReader: Bool { selection.kind == .commands || selection.kind == .subagents }
+
+    /// A subagent's body is its definition's Markdown; a command's is its source.
+    private var bodySource: CommandInfo.Source {
+        selection.kind == .subagents ? .prompt : selection.commandInfo?.source ?? .extension
+    }
+
+    /// The source excerpt (480 characters or ten lines), ended at a whole line
+    /// so a Markdown body never stops mid-word; View All shows the rest.
+    private static func excerpt(_ text: String) -> String {
+        let preview = ComposerResourceContentPresentation.preview(text, source: .extension, sourceTruncated: false)
+        guard preview.isTruncated, let lineEnd = preview.text.range(of: "\n", options: .backwards) else { return preview.text }
+        return String(preview.text[..<lineEnd.lowerBound])
+    }
+
+    private var loadedContent: (text: String, truncated: Bool)? {
+        if let content = detail?.content, !content.isEmpty { return (content, detail?.contentTruncated == true) }
+        if let content = subagentDetail?.content, !content.isEmpty { return (content, subagentDetail?.contentTruncated == true) }
+        return nil
+    }
+
     @ViewBuilder
     private var contentSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             TronTechnicalSectionLabel("Content")
-            Group {
-                if let detail, let content = detail.content, !content.isEmpty {
-                    let preview = ComposerResourceContentPresentation.preview(
-                        content,
-                        source: selection.commandInfo?.source ?? .extension,
-                        sourceTruncated: detail.contentTruncated == true
-                    )
-                    ComposerResourceContentBody(
-                        preview: preview,
-                        source: selection.commandInfo?.source ?? .extension
-                    )
-                } else if detail != nil {
-                    Text("This resource has no body content.")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                } else if let loadError {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(loadError)
+            if readsInReader, let content = loadedContent {
+                TronGlassCard(accent: accent) {
+                    ComposerResourceContentBody(preview: .init(text: Self.excerpt(content.text), isTruncated: false),
+                                                source: bodySource)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("project-resource-content")
+                    TronSettingsDivider(accent: accent)
+                    Button {
+                        reading = ProjectResourceReading(id: selection.id.uuidString, title: selection.title, text: content.text,
+                                                         source: bodySource, truncated: content.truncated)
+                    } label: {
+                        TronSettingsRow(icon: "text.alignleft", title: "View All",
+                                        subtitle: "\(content.text.count.formatted()) characters", accent: accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("project-resource-view-all")
+                }
+            } else {
+                Group {
+                    if let detail, let content = detail.content, !content.isEmpty {
+                        let preview = ComposerResourceContentPresentation.preview(
+                            content,
+                            source: selection.commandInfo?.source ?? .extension,
+                            sourceTruncated: detail.contentTruncated == true
+                        )
+                        ComposerResourceContentBody(
+                            preview: preview,
+                            source: selection.commandInfo?.source ?? .extension
+                        )
+                    } else if detail != nil || subagentDetail != nil {
+                        Text("This resource has no body content.")
                             .font(TronTypography.secondaryDescription)
                             .foregroundStyle(Color.tronTextSecondary)
-                        Button("Try Again", systemImage: "arrow.clockwise") { loadRevision &+= 1 }
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                    } else if let loadError {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(loadError)
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                            Button("Try Again", systemImage: "arrow.clockwise") { loadRevision &+= 1 }
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(accent)
+                        }
+                    } else if selection.commandInfo == nil && selection.kind != .subagents {
+                        Text("This resource does not expose body content.")
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextSecondary)
+                    } else {
+                        TronLoadingState(label: "Loading resource content…", accent: accent)
                     }
-                } else if selection.commandInfo == nil {
-                    Text("This resource does not expose body content.")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                } else {
-                    TronLoadingState(label: "Loading resource content…", accent: accent)
                 }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .tronScrollSurface(accent: accent, cornerRadius: 16, tintOpacity: 0.06)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .tronScrollSurface(accent: accent, cornerRadius: 16, tintOpacity: 0.06)
         }
     }
 
@@ -735,7 +794,7 @@ struct ProjectResourceDetailSheet: View {
         if let argumentHint = detail?.argumentHint ?? command?.argumentHint, !argumentHint.isEmpty {
             items.append(.init(title: "Arguments", value: argumentHint, icon: "text.badge.plus"))
         }
-        if let bytes = detail?.contentBytes {
+        if let bytes = detail?.contentBytes ?? subagentDetail?.contentBytes {
             items.append(.init(title: "Content size", value: ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file), icon: "internaldrive"))
         }
         return items
@@ -749,11 +808,12 @@ struct ProjectResourceDetailSheet: View {
     }
 
     private func loadDetail() async {
-        if loadedIdentity == loadIdentity, detail != nil, loadError == nil { return }
+        if loadedIdentity == loadIdentity, detail != nil || subagentDetail != nil, loadError == nil { return }
         detailGeneration &+= 1
         let generation = detailGeneration
         let identity = loadIdentity
         detail = nil
+        subagentDetail = nil
         loadError = nil
         // The settings catalog carries the authoritative tool record already;
         // there is no session RPC to fetch for a Mac/Project settings editor.
@@ -763,13 +823,23 @@ struct ProjectResourceDetailSheet: View {
             loadedIdentity = identity
             return
         }
-        guard let command = selection.commandInfo else { return }
+        let subagentName = selection.kind == .subagents ? selection.value.objectValue?["name"]?.stringValue : nil
+        let command = selection.commandInfo
+        guard subagentName != nil || command != nil else { return }
         do {
-            let loaded = try await model.commandDetail(sessionID: sessionID, command: command)
-            guard generation == detailGeneration,
-                  !Task.isCancelled,
-                  presentationActivity.allowsPresentationPublication else { return }
-            detail = loaded
+            if let subagentName {
+                let loaded = try await model.subagentDetail(sessionID: sessionID, name: subagentName)
+                guard generation == detailGeneration,
+                      !Task.isCancelled,
+                      presentationActivity.allowsPresentationPublication else { return }
+                subagentDetail = loaded
+            } else if let command {
+                let loaded = try await model.commandDetail(sessionID: sessionID, command: command)
+                guard generation == detailGeneration,
+                      !Task.isCancelled,
+                      presentationActivity.allowsPresentationPublication else { return }
+                detail = loaded
+            }
             loadedIdentity = identity
         } catch is CancellationError {
             // A rejected live-session read is not a cancelled presentation.
@@ -785,6 +855,34 @@ struct ProjectResourceDetailSheet: View {
                   presentationActivity.allowsPresentationPublication else { return }
             loadError = error.localizedDescription
             loadedIdentity = identity
+        }
+    }
+}
+
+/// A command's or subagent's whole body, opened from its View All row.
+struct ProjectResourceReading: Identifiable {
+    let id: String
+    let title: String
+    let text: String
+    let source: CommandInfo.Source
+    let truncated: Bool
+}
+
+/// The shared document reader every instructions and Home text reader uses,
+/// with the resource's own body renderer.
+private struct ProjectResourceReader: View {
+    let reading: ProjectResourceReading
+
+    var body: some View {
+        TronDocumentSheet(title: reading.title, detents: [.medium, .large]) {
+            ScrollView {
+                ComposerResourceContentBody(preview: .init(text: reading.text, isTruncated: reading.truncated), source: reading.source)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(18)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("project-resource-reading")
+            }
+            .tronScrollEdgeChrome()
         }
     }
 }

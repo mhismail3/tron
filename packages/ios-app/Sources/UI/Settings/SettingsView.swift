@@ -350,37 +350,43 @@ struct SessionSettingsView: View {
         let agent = ["model", "workers", "context", "approvals", "run"].filter(shown.contains)
         let tools = ["tools"].filter(shown.contains)
         let more = sections.map(\.id).filter { shown.contains($0) && !SettingsGroupKind.placedSections.contains($0) }
-        let projectOnly = homeProfileID == nil
-            && model.settingsSnapshot(for: target)?.resolution.keys.contains(where: SettingsKeySelection.projectOnly.includes) == true
+        // The chat's project, read-only, below its own choices; Manage Session's
+        // Workspace row already names the branch. Its notices are listed there once.
+        let project = homeProfileID == nil ? projectCWD.flatMap { cwd in
+            model.selectedGatewayProfileID().map { (cwd: cwd, profileID: $0) }
+        }.flatMap { $0.cwd.isEmpty ? nil : $0 } : nil
         ScrollView(.vertical, showsIndicators: true) {
-            // Global Settings' layout: titled group cards of drill-in rows (#1651).
             VStack(alignment: .leading, spacing: 18) {
-                TronSettingsCaption(homeProfileID == nil
-                    ? "Choices for this session. Revert an override to use Global settings."
-                    : "Home's overrides of Global settings. Worker launch choices apply to new workers.")
-                if let notice = model.settingsSnapshot(for: target)?.resolution.projectNotice { SettingsProjectNoticeGroup(notice: notice) }
-                if sections.isEmpty {
-                    TronSheetLoadingState(label: "Loading settings…")
-                } else {
-                    if !agent.isEmpty {
-                        SettingsGroupCard(.agent) { links(agent, sections) }
+                // Global Settings' layout: titled group cards of drill-in rows (#1651).
+                VStack(alignment: .leading, spacing: 18) {
+                    TronSettingsCaption(homeProfileID == nil
+                        ? "Choices for this session. Revert an override to use Global settings."
+                        : "Home's overrides of Global settings. Worker launch choices apply to new workers.")
+                    if project == nil, let notice = model.settingsSnapshot(for: target)?.resolution.projectNotice {
+                        SettingsProjectNoticeGroup(notice: notice)
                     }
-                    if !tools.isEmpty {
-                        SettingsGroupCard(.tools) { links(tools, sections) }
-                    }
-                    if !more.isEmpty || projectOnly {
-                        SettingsGroupCard(.more) {
-                            if !more.isEmpty { links(more, sections) }
-                            if projectOnly {
-                                if !more.isEmpty { TronSettingsDivider() }
-                                setByProject
-                            }
+                    if sections.isEmpty {
+                        TronSheetLoadingState(label: "Loading settings…")
+                    } else {
+                        if !agent.isEmpty {
+                            SettingsGroupCard(.agent) { links(agent, sections) }
+                        }
+                        if !tools.isEmpty {
+                            SettingsGroupCard(.tools) { links(tools, sections) }
+                        }
+                        if !more.isEmpty {
+                            SettingsGroupCard(.more) { links(more, sections) }
                         }
                     }
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(homeProfileID == nil ? "session-settings-content" : "home-settings-content")
+                if let project {
+                    ProjectSettingsSections(cwd: project.cwd, profileID: project.profileID, showsWorkspace: false)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("session-project-settings")
+                }
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier(homeProfileID == nil ? "session-settings-content" : "home-settings-content")
             .padding(20)
         }
         .tronScrollEdgeChrome()
@@ -394,21 +400,6 @@ struct SessionSettingsView: View {
     private func links(_ ids: [String], _ sections: [SettingsRendererSection]) -> some View {
         SettingsSectionLinks(ids: ids, sections: sections, target: target, ownedLayers: ownedLayers, projectCWD: projectCWD,
                              showsSummary: true, selection: selection, homeProfileID: homeProfileID)
-    }
-
-    private var setByProject: some View {
-        TronProgressiveSheetLink(accessibilityLabel: "Set by Project", identity: "settings.project-only.\(sessionID)") {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    SettingsProjectGroups(target: target, selection: .projectOnly)
-                }.padding(20)
-            }
-            .tronScrollEdgeChrome()
-            .tronNavigationTitle("Set by Project")
-        } label: {
-            TronSettingsRow(icon: "folder.badge.gearshape", title: "Set by Project",
-                            subtitle: "Read-only repository settings", subtitleColor: .tronTextSecondary)
-        }
     }
 }
 

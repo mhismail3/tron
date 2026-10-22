@@ -233,9 +233,8 @@ struct SessionContextSheet: View {
                         }
                         // Manage Session is this chat's live state and its few direct
                         // controls. Settings (the gear) owns every scope's settings.
-                        SessionContextUsageCard(snapshot: snapshot)
+                        SessionContextUsageCard(snapshot: snapshot, action: compactButton(snapshot))
                             .settingsApprovals(.session(sessionID))
-                        TronGlassCard { manualCompactionRow(snapshot) }
                         sessionSection(snapshot)
                         settingsSection(snapshot)
                         exportSection
@@ -249,11 +248,7 @@ struct SessionContextSheet: View {
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    SessionTerminalToolbarButton(enabled: displayedPresentation != nil,
-                                                 identifier: "manage-session-terminal") {
-                        destination = .terminal
-                    }
+                ToolbarItem(placement: .topBarLeading) {
                     Button {
                         name = displayedPresentation?.name ?? ""
                         showRename = true
@@ -412,6 +407,8 @@ struct SessionContextSheet: View {
             )
         }
         .buttonStyle(.plain)
+        .controlSize(.small)
+        .fixedSize()
         .accessibilityLabel("Compact Now")
         .accessibilityIdentifier("manage-session-compact")
         .disabled(!SessionCompactionControlPolicy.canRequest(
@@ -454,17 +451,6 @@ struct SessionContextSheet: View {
         if presentation != value { presentation = value }
     }
 
-    private func manualCompactionRow(_ snapshot: SessionContextPresentation) -> some View {
-        TronSettingsRow(
-            icon: "rectangle.compress.vertical",
-            title: "Compact conversation",
-            subtitle: "Summarize older context now",
-            accent: .tronPurple
-        ) {
-            compactButton(snapshot)
-        }
-    }
-
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
         TronGlassCard(accent: sessionRowAccent) {
             VStack(spacing: 0) {
@@ -474,10 +460,10 @@ struct SessionContextSheet: View {
                 }
                 gitRow
                 divider()
-                manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
+                manageRow(icon: "doc.text.magnifyingglass", title: "Instructions",
                           subtitle: "The complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }
                 divider()
-                manageRow(icon: "shippingbox", title: "Project Resources",
+                manageRow(icon: "shippingbox", title: "Resources",
                           subtitle: "Loaded skills, subagents, prompts, and commands", accent: sessionRowAccent) { destination = .projectResources }
                 divider()
                 manageRow(
@@ -501,21 +487,17 @@ struct SessionContextSheet: View {
         }
     }
 
-    /// The project's and this chat's settings, in Settings' own accent.
+    /// This chat's settings and, below them, its project's, in Settings' own accent.
     private func settingsSection(_ snapshot: SessionContextPresentation) -> some View {
         TronGlassCard(accent: .tronEmerald) {
             VStack(spacing: 0) {
-                if let profileID = model.selectedGatewayProfileID(), !snapshot.cwd.isEmpty {
-                    ProjectSettingsLink(cwd: snapshot.cwd, profileID: profileID)
-                    TronSettingsDivider(accent: .tronEmerald)
-                }
                 TronProgressiveSheetLink(accessibilityLabel: "Session Settings", identity: "session.\(sessionID).settings",
                                          accent: .tronEmerald) {
                     SessionSettingsView(sessionID: sessionID, ownedLayers: ["session"], projectCWD: snapshot.cwd)
                         .tronNavigationTitle("Session Settings")
                 } label: {
                     TronSettingsRow(icon: "slider.horizontal.3", title: "Session Settings",
-                                    subtitle: "Models, tools, and session overrides", accent: .tronEmerald)
+                                    subtitle: "Session overrides and project settings", accent: .tronEmerald)
                 }
                 .accessibilityIdentifier("chat-settings-link")
             }
@@ -525,6 +507,10 @@ struct SessionContextSheet: View {
     private var exportSection: some View {
         TronGlassCard(accent: exportRowAccent) {
             VStack(spacing: 0) {
+                manageRow(icon: "terminal", title: "Terminal", subtitle: "A shell in this session's workspace",
+                          accent: exportRowAccent) { destination = .terminal }
+                    .accessibilityIdentifier("manage-session-terminal")
+                TronSettingsDivider(accent: exportRowAccent)
                 exportRow(
                     format: "html",
                     icon: "doc.richtext",
@@ -586,7 +572,7 @@ struct SessionContextSheet: View {
             SessionWorkspaceSummaryRow(presentation: workspacePresentation, accent: sessionRowAccent)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Current Branch and Workspace")
+        .accessibilityLabel("Workspace")
     }
 
     private func divider() -> some View {
