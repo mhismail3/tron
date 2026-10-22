@@ -122,6 +122,8 @@ disposable projection or an in-flight command owner.
 | `reconnect.stalled` | error | A foreground episode spent `RECONNECT_STALL_BOUND` (20 s) with no attempt in flight or scheduled; at most once per episode: `guard`, `heldForMs`, `silentForMs`, `attempts`, `boundMs` |
 | `app.main-stall` | warning | The main actor missed a 1 s off-main ping for `MAIN_STALL_BOUND` (2 s) during a foreground episode (selected profile only): `durationMs`, `boundMs`, `foreground` |
 | `gateway.lifecycle` | info | An admitted reconnect/path/detail event in the incident store (`AppDiagnostics.swift`): `kind` (`reconnect.*`, `path.changed`, `detail.*`), `profileID`; `reconnect.parked`/`-resume` (`reason=pathUnsatisfied`, 30 s `boundMs`) and `reconnect.skipped` (refusing guard) are one record per park, resume and guard change |
+| `managed-sheet.never-appeared` | OSLog fault (`ManagedSheetPresentation`) | A live sheet request registered but retired before its content appeared (refused, deferred then torn down, or a stuck presenter closed with its parent): `identity`, call `site` |
+| `presentation-state.scope-leak` | OSLog fault (`ManagedSheetPresentation`) | More than 256 presentation-state scopes are live; scopes are never evicted, so this names a missing retirement: `live`, newest path |
 | `ios.metrickit` | info | A MetricKit metric or diagnostic payload was recorded (`IOSMetricKitDiagnostics.swift`) |
 
 ## Verify

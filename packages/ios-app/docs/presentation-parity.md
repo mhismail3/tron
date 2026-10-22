@@ -229,7 +229,9 @@ canonical state, is never persisted, and is not a second state authority.
   polls, automatic presentation, animation or viewport observation.
 - Surface tokens are generation-qualified; a bounded tombstone ledger rejects content arriving
   after its generation retired. Binding intent registers a child before its transition, and a
-  dismissal lease keeps the retiring generation until SwiftUI's callback.
+  dismissal lease keeps the retiring generation until SwiftUI's callback. The sheet haptic
+  waits for that registered child's content to appear; a request retired unseen is silent
+  and reported (`managed-sheet.never-appeared`).
 - Disposable loads, media preparation and polls include surface activity in their task identity:
   cover or an inactive scene cancels them, uncover restarts from current inputs. Visible reads
   that need the transport wait for foreground reconciliation; accepted operations do not. Publication rejects cancellation

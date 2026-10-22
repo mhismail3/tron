@@ -56,7 +56,7 @@ and foreground activity. User-intent closures, not value observers, own control 
 
 | Event | Interaction | Generator / intensity | Why |
 | --- | --- | --- | --- |
-| `sheetPresented` | Shared live sheet/picker presentation | Medium impact / full | A perceptible lift, without a sharp rigid snap |
+| `sheetPresented` | Shared live sheet presentation, when its content appears; system picker on request | Medium impact / full | A perceptible lift, without a sharp rigid snap; a refused or deferred request is silent until shown |
 | `toggleChanged` | Shared toggle rows and schema renderer switches | Selection | One mechanical flip; no ticks on server/restored values |
 | `selectionChanged` | Choice picker change; checklist add/remove | Selection | A detent, not a completion; choosing the current value is silent |
 | `copied` | Message Copy (menu/AX); code-block Copy | Light impact / full | A small confirmation after the clipboard write |
@@ -94,7 +94,8 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronAccessibilityUITests
 packages/ios-app/scripts/test-source-policy.sh
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronChatHapticsUITests \
-  --only-testing TronMobileUITests/TronInteractionHapticsUITests
+  --only-testing TronMobileUITests/TronInteractionHapticsUITests \
+  --only-testing TronMobileUITests/TronSubsheetReliabilityUITests
 ```
 
 The loading journey samples rendered material, not accessibility geometry; the paged-list journey
