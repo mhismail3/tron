@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import { lstat, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createInterface } from "node:readline";
+import { GatewayError } from "../errors.js";
 import { KEYS, schemaKey } from "./settings-schema.js";
 import { foldHomeChapter, migrateApprovals, migrateAuditEntry, migrateObserved, migrateSessionSettings, migrationObject,
   migrationRefusal, migrationSetPath, parseMigrationObject, type MigrationDefaults } from "./settings-migration-state.js";
@@ -15,6 +16,8 @@ export interface MigrationCapture {
   inputs: Array<{ path: string; hash: string | null }>;
   replacements: Array<{ path: string; before: string | null; after: string; index: number; staged: string }>;
   notes: Array<{ file: string; key: string; reason: string }>;
+  /** Non-Home sessions left byte-for-byte unmigrated; startup continues and reports them. */
+  skipped: Array<{ file: string; reason: string }>;
   dispose(): Promise<void>;
 }
 export async function migrationFileHash(path: string): Promise<string | null> {
@@ -28,6 +31,19 @@ export async function migrationFileHash(path: string): Promise<string | null> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     return migrationRefusal(path, "file could not be read safely");
   }
+}
+/** Pi's session reader splits on "\n" only. `readline` also splits on U+2028/U+2029,
+ * which are legal raw inside JSON strings, and would tear valid entries apart. */
+async function* jsonlLines(path: string): AsyncGenerator<string> {
+  const decoder = new StringDecoder("utf8");
+  let rest = "";
+  for await (const chunk of createReadStream(path)) {
+    const lines = (rest + decoder.write(chunk as Buffer)).split("\n");
+    rest = lines.pop()!;
+    yield* lines;
+  }
+  rest += decoder.end();
+  if (rest) yield rest;
 }
 async function document(path: string, limit = 1024 * 1024): Promise<Document> {
   if (await migrationFileHash(path) === null) return {};
@@ -81,6 +97,7 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
   const inputs: MigrationCapture["inputs"] = [];
   const replacements: MigrationCapture["replacements"] = [];
   const notes: MigrationCapture["notes"] = [];
+  const skipped: MigrationCapture["skipped"] = [];
   const dispose = () => rm(temporary, { recursive: true, force: true });
   try {
     const defaults: MigrationDefaults = { global: await document(join(resolve(agentDir), "settings.json")),
@@ -131,11 +148,16 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
         type Branch = { settings?: Document; model?: unknown; thinking?: unknown };
         const branches = new Map<string, Branch>();
         let branch: Branch = {};
-        let first = true, homeSession = false, canonicalSession = false, changed = false;
+        let first = true, homeSession = false, canonicalSession = false, changed = false, malformed = 0;
         try {
-          for await (const line of createInterface({ input: createReadStream(path), crlfDelay: Infinity })) {
+          for await (const line of jsonlLines(path)) {
             if (!line.trim()) { await handle.write(`${line}\n`); continue; }
-            const original = parseMigrationObject(line, path);
+            let original: Document;
+            try { original = parseMigrationObject(line, path); } catch (error) {
+              // Pi skips a malformed session line, so it is not a settings entry: keep its bytes.
+              if (kind === "audit") throw error;
+              malformed += 1; first = false; await handle.write(`${line}\n`); continue;
+            }
             let next = original;
             if (kind === "audit") next = migrateAuditEntry(original, path);
             else {
@@ -155,7 +177,15 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
             if (JSON.stringify(next) !== JSON.stringify(original)) { changed = true; await handle.write(`${JSON.stringify(next)}\n`); }
             else await handle.write(`${line}\n`);
           }
+        } catch (error) {
+          // One unconvertible chat or subagent session must not stop the Gateway:
+          // it stays byte-for-byte untouched and is reported. Home and audit inputs
+          // feed shared state, so they still refuse the whole migration.
+          if (kind === "audit" || homeSession || !(error instanceof GatewayError) || error.code !== "conflict") throw error;
+          skipped.push({ file: path, reason: error.message });
+          changed = false; homeSession = false;
         } finally { await handle.close(); }
+        if (malformed) notes.push({ file: path, key: "", reason: `${malformed} malformed line(s) preserved as Pi skips them` });
         if (homeSession) folded = foldHomeChapter(folded, branch.settings, branch.model, branch.thinking, path);
         if (changed) {
           const after = (await migrationFileHash(output))!;
@@ -180,6 +210,6 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
       const path = join(resolve(tronHome), "gateway", "home", "profile.json");
       await stage(path, inputs.find(input => input.path === path)!.hash, `${JSON.stringify(folded, null, 2)}\n`);
     }
-    return { runtimeDirectories: inventory.runtimeDirectories, inputs, replacements, notes, dispose };
+    return { runtimeDirectories: inventory.runtimeDirectories, inputs, replacements, notes, skipped, dispose };
   } catch (error) { await dispose(); throw error; }
 }

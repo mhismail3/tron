@@ -91,7 +91,7 @@ const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 // its legacy roots. The operator cutover is explicit and runs before Pi loads
 // the provider, so an old run cannot be silently stranded.
 await assertDelegatedRootCutoverReady(config.tronHome);
-await migrateSettings({ tronHome: config.tronHome, agentDir: config.agentDir, acquireRuntimeLocks: acquireAgentRuntimeLocks });
+const unmigratedSessions = await migrateSettings({ tronHome: config.tronHome, agentDir: config.agentDir, acquireRuntimeLocks: acquireAgentRuntimeLocks });
 await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
 // extensions. Existing installed packages are never rewritten in place.
@@ -126,6 +126,9 @@ const logger = new GatewayLogger(gatewayLogPath, {
 // Activate this payload's exact offline closure before any Pi discovery. A
 // restart verifies/reuses the immutable root; damaged roots fail startup closed.
 const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, logger);
+for (const { reason } of unmigratedSessions) {
+  logger.log("error", `Settings migration left a session unmigrated: ${reason}`, { event: "settings.migration-session-skipped", source: "settings" });
+}
 {
   const identity = runtimeIdentity();
   logger.log(

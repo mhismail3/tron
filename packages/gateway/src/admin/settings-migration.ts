@@ -21,6 +21,7 @@ interface Journal {
   inputs: Input[];
   replacements: Replacement[];
   notes: Array<{ file: string; key: string; reason: string }>;
+  skipped: Array<{ file: string; reason: string }>;
 }
 const name = "three-layer-v1";
 const hashPattern = /^[a-f0-9]{64}$/;
@@ -44,7 +45,7 @@ async function readJournal(path: string, options: SettingsMigrationOptions): Pro
     || value.tronHome !== resolve(options.tronHome) || value.agentDir !== resolve(options.agentDir)
     || !Array.isArray(value.runtimeDirectories) || !value.runtimeDirectories.includes(resolve(options.agentDir))
     || value.runtimeDirectories.some(root => typeof root !== "string" || !isAbsolute(root))
-    || !Array.isArray(value.inputs) || !Array.isArray(value.replacements) || !Array.isArray(value.notes)) return fail(path, "journal identity is invalid");
+    || !Array.isArray(value.inputs) || !Array.isArray(value.replacements) || !Array.isArray(value.notes) || !Array.isArray(value.skipped)) return fail(path, "journal identity is invalid");
   const roots = [value.tronHome, ...value.runtimeDirectories];
   const inside = (candidate: string) => typeof candidate === "string" && isAbsolute(candidate)
     && roots.some(root => { const child = relative(root, candidate); return child !== "" && child !== ".." && !child.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(child); });
@@ -110,7 +111,7 @@ export class SettingsMigration {
       const current = await readJournal(journalPath, options);
       if (current) fail(journalPath, "another startup prepared this migration; restart to resume it");
       const journal: Journal = { version: 1, state: "prepared", tronHome: resolve(options.tronHome), agentDir: resolve(options.agentDir),
-        runtimeDirectories: capture.runtimeDirectories, inputs: capture.inputs, replacements: capture.replacements.map(({ path, before, after, index }) => ({ path, before, after, index })), notes: capture.notes };
+        runtimeDirectories: capture.runtimeDirectories, inputs: capture.inputs, replacements: capture.replacements.map(({ path, before, after, index }) => ({ path, before, after, index })), notes: capture.notes, skipped: capture.skipped };
       const inventory = await settingsMigrationInventory(options.tronHome, options.agentDir);
       if (JSON.stringify(inventory.paths) !== JSON.stringify(capture.inputs.map(input => input.path))) fail(root, "input inventory changed during preflight");
       await verifyInputs(journal, false);
@@ -166,10 +167,14 @@ export class SettingsMigration {
     this.journal.state = "complete";
   }
 
+  /** Sessions this transaction left unmigrated; empty once an earlier startup completed it. */
+  get skipped(): Journal["skipped"] { return this.alreadyComplete ? [] : this.journal.skipped; }
+
   async release(): Promise<void> { await this.unlock?.(); }
 }
 
-export async function migrateSettings(options: SettingsMigrationOptions): Promise<void> {
+export async function migrateSettings(options: SettingsMigrationOptions): Promise<Journal["skipped"]> {
   const migration = await SettingsMigration.prepare(options);
   try { await migration.complete(); } finally { await migration.release(); }
+  return migration.skipped;
 }

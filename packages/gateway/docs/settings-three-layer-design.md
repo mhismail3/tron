@@ -196,6 +196,9 @@ legacy undo applier may retire only when no retained undoable entry references i
   transformations and stage replacements; crash recovery completes the same migration, never exposes
   half-upgraded stores. Backup/version completion only after durable writes; rerun is a no-op. A
   failed preflight changes nothing; corrupt/unclassifiable legacy state refuses with path, not drops.
+  Session JSONL is read as Pi reads it (`\n` lines; malformed lines kept byte-for-byte). An
+  unconvertible chat or subagent session stays untouched and is logged
+  (`settings.migration-session-skipped`) while startup continues; Home and audit inputs still refuse.
 - Preserve saved Global values in their owned stores as Global. Convert Profile entries to the same
   override vocabulary. Fold active Home chapter choices into Profile while preserving currently
   effective behavior; no extra chapter setting layer. Archive superseded provenance in the backup.
