@@ -1915,10 +1915,8 @@ export class GatewayService {
         const slot = await this.openedSlot(client, params);
         return safeJson(slot.tree());
       }
-      case "session.commands": {
-        const slot = await this.openedSlot(client, params);
-        return safeJson({ commands: slot.commands() });
-      }
+      case "session.commands":
+        return safeJson({ commands: (await this.openedSlot(client, params)).commands() });
       case "session.commandDetail": {
         const slot = await this.openedSlot(client, params);
         return safeJson(await slot.commandDetail(
@@ -1926,10 +1924,8 @@ export class GatewayService {
           string(params.name, "name", { max: 8_192 }),
         ));
       }
-      case "session.subagentDetail": {
-        const slot = await this.openedSlot(client, params);
-        return safeJson(await slot.subagentDetail(string(params.name, "name", { max: 8_192 })));
-      }
+      case "session.subagentDetail":
+        return safeJson(await (await this.openedSlot(client, params)).subagentDetail(string(params.name, "name", { max: 8_192 })));
       case "session.export": {
         const slot = await this.openedSlot(client, params);
         // A queued export whose client left is dropped before it starts: the

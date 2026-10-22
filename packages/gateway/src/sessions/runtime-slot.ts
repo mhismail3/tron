@@ -8889,7 +8889,7 @@ export class RuntimeSlot {
 
   async resources(): Promise<JsonValue> {
     this.assertNoTrustReload();
-    const subagents = await this.loadSubagents();
+    const subagents = await this.subagentCatalog();
     return safeJson({
       commands: this.commands(),
       ...this.resourcesValue(),
@@ -8898,18 +8898,9 @@ export class RuntimeSlot {
     });
   }
 
-  /** One discovered subagent's definition body, from the same discovery
-   * `resources()` lists; a name no longer discovered is not found. */
-  async subagentDetail(name: string): Promise<SubagentDetail> {
-    this.assertNoTrustReload();
-    const subagent = (await this.loadSubagents()).subagents.find((candidate) => candidate.name === name);
-    if (!subagent) throw new GatewayError("not_found", "That subagent is no longer available");
-    return subagentDetail(subagent);
-  }
-
-  /** Failure-soft and uncached: every call re-runs the package's own discovery,
-   * and an unavailable package yields an empty list plus one diagnostic. */
-  private async loadSubagents(): Promise<SubagentCatalog> {
+  async subagentDetail(name: string): Promise<SubagentDetail> { this.assertNoTrustReload(); return subagentDetail((await this.subagentCatalog()).subagents, name); }
+  /** Failure-soft, uncached discovery for `resources()` and `subagentDetail`: unavailable is empty plus a diagnostic. */
+  private async subagentCatalog(): Promise<SubagentCatalog> {
     if (!this.liveProfile().subagentCatalog) return { subagents: [] };
     return loadSubagentCatalog({
       agentDir: this.dependencies.agentDir,
