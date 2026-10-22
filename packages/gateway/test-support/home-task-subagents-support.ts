@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { vi } from "vitest";
-import { OWNED_OPERATION_DEADLINE_MS } from "../src/sessions/owned-session-dispatch.js";
+import { OWNED_OPERATION_DEADLINE_MS } from "../src/kernel/delegation/owned-session-dispatch.js";
 import { disposeFixtures, type fixture } from "./home-task-fixture.js";
 import { startScriptedChild, type ChildModelServer } from "./home-task-subagent-child.js";
 import { waitFor } from "./wait-for.js";

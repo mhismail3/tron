@@ -19,6 +19,7 @@
     "managed-subagents.rollback.integration.test.ts",
     "managed-subagents.ts",
     "managed-workflow-children.integration.test.ts",
+    "owned-session-dispatch.ts",
     "paused-subagent.integration.test.ts",
     "subagent-catalog.ts",
     "subagent-parity.integration.test.ts",

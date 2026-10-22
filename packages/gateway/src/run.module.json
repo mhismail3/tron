@@ -31,7 +31,6 @@
     "sessions/multi-resource-message.e2e.test.ts",
     "sessions/native-tool-settlement.integration.test.ts",
     "sessions/openai-model-eligibility.integration.test.ts",
-    "sessions/owned-session-dispatch.ts",
     "sessions/recency-deadlines.ts",
     "sessions/recent-model-usage.integration.test.ts",
     "sessions/restart-drain.ts",
