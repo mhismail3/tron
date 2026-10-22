@@ -14,6 +14,10 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 GATEWAY = "packages/gateway"
 IOS = "packages/ios-app"
 TARGETS = {"gateway": (GATEWAY, "gateway/", "Gateway"), "ios": (IOS, "ios-app/", "iOS")}
+# Every module may import platform (L0) and contracts (L1): an edge into them is never upward or undeclared.
+FOUNDATION = {"L0", "L1"}
+# Ratcheted rule kinds; `undeclared` pairs are counted and reported, never ratcheted or failed.
+RATCHETED = ("upward ", "two-way ", "unindexed ")
 PI_SEAM = "gateway/pi"  # the one module that may import or name the Pi SDK (k0-kernel.md §4, decision D2)
 PI_PACKAGE = re.compile(r"(?:^|/)node_modules/@earendil-works/")
 REASON = re.compile(r"^\s+(?:Imported|Referenced) via (?:\"[^\"]*\"|'[^']*'|\S+) from file '([^']+)'")
@@ -95,7 +99,7 @@ def pi_seam(owner: dict, files: set, pi_importers: set) -> list[str]:
 
 
 def evaluate(gateway: dict, owner: dict, edges: set) -> tuple[Counter, dict]:
-    """Violating module pairs keyed by rule; the file-edge counts are reported, never ratcheted."""
+    """Module-pair rules (upward, undeclared, two-way) with their file-edge counts, which are reported only."""
     pairs: dict[tuple[str, str], list] = defaultdict(list)
     for importer, imported in sorted(edges):
         source, target = owner.get(importer), owner.get(imported)
@@ -106,10 +110,10 @@ def evaluate(gateway: dict, owner: dict, edges: set) -> tuple[Counter, dict]:
     violations: Counter = Counter()
     examples = {}
     for (source, target), found in pairs.items():
-        rules = []
-        if int(gateway[target]["layer"][1]) > int(gateway[source]["layer"][1]):
+        rules, foundation = [], gateway[target]["layer"] in FOUNDATION
+        if not foundation and int(gateway[target]["layer"][1]) > int(gateway[source]["layer"][1]):
             rules.append(f"upward {source} ({gateway[source]['layer']}) -> {target} ({gateway[target]['layer']})")
-        if target not in gateway[source]["dependsOn"]:
+        if not foundation and target not in gateway[source]["dependsOn"]:
             rules.append(f"undeclared {source} -> {target}")
         if (target, source) in pairs and source < target:
             rules.append(f"two-way {source} <-> {target}")
@@ -133,12 +137,15 @@ def load_baseline(text: str | None, origin: str) -> dict:
             raise ValueError("unindexed must map modules to positive file counts")
     except (ValueError, KeyError, TypeError) as error:
         raise LayersError(f"{origin}: malformed baseline ({error})") from error
-    return {**dict.fromkeys(pairs, 1), **{f"unindexed {key}": count for key, count in gaps.items()}}
+    # A baseline written before undeclared pairs became report-only still lists them; they bound nothing.
+    return {**dict.fromkeys((rule for rule in pairs if rule.startswith(RATCHETED)), 1),
+            **{f"unindexed {key}": count for key, count in gaps.items()}}
 
 
 def ratcheted(current: Counter) -> dict:
-    """What the baseline bounds: the presence of each pair rule and the unindexed file count per module."""
-    return {rule: count if rule.startswith("unindexed ") else 1 for rule, count in current.items()}
+    """What the baseline bounds: each upward or two-way pair's presence and each module's unindexed file count."""
+    return {rule: count if rule.startswith("unindexed ") else 1 for rule, count in current.items()
+            if rule.startswith(RATCHETED)}
 
 
 def ios_graph(package: dict, tracked: set) -> tuple[set, Counter, dict]:
@@ -248,7 +255,8 @@ def main(argv: list[str]) -> int:
     kinds = Counter(rule.split(" ", 1)[0] for rule in counts)
     gaps = sum(count for rule, count in counts.items() if rule.startswith("unindexed "))
     print(f"layers: {len(package)} {label} modules, {stats['pairs']} module pairs from {stats['fileEdges']} file "
-          f"edges; current {kinds['upward']} upward, {kinds['undeclared']} undeclared, {kinds['two-way']} two-way"
+          f"edges; current {kinds['upward']} upward, {kinds['two-way']} two-way, "
+          f"{kinds['undeclared']} undeclared (reported only)"
           + (f", {gaps} unindexed Swift file(s) in {kinds['unindexed']} module(s)" if target == "ios" else "")
           + "; " + (f"{len(problems)} problem(s)" if problems else "no violation beyond the baseline"))
     return 1 if problems else 0

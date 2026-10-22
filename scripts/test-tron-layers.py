@@ -6,21 +6,22 @@ Each case builds a disposable Git repository with the real `scripts/tron`,
 the repository's installed Gateway `node_modules`, so the pinned TypeScript
 compiler resolves the import graph exactly as it does for the Gateway:
 
-1. Declared downward edges pass; undeclared edges are reported, including
-   type-only and dynamic imports; `--update` writes the first baseline.
-2. Known-bad mutations fail: an upward import (with its two-way pair) and a
-   re-export reaching upward. A move-only split that adds file edges within a
+1. Declared and undeclared downward edges pass, and edges into L0/L1 are never
+   violations; type-only and dynamic imports are found, and undeclared pairs are
+   counted only; `--update` writes the first baseline.
+2. Known-bad mutations fail: an upward import (with its two-way pair), a
+   re-export reaching upward, and a cycle between two modules of one layer. A move-only split that adds file edges within a
    baselined pair passes: edge counts are reported, never ratcheted.
-3. The baseline only shrinks: `--update` refuses to add violations, a fixed
-   violation must be tightened, and a baseline larger than the base revision's
-   fails.
+3. The baseline (upward and two-way pairs) only shrinks: `--update` refuses to
+   add violations, a fixed violation must be tightened, and a baseline larger
+   than the base revision's fails.
 4. A missing compiler or an ownership violation is an error (exit 2), never clean.
 4a. The Pi seam (decision D2): only `gateway/pi` imports or names `@earendil-works`;
    a type-only import, a value import and a resolution string elsewhere each fail
    without a baseline, and the seam's own re-exports pass.
 5. iOS: real index stores compiled by `swiftc -index-store-path` and stamped by
-   `scripts/ios-test-build-identity.py` give declared, upward, undeclared and
-   two-way references, ignore units of files no longer tracked, pass a split
+   `scripts/ios-test-build-identity.py` give declared, upward and two-way
+   references, ignore units of files no longer tracked, pass a split
    inside a baselined pair, fail a new unindexed file, and refuse a stale stamp or a dirty tree.
 
 The last run's output is kept in `test-results/layers-cli/`.
@@ -58,6 +59,9 @@ SOURCES = {
     "main/main.ts": 'import { run } from "../kernel/run.js";\nexport const start = async () => '
                     '{ run(); return (await import("../feature/feature.js")).feature; };\n',
 }
+
+# A baselinable upward kernel -> feature reference (feature already imports kernel, so it is also two-way).
+PEEK = 'import type { feature } from "../feature/feature.js";\nexport type F = typeof feature;\n'
 
 
 def node_binary() -> str:
@@ -139,48 +143,53 @@ class LayersCase(unittest.TestCase):
 
 
 class BoundaryTests(LayersCase):
-    def test_declared_edges_pass_and_undeclared_type_only_and_dynamic_edges_are_found(self) -> None:
-        lines = self.run_ok(code=1)
-        self.assertEqual([line for line in lines if not line.startswith("layers:")], [
-            "new violation: undeclared gateway/feature -> gateway/contracts [1 edge(s), e.g. "
-            "packages/gateway/src/feature/feature.ts -> packages/gateway/src/contracts/types.ts]",
-            "new violation: undeclared gateway/main -> gateway/feature [1 edge(s), e.g. "
-            "packages/gateway/src/main/main.ts -> packages/gateway/src/feature/feature.ts]",
-        ])
-        self.assertIn("5 module pairs from 5 file edges", lines[-1])
+    def test_downward_and_foundation_edges_pass_and_undeclared_pairs_are_only_counted(self) -> None:
+        # feature -> contracts (L1, type-only, undeclared) is a foundation edge; main -> feature (dynamic,
+        # undeclared) is downward: both pass, and only the second counts as undeclared.
+        lines = self.run_ok()
+        self.assertEqual(lines, ["layers: main has no packages/gateway/layer-baseline.json; this change introduces it",
+                                 "layers: 6 Gateway modules, 5 module pairs from 5 file edges; current 0 upward, "
+                                 "0 two-way, 1 undeclared (reported only); no violation beyond the baseline"])
+        # A utility import into L0 from every layer passes, declared or not.
+        for owner in ("main", "contracts"):
+            self.repo.write(f"packages/gateway/src/{owner}/clamp.ts",
+                            'import { clamp } from "../util/util.js";\nexport const c = clamp;\n')
+        self.assertIn("1 undeclared (reported only); no violation beyond the baseline", self.run_ok()[-1])
         self.run_ok("--update")
-        self.assertEqual(self.repo.baseline()["violations"], ["undeclared gateway/feature -> gateway/contracts",
-                                                              "undeclared gateway/main -> gateway/feature"])
+        self.assertEqual(self.repo.baseline()["violations"], [])
         self.assertNotIn("unindexed", self.repo.baseline())
-        self.assertIn("no violation beyond the baseline", self.run_ok()[-1])
 
     def test_split_inside_a_baselined_pair_passes(self) -> None:
-        self.baselined()
         r = self.repo
-        # Move-only split of feature.ts: both halves keep the baselined feature -> contracts reference.
-        r.write("packages/gateway/src/feature/feature.ts", ('import { run } from "../kernel/run.js";\n'
-                                                           'import type { Shape } from "../contracts/types.js";\n'
-                                                           'import { size } from "./size.js";\n'
-                                                           "export const feature = (s: Shape) => run() + size(s);\n"))
-        r.write("packages/gateway/src/feature/size.ts", 'import type { Shape } from "../contracts/types.js";\n'
-                                                       "export const size = (s: Shape) => s.size;\n")
+        r.write("packages/gateway/src/kernel/peek.ts", PEEK)
+        self.baselined()
+        self.assertEqual(r.baseline()["violations"], ["two-way gateway/feature <-> gateway/kernel",
+                                                      "upward gateway/kernel (L2) -> gateway/feature (L3)"])
+        # Move-only split of peek.ts: both halves keep the baselined kernel -> feature reference.
+        r.write("packages/gateway/src/kernel/peek.ts", PEEK.split("\n", 1)[0] + "\nexport type F = typeof feature;\n")
+        r.write("packages/gateway/src/kernel/peek-size.ts", PEEK.split("\n", 1)[0] + "\nexport type G = typeof feature;\n")
         lines = self.run_ok()
-        self.assertIn("5 module pairs from 7 file edges", lines[-1])
+        self.assertIn("6 module pairs from 7 file edges", lines[-1])
         self.assertIn("no violation beyond the baseline", lines[-1])
 
-    def test_known_bad_upward_and_reexport_fail(self) -> None:
-        self.baselined()
+    def test_known_bad_upward_reexport_and_same_layer_cycle_fail(self) -> None:
         r = self.repo
+        r.manifest("packages/gateway/src/extra/extra.module.json", {"layer": "L3", "owns": ["**"],
+                                                                    "dependsOn": ["gateway/feature"]})
+        r.write("packages/gateway/src/extra/extra.ts", 'import { feature } from "../feature/feature.js";\n'
+                                                       "export const extra = feature;\n")
+        self.baselined()
         r.write("packages/gateway/src/util/bad.ts", 'import { run } from "../kernel/run.js";\nexport const b = run;\n')
         r.write("packages/gateway/src/contracts/index.ts", 'export * from "../kernel/run.js";\n')
+        # Two L3 modules importing each other: neither edge is upward, the cycle alone fails.
+        r.write("packages/gateway/src/feature/back.ts", 'import { extra } from "../extra/extra.js";\n'
+                                                       "export const back = extra;\n")
         problems = [line for line in self.run_ok(code=1) if not line.startswith("layers:")]
         self.assertEqual(problems, [
+            "new violation: two-way gateway/extra <-> gateway/feature [1 edge(s), e.g. "
+            "packages/gateway/src/extra/extra.ts -> packages/gateway/src/feature/feature.ts]",
             "new violation: two-way gateway/kernel <-> gateway/util [1 edge(s), e.g. "
             "packages/gateway/src/kernel/run.ts -> packages/gateway/src/util/util.ts]",
-            "new violation: undeclared gateway/contracts -> gateway/kernel [1 edge(s), e.g. "
-            "packages/gateway/src/contracts/index.ts -> packages/gateway/src/kernel/run.ts]",
-            "new violation: undeclared gateway/util -> gateway/kernel [1 edge(s), e.g. "
-            "packages/gateway/src/util/bad.ts -> packages/gateway/src/kernel/run.ts]",
             "new violation: upward gateway/contracts (L1) -> gateway/kernel (L2) [1 edge(s), e.g. "
             "packages/gateway/src/contracts/index.ts -> packages/gateway/src/kernel/run.ts]",
             "new violation: upward gateway/util (L0) -> gateway/kernel (L2) [1 edge(s), e.g. "
@@ -190,8 +199,9 @@ class BoundaryTests(LayersCase):
 
 class BaselineTests(LayersCase):
     def test_baseline_never_grows_and_must_be_tightened(self) -> None:
-        self.baselined()
         r = self.repo
+        r.write("packages/gateway/src/kernel/peek.ts", PEEK)
+        self.baselined()
         before = r.baseline()
         r.write("packages/gateway/src/util/bad.ts", 'import { run } from "../kernel/run.js";\nexport const b = run;\n')
         refused = r.layers("--update")
@@ -199,12 +209,12 @@ class BaselineTests(LayersCase):
         self.assertIn("--update only removes fixed entries", refused.stderr)
         self.assertEqual(r.baseline(), before)
         (r.path / "packages/gateway/src/util/bad.ts").unlink()
-        # Fix one baselined edge: the run fails until the baseline is tightened.
-        r.write("packages/gateway/src/main/main.ts", 'import { run } from "../kernel/run.js";\nexport const start = run;\n')
-        self.assertIn("improved, tighten the baseline (scripts/tron layers gateway --update): undeclared gateway/main -> "
-                      "gateway/feature [1 -> 0]", self.run_ok(code=1))
+        # Fix the baselined upward edge: the run fails until the baseline is tightened.
+        (r.path / "packages/gateway/src/kernel/peek.ts").unlink()
+        self.assertIn("improved, tighten the baseline (scripts/tron layers gateway --update): upward gateway/kernel (L2) -> "
+                      "gateway/feature (L3) [1 -> 0]", self.run_ok(code=1))
         self.run_ok("--update")
-        self.assertEqual(r.baseline()["violations"], ["undeclared gateway/feature -> gateway/contracts"])
+        self.assertEqual(r.baseline()["violations"], [])
         self.run_ok()
         # A hand-grown baseline fails against the base revision's.
         data = r.baseline()
@@ -347,8 +357,6 @@ class IosTests(IosCase):
         self.assertEqual(problems, [
             "new violation: two-way ios-app/chat <-> ios-app/state [1 edge(s), e.g. "
             "packages/ios-app/Sources/UI/Chat/ChatView.swift -> packages/ios-app/Sources/State/Store.swift]",
-            "new violation: undeclared ios-app/state -> ios-app/chat [1 edge(s), e.g. "
-            "packages/ios-app/Sources/State/Leak.swift -> packages/ios-app/Sources/UI/Chat/ChatView.swift]",
             "new violation: upward ios-app/state (L2) -> ios-app/chat (L4) [1 edge(s), e.g. "
             "packages/ios-app/Sources/State/Leak.swift -> packages/ios-app/Sources/UI/Chat/ChatView.swift]",
             "grew: unindexed ios-app/profiling [1 -> 2 file(s)]",
@@ -356,21 +364,19 @@ class IosTests(IosCase):
 
     def test_split_inside_a_baselined_pair_passes(self) -> None:
         r = self.repo
-        r.manifest("packages/ios-app/Sources/UI/Chat/chat.module.json", {"layer": "L4", "owns": ["**"],
-                                                                         "dependsOn": ["ios-app/state"]})
-        r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift", "struct ChatView { let store = Store()\n"
-                " var size: Int { store.total() + Model().size }\n func extra() -> Int { Model().size } }\n")
+        r.write("packages/ios-app/Sources/State/Leak.swift",
+                "struct Leak { let view = ChatView()\n func extra() -> Int { ChatView().size } }\n")
         self.build()
         self.ios("--update")
-        self.assertEqual(r.baseline("ios-app")["violations"], ["undeclared ios-app/chat -> ios-app/core"])
+        self.assertEqual(r.baseline("ios-app")["violations"], ["two-way ios-app/chat <-> ios-app/state",
+                                                               "upward ios-app/state (L2) -> ios-app/chat (L4)"])
         r.git("add", "-A")
         r.git("commit", "-q", "-m", "ios baseline")
         r.git("checkout", "-q", "-b", "slice")
-        # Move-only split of ChatView.swift: both files now reference Core's Model (1 -> 2 chat -> core edges).
-        r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift",
-                "struct ChatView { let store = Store()\n var size: Int { store.total() + Model().size } }\n")
-        r.write("packages/ios-app/Sources/UI/Chat/ChatView+Extra.swift",
-                "extension ChatView { func extra() -> Int { Model().size } }\n")
+        # Move-only split of Leak.swift: both files reference Chat's view (1 -> 2 state -> chat edges).
+        r.write("packages/ios-app/Sources/State/Leak.swift", "struct Leak { let view = ChatView() }\n")
+        r.write("packages/ios-app/Sources/State/Leak+Extra.swift",
+                "extension Leak { func extra() -> Int { ChatView().size } }\n")
         self.build()
         lines = self.ios()
         self.assertIn("no violation beyond the baseline", lines[-1])
