@@ -1134,21 +1134,11 @@ extension ComposerDraftCoordinator {
             // later upload; transport failure never discards user input.
             throw error
         }
-        do {
-            try require(admission)
-        } catch {
-            // The Gateway completed after this presentation lost ownership.
-            adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope)
-            throw error
-        }
-        guard var attachments = attachmentsByScope[scope],
-              let index = attachments.firstIndex(where: { $0.id == localID }) else {
-            discardUpload(uploadID)
+        let admitted = (try? require(admission)) != nil
+        // The chip adopts its upload even if this presentation lost ownership meanwhile.
+        guard adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope), admitted else {
             throw CancellationError()
         }
-        attachments[index] = attachments[index].replacingGatewayUploadID(uploadID)
-        attachmentsByScope[scope] = attachments
-        schedulePersistence(for: scope)
     }
 
     /// Stages one selected or pasted image batch atomically in source order,
@@ -1246,21 +1236,7 @@ extension ComposerDraftCoordinator {
                 let localID = localIDs[index]
                 do {
                     let uploadID = try await transportTasks[index].value
-                    guard uploadAdmissions.contains(admission) else {
-                        adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope)
-                        continue
-                    }
-                    guard var attachments = attachmentsByScope[scope],
-                          let attachmentIndex = attachments.firstIndex(where: {
-                              $0.id == localID
-                          }) else {
-                        discardUpload(uploadID)
-                        continue
-                    }
-                    attachments[attachmentIndex] = attachments[attachmentIndex]
-                        .replacingGatewayUploadID(uploadID)
-                    attachmentsByScope[scope] = attachments
-                    schedulePersistence(for: scope)
+                    adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope)
                 } catch {
                     if Task.isCancelled { throw CancellationError() }
                     // Exact chip removal retires its admission and is not a
@@ -1383,20 +1359,10 @@ extension ComposerDraftCoordinator {
             try require(admission)
             throw error
         }
-        do {
-            try require(admission)
-        } catch {
-            adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope)
-            throw error
-        }
-        guard var attachments = attachmentsByScope[scope],
-              let index = attachments.firstIndex(where: { $0.id == localID }) else {
-            discardUpload(uploadID)
+        let admitted = (try? require(admission)) != nil
+        guard adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope), admitted else {
             throw CancellationError()
         }
-        attachments[index] = attachments[index].replacingGatewayUploadID(uploadID)
-        attachmentsByScope[scope] = attachments
-        schedulePersistence(for: scope)
     }
 
     func removeAttachment(_ id: String, target: SessionPresentationIdentity) {
@@ -1768,29 +1734,13 @@ extension ComposerDraftCoordinator {
             // no restored draft is ever sent automatically.
             return
         }
-        do {
-            try require(admission)
-        } catch {
-            adoptOrDiscard(uploadID, identity: identity, admission: admission, scope: scope)
-            return
-        }
-        guard self.lease?.scope == scope,
-              let index = attachmentsByScope[scope]?.firstIndex(where: {
-                  $0.id == identity && $0.gatewayUploadID == nil
-              }) else {
-            discardUpload(uploadID)
-            return
-        }
-        attachmentsByScope[scope]?[index] = attachment.replacingGatewayUploadID(uploadID)
-        schedulePersistence(for: scope)
+        adoptOrDiscard(uploadID, identity: identity, admission: admission, scope: scope)
     }
 
-    /// A chip stays owned by its transfer until that transfer settles, also across a
-    /// presentation replacement, which skips the chip instead of staging the same
-    /// bytes a second time (#1665). Releasing it hands an unstaged chip of the
-    /// mounted scope to that presentation's restored uploads, but only when the
-    /// transfer belonged to a replaced presentation: a failure in the current one
-    /// waits for a later mount, as before.
+    /// A chip stays owned by its transfer until it settles, across a presentation
+    /// replacement too, so the replacement never stages the same bytes again (#1665).
+    /// A replaced presentation's released chip joins the mounted one's restored
+    /// uploads; a failure in the current presentation waits for a later mount.
     private func releaseTransfer(_ identity: String, admission: UploadAdmission, scope: ComposerDraftScope) {
         guard uploadAdmissionByAttachmentID[identity] == admission else { return }
         uploadAdmissionByAttachmentID[identity] = nil
@@ -1800,21 +1750,20 @@ extension ComposerDraftCoordinator {
         beginRestoredAttachmentUploads(scope: scope, target: lease.target)
     }
 
-    /// A transfer that completed after its presentation lost ownership. Staged IDs
-    /// are scope-owned (#916): the chip it was made for adopts it while that chip is
-    /// still in its scope, unstaged and owned by this transfer. Otherwise (the chip
-    /// was removed or its scope retired) the unclaimed staging blob is discarded.
-    private func adoptOrDiscard(_ uploadID: String, identity: String, admission: UploadAdmission, scope: ComposerDraftScope) {
-        guard uploadAdmissionByAttachmentID[identity] == admission,
-              var attachments = attachmentsByScope[scope],
-              let index = attachments.firstIndex(where: { $0.id == identity && $0.gatewayUploadID == nil })
-        else {
+    /// Staged IDs are scope-owned (#916): a completed transfer's chip adopts it while
+    /// still in its scope, unstaged and owned by this transfer, even if the presentation
+    /// that started it was replaced. Otherwise the unclaimed staging blob is discarded.
+    @discardableResult
+    private func adoptOrDiscard(_ uploadID: String, identity: String, admission: UploadAdmission, scope: ComposerDraftScope) -> Bool {
+        guard uploadAdmissionByAttachmentID[identity] == admission, var attachments = attachmentsByScope[scope],
+              let index = attachments.firstIndex(where: { $0.id == identity && $0.gatewayUploadID == nil }) else {
             discardUpload(uploadID)
-            return
+            return false
         }
         attachments[index] = attachments[index].replacingGatewayUploadID(uploadID)
         attachmentsByScope[scope] = attachments
         schedulePersistence(for: scope)
+        return true
     }
 
     /// A draft scope that is deleted or evicted no longer owns its staged chips.
