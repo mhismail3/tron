@@ -1,4 +1,5 @@
 import { watch, type FSWatcher } from "node:fs";
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
@@ -32,6 +33,10 @@ const SETTLE_MS = 150;
  * `fs.watch` has no readiness signal, and a watcher armed only once such a
  * directory appeared missed the edits made before its stream started (#1664).
  * `~/.agents/skills` created later is seen after the next agent-directory change.
+ * macOS FSEvents can also report a write made just before a stream started; an
+ * entry unchanged since its watcher was armed is that history, not a change: any
+ * Home runtime is built after `start()` and every re-arm is followed by a reload,
+ * so it already holds that state (#1694).
  */
 export class HomeGlobalResources {
   private readonly watchers = new Map<string, FSWatcher>();
@@ -77,9 +82,13 @@ export class HomeGlobalResources {
   private watch(path: string, recursive: boolean, relevant: (name: string | null) => boolean): void {
     if (this.closed || this.watchers.has(path)) return;
     let watcher: FSWatcher;
+    const armedAt = Date.now();
     try {
       watcher = watch(path, { recursive, persistent: false }, (_event, name) => {
-        if (relevant(name === null ? null : String(name))) this.changed();
+        const entry = name === null ? null : String(name);
+        if (!relevant(entry)) return;
+        if (entry === null) return this.changed();
+        void changedSince(join(path, entry), armedAt).then(changed => { if (changed) this.changed(); });
       });
     } catch (error) {
       // Absent: armed when the agent directory reports its creation.
@@ -130,5 +139,15 @@ export class HomeGlobalResources {
       }
       this.applied = target;
     }
+  }
+}
+
+/** Whether `path` changed at or after `since`: a missing entry was deleted, and
+ * a write, create or rename-into-place all advance the entry's ctime. */
+async function changedSince(path: string, since: number): Promise<boolean> {
+  try {
+    return (await stat(path)).ctimeMs >= since;
+  } catch {
+    return true;
   }
 }
