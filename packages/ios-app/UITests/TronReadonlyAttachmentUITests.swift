@@ -53,7 +53,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("pending-multi"); defer { app.terminate() }
         let probe = app.staticTexts["fixture.preview-native"]
-        for index in [0, 1, 2] {
+        // Last first: a sibling that already presented publishes after the
+        // first chip, so the first and middle chips must still win their taps.
+        for index in [2, 0, 1] {
             let chip = app.buttons["Preview pending-\(index).png"]
             XCTAssertTrue(chip.waitForExistence(timeout: 15), app.debugDescription)
             chip.tap()
