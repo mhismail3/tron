@@ -432,7 +432,8 @@ private actor HostedHomeShellGateway {
     private var sheetReadsInFlight = 0
     private var sheetReadPeak = 0
     /// The background model queue the fixture's last accepted change set, `provider/id` in order.
-    private var configuredModels: [String] = []
+    private var configuredModels: [String] = HostedSettingsReviewSchema.scopeReview
+        ? ["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"] : []
     private var workerThinking = "sameAsHome"
     private var foreground = HostedForegroundSheetScenario()
     private var taskRedelivered = false
@@ -1031,6 +1032,7 @@ private actor HostedHomeShellGateway {
             "key": .string("model.ref[role=chat]"), "group": .string("model"),
             "value": modelValue, "display": .string(settingsModelOverridden ? "Claude Opus 5.5" : "Claude Haiku 5.5"),
             "layer": .string(settingsModelOverridden ? "session" : "global"), "origin": .string("inherited"), "applied": .bool(true),
+            "overridden": .bool(HostedSettingsReviewSchema.scopeReview && settingsModelOverridden),
             "layers": .array([.object(["layer": .string("session"), "value": settingsModelOverridden ? modelValue : .null]), .object(["layer": .string("global")])]),
             "badges": .array(settingsModelOverridden ? [
                 .object(["kind": .string("layer"), "label": .string("Set in Home profile")]),
@@ -1073,6 +1075,7 @@ private actor HostedHomeShellGateway {
             "key": .string("model.queue[role=background]"), "qualifiers": .object(["role": .string("background")]),
             "group": .string("workers"), "value": .array(configuredModels.map(JSONValue.string)),
             "display": .string(memoryName), "layer": .string(configuredModels.isEmpty ? "global" : "session"), "applied": .bool(true),
+            "overridden": .bool(HostedSettingsReviewSchema.scopeReview && !configuredModels.isEmpty),
             "badges": .array([.object(["kind": .string("source"), "label": .string(configuredModels.isEmpty ? "Tron default" : "Set in Home profile")])]),
             "layers": .array([.object(["layer": .string("session"), "value": configuredModels.isEmpty ? .null : .array(configuredModels.map(JSONValue.string))]), .object(["layer": .string("global")]), .object(["layer": .string("global")])]),
             "presentation": .object(["label": .string("Background models"), "help": .string("The models for memory and Knowledge calls, in order. Empty uses the subagent models."),
@@ -1083,13 +1086,18 @@ private actor HostedHomeShellGateway {
         ])
         let homeKeys = HostedSettingsReviewSchema.additionalKeys.filter {
             !["model.thinking[role=chat]", "tools.active"].contains($0.objectValue?["key"]?.stringValue ?? "")
+                && !(HostedSettingsReviewSchema.scopeReview && $0.objectValue?["key"]?.stringValue == "model.queue[role=subagent]")
         }.filter {
             let id = $0.objectValue?["key"]?.stringValue ?? ""
             return !id.hasPrefix("context.compaction") && !id.hasPrefix("context.branchSummary")
                 && !id.hasPrefix("tools.codemode") && !id.hasPrefix("tools.shell")
                 && !["model.thinking[role=summarizer]", "run.cacheWarming"].contains(id)
         }
-        let profileKeys = [modelKey, workerThinkingKey, contextWindowKey, memoryKey,
+        // The reported Home: overridden model and every model queue (#1651).
+        let reviewKeys = HostedSettingsReviewSchema.scopeReview ? [HostedSettingsReviewSchema.key("model.queue[role=subagent]", "workers", "Subagent models",
+            .array(["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"].map(JSONValue.string)), "3 models", "list",
+            order: 42, essential: true, layer: "session")] : []
+        let profileKeys = reviewKeys + [modelKey, workerThinkingKey, contextWindowKey, memoryKey,
             HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
                 order: 20, essential: true, layer: "session", options: [.object(["value": .string("high"), "label": .string("High")])]),
             HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "session")

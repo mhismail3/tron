@@ -64,6 +64,10 @@ enum HostedSettingsReviewSchema {
             help: "Lets this paired iPhone open a shell on the Mac over Tailscale through Remote Login, even when the Gateway is not running.")]
     }()
 
+    /// `-settings-scope-review`: the overridden Home, Session and Project values
+    /// reported after three-layer settings (#1651), at their real lengths.
+    static let scopeReview = ProcessInfo.processInfo.arguments.contains("-settings-scope-review")
+
     static let tools = ["ask_user", "display", "notify", "read", "bash", "edit", "write", "web_search", "fetch_content", "knowledge", "computer", "schedule", "connections", "settings", "zoom"]
     static let additionalKeys: [JSONValue] = [
         key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice", order: 20,

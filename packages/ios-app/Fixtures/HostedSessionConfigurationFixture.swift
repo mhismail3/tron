@@ -171,6 +171,38 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             ])
         } : []
     }
+    /// The reported chat (#1651): 27 of 52 tools and High thinking overridden, an
+    /// unset context window, and the repository's ignored `defaultTools`, which the
+    /// Gateway reports on every Session and Project resolution of that workspace.
+    private static let scopeReviewCatalog = HostedSettingsReviewSchema.tools + (16...52).map { "tool_\($0)" }
+    private static func scopeReviewResolution(project: Bool) -> JSONValue {
+        let thinking = HostedSettingsReviewSchema.additionalKeys.filter { $0.objectValue?["key"]?.stringValue == "model.thinking[role=chat]" }
+        let keys = [
+            HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model",
+                .object(["provider": .string("anthropic"), "id": .string("claude-opus-5-5")]), "Claude Opus 5.5", "catalog", order: 10,
+                help: "The model this chat runs.", essential: true),
+        ] + thinking + [
+            HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .null, "Not set", order: 30,
+                help: "Tokens of conversation the model is given.", essential: true),
+            HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(scopeReviewCatalog.prefix(27).map(JSONValue.string)),
+                "27 tools", "checklist", essential: true, layer: "session"),
+        ] + HostedSettingsReviewSchema.additionalKeys.filter {
+            $0.objectValue?["group"]?.stringValue != "workers"
+                && !["tools.active", "model.thinking[role=chat]"].contains($0.objectValue?["key"]?.stringValue ?? "")
+        }
+        return .object(["keys": .array(keys.map { value in
+            guard var row = value.objectValue, var presentation = row["presentation"]?.objectValue else { return value }
+            let session = !project && row["layer"]?.stringValue == "session"
+            if project { row["layer"] = .string("global") }
+            row["overridden"] = .bool(session)
+            presentation["editable"] = .bool(!project && presentation["sessionOverridable"]?.boolValue == true)
+            row["presentation"] = .object(presentation)
+            return .object(row)
+        }), "sections": .array(HostedSettingsReviewSchema.sections),
+            "diagnostics": .array([.object(["file": .string("/workspace/.pi/settings.json"), "layer": .string("project"),
+                "key": .string("tools.active"), "path": .string("defaultTools"), "reason": .string("project-forbidden")])])])
+    }
+
     func decisionSummary() -> String { decisions.isEmpty ? "none" : decisions.joined(separator: ",") }
     func resume() async { }
     func ping() async throws { }
@@ -197,6 +229,11 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             try enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
                 "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
             result = .object(["aborted": .bool(true)])
+        case "settings.resolve" where HostedSettingsReviewSchema.scopeReview:
+            result = Self.scopeReviewResolution(project: params["target"]?.objectValue?["kind"]?.stringValue == "project")
+        case "settings.options" where HostedSettingsReviewSchema.scopeReview:
+            result = .object(["key": .string("tools.active"), "source": .string("catalog.tools"), "dependsOn": .array([]),
+                "options": .array(Self.scopeReviewCatalog.map { .object(["value": .string($0), "label": .string($0), "resource": .object([:])]) })])
         case "settings.resolve":
             result = .object(["keys": .array([.object([
                 "key": .string("model.thinking[role=chat]"), "group": .string("model"),
