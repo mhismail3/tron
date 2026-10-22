@@ -28,7 +28,7 @@ struct HostedSessionConfigurationFixture: View {
             sessionId: "configuration-fixture", runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
             phase: .running, configurationBlocker: .running, name: "Configuration fixture", cwd: "/workspace",
             parentSessionId: nil, model: ModelRef(provider: "fixture", id: "model"),
-            thinkingLevel: "off", availableThinkingLevels: ["off", "high"], contextUsage: nil,
+            thinkingLevel: "off", availableThinkingLevels: ["off", "high"], contextUsage: HostedManageSessionReview.contextUsage,
             stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
                 tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
             queueRevision: 0, queuedItems: [], automaticCompactionEnabled: true, transcript: [], transcriptStart: 0,
@@ -275,6 +275,8 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             }
         case "session.context":
             result = .object(["activeTools": .array(HostedSettingsReviewSchema.tools.map(JSONValue.string))])
+        case let method where HostedManageSessionReview.enabled && HostedManageSessionReview.handles(method):
+            result = HostedManageSessionReview.response(method, params: params)
         case "session.resources":
             result = .object(["tools": .array(HostedSettingsReviewSchema.tools.map {
                 .object(["name": .string($0), "description": .string("Session tool details for \($0)."),
