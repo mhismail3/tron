@@ -390,16 +390,15 @@ enum SessionProcessRowTone: Equatable, Sendable {
 }
 
 enum SessionProcessRowPresentation {
-    /// A Subagent History row: what the run produced (or is doing) as its title,
-    /// lifecycle as the one pill, agent, mode and duration as tags.
+    /// A Subagent History row: the agent as its title, its latest output line (else its
+    /// current action) as the preview, lifecycle as the one pill, and mode and
+    /// duration as tags. The Gateway sends no task text yet (#1697).
     @MainActor static func listContent(_ process: SessionProcessActivity, now: Date = .now,
                                        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TronListRowContent {
-        let lines = (outputPreview(process.outputTail)?.text ?? "")
+        let output = (outputPreview(process.outputTail)?.text ?? "")
             .split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let action = latestAction(for: process)
-        let title = lines.first ?? action ?? process.title
-        var subtext = lines.dropFirst().joined(separator: " ")
-        if process.lifecycle.isActiveWork, let action, action != title { subtext = action }
+        let preview = output.last ?? action
         let accent: Color = switch tone(for: process.lifecycle) {
         case .inProgress: .tronEmerald
         case .pausedSettled: .tronSlate
@@ -407,12 +406,12 @@ enum SessionProcessRowPresentation {
         case .unsuccessful: .tronError
         }
         let status = process.lifecycle.state == .running ? "Running" : statusText(for: process.lifecycle)
-        var tags = [TronListTag(text: process.title)]
+        var tags: [TronListTag] = []
         if !process.executionMode.displayName.isEmpty { tags.append(TronListTag(text: process.executionMode == .asynchronous ? "Async" : process.executionMode.displayName)) }
         if let elapsed = elapsedMilliseconds(for: process, at: now, uptime: uptime) { tags.append(TronListTag(text: durationText(elapsed), mono: true)) }
         return TronListRowContent(
-            title: title, status: TronListStatus(text: status, tone: accent, live: process.lifecycle.isActiveWork),
-            subtext: subtext.isEmpty ? nil : subtext, tags: tags,
+            title: process.title, status: TronListStatus(text: status, tone: accent, live: process.lifecycle.isActiveWork),
+            subtext: preview, tags: tags,
             timestamp: TronListTime.short(iso: process.startedAt, now: now),
             accessibilityHint: process.lifecycle.isActiveWork ? "Opens the live read-only subagent session"
                 : "Opens the completed read-only subagent session")

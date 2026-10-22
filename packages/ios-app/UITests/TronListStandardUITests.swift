@@ -135,40 +135,137 @@ final class TronListStandardUITests: XCTestCase {
         shot("resources-bottom-\(mode)")
     }
 
-    /// Session History over 6,733 entries: time to the first rows, time and swipes
-    /// to auto-load 1,000 entries, then scroll hitches and memory with them loaded.
-    @MainActor func testLargeHistoryScrollPerformance() {
+    // MARK: Behaviour
+
+    /// A feed row's anatomy on the real Session History fixture: the kind icon is
+    /// centred on the row, the one status pill sits top-right, and actions come
+    /// from the detail and an identical long-press menu, never a ⋯ button.
+    @MainActor func testFeedRowAnatomyAndActions() {
+        let app = openLargeHistory()
+        let row = app.buttons["history-row-h-6732"]
+        let leading = element(app, "history-row-h-6732-leading")
+        let status = element(app, "history-row-h-6732-status")
+        XCTAssertTrue(leading.waitForExistence(timeout: 5), "The row publishes its leading slot\n\(app.debugDescription)")
+        XCTAssertTrue(status.exists, "The current entry carries one status pill")
+        XCTAssertEqual(leading.frame.midY, row.frame.midY, accuracy: 2, "The leading icon is centred vertically in the row")
+        XCTAssertLessThan(leading.frame.maxX, row.frame.minX + 50, "The leading slot is on the left")
+        XCTAssertGreaterThan(status.frame.maxX, row.frame.maxX - 24, "The status pill is at the trailing edge")
+        XCTAssertLessThan(status.frame.minY - row.frame.minY, 20, "The status pill is on the first line")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Actions for'")).count, 0, "Rows have no ⋯ menu")
+        XCTAssertFalse(app.images["ellipsis"].exists, "Rows have no ⋯ menu")
+        let menuActions = ["Continue From Here", "Fork New Session", "Edit Bookmark", "Copy Text"]
+        let bookmarked = app.buttons["history-row-h-6731"]
+        bookmarked.press(forDuration: 1.0)
+        for action in menuActions {
+            XCTAssertTrue(app.buttons[action].waitForExistence(timeout: 5), "Long-press offers \(action)\n\(app.debugDescription)")
+        }
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        _ = waitFor(app.buttons["Copy Text"], "exists == false", timeout: 5)
+        bookmarked.tap()
+        XCTAssertTrue(element(app, "history-entry-actions").waitForExistence(timeout: 8), app.debugDescription)
+        for (id, title) in zip(["navigate", "fork", "bookmark", "copy"], menuActions) {
+            let action = app.buttons["history-entry-action-\(id)"]
+            XCTAssertTrue(action.exists, "The detail holds \(title)")
+            XCTAssertTrue(action.label.hasPrefix(title), "The detail names \(title): \(action.label)")
+        }
+    }
+
+    /// The feed pages itself while the reader scrolls (no Older/Newer buttons),
+    /// the pinned chip names the visible range of the whole feed, and tapping the
+    /// chip returns to the newest entry.
+    @MainActor func testFeedAutoLoadsAndChipJumpsToNewest() {
+        let app = openLargeHistory()
+        XCTAssertFalse(app.buttons["history-older-top"].exists, "No explicit paging control")
+        let secondPage = app.buttons["history-row-h-6630"]
+        var swipes = 0
+        while !secondPage.exists && swipes < 40 { app.swipeUp(velocity: .fast); swipes += 1 }
+        XCTAssertTrue(secondPage.exists, "Scrolling alone loads the next page")
+        XCTAssertEqual(app.buttons.matching(identifier: "history-row-h-6632").count, 1, "Pages never duplicate rows")
+        let chip = app.buttons["feed-position-chip"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5), "A long feed shows its position chip")
+        XCTAssertTrue(chip.label.contains("of 6,733"), "The chip counts the whole feed: \(chip.label)")
+        XCTAssertFalse(app.buttons["history-row-h-6732"].isHittable)
+        chip.tap()
+        XCTAssertTrue(waitFor(app.buttons["history-row-h-6732"], "hittable == true", timeout: 5), "The chip jumps to the newest entry")
+    }
+
+    /// Grouped lists: a status row's pill is top-right, ordinal rows centre their
+    /// number, and rows without kind carry no leading icon.
+    @MainActor func testGroupedRowAnatomy() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-agent-instructions-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        let row = app.buttons["agent-instructions-section-preamble"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        let ordinal = element(app, "agent-instructions-section-preamble-leading")
+        XCTAssertTrue(ordinal.waitForExistence(timeout: 5), "Instructions keep their reading-order number\n\(app.debugDescription)")
+        XCTAssertEqual(ordinal.frame.midY, row.frame.midY, accuracy: 2, "The number is centred vertically in the row")
+        app.terminate()
+
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        ring.tap()
+        let chapters = element(app, "home-manage-chapters")
+        XCTAssertTrue(chapters.waitForExistence(timeout: 10), app.debugDescription)
+        for _ in 0..<6 where !chapters.isHittable { app.swipeUp() }
+        chapters.tap()
+        let chapter = app.buttons["home-chapter-1"]
+        XCTAssertTrue(chapter.waitForExistence(timeout: 10), app.debugDescription)
+        let pill = element(app, "home-chapter-1-status")
+        XCTAssertTrue(pill.waitForExistence(timeout: 5), "A chapter carries its state as one pill")
+        XCTAssertGreaterThan(pill.frame.maxX, chapter.frame.maxX - 24, "The pill is at the trailing edge")
+        XCTAssertLessThan(pill.frame.minY - chapter.frame.minY, 20, "The pill is on the title line")
+        XCTAssertFalse(element(app, "home-chapter-1-leading").exists, "Chapters carry no repeated icon")
+    }
+
+    /// Tasks page themselves; a refused page keeps the rows and offers Retry, and
+    /// the feed ends with an explicit end row.
+    @MainActor func testTaskFeedRetriesAndEnds() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-paging"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        ring.tap()
+        let tasks = element(app, "home-manage-tasks")
+        XCTAssertTrue(tasks.waitForExistence(timeout: 10), app.debugDescription)
+        for _ in 0..<6 where !tasks.isHittable { app.swipeUp() }
+        tasks.tap()
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["home-tasks-older-top"].exists, "No explicit paging control")
+        let retry = app.buttons["feed-retry"]
+        for _ in 0..<10 where !retry.exists { app.swipeUp(velocity: .fast) }
+        XCTAssertTrue(retry.waitForExistence(timeout: 5), "A refused page offers Retry in the feed\n\(app.debugDescription)")
+        XCTAssertTrue(app.buttons["home-task-paged-19"].exists, "A failed page keeps the loaded rows")
+        retry.tap()
+        let end = element(app, "feed-end")
+        for _ in 0..<12 where !end.exists { app.swipeUp(velocity: .fast) }
+        XCTAssertTrue(end.waitForExistence(timeout: 5), "The feed ends with an end row")
+        XCTAssertEqual(app.buttons.matching(identifier: "home-task-paged-44").count, 1)
+    }
+
+    @MainActor private func openLargeHistory() -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-session-configuration-fixture", "-history-large", "-fixture-appearance", "light"]
-        app.launch(); defer { app.terminate() }
+        app.launch()
+        addTeardownBlock { app.terminate() }
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
         app.buttons["Stop session"].tap()
         let history = app.buttons["Session History"]
         for _ in 0..<12 where !history.isHittable { app.swipeUp() }
-        let opened = Date()
         history.tap()
         XCTAssertTrue(app.buttons["history-row-h-6732"].waitForExistence(timeout: 10), app.debugDescription)
-        let firstRows = Date().timeIntervalSince(opened)
         expandSheet(app, title: "Session History")
-        let target = app.buttons["history-row-h-5733"]
-        let started = Date()
-        var swipes = 0
-        while !target.exists && swipes < 400 { app.swipeUp(velocity: .fast); swipes += 1 }
-        let loaded = Date().timeIntervalSince(started)
-        XCTAssertTrue(target.exists, "1,000 entries auto-load by scrolling alone")
-        let report = String(format: "list-standard-perf firstRows=%.2fs load1000=%.1fs swipes=%d perSwipe=%.2fs", firstRows, loaded, swipes, loaded / Double(max(swipes, 1)))
-        print(report)
-        let attachment = XCTAttachment(string: report)
-        attachment.name = "large-history-perf"
-        attachment.lifetime = .keepAlways
-        add(attachment)
-        let options = XCTMeasureOptions()
-        options.iterationCount = 5
-        measure(metrics: [XCTOSSignpostMetric.scrollDecelerationMetric, XCTMemoryMetric(application: app)], options: options) {
-            app.swipeUp(velocity: .fast)
-            app.swipeDown(velocity: .fast)
-        }
+        return app
     }
 
     // MARK: Helpers
