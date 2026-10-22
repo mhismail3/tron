@@ -832,9 +832,11 @@ final class TronHomeSheetsUITests: XCTestCase {
         app.buttons["home-sheet-done-profile"].tap()
 
         // Changes: the default feed is everyone's, newest first (#1305); Home's own learn is below, with its Undo.
-        let settings = element(app, "home-manage-settings")
-        for _ in 0..<6 where !settings.isHittable { app.swipeUp() }
-        settings.tap()
+        // The one audit history lives in Global Settings (#1634).
+        app.buttons["home-sheet-done-manage"].tap()
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 8), app.debugDescription)
+        gear.tap()
         let changes = app.buttons["Changes"].firstMatch
         XCTAssertTrue(changes.waitForExistence(timeout: 8))
         changes.tap()

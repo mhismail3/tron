@@ -178,6 +178,7 @@ struct SettingsRendererView: View {
                 if ownsDefaultTools {
                     DefaultToolsSettingsSection(projectCWD: target.objectValue?["cwd"]?.stringValue)
                 }
+                // No per-group accessibility wrapper: a headless group's lone row keeps its own identity.
                 ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
                     Group {
                         // A key with many instances is one row, titled by the key itself.
@@ -199,8 +200,6 @@ struct SettingsRendererView: View {
                             }
                         }
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("settings-detail-\(id)-\(index)")
                 }
             }
             .accessibilityElement(children: .contain)

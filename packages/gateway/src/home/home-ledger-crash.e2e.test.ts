@@ -31,7 +31,6 @@ function initialRecord() {
     generation: 1, routeGeneration: 1,
     policyRevision: 1,
     enabled: true,
-    model: { provider: "faux", id: "chat" },
     createdAt: now,
     updatedAt: now,
   };

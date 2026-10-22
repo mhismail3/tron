@@ -151,9 +151,10 @@ describe("Home's task tool on the wire (#961)", () => {
       models: [{ id: MODEL_ID, name: "Home (local wire)", reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 4_096 }],
     } } });
     const home = await f.registry.acquire(f.home.sessionId);
-    await home.setModel(PROVIDER, MODEL_ID);
     // The memory summarizer is the fixture's stub; Home only needs a configured memory model.
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    // With the settings owner installed (as gateway-main does first), the choice is Home's saved model.
+    await home.setModel(PROVIDER, MODEL_ID);
 
     /** One Home turn in which the model makes exactly `input` as its `task` call; returns the
      * tool result the model reads back on the wire. */

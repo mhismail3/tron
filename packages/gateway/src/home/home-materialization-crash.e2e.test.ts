@@ -106,7 +106,7 @@ async function fixture() {
       { sessionId: "prior-session", ordinal: 1, state: "sealed", activationStarted: true, createdAt: timestamp, sealedAt: timestamp, sizeAtSeal: 1, entriesAtSeal: 1 },
       { sessionId, ordinal: 2, state: "reserved", activationStarted: false, createdAt: timestamp },
     ],
-    bindingRevision: 1, generation: 2, routeGeneration: 1, policyRevision: 1, enabled: true, model, createdAt: timestamp, updatedAt: timestamp,
+    bindingRevision: 1, generation: 2, routeGeneration: 1, policyRevision: 1, enabled: true, createdAt: timestamp, updatedAt: timestamp,
   }, null, 2)}\n`, { mode: 0o600 });
   const manager = SessionManager.create(canonicalCwd, sessionDirectory);
   const expectedPath = manager.newSession({ id: sessionId })!;
