@@ -7,7 +7,8 @@ settings implementation. This boundary carries values, not settings owners.
 
 ## Owns
 
-`tool-contract.ts`: layer/tier/qualifier vocabulary and tool request, resolution,
+`tool-contract.ts`: layer/tier/qualifier vocabulary, retired scope-name mapping
+shared by session readers and store migration, and tool request, resolution,
 result and worker-state interfaces.
 
 ## Contract

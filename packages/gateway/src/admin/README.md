@@ -34,8 +34,7 @@ Durable stores: `<tronHome>/gateway/settings/` (`changes/`, `approvals.json`,
 vocabulary is the [kernel settings contract](../kernel/settings/README.md); the
 session resolves its actor and settings owner at every call.
 
-Project diagnostics contain file/key/reason only: at most 32 entries, 1,024 visited
-fields and 256-character paths (ellipsis when shortened). Unknown objects are not traversed.
+Project diagnostics: file/key/reason only; ≤32 entries, ≤1,024 visited fields, ≤256-character paths (ellipsis when shortened); unknown objects are not traversed.
 The full settings contract (foundations, layers, the generated key table,
 timing, change path, tiers, outside changes, project writes, Home profile,
 presentation) is [docs/settings-contract.md](../../docs/settings-contract.md).

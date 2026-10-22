@@ -2,9 +2,8 @@
 
 ## Purpose
 
-Settings for this Mac and this iPhone, the generic schema renderer every settings surface uses,
-and the management sheets for providers, models, extensions, hooks, MCP servers, connected
-services, paired Macs and devices, notifications and logs.
+Mac and iPhone settings, the generic schema renderer shared by all settings surfaces, and management sheets for
+providers, models, extensions, hooks, MCP servers, connected services, paired Macs and devices, notifications and logs.
 
 ## Owns
 
