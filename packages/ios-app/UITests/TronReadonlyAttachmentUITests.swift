@@ -47,6 +47,25 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         }
     }
 
+    /// Every pending composer chip above the input bar opens the preview of its
+    /// own photo, whichever sibling presented before it (#1656).
+    @MainActor func testEveryPendingComposerChipOpensItsOwnPreview() {
+        continueAfterFailure = false
+        let app = launch("pending-multi"); defer { app.terminate() }
+        let probe = app.staticTexts["fixture.preview-native"]
+        for index in [0, 1, 2] {
+            let chip = app.buttons["Preview pending-\(index).png"]
+            XCTAssertTrue(chip.waitForExistence(timeout: 15), app.debugDescription)
+            chip.tap()
+            let height = 300 + index * 10
+            let opened = wait(probe, predicate: "label BEGINSWITH 'image native:' AND label CONTAINS %@", value: "height:\(height) ")
+            keepScreenshot(app, opened ? "1656-pending-chip-\(index)-preview" : "1656-pending-chip-\(index)-no-preview")
+            XCTAssertTrue(opened, "Pending chip \(index) opens its own photo (height \(height)); native: \(probe.label)")
+            app.buttons["Close"].tap()
+            XCTAssertTrue(wait(probe, predicate: "label == 'none'"), "Pending chip \(index) preview closes")
+        }
+    }
+
     /// The fitted, unzoomed photo opens below the sheet's title row with the
     /// shared `TronSpacing.section` gap instead of underlapping the title or Done.
     @MainActor func testFittedPhotoClearsSheetTitleRow() {

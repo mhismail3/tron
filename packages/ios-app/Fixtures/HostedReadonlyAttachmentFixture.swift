@@ -21,6 +21,7 @@ struct HostedReadonlyAttachmentFixture: View {
     @State private var poisonPublished = false
     @State private var showsSettings = false
     @State private var localAttachment: PendingAttachment?
+    @State private var pendingStrip: [PendingAttachment] = []
     private let gateway: ReadonlyAttachmentGateway
     private let scenario: String
     private let profile = GatewayProfile(id: "readonly-original", label: "Readonly fixture", host: "original.example.test", port: 9847, machineId: "readonly-machine")
@@ -51,7 +52,13 @@ struct HostedReadonlyAttachmentFixture: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if let localAttachment {
+                if !pendingStrip.isEmpty {
+                    // The composer's own pending strip inside a chat route's
+                    // presentation surface, as above the input bar (#1656).
+                    ChatPendingAttachmentStrip(attachments: pendingStrip, reduceMotion: true,
+                                               submissionTransitionActive: false, onRemove: { _ in })
+                        .tronPresentationSurface(id: "chat.fixture.pending-strip")
+                } else if let localAttachment {
                     HostedLocalAttachmentChip(attachment: localAttachment, onRemove: { self.localAttachment = nil }).equatable()
                 } else if ready, scenario == "multi-image" {
                     // Production chat routes mount inside a presentation surface,
@@ -77,7 +84,7 @@ struct HostedReadonlyAttachmentFixture: View {
             }
             // Local-chip journeys still own a full native viewport; do not
             // center their evidence beneath the presented medium photo sheet.
-            .frame(maxHeight: localAttachment == nil ? nil : .infinity, alignment: .top)
+            .frame(maxHeight: localAttachment == nil && pendingStrip.isEmpty ? nil : .infinity, alignment: .top)
         }
         .tronManagedSheet(isPresented: $showsSettings, identity: "fixture.settings") { SettingsView() }
         // The real openURL boundary a running Swift app reaches (#1160),
@@ -125,6 +132,15 @@ struct HostedReadonlyAttachmentFixture: View {
                     localAttachment = PendingAttachment(id: "local-photo", name: "local.png", mimeType: "image/png",
                         size: data.count, previewData: thumbnail?.encodedData,
                         fullPreviewData: scenario == "pending-local" ? data : nil, preparedThumbnail: thumbnail)
+                }
+                if scenario == "pending-multi" {
+                    // Distinct full-image heights identify which chip's photo a preview shows.
+                    for index in 0..<3 {
+                        let data = ReadonlyAttachmentGateway.image(height: 300 + index * 10)
+                        let thumbnail = await ComposerAttachmentPreviewPolicy.prepare(data)
+                        pendingStrip.append(PendingAttachment(id: "local:pending-\(index)", name: "pending-\(index).png", mimeType: "image/png",
+                            size: data.count, previewData: thumbnail?.encodedData, fullPreviewData: data, preparedThumbnail: thumbnail))
+                    }
                 }
                 if scenario.contains("display-video") { try await gateway.prepareVideo() }
                 try await model.connectHostedGateway(profile: profile, token: "fixture-only-token")
