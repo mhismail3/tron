@@ -99,6 +99,7 @@ it.each([
     const model = faux.getModel();
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
     await writeFile(join(cwd, ".pi", "agents", "offline-worker.md"), `---\nname: offline-worker\ndescription: Offline activation probe\nmodel: ${model.provider}/${model.id}\ntools: read\n---\nReturn the requested probe marker.\n`);
+    await writeFile(join(cwd, ".pi", "agents", "detail-probe.md"), "---\nname: detail-probe\ndescription: Detail probe\n---\nDelegated body line.\nUse key sk-abcdefghijklmnopqrstuvwx carefully.\n");
     const invalidDefinition = join(cwd, ".pi", "agents", "invalid-worker.md");
     if (conflict) await writeFile(invalidDefinition, "---\nname: invalid-worker\ndescription: Invalid definition probe\nfallbackModels: [provider/model]\n---\nRead only.\n");
     faux.setResponses([
@@ -176,6 +177,16 @@ it.each([
       ignoredUserResourcesAbsent: true,
     };
     expect(resources.subagents.some((agent) => agent.name === "offline-worker")).toBe(true);
+    // Subagent detail (#1655): the definition body, credential-redacted, with no file path.
+    const detail = await slot.subagentDetail("detail-probe") as unknown as Record<string, unknown>;
+    expect(detail).toMatchObject({ name: "detail-probe", description: "Detail probe", source: "project", distribution: "local", contentTruncated: false });
+    expect(detail.content).toContain("Delegated body line.");
+    expect(detail.content).toContain("[REDACTED]");
+    expect(detail.content).not.toContain("sk-abcdefghijklmnopqrstuvwx");
+    expect(Object.keys(detail)).not.toEqual(expect.arrayContaining(["filePath"]));
+    expect(Object.keys(detail)).not.toContain("systemPrompt");
+    expect(resources.subagents.find((agent) => agent.name === "detail-probe")).not.toHaveProperty("systemPrompt");
+    await expect(slot.subagentDetail("missing-probe")).rejects.toMatchObject({ code: "not_found" });
     expect(resources.subagents.some((agent) => agent.name === "researcher")).toBe(true);
     expect(resources.tools.find(tool => tool.name === "subagent")).toMatchObject({ source: MANAGED_SUBAGENTS_SOURCE });
     if (conflict) {

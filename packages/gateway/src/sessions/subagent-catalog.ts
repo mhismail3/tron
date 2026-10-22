@@ -4,6 +4,8 @@ import { pathToFileURL } from "node:url";
 import { type SettingsManager } from "../kernel/pi/coding-agent.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import type { ResourceDistribution } from "../protocol/types.js";
+import { boundCommandContent } from "../kernel/projection/projection.js";
+import { redactCredentials } from "../util/credential-redaction.js";
 
 /** The third-party package that owns subagent discovery. */
 const SUBAGENT_PACKAGE = "pi-subagents";
@@ -25,6 +27,9 @@ export interface AvailableSubagent {
   /** Absolute definition file, when discovery reports one. Internal attribution
    * evidence for `packages.list` (`availableSubagentRow` keeps it off the wire). */
   filePath?: string;
+  /** The definition's body (its system prompt). Internal: only the bounded
+   * `session.subagentDetail` read publishes it, never `session.resources`. */
+  systemPrompt?: string;
 }
 
 export interface SubagentCatalog {
@@ -94,6 +99,7 @@ function projectSubagent(value: unknown, groupSource?: SubagentDiscoverySource):
   const model = typeof record.model === "string" ? record.model : undefined;
   const thinking = typeof record.thinking === "string" ? record.thinking : undefined;
   const filePath = typeof record.filePath === "string" ? record.filePath : undefined;
+  const systemPrompt = typeof record.systemPrompt === "string" ? record.systemPrompt : undefined;
   return {
     name,
     ...(description ? { description } : {}),
@@ -102,12 +108,13 @@ function projectSubagent(value: unknown, groupSource?: SubagentDiscoverySource):
     source,
     distribution: subagentDistribution(source),
     ...(filePath ? { filePath } : {}),
+    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
   };
 }
 
 /** The wire row `session.resources` publishes for one subagent. The definition
  * file path is Gateway-internal attribution evidence for `packages.list`, so it
- * never leaves the process. */
+ * never leaves the process; the body is `subagentDetail`'s alone. */
 export function availableSubagentRow(subagent: AvailableSubagent): AvailableSubagent {
   return {
     name: subagent.name,
@@ -171,4 +178,19 @@ function unavailable(reason: string): SubagentCatalog {
 
 function boundedDiagnostic(text: string): string {
   return text.length <= MAX_DIAGNOSTIC_CHARACTERS ? text : `${text.slice(0, MAX_DIAGNOSTIC_CHARACTERS - 1)}…`;
+}
+
+export interface SubagentDetail extends AvailableSubagent {
+  content?: string;
+  contentBytes?: number;
+  contentTruncated?: boolean;
+}
+
+/** One subagent's wire row plus its definition body, credential-redacted and
+ * bounded like a command's source document. The file path stays internal. */
+export function subagentDetail(subagent: AvailableSubagent): SubagentDetail {
+  return {
+    ...availableSubagentRow(subagent),
+    ...(subagent.systemPrompt !== undefined ? boundCommandContent(redactCredentials(subagent.systemPrompt)) : {}),
+  };
 }
