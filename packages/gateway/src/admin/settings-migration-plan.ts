@@ -4,20 +4,17 @@ import { StringDecoder } from "node:string_decoder";
 import { lstat, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { GatewayError } from "../errors.js";
 import { KEYS, schemaKey } from "./settings-schema.js";
-import { foldHomeChapter, migrateApprovals, migrateAuditEntry, migrateObserved, migrateSessionSettings, migrationObject,
-  migrationRefusal, migrationSetPath, parseMigrationObject, type MigrationDefaults } from "./settings-migration-state.js";
+import { migrateApprovals, migrateAuditEntry, migrateObserved, migrationObject,
+  migrationRefusal, migrationSetPath, parseMigrationObject } from "./settings-migration-state.js";
 
 type Document = Record<string, unknown>;
-type FileKind = "json" | "audit" | "session";
+type FileKind = "json" | "audit";
 export interface MigrationCapture {
   runtimeDirectories: string[];
   inputs: Array<{ path: string; hash: string | null }>;
   replacements: Array<{ path: string; before: string | null; after: string; index: number; staged: string }>;
   notes: Array<{ file: string; key: string; reason: string }>;
-  /** Non-Home sessions left byte-for-byte unmigrated; startup continues and reports them. */
-  skipped: Array<{ file: string; reason: string }>;
   dispose(): Promise<void>;
 }
 export async function migrationFileHash(path: string): Promise<string | null> {
@@ -50,6 +47,9 @@ async function document(path: string, limit = 1024 * 1024): Promise<Document> {
   if ((await lstat(path)).size > limit) return migrationRefusal(path, "JSON input exceeds its owner limit");
   return parseMigrationObject(await readFile(path, "utf8"), path);
 }
+/** The startup transaction's whole input set: a fixed list of small shared stores
+ * plus the audit ledger. Session JSONL is never an input (#1649): the Session
+ * reader maps its retired scope names (`sessions/session-settings.ts`). */
 export async function settingsMigrationInventory(tronHome: string, agentDir: string): Promise<{
   paths: string[]; kinds: Map<string, FileKind>; runtimeDirectories: string[]; profile: Document; home: Document;
 }> {
@@ -69,7 +69,7 @@ export async function settingsMigrationInventory(tronHome: string, agentDir: str
     ...["profile.json", "home.json"].map(name => [join(tronHome, "gateway", "home", name), "json"] as const),
     ...["gateway.json", "floors.json", "approvals.json", "observed.json"].map(name => [join(tronHome, "gateway", "settings", name), "json"] as const),
   ]);
-  const scan = async (path: string, kind: "audit" | "session"): Promise<void> => {
+  const scan = async (path: string): Promise<void> => {
     let entries;
     try {
       const stat = await lstat(path);
@@ -79,13 +79,12 @@ export async function settingsMigrationInventory(tronHome: string, agentDir: str
     for (const entry of entries) {
       const child = join(path, entry.name);
       if (entry.isSymbolicLink()) migrationRefusal(child, "symbolic links are not migration inputs");
-      if (entry.isDirectory()) await scan(child, kind);
-      else if (entry.name.endsWith(".jsonl")) kinds.set(child, kind);
-      else if (kind === "audit" && entry.name.endsWith(".json")) kinds.set(child, "json");
+      if (entry.isDirectory()) await scan(child);
+      else if (entry.name.endsWith(".jsonl")) kinds.set(child, "audit");
+      else if (entry.name.endsWith(".json")) kinds.set(child, "json");
     }
   };
-  await scan(join(tronHome, "gateway", "settings", "changes"), "audit");
-  await scan(configured ?? join(agentDir, "sessions"), "session");
+  await scan(join(tronHome, "gateway", "settings", "changes"));
   return { paths: [...kinds.keys()].sort(), kinds, runtimeDirectories, profile, home };
 }
 
@@ -97,11 +96,8 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
   const inputs: MigrationCapture["inputs"] = [];
   const replacements: MigrationCapture["replacements"] = [];
   const notes: MigrationCapture["notes"] = [];
-  const skipped: MigrationCapture["skipped"] = [];
   const dispose = () => rm(temporary, { recursive: true, force: true });
   try {
-    const defaults: MigrationDefaults = { global: await document(join(resolve(agentDir), "settings.json")),
-      gateway: await document(join(resolve(tronHome), "gateway", "settings", "gateway.json")), floors: {} };
     for (const key of KEYS) {
       const binding = key.layers.home;
       if (binding?.store !== "home") continue;
@@ -109,11 +105,7 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
       for (const field of binding.path) value = value && typeof value === "object" && Object.hasOwn(value, field) ? (value as Document)[field] : undefined;
       if (value !== undefined) try { await key.type.validate(value, key.id); } catch { migrationRefusal(join(resolve(tronHome), "gateway", "home", "profile.json"), `invalid value for ${key.id}`); }
     }
-    const chapters = Array.isArray(inventory.home.chapters) ? inventory.home.chapters : [];
-    const active = chapters.findLast(value => migrationObject(value, "Home chapters").state === "active");
-    const activeId = active === undefined ? undefined : migrationObject(active, "Home chapters").sessionId;
-    let folded = inventory.profile;
-    let foundActive = activeId === undefined;
+    let profile = inventory.profile;
     const stage = async (path: string, before: string | null, text: string) => {
       const after = createHash("sha256").update(text).digest("hex");
       if (after === before) return;
@@ -145,48 +137,16 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
       } else {
         const output = join(temporary, `stream-${replacements.length}`);
         const handle = await open(output, "wx", 0o600);
-        type Branch = { settings?: Document; model?: unknown; thinking?: unknown };
-        const branches = new Map<string, Branch>();
-        let branch: Branch = {};
-        let first = true, homeSession = false, canonicalSession = false, changed = false, malformed = 0;
+        let changed = false;
         try {
           for await (const line of jsonlLines(path)) {
             if (!line.trim()) { await handle.write(`${line}\n`); continue; }
-            let original: Document;
-            try { original = parseMigrationObject(line, path); } catch (error) {
-              // Pi skips a malformed session line, so it is not a settings entry: keep its bytes.
-              if (kind === "audit") throw error;
-              malformed += 1; first = false; await handle.write(`${line}\n`); continue;
-            }
-            let next = original;
-            if (kind === "audit") next = migrateAuditEntry(original, path);
-            else {
-              if (first) { canonicalSession = original.type === "session"; homeSession = canonicalSession && original.id === activeId; if (homeSession) foundActive = true; }
-              if (canonicalSession && original.type === "custom" && original.customType === "tron.settings.v1") next = migrateSessionSettings(original, path, defaults, notes);
-              if (homeSession && typeof original.id === "string") {
-                const parent = typeof original.parentId === "string" ? branches.get(original.parentId) : undefined;
-                if (original.parentId && !parent) migrationRefusal(path, "active Home branch has an unknown parent");
-                branch = { ...(parent ?? {}) };
-                if (next.type === "custom" && next.customType === "tron.settings.v1") branch.settings = migrationObject(next.data, path);
-                if (next.type === "model_change") branch.model = { provider: next.provider, id: next.modelId };
-                if (next.type === "thinking_level_change") branch.thinking = next.thinkingLevel;
-                branches.set(original.id, branch);
-              }
-            }
-            first = false;
+            const original = parseMigrationObject(line, path);
+            const next = migrateAuditEntry(original, path);
             if (JSON.stringify(next) !== JSON.stringify(original)) { changed = true; await handle.write(`${JSON.stringify(next)}\n`); }
             else await handle.write(`${line}\n`);
           }
-        } catch (error) {
-          // One unconvertible chat or subagent session must not stop the Gateway:
-          // it stays byte-for-byte untouched and is reported. Home and audit inputs
-          // feed shared state, so they still refuse the whole migration.
-          if (kind === "audit" || homeSession || !(error instanceof GatewayError) || error.code !== "conflict") throw error;
-          skipped.push({ file: path, reason: error.message });
-          changed = false; homeSession = false;
         } finally { await handle.close(); }
-        if (malformed) notes.push({ file: path, key: "", reason: `${malformed} malformed line(s) preserved as Pi skips them` });
-        if (homeSession) folded = foldHomeChapter(folded, branch.settings, branch.model, branch.thinking, path);
         if (changed) {
           const after = (await migrationFileHash(output))!;
           replacements.push({ path, before, after, index: replacements.length, staged: output });
@@ -195,21 +155,20 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
       if (await migrationFileHash(path) !== before) migrationRefusal(path, "input changed while preflighting");
     }
     const homePath = join(resolve(tronHome), "gateway", "home", "home.json");
-    if (!foundActive) migrationRefusal(homePath, "active chapter is not present in the canonical catalog");
     // The retired record model becomes Home's saved model when none is saved.
     if (Object.hasOwn(inventory.home, "model")) {
       const { model, ...record } = inventory.home;
       const key = schemaKey("model.ref[role=chat]"), path = (key.layers.home as { path: readonly string[] }).path;
       try { await key.type.validate(model, key.id); } catch { migrationRefusal(homePath, "invalid Home record model"); }
-      if (path.reduce<unknown>((value, field) => value && typeof value === "object" ? (value as Document)[field] : undefined, folded) === undefined) {
-        folded = structuredClone(folded); migrationSetPath(folded, path, model);
+      if (path.reduce<unknown>((value, field) => value && typeof value === "object" ? (value as Document)[field] : undefined, profile) === undefined) {
+        profile = structuredClone(profile); migrationSetPath(profile, path, model);
       }
       await stage(homePath, inputs.find(input => input.path === homePath)!.hash, `${JSON.stringify(record, null, 2)}\n`);
     }
-    if (JSON.stringify(folded) !== JSON.stringify(inventory.profile)) {
+    if (JSON.stringify(profile) !== JSON.stringify(inventory.profile)) {
       const path = join(resolve(tronHome), "gateway", "home", "profile.json");
-      await stage(path, inputs.find(input => input.path === path)!.hash, `${JSON.stringify(folded, null, 2)}\n`);
+      await stage(path, inputs.find(input => input.path === path)!.hash, `${JSON.stringify(profile, null, 2)}\n`);
     }
-    return { runtimeDirectories: inventory.runtimeDirectories, inputs, replacements, notes, skipped, dispose };
+    return { runtimeDirectories: inventory.runtimeDirectories, inputs, replacements, notes, dispose };
   } catch (error) { await dispose(); throw error; }
 }

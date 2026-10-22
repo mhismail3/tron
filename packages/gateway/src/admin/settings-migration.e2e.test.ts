@@ -11,7 +11,6 @@ import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { SessionManager } from "../kernel/pi/coding-agent.js";
-import { acquireAgentRuntimeLocks } from "../sessions/agent-runtime-lock.js";
 import { approvalDigest, SettingsApprovals } from "./settings-approvals.js";
 import { migrateSettings, SettingsMigration, type SettingsMigrationOptions } from "./settings-migration.js";
 import { migrationFileHash } from "./settings-migration-plan.js";
@@ -47,10 +46,7 @@ async function copiedState() {
   // choices exercise migration without exposing or contacting copied accounts.
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ ...global, sessionDir: join(agentDir, "sessions"), defaultProvider: "fixture", defaultModel: "global", retry: { maxRetries: 1 } }));
   await writeFile(profilePath, JSON.stringify({ ...profile, model: { ...profile.model, chat: { provider: "fixture", id: "profile" } } }));
-  const options: SettingsMigrationOptions = { tronHome, agentDir, acquireRuntimeLocks: async paths => {
-    expect(paths.every(path => relative(root, path) !== ".." && !relative(root, path).startsWith("../"))).toBe(true);
-    return acquireAgentRuntimeLocks(paths);
-  } };
+  const options: SettingsMigrationOptions = { tronHome, agentDir };
   const settings = join(tronHome, "gateway", "settings");
   const journalPath = join(settings, "migrations", "three-layer-v1", "journal.json");
   return { root, tronHome, agentDir, profilePath, settings, journalPath, options };
@@ -90,54 +86,33 @@ async function journal(f: Awaited<ReturnType<typeof copiedState>>) {
 }
 
 describe("settings startup migration on copied state", () => {
-  it("refuses the corrupt copied Profile before the real runtime owner and leaves Global bytes unchanged", async () => {
-    const f = await copiedState();
-    const before = await migrationFileHash(join(f.agentDir, "settings.json"));
-    await writeFile(f.profilePath, "{not-valid-json");
-    await mkdir(join(f.agentDir, ".tron-gateway-runtime.lock.lock"));
-    let stderr = "";
-    try {
-      await exec(process.execPath, ["dist/gateway-main.js", "--host", "127.0.0.1", "--port", "19848"], {
-        cwd: packageRoot, env: { PATH: process.env.PATH, HOME: join(f.root, "home"), TMPDIR: f.root,
-          TRON_DATA_DIR: f.tronHome, PI_CODING_AGENT_DIR: f.agentDir, TRON_MACHINE_GROUP_ID: "settings-startup-test" },
-      });
-    } catch (error) { stderr = (error as { stderr?: string }).stderr ?? ""; }
-    expect(stderr).toContain(f.profilePath);
-    expect(stderr).not.toContain("already owns a canonical session directory");
-    expect(await migrationFileHash(join(f.agentDir, "settings.json"))).toBe(before);
-    await expect(stat(f.journalPath)).rejects.toMatchObject({ code: "ENOENT" });
-    evidence.push({ case: "actual startup before runtime owner", passed: true, copiedGlobalUnchanged: true });
-  });
-
-  it("backs up before publication, preserves and rehashes pending approvals, folds Home and reruns byte-for-byte as a no-op", async () => {
+  it("backs up before publication, preserves and rehashes pending approvals, never touches the Home chapter and reruns byte-for-byte as a no-op", async () => {
     const f = await copiedState(); const pending = await legacyApproval(f); const sessionPath = await legacyHomeChapter(f);
+    const sessionBefore = await migrationFileHash(sessionPath);
     const transaction = await SettingsMigration.prepare(f.options);
-    try {
-      const prepared = await journal(f);
-      expect(prepared.state).toBe("prepared");
-      expect((await new SettingsApprovals(f.tronHome).pending())[0]?.digest).toBe(pending.digest);
-      for (const [index, input] of prepared.inputs.entries()) {
-        if (input.hash !== null) expect(await migrationFileHash(join(dirname(f.journalPath), "backup", String(index)))).toBe(input.hash);
-        expect(await migrationFileHash(input.path)).toBe(input.hash);
-      }
-      await transaction.complete();
-    } finally { await transaction.release(); }
+    const prepared = await journal(f);
+    expect(prepared.state).toBe("prepared");
+    expect((await new SettingsApprovals(f.tronHome).pending())[0]?.digest).toBe(pending.digest);
+    for (const [index, input] of prepared.inputs.entries()) {
+      if (input.hash !== null) expect(await migrationFileHash(join(dirname(f.journalPath), "backup", String(index)))).toBe(input.hash);
+      expect(await migrationFileHash(input.path)).toBe(input.hash);
+    }
+    await transaction.complete();
     const migrated = (await new SettingsApprovals(f.tronHome).pending())[0]!;
     expect(migrated).toMatchObject({ requestId: pending.requestId, createdAt: pending.createdAt, expiresAt: pending.expiresAt, status: "pending", actor: pending.actor,
       target: { kind: "global" }, changes: [{ changeId: "legacy-change", layer: "global", before: 1, after: 2 }] });
     expect(migrated.digest).not.toBe(pending.digest);
     expect(migrated.digest).toBe(approvalDigest(migrated.target, migrated.changes));
-    const profile = JSON.parse(await readFile(f.profilePath, "utf8"));
-    expect(profile.model.chat).toEqual({ provider: "fixture", id: "chosen" });
-    const session = (await readFile(sessionPath, "utf8")).trim().split("\n").map(line => JSON.parse(line));
-    expect(session.find(entry => entry.customType === "tron.settings.v1").data.fixed["run.retry.maxRetries"]).toMatchObject({ value: 0, from: "session", ref: "old-default" });
+    // The saved Profile model stays; the Home chapter session is not an input.
+    expect(JSON.parse(await readFile(f.profilePath, "utf8")).model.chat).toEqual({ provider: "fixture", id: "profile" });
+    expect(await migrationFileHash(sessionPath)).toBe(sessionBefore);
     const completed = await journal(f);
+    expect(completed.inputs.map(input => input.path).filter(path => path.endsWith(".jsonl") && !path.includes(join("settings", "changes")))).toEqual([]);
     const hashes = await Promise.all([...completed.inputs.map(input => input.path), f.journalPath].map(migrationFileHash));
-    const release = await acquireAgentRuntimeLocks([f.agentDir]);
-    try { await migrateSettings(f.options); } finally { await release(); }
+    expect(await migrateSettings(f.options)).toMatchObject({ alreadyComplete: true, replaced: 0 });
     expect(await Promise.all([...completed.inputs.map(input => input.path), f.journalPath].map(migrationFileHash))).toEqual(hashes);
     expect((await stat(dirname(f.journalPath))).mode & 0o777).toBe(0o700);
-    evidence.push({ case: "backup, pending preservation/rehash, Home fold, no-op", passed: true, inputs: completed.inputs.length });
+    evidence.push({ case: "backup, pending preservation/rehash, Home chapter untouched, no-op", passed: true, inputs: completed.inputs.length });
   });
 
   it.each([true, false])("moves the retired Home record model into Home's saved settings only when none is saved (saved: %s)", async saved => {
@@ -161,8 +136,8 @@ describe("settings startup migration on copied state", () => {
 
   it("resumes the same prepared transaction after a partial canonical publication without duplicating approvals or audit", async () => {
     const f = await copiedState(); await legacyApproval(f); await legacyHomeChapter(f);
-    const transaction = await SettingsMigration.prepare(f.options);
-    await transaction.release();
+    // Interrupted after durable intent: prepared, never completed.
+    await SettingsMigration.prepare(f.options);
     const prepared = await journal(f);
     const first = prepared.replacements[0]!;
     await cp(join(dirname(f.journalPath), "stage", String(first.index)), first.path);
@@ -184,7 +159,7 @@ describe("settings startup migration on copied state", () => {
     expect(await migrationFileHash(path)).toBe(before);
     await expect(stat(f.journalPath)).rejects.toMatchObject({ code: "ENOENT" });
     await writeFile(path, original);
-    const transaction = await SettingsMigration.prepare(f.options); await transaction.release();
+    await SettingsMigration.prepare(f.options);
     const prepared = await journal(f); const replacement = prepared.replacements[0]!;
     await writeFile(join(dirname(f.journalPath), "stage", String(replacement.index)), "damaged-stage");
     await expect(migrateSettings(f.options)).rejects.toThrow("staged hash does not match");
@@ -192,37 +167,26 @@ describe("settings startup migration on copied state", () => {
     evidence.push({ case: "preflight/refused replay", passed: true });
   });
 
-  it("starts past a subagent session with raw U+2028/U+2029 and keeps an unconvertible chat session untouched (#1647)", async () => {
-    const f = await copiedState();
+  it("never reads into or rewrites session JSONL, including a U+2028 subagent run and an unclassifiable chat (#1647, #1649)", async () => {
+    const f = await copiedState(); await legacyApproval(f);
     const sessions = join(f.agentDir, "sessions");
-    // Real shape from the Stable crash: a nested subagent run whose tool output holds raw
-    // U+2028 inside a JSON string, valid JSON that Pi reads by splitting on "\n" only.
     const runDirectory = join(sessions, "--fixture--", "parent", "ccdf4b15", "run-0"); await mkdir(runDirectory, { recursive: true });
     const subagent = SessionManager.create(f.root, runDirectory);
     subagent.appendMessage(fauxAssistantMessage("guard output\u2028line two\u2029para \u2028 end"));
     subagent.appendCustomEntry("tron.settings.v1", { settings: {}, fixed: {
       "run.retry.maxRetries": { value: 0, from: "mac", ref: "old-default", at: "2026-01-01T00:00:00.000Z" } } });
-    const subagentPath = subagent.getSessionFile()!;
-    // A crash-torn final line, which Pi skips, must not refuse either.
-    await writeFile(subagentPath, `${await readFile(subagentPath, "utf8")}{"type":"message","id":"torn"`);
-    const tornLine = `{"type":"message","id":"torn"`;
     const chat = SessionManager.create(f.root, sessions);
     chat.appendMessage(fauxAssistantMessage("Chat with an unclassifiable legacy scope"));
     chat.appendCustomEntry("tron.settings.v1", { settings: {}, fixed: {
       "run.retry.maxRetries": { value: 0, from: "unknown-scope", ref: "odd", at: "2026-01-01T00:00:00.000Z" } } });
-    const chatPath = chat.getSessionFile()!;
-    const chatBefore = await migrationFileHash(chatPath);
-    const skipped = await migrateSettings(f.options);
-    expect((await journal(f)).state).toBe("complete");
-    expect(skipped).toEqual([{ file: chatPath, reason: expect.stringContaining("unrecognized settings scope") }]);
-    expect(await migrationFileHash(chatPath)).toBe(chatBefore);
-    const text = await readFile(subagentPath, "utf8");
-    expect(text).toContain("guard output\u2028line two\u2029para \u2028 end");
-    expect(text.endsWith(`${tornLine}\n`)).toBe(true);
-    const settings = text.split("\n").filter(line => line.startsWith("{") && line !== tornLine).map(line => JSON.parse(line))
-      .find(entry => entry.customType === "tron.settings.v1");
-    expect(settings.data.fixed["run.retry.maxRetries"]).toMatchObject({ value: 0, from: "session", ref: "old-default" });
-    evidence.push({ case: "U+2028 subagent session migrates; unconvertible chat session skipped (#1647)", passed: true, skipped: skipped.length });
+    const paths = [subagent.getSessionFile()!, chat.getSessionFile()!];
+    const before = await Promise.all(paths.map(migrationFileHash));
+    expect(await migrateSettings(f.options)).toMatchObject({ alreadyComplete: false });
+    const completed = await journal(f);
+    expect(completed.state).toBe("complete");
+    expect(completed.inputs.filter(input => input.path.startsWith(sessions))).toEqual([]);
+    expect(await Promise.all(paths.map(migrationFileHash))).toEqual(before);
+    evidence.push({ case: "session JSONL is never a migration input (#1647, #1649)", passed: true });
   });
 
   it("restores every original byte from the automatic backup into a separate test copy", async () => {
@@ -271,7 +235,8 @@ function sessionText(id: string, cwd: string, index: number, legacy: boolean): s
   let parent = "e1";
   if (legacy) {
     lines.push({ type: "custom", customType: "tron.settings.v1", id: "e2", parentId: parent, timestamp: stamp,
-      data: { receiptId: `receipt-${index}`, settings: {}, fixed: legacyFixed(index),
+      // Old Chat overrides: explicit settings and `chat` frames; inherited `mac`/`builtin` frames.
+      data: { receiptId: `receipt-${index}`, settings: index % 3 === 0 ? { retry: { maxRetries: 0 } } : {}, fixed: legacyFixed(index),
         requestPins: { "context.images.block": { value: false, from: "builtin", at: stamp, ref: `b-${index}` } } } });
     parent = "e2";
   }
@@ -279,38 +244,42 @@ function sessionText(id: string, cwd: string, index: number, legacy: boolean): s
     const entry = `m${turn}`;
     const text = `${index}:${turn} ${"transcript ".repeat(60)}${index === 7 && turn === 2 ? "raw\u2028separator\u2029kept" : ""}`;
     lines.push({ type: "message", id: entry, parentId: parent, timestamp: stamp,
-      message: { role: turn % 2 ? "assistant" : "user", content: [{ type: "text", text }], timestamp: Date.parse(stamp) } });
+      message: turn % 2 ? fauxAssistantMessage(text) : { role: "user", content: [{ type: "text", text }], timestamp: Date.parse(stamp) } });
     parent = entry;
   }
   return `${lines.map(line => JSON.stringify(line)).join("\n")}\n${index === 11 ? `{"type":"message","id":"torn"` : ""}`;
 }
-async function stableShapedState() {
+async function stableShapedState(count = SESSIONS, withUnreadable = false) {
   const root = await mkdtemp(join(tmpdir(), "tron-settings-startup-")); roots.push(root);
   const tronHome = join(root, "tron"), agentDir = join(root, "agent"), sessions = join(agentDir, "sessions");
   for (const directory of ["home", "tmp", "project", "agent", join("tron", "gateway", "home")]) await mkdir(join(root, directory), { recursive: true, mode: 0o700 });
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "fixture", defaultModel: "global", defaultThinkingLevel: "low" }));
+  // The Global the old `mac` frames recorded (unchanged since), with its own retry policy.
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "fixture", defaultModel: "global", defaultThinkingLevel: "medium", retry: { maxRetries: 2 } }));
   const paths: string[] = [];
   let homeSession = "";
-  for (let index = 0; index < SESSIONS; index += 1) {
+  for (let index = 0; index < count; index += 1) {
     const cwd = join(root, "project", `p${index % 200}`);
-    const directory = join(sessions, `--project-p${index % 200}--`);
+    if (index < 200) await mkdir(cwd, { recursive: true });
+    // Pi's own cwd directory naming, so the catalog proves each file's membership.
+    const directory = join(sessions, `--${cwd.slice(1).replace(/[/\\:]/g, "-")}--`);
     const id = randomUUID();
     let path = join(directory, `${stamp.replaceAll(":", "-")}_${id}.jsonl`);
     // Nested subagent runs, the shape of the #1647 file.
-    if (index >= SESSIONS - SUBAGENT_RUNS) path = join(directory, `parent-${index}`, randomUUID().slice(0, 8), "run-0", "session.jsonl");
+    if (index >= count - SUBAGENT_RUNS) path = join(directory, `parent-${index}`, randomUUID().slice(0, 8), "run-0", "session.jsonl");
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, sessionText(id, cwd, index, index < LEGACY));
     paths.push(path);
     if (index === LEGACY) homeSession = id;
   }
   // One unreadable session: one bad file can never take the Gateway down.
-  const unreadable = paths[LEGACY - 1]!; await chmod(unreadable, 0o000);
+  const unreadable = paths[Math.min(LEGACY, count) - 1]!;
+  if (withUnreadable) await chmod(unreadable, 0o000);
   await writeFile(join(tronHome, "gateway", "home", "profile.json"), JSON.stringify({ memory: { model: { provider: "fixture", id: "memory" } } }));
   await writeFile(join(tronHome, "gateway", "home", "home.json"), JSON.stringify({ version: 2, homeId: "fixture-home", enabled: false,
     model: { provider: "fixture", id: "record" }, chapters: [{ sessionId: homeSession, ordinal: 1, state: "active", createdAt: stamp, activationStarted: true }],
     bindingRevision: 1, generation: 1, routeGeneration: 1, policyRevision: 3, createdAt: stamp, updatedAt: stamp }));
   const pending = await legacyApproval({ settings: join(tronHome, "gateway", "settings") } as Awaited<ReturnType<typeof copiedState>>);
-  const hashes = async () => Promise.all(paths.map(path => path === unreadable ? "unreadable" : migrationFileHash(path)));
+  const hashes = async () => Promise.all(paths.map(path => withUnreadable && path === unreadable ? "unreadable" : migrationFileHash(path)));
   return { root, tronHome, agentDir, paths, unreadable, pending, hashes, legacySession: paths[3]! };
 }
 async function freePort(): Promise<number> {
@@ -373,11 +342,27 @@ type Frame = { type: string; id?: string; ok?: boolean; result?: unknown; error?
 const readGatewayLog = async (tronHome: string) => (await readFile(join(tronHome, "logs", "gateway.jsonl"), "utf8").catch(() => ""))
   .split("\n").filter(Boolean).map(line => JSON.parse(line) as { event?: string; message?: string; durationMs?: number; counts?: Record<string, number> });
 
+const LEGACY_KEYS = ["model.ref[role=chat]", "model.thinking[role=chat]", "run.retry.maxRetries", "context.images.block"];
+async function resolveLegacy(gateway: Awaited<ReturnType<typeof startGateway>>, path: string) {
+  const { id } = JSON.parse((await readFile(path, "utf8")).split("\n")[0]!) as { id: string };
+  // Serving precedes the bounded catalog passes; their refusals are retryable by contract.
+  let opened = await gateway.request("session.open", { sessionId: id });
+  for (const deadline = performance.now() + 60_000; !opened.ok && /catalog|proven|provable/.test(opened.error?.message ?? "") && performance.now() < deadline;) {
+    await new Promise(done => setTimeout(done, 250));
+    opened = await gateway.request("session.open", { sessionId: id });
+  }
+  expect(opened.ok, opened.error?.message).toBe(true);
+  const resolved = await gateway.request("settings.resolve", { target: { kind: "session", sessionId: id }, keys: LEGACY_KEYS });
+  expect(resolved.ok, resolved.error?.message).toBe(true);
+  return Object.fromEntries((resolved.result as Resolution).keys.map(row => [row.key, { value: row.value, layer: row.layer }]));
+}
+
 describe("Gateway startup over Stable-shaped legacy state (#1649)", () => {
-  it("listens within the replace window, leaves session files untouched, reads legacy session settings and restarts as a no-op", { timeout: 420_000 }, async () => {
+  it("listens within the replace window over thousands of sessions, never changes one, and an old chat/mac session resumes with the same effective settings across a no-op restart", { timeout: 420_000 }, async () => {
     const state = await stableShapedState();
     const before = await state.hashes();
     const first = await startGateway(state);
+    let rows: Record<string, unknown>;
     try {
       expect(await state.hashes()).toEqual(before);
       // Shared stores moved to the current vocabulary at startup.
@@ -385,29 +370,44 @@ describe("Gateway startup over Stable-shaped legacy state (#1649)", () => {
       const profile = JSON.parse(await readFile(join(state.tronHome, "gateway", "home", "profile.json"), "utf8"));
       expect(profile.model.chat).toEqual({ provider: "fixture", id: "record" });
       expect(Object.hasOwn(JSON.parse(await readFile(join(state.tronHome, "gateway", "home", "home.json"), "utf8")), "model")).toBe(false);
-      // A legacy chat reads in the current vocabulary when it is opened.
-      const header = JSON.parse((await readFile(state.legacySession, "utf8")).split("\n")[0]!) as { id: string };
-      const opened = await first.request("session.open", { sessionId: header.id });
-      expect(opened.ok, opened.error?.message).toBe(true);
-      const resolved = await first.request("settings.resolve", { target: { kind: "session", sessionId: header.id },
-        keys: ["model.thinking[role=chat]", "model.ref[role=chat]", "context.images.block"] });
-      expect(resolved.ok, resolved.error?.message).toBe(true);
-      const rows = Object.fromEntries((resolved.result as Resolution).keys.map(row => [row.key, { value: row.value, layer: row.layer }]));
+      rows = await resolveLegacy(first, state.legacySession);
+      // Old Chat overrides stay Session overrides; old Mac/builtin frames are the unchanged Global.
+      expect(rows).toEqual({
+        "model.ref[role=chat]": { value: { provider: "fixture", id: "chosen" }, layer: "session" },
+        "model.thinking[role=chat]": { value: "medium", layer: "global" },
+        "run.retry.maxRetries": { value: 0, layer: "session" },
+        "context.images.block": expect.objectContaining({ value: false }),
+      });
+      expect(await state.hashes()).toEqual(before);
       evidence.push({ case: "#1649 startup", listenerMs: Math.round(first.listenerMs!), readyMs: Math.round(first.readyMs!), sessions: SESSIONS, legacy: LEGACY, rows });
-      // The legacy chat kept its own model and thinking, as the old Chat layer reported them.
-      expect(rows["model.thinking[role=chat]"]).toEqual({ value: "medium", layer: "session" });
-      expect(rows["model.ref[role=chat]"]).toEqual({ value: { provider: "fixture", id: "chosen" }, layer: "session" });
-      expect(rows["context.images.block"]?.value).toBe(false);
     } finally { await first.stop(); }
     const journal = join(state.tronHome, "gateway", "settings", "migrations", "three-layer-v1", "journal.json");
     const settled = await migrationFileHash(journal);
     const second = await startGateway(state);
     try {
       expect(await migrationFileHash(journal)).toBe(settled);
+      expect(await resolveLegacy(second, state.legacySession)).toEqual(rows);
       const log = await readGatewayLog(state.tronHome);
-      expect(log.filter(record => record.event === "settings.migration-failed")).toEqual([]);
-      expect(log.filter(record => record.event === "gateway.fatal-startup")).toEqual([]);
+      expect(log.filter(record => record.event === "settings.migration").map(record => record.message))
+        .toEqual([expect.stringMatching(/^Settings migration published [1-9]\d* of \d+ shared settings file/), "Settings migration already complete"]);
+      expect(log.filter(record => ["settings.migration-failed", "gateway.fatal-startup"].includes(record.event ?? ""))).toEqual([]);
       evidence.push({ case: "#1649 second start", listenerMs: Math.round(second.listenerMs!), readyMs: Math.round(second.readyMs!) });
-    } finally { await second.stop(); await chmod(state.unreadable, 0o600); }
+    } finally { await second.stop(); }
+  });
+
+  it("an unreadable session file and a refused shared-store migration never stop startup; every store is unchanged", { timeout: 420_000 }, async () => {
+    const state = await stableShapedState(400, true);
+    const approvals = join(state.tronHome, "gateway", "settings", "approvals.json");
+    const corrupt = JSON.parse(await readFile(approvals, "utf8")); corrupt.requests[0].changes[0].after = 3;
+    await writeFile(approvals, JSON.stringify(corrupt));
+    const before = await migrationFileHash(approvals);
+    const gateway = await startGateway(state);
+    try {
+      const log = await readGatewayLog(state.tronHome);
+      expect(log.filter(record => record.event === "settings.migration-failed")).toHaveLength(1);
+      expect(await migrationFileHash(approvals)).toBe(before);
+      await expect(stat(join(state.tronHome, "gateway", "settings", "migrations", "three-layer-v1"))).rejects.toMatchObject({ code: "ENOENT" });
+      evidence.push({ case: "#1649 refused migration, Gateway serving", listenerMs: Math.round(gateway.listenerMs!), readyMs: Math.round(gateway.readyMs!) });
+    } finally { await gateway.stop(); await chmod(state.unreadable, 0o600); }
   });
 });

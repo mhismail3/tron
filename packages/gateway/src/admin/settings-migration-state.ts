@@ -1,7 +1,6 @@
 import { GatewayError } from "../errors.js";
+import { RETIRED_SCOPES } from "../sessions/session-settings.js";
 import { approvalDigest } from "./settings-approvals.js";
-import { KEYS, keyForHome, type KeyDeclaration } from "./settings-schema.js";
-import { resolveInstance, type SettingsStores } from "./settings-resolver.js";
 
 type Document = Record<string, unknown>;
 export const migrationRefusal = (file: string, reason: string): never => {
@@ -15,9 +14,8 @@ export function parseMigrationObject(text: string, file: string): Document {
   try { return migrationObject(JSON.parse(text), file); } catch { return migrationRefusal(file, "invalid JSON object"); }
 }
 function scope(value: unknown, file: string, delegated = false): string {
-  if (value === "mac" || value === "builtin" || value === "global") return "global";
-  if (value === "profile" || value === "chat" || value === "session") return "session";
-  if (value === "project" || (delegated && value === "delegate")) return value;
+  if (typeof value === "string" && Object.hasOwn(RETIRED_SCOPES, value)) return RETIRED_SCOPES[value]!;
+  if (value === "global" || value === "session" || value === "project" || (delegated && value === "delegate")) return value;
   return migrationRefusal(file, "unrecognized settings scope");
 }
 function target(value: unknown, file: string): Document {
@@ -80,73 +78,4 @@ export function migrationSetPath(document: Document, path: readonly string[], va
     current = migrationObject(current[field], path.join("."));
   }
   Object.defineProperty(current, path.at(-1)!, { value: structuredClone(value), writable: true, enumerable: true, configurable: true });
-}
-export interface MigrationDefaults { global: Document; gateway: Document; floors: SettingsStores["floors"] }
-function currentGlobal(key: KeyDeclaration, qualifiers: Record<string, string>, defaults: MigrationDefaults): unknown {
-  const stores: SettingsStores = { layers: ["global", "default"], ...defaults, trust: {}, macTerminal: {} };
-  return resolveInstance(key, qualifiers, stores, { format: { modelName: () => undefined }, options: { clamp: (_source, _dependency, value) => value } }, () => undefined).value;
-}
-
-/** Converts only the settings custom entry, never arbitrary message/user data.
- * Entry IDs, parents and unrelated custom fields remain byte-for-byte values. */
-export function migrateSessionSettings(value: Document, file: string, defaults: MigrationDefaults,
-  notes: Array<{ file: string; key: string; reason: string }>): Document {
-  const original = migrationObject(value.data, file);
-  const data = { ...original, settings: structuredClone(migrationObject(original.settings, file)) };
-  for (const field of ["fixed", "requestPins"] as const) {
-    if (original[field] === undefined) continue;
-    const snapshots = { ...migrationObject(original[field], file) };
-    for (const [id, value] of Object.entries(snapshots)) {
-      const old = migrationObject(value, file);
-      const converted = fixed(old, file);
-      const key = KEYS.find(key => key.id === id);
-      if (!key) { notes.push({ file, key: id, reason: "unknown snapshot preserved" }); snapshots[id] = converted; continue; }
-      const qualifiers = { ...(key.fixed ?? {}), ...(old.qualifiers === undefined ? {} : migrationObject(old.qualifiers, file)) } as Record<string, string>;
-      const global = currentGlobal(key, qualifiers, defaults);
-      if (old.from === "project" && !key.projectSettable) {
-        // A forbidden inherited permission must not be laundered into a new
-        // Session override. This is an approved Project safety delta.
-        if (global === undefined) delete snapshots[id];
-        else snapshots[id] = { ...converted, from: "global", value: global };
-        notes.push({ file, key: id, reason: "ignored inherited Project permission" });
-        continue;
-      }
-      if (["mac", "builtin", "profile"].includes(String(old.from)) && key.sessionOverridable
-        && JSON.stringify(old.value) !== JSON.stringify(global)) {
-        converted.from = "session";
-        const binding = key.layers.session;
-        if (binding?.store === "session-settings") migrationSetPath(data.settings, binding.path, old.value);
-        notes.push({ file, key: id, reason: "preserved differing inherited snapshot as override" });
-      }
-      snapshots[id] = converted;
-    }
-    Object.defineProperty(data, field, { value: snapshots, writable: true, enumerable: true, configurable: true });
-  }
-  return { ...value, data };
-}
-
-/** Fold the currently effective chapter's explicit choices into the Profile
- * store. Branch selection is supplied by the canonical parent chain, not audit. */
-export function foldHomeChapter(profile: Document, settings: Document | undefined,
-  model: unknown, thinking: unknown, file: string): Document {
-  const result = structuredClone(profile);
-  const fixed = settings?.fixed === undefined ? {} : migrationObject(settings.fixed, file);
-  for (const declared of KEYS) {
-    const key = keyForHome(declared, true);
-    const destination = key.layers.home;
-    const source = key.layers.session;
-    if (!key.sessionOverridable || destination?.store !== "home" || !source) continue;
-    let value: unknown;
-    if (source.store === "session-settings" && settings?.settings !== undefined) {
-      value = source.path.reduce<unknown>((current, field) => current && typeof current === "object" && Object.hasOwn(current, field) ? (current as Document)[field] : undefined, settings.settings);
-    } else if (source.store === "session") {
-      const snapshot = fixed[key.id] === undefined ? undefined : migrationObject(fixed[key.id], file);
-      // A recorded inherited frame is not a user choice. Without provenance,
-      // the existing reader treats SDK model/thinking records as legacy choices.
-      if (snapshot?.from === "session" || snapshot?.from === "delegate") value = snapshot.value;
-      else if (!snapshot) value = source.field === "model" ? model : source.field === "thinking" ? thinking : undefined;
-    }
-    if (value !== undefined) migrationSetPath(result, destination.path, value);
-  }
-  return result;
 }

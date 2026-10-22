@@ -91,7 +91,6 @@ const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 // its legacy roots. The operator cutover is explicit and runs before Pi loads
 // the provider, so an old run cannot be silently stranded.
 await assertDelegatedRootCutoverReady(config.tronHome);
-const unmigratedSessions = await migrateSettings({ tronHome: config.tronHome, agentDir: config.agentDir, acquireRuntimeLocks: acquireAgentRuntimeLocks });
 await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
 // extensions. Existing installed packages are never rewritten in place.
@@ -126,9 +125,6 @@ const logger = new GatewayLogger(gatewayLogPath, {
 // Activate this payload's exact offline closure before any Pi discovery. A
 // restart verifies/reuses the immutable root; damaged roots fail startup closed.
 const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, logger);
-for (const { reason } of unmigratedSessions) {
-  logger.log("error", `Settings migration left a session unmigrated: ${reason}`, { event: "settings.migration-session-skipped", source: "settings" });
-}
 {
   const identity = runtimeIdentity();
   logger.log(
@@ -901,6 +897,16 @@ startupCheckpoint("composition");
 await transport.listen(async () => {
   service.startModelReleaseDateRefresh();
   startupCheckpoint("listener-bind");
+  // The shared settings stores move to the three-layer vocabulary while clients
+  // see warming-up, before the owners that read them load (sessions.initialize).
+  // Never fatal (#1649): a refusal changes nothing, is logged, and retries next start.
+  await migrateSettings({ tronHome: config.tronHome, agentDir: config.agentDir }).then(
+    ({ inputs, replaced, alreadyComplete }) => logger.log("info", alreadyComplete ? "Settings migration already complete"
+      : `Settings migration published ${replaced} of ${inputs} shared settings file(s)`, {
+      event: "settings.migration", source: "settings", counts: { inputs, replaced } }),
+    (error: unknown) => logger.log("error", "Settings migration refused; shared settings stores are unchanged and it retries next start", {
+      event: "settings.migration-failed", source: "settings", error }));
+  startupCheckpoint("settings-migration");
   // This startup follows a user-initiated Gateway update. Keep Knowledge
   // unavailable on upgrade failure without disabling unrelated chat features.
   await knowledgeStore.upgradeStorage().catch((error: unknown) => {

@@ -58,13 +58,28 @@ export function readSessionFixedSettings(entries: readonly SessionEntry[]): Reco
   return readChatSnapshots(entries, "fixed");
 }
 
+/** Scope names #1634 retired, as old session entries recorded them. Session JSONL
+ * is never rewritten (#1649), so this reader is where they become current names;
+ * the next settings write persists the current name. The startup migration of the
+ * shared stores (approvals, audit) uses the same map. Exit condition: delete it
+ * once no retained session predates #1634 (none carries one of these names). */
+export const RETIRED_SCOPES: Readonly<Record<string, "global" | "session">> = Object.freeze({
+  mac: "global", builtin: "global", chat: "session", profile: "session",
+});
+
 function readChatSnapshots(entries: readonly SessionEntry[], field: "fixed" | "requestPins"): Record<string, FixedSetting> {
   const entry = entries.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY);
   if (!entry || entry.type !== "custom") return {};
-  const snapshots = (entry.data as Record<string, unknown> | null)?.[field];
-  if (snapshots === undefined) return {};
-  if (!snapshots || typeof snapshots !== "object" || Array.isArray(snapshots)) throw new GatewayError("conflict", "Canonical Chat snapshots are invalid");
-  for (const value of Object.values(snapshots)) {
+  const stored = (entry.data as Record<string, unknown> | null)?.[field];
+  if (stored === undefined) return {};
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) throw new GatewayError("conflict", "Canonical Chat snapshots are invalid");
+  const snapshots: Record<string, unknown> = {};
+  for (const [id, value] of Object.entries(stored)) {
+    const from = (value as { from?: unknown } | null)?.from;
+    const current = typeof from === "string" && Object.hasOwn(RETIRED_SCOPES, from) ? { ...value, from: RETIRED_SCOPES[from] } : value;
+    Object.defineProperty(snapshots, id, { value: current, enumerable: true, writable: true, configurable: true });
+  }
+  for (const value of Object.values(snapshots as object)) {
     if (!value || typeof value !== "object" || typeof value.at !== "string" || !Number.isFinite(Date.parse(value.at))
       || typeof value.ref !== "string" || !value.ref
       || !["global", "project", "session", "delegate"].includes(value.from)
