@@ -49,6 +49,7 @@ import { RunPersistence, CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WR
 import { RunWorkOwner } from "../kernel/run/run-work-owner.js";
 import { RunAbortOwner } from "../kernel/run/run-abort-owner.js";
 import { RunQueueOwner } from "../kernel/run/run-queue-owner.js";
+import { PromptAttempt } from "../kernel/run/prompt-attempt.js";
 import { RunQueueCommands, MAXIMUM_QUEUED_MESSAGE_BYTES, validateQueue, invocationResources, resourceIsInvocable } from "../kernel/run/queue-commands.js";
 import { HeldPromptQueue } from "../kernel/run/held-prompt-queue.js";
 import { MAXIMUM_PROMPT_ATTACHMENTS, type QueueAdmissionDisposition, type QueueBehavior, type RuntimeQueuedMessage, type HeldPrompt, type PromptQueueDisplay } from "../kernel/run/queue-input.js";
@@ -7631,7 +7632,6 @@ export class RuntimeSlot {
       let handledWithoutAgent = false;
       let queueDisposition: Promise<QueueAdmissionDisposition> | undefined;
       let resolveQueueDisposition: ((disposition: QueueAdmissionDisposition) => void) | undefined;
-      let queueDispositionFailure: unknown;
       let startPersisted = false;
       /** The phase this admission replaced when it marked the session running. */
       let phaseBeforeAdmission: SessionPhase | undefined;
@@ -7887,103 +7887,51 @@ export class RuntimeSlot {
             "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
           : error;
       }
-      let runSettled = false;
-      let commandSettled = false;
-      let terminalReceiptPersisted = false;
-      let admissionAccepted = false;
-      let finalizeAdmission!: () => void;
-      const admissionFinalized = new Promise<void>((resolve) => { finalizeAdmission = resolve; });
-      const promptRun = this.lifecycle.trackPrompt(sdkRun, () => {
-        runSettled = true;
-        this.maybePerformExtensionShutdown();
-      });
-      const run = isExactExtensionCommand
-        ? this.lifecycle.trackCommand(promptRun, () => { commandSettled = true; this.maybePerformExtensionShutdown(); })
-        : promptRun;
-
-      let noAgentSettlementStarted = false;
-      const settleWithoutAgent = async (
-        terminalLifecycle: "completed" | "failed" = "completed",
-      ) => {
-        if (this.shuttingDown || this.hasActiveAgentRun || queuesIntoActiveRun) return;
-        const owned = this.activeOperationId === operationId || this.operation?.id === operationId;
-        if (!owned || (this.queuedManualCompactionInFlight && !this.adoptedManualCompaction) || noAgentSettlementStarted) return;
-        noAgentSettlementStarted = true;
-        if (terminalLifecycle === "failed") this.completionObserved(`terminal:${invocationId}`);
-        if (this.pendingPrompt?.id === operationId) {
-          this.pendingPrompt = undefined;
-          this.pendingPromptMessage = undefined;
-        }
-        // A handled input creates no canonical user/assistant entry. Persist its
-        // terminal outcome for every invocation, not only Automation callers.
-        // A rejected Pi call uses the same no-agent cleanup but remains failed.
-        await this.terminalizeInvocation(
-          operationId,
-          terminalLifecycle,
-          terminalLifecycle === "failed" ? "runtime-prompt-failed" : undefined,
-        );
-        this.lifecycle.cancelPreflight(operationId);
-        if (!operationId.startsWith("automation:") && operationId !== this.taskWorker?.identity.operationId) {
-          await this.clearMarkerOwnership(operationId);
-        }
-        // Marker I/O may suspend behind a newer run. Clear only this run's live
-        // projection; conditional marker deletion already protects its successor.
-        if (this.activeOperationId === operationId) this.activeOperationId = undefined;
-        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
-        if (this.operation?.id === operationId) this.operation = undefined;
-        this.runWork.settleOperationWork(operationId);
-        if (terminalLifecycle === "failed") {
-          this.emit("session.operationFailed", {
-            operationId,
-            message: "The agent runtime failed before creating canonical input",
-          });
-          if (!isExactExtensionCommand && !this.shuttingDown) await this.notifyAgentTerminal(`terminal:${invocationId}`, "failed");
-        }
-        if (this.activeOperationId !== undefined || this.hasActiveAgentRun) return;
-        this.phase = "idle";
-        this.noteHomeIdle();
-        if (this.pendingManualCompaction) {
-          this.publishSnapshot();
-          this.startPendingManualCompaction();
-        } else {
-          this.hooks.settled(this.id);
-          this.revision += 1;
-          this.publishSnapshot();
-        }
-      };
-
-      void run.then(
-        async () => {
-          if (this.runQueue.pendingQueueAdmission?.id === operationId) {
-            this.runQueue.pendingQueueAdmission = undefined;
-            resolveQueueDisposition?.("handled");
-          }
-          await admissionFinalized;
-          if (admissionAccepted) await settleWithoutAgent();
-        },
-        async (error) => {
-          // Before queue/user disposition, rejection is definitive and wakes
-          // that exact admission below. After disposition, canonical/runtime
-          // lifecycle remains authoritative for already accepted work.
-          if (!this.runAbort.abortedOperations.has(operationId)) this.emit("session.diagnostic", safeJson({
-            code: "runtime-prompt-failed",
-            operationId,
-            message: error instanceof Error ? error.message : String(error),
-          }));
-          acceptedResolve(false);
-          if (this.runQueue.pendingQueueAdmission?.id === operationId) {
-            this.runQueue.pendingQueueAdmission = undefined;
-            queueDispositionFailure = error;
-            resolveQueueDisposition?.("failed");
-          }
-          await admissionFinalized;
-          if (admissionAccepted) await settleWithoutAgent("failed");
-        },
-      ).catch((error) => this.emit("session.diagnostic", safeJson({
-        code: "runtime-prompt-settlement-failed",
-        operationId,
-        message: error instanceof Error ? error.message : String(error),
-      })));
+      const attempt = new PromptAttempt<CanonicalAssistantCompletion>({
+        lifecycle: this.lifecycle,
+        runQueue: this.runQueue,
+        runAbort: this.runAbort,
+        runWork: this.runWork,
+        invocations: this.invocations,
+        invocationFailures: this.invocationFailures,
+        shuttingDown: () => this.shuttingDown,
+        hasActiveAgentRun: () => this.hasActiveAgentRun,
+        activeOperationId: () => this.activeOperationId,
+        clearActiveOperation: () => { this.activeOperationId = undefined; },
+        operation: () => this.operation,
+        clearOperation: () => { this.operation = undefined; },
+        queuedManualCompactionInFlight: () => this.queuedManualCompactionInFlight,
+        adoptedManualCompaction: () => this.adoptedManualCompaction,
+        pendingPrompt: () => this.pendingPrompt,
+        clearPendingPrompt: () => { this.pendingPrompt = undefined; this.pendingPromptMessage = undefined; },
+        taskOperationId: () => this.taskWorker?.identity.operationId,
+        requestPolicy: () => this.homeRequestPolicy,
+        pendingManualCompaction: () => this.pendingManualCompaction,
+        pendingExtensionCommand: () => this.pendingExtensionCommand,
+        clearPendingExtensionCommand: () => { this.pendingExtensionCommand = undefined; },
+        pendingAssistantCompletion: () => this.pendingAssistantCompletion,
+        beginAttentionSettlement: completion => this.beginAttentionSettlement(completion),
+        queuesIntoActiveRun: () => queuesIntoActiveRun,
+        completionObserved: id => this.completionObserved(id),
+        terminalizeInvocation: (id, lifecycle, errorCode) => this.terminalizeInvocation(id, lifecycle, errorCode),
+        clearMarkerOwnership: id => this.clearMarkerOwnership(id),
+        enqueueMarkerOwnership: id => this.enqueueMarkerOwnership(id),
+        notifyAgentTerminal: (id, outcome) => this.notifyAgentTerminal(id, outcome),
+        persistInvocationReceipt: (receipt, owner) => this.persistInvocationReceipt(receipt, owner),
+        setIdle: () => { this.phase = "idle"; },
+        noteHomeIdle: () => this.noteHomeIdle(),
+        publishSnapshot: () => this.publishSnapshot(),
+        publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
+        startPendingManualCompaction: () => this.startPendingManualCompaction(),
+        maybePerformExtensionShutdown: () => this.maybePerformExtensionShutdown(),
+        settled: () => this.hooks.settled(this.id),
+        sessionId: () => this.id,
+        revision: () => this.revision,
+        emit: (topic, data) => this.emit(topic, data),
+      }, {
+        operationId, invocationId, invocationSource, invocationName, invocation,
+        isExactExtensionCommand, acceptedResolve, resolveQueueDisposition,
+      }, sdkRun);
 
       // Successful Pi dispositions are reported by the callback; rejected
       // prompts do not call it and are resolved by the SDK promise rejection
@@ -8005,7 +7953,7 @@ export class RuntimeSlot {
         handledWithoutAgent = disposition === "handled";
         if (disposition === "failed") {
           this.lifecycle.resolvePreflight(operationId, true);
-          admissionAccepted = true;
+          attempt.admissionAccepted = true;
           this.completionObserved(`terminal:${invocationId}`);
           await this.terminalizeInvocation(
             operationId,
@@ -8016,9 +7964,9 @@ export class RuntimeSlot {
           if (!this.shuttingDown) await this.notifyAgentTerminal(`terminal:${invocationId}`, "failed");
           this.lifecycle.cancelPreflight(operationId);
           this.runWork.settleOperationWork(operationId);
-          finalizeAdmission();
-          throw queueDispositionFailure instanceof Error
-            ? queueDispositionFailure
+          attempt.finalizeAdmission();
+          throw attempt.queueDispositionFailure instanceof Error
+            ? attempt.queueDispositionFailure
             : new GatewayError("internal", "The agent runtime failed after prompt admission");
         }
       }
@@ -8034,11 +7982,11 @@ export class RuntimeSlot {
       const commandTurnStarting = isExactExtensionCommand && handledWithoutAgent && runIdleAtAdmission
         && this.runtime.session.isStreaming && !this.runtime.session.state.isStreaming;
       this.lifecycle.resolvePreflight(operationId, admitted && !queuesIntoActiveRun && (!handledWithoutAgent || commandTurnStarting));
-      admissionAccepted = admitted;
+      attempt.admissionAccepted = admitted;
       if (!admitted) {
         // A preflight callback is a disposition, not SDK settlement. Join the
         // exact promise before retiring its marker or publishing idle.
-        await run.catch(() => {});
+        await attempt.run.catch(() => {});
         const stopped = this.runAbort.abortedOperations.has(operationId);
         const terminalLifecycle = stopped ? "interrupted" : "failed";
         const errorCode = stopped ? "user-abort" : "preflight-rejected";
@@ -8080,7 +8028,7 @@ export class RuntimeSlot {
         this.hooks.settled(this.id);
         this.revision += 1;
         this.publishSnapshot();
-        finalizeAdmission();
+        attempt.finalizeAdmission();
         if (!isExactExtensionCommand && !this.shuttingDown) await this.notifyAgentTerminal(`terminal:${invocationId}`, stopped ? "stopped" : "failed");
         if (preflightFailure) throw preflightFailure;
         throw new GatewayError(stopped ? "cancelled" : "invalid_request", stopped
@@ -8115,12 +8063,12 @@ export class RuntimeSlot {
       invocation.lifecycle = queuesIntoActiveRun ? "queued" : "accepted";
       invocation.updatedAt = new Date().toISOString();
       this.invocations.set(invocationId, invocation);
-      finalizeAdmission();
+      attempt.finalizeAdmission();
       if (isExactExtensionCommand) operationWork.transition("extension-command-prompt-ui");
       else if (queuesIntoActiveRun) operationWork.transition("queued-mutation");
       else if (handledWithoutAgent) {
-        await settleWithoutAgent();
-      } else if (!runSettled) {
+        await attempt.settleWithoutAgent();
+      } else if (!attempt.runSettled) {
         operationWork.transition("foreground-agent-operation");
         const markerWrite = this.enqueueMarkerOwnership(operationId);
         count("session.prompt.marker-persist");
@@ -8138,72 +8086,20 @@ export class RuntimeSlot {
       }
 
       if (isExactExtensionCommand) {
-        const finishCommand = async () => {
-          if (this.pendingExtensionCommand?.id !== operationId) return;
-          // Latch the terminal fact before marker transfer or attention
-          // settlement. Those branches may return early while a continuation
-          // owns the assistant completion; the invocation must already be
-          // durably terminal in that overlap window.
-          if (!terminalReceiptPersisted) {
-            const terminalLifecycle = this.invocationFailures.delete(invocationId)
-              ? "failed"
-              : commandSettled ? "completed" : "outcomeUnknown";
-            await this.persistInvocationReceipt(makeInvocationReceipt({
-              version: 1,
-              receiptId: `terminal:${invocationId}`,
-              receiptKind: "terminal",
-              invocationId,
-              operationId,
-              sessionId: this.id,
-              source: invocationSource,
-              ...(invocationName ? { name: invocationName } : {}),
-              lifecycle: terminalLifecycle,
-              origin: invocation.origin,
-              sequence: this.revision + 1,
-              createdAt: new Date().toISOString(),
-            }), this.runWork.get(operationId));
-            terminalReceiptPersisted = true;
-            this.invocations.delete(invocationId);
-          }
-          if (this.hasActiveAgentRun && this.activeOperationId !== undefined) {
-            // Transfer marker ownership back to the foreground/new agent run:
-            // commit its record before retiring the command's provisional one.
-            await this.enqueueMarkerOwnership(this.activeOperationId);
-            await this.clearMarkerOwnership(operationId);
-          } else if (this.activeOperationId === undefined) {
-            if (this.pendingAssistantCompletion) {
-              // No continuation claimed the final assistant entry. Retire the
-              // command owner, then let the same durable attention barrier own
-              // marker cleanup and truthful settlement.
-              this.pendingExtensionCommand = undefined;
-              await this.beginAttentionSettlement(this.pendingAssistantCompletion);
-              this.maybePerformExtensionShutdown();
-              return;
-            }
-            await this.clearMarkerOwnership(operationId);
-            this.hooks.settled(this.id);
-          }
-          if (this.pendingExtensionCommand?.id !== operationId) return;
-          this.pendingExtensionCommand = undefined;
-          this.runWork.settleOperationWork(operationId);
-          this.revision += 1;
-          this.publishSnapshot();
-          this.maybePerformExtensionShutdown();
-        };
-        if (!commandSettled) {
-          try { await run; } finally { await finishCommand(); }
+        if (!attempt.commandSettled) {
+          try { await attempt.run; } finally { await attempt.finishCommand(); }
         } else {
-          await finishCommand();
+          await attempt.finishCommand();
         }
-      } else if (runSettled) {
+      } else if (attempt.runSettled) {
         // Handles input action:"handled" and rejected accepted calls without
         // touching a newer operation. `finally` can mark runSettled one
         // microtask before `run` exposes its outcome, so join it explicitly.
-        const terminalLifecycle = await run.then(
+        const terminalLifecycle = await attempt.run.then(
           () => "completed" as const,
           () => "failed" as const,
         );
-        await settleWithoutAgent(terminalLifecycle);
+        await attempt.settleWithoutAgent(terminalLifecycle);
       }
       return { operationId };
       };
