@@ -186,6 +186,39 @@ describe("settings startup migration on copied state", () => {
     evidence.push({ case: "preflight/refused replay", passed: true });
   });
 
+  it("starts past a subagent session with raw U+2028/U+2029 and keeps an unconvertible chat session untouched (#1647)", async () => {
+    const f = await copiedState();
+    const sessions = join(f.agentDir, "sessions");
+    // Real shape from the Stable crash: a nested subagent run whose tool output holds raw
+    // U+2028 inside a JSON string, valid JSON that Pi reads by splitting on "\n" only.
+    const runDirectory = join(sessions, "--fixture--", "parent", "ccdf4b15", "run-0"); await mkdir(runDirectory, { recursive: true });
+    const subagent = SessionManager.create(f.root, runDirectory);
+    subagent.appendMessage(fauxAssistantMessage("guard output\u2028line two\u2029para \u2028 end"));
+    subagent.appendCustomEntry("tron.settings.v1", { settings: {}, fixed: {
+      "run.retry.maxRetries": { value: 0, from: "mac", ref: "old-default", at: "2026-01-01T00:00:00.000Z" } } });
+    const subagentPath = subagent.getSessionFile()!;
+    // A crash-torn final line, which Pi skips, must not refuse either.
+    await writeFile(subagentPath, `${await readFile(subagentPath, "utf8")}{"type":"message","id":"torn"`);
+    const tornLine = `{"type":"message","id":"torn"`;
+    const chat = SessionManager.create(f.root, sessions);
+    chat.appendMessage(fauxAssistantMessage("Chat with an unclassifiable legacy scope"));
+    chat.appendCustomEntry("tron.settings.v1", { settings: {}, fixed: {
+      "run.retry.maxRetries": { value: 0, from: "unknown-scope", ref: "odd", at: "2026-01-01T00:00:00.000Z" } } });
+    const chatPath = chat.getSessionFile()!;
+    const chatBefore = await migrationFileHash(chatPath);
+    const skipped = await migrateSettings(f.options);
+    expect((await journal(f)).state).toBe("complete");
+    expect(skipped).toEqual([{ file: chatPath, reason: expect.stringContaining("unrecognized settings scope") }]);
+    expect(await migrationFileHash(chatPath)).toBe(chatBefore);
+    const text = await readFile(subagentPath, "utf8");
+    expect(text).toContain("guard output\u2028line two\u2029para \u2028 end");
+    expect(text.endsWith(`${tornLine}\n`)).toBe(true);
+    const settings = text.split("\n").filter(line => line.startsWith("{") && line !== tornLine).map(line => JSON.parse(line))
+      .find(entry => entry.customType === "tron.settings.v1");
+    expect(settings.data.fixed["run.retry.maxRetries"]).toMatchObject({ value: 0, from: "session", ref: "old-default" });
+    evidence.push({ case: "U+2028 subagent session migrates; unconvertible chat session skipped (#1647)", passed: true, skipped: skipped.length });
+  });
+
   it("restores every original byte from the automatic backup into a separate test copy", async () => {
     const f = await copiedState(); await legacyApproval(f); await legacyHomeChapter(f); await migrateSettings(f.options);
     const completed = await journal(f);
