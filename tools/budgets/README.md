@@ -1,61 +1,48 @@
 # Budgets
 
-`scripts/tron budgets` checks file-size and doc budgets for one commit
+`scripts/tron budgets` reports file sizes and doc budgets for one commit, and
+fails only on the two size rules that are hard
 ([plan §6.7 V6](../../docs/restructure/plan.md#67-structure-checkers-v5-v6-v8-v9-v10), [§3 M2](../../docs/restructure/plan.md#m2-locality-and-conflict-surface-primary-objective)).
-It reports and is never wired into a hook, landing or queue.
+Size is reported, never a target: splitting an owner is justified by locality
+and ownership, not its line count.
 
 ```bash
-scripts/tron budgets                     # HEAD, bounded by origin/main
+scripts/tron budgets                     # HEAD against origin/main
 scripts/tron budgets <rev> --base <ref>
 ```
 
-Exit 0: every file is within budget or excepted. Exit 1: problems, one per line.
-Exit 2: usage error, an unmeasurable base, or ownership violations at the
-revision. None of these is reported as clean.
+Exit 0: no problem. Exit 1: problems, one per line. Exit 2: usage error or an
+unmeasurable revision or base. None of these is reported as clean. The summary
+line always reports the code files over 500 lines and docs over budget.
 
-## Budgets
+## Rules
 
 Categories and line counts come from `tools/metrics` (`read_tree`), so the
-checker and `M2.fileSize` cannot drift. The checker reads Git objects only:
-commit first.
+checker and `M2.fileSize` cannot drift. It reads Git objects only: commit first.
 
-| Files (metrics category) | Budget |
-|---|---|
-| production, tests, tooling | 500 lines (`lines`); 501 is over, as in `M2.fileSize` |
-| `packages/<name>/README.md` (docs) | 200 lines (`doc`, package index, §5.6) |
-| any other `README.md` (docs) | 150 lines (`doc`, module README) |
-| other docs | 300 lines (`doc`, cross-module contract) |
+- **New production file over 800 lines fails.** "New" means the path is not in
+  the base and is not a Git move of a base file (`diff -B -M`, so a rewrite
+  that moves a file's content away pairs with its new name). A file at a path
+  whose old file moved away is new. Existing files, tests and tooling only
+  report against 500 lines, however much they grow.
+- **A doc fails above twice its budget**, and reports above its budget:
 
-The root `README.md` (250) and `AGENTS.md` (150) keep their budgets in
-`scripts/check-documentation-policy.py`, which the charter names; they are not
-double-checked here.
+  | Doc (metrics `docs`) | Budget | Fails above |
+  |---|---|---|
+  | `packages/<name>/README.md` | 200 | 400 |
+  | any other `README.md` | 150 | 300 |
+  | other docs | 300 | 600 |
 
-## Exceptions
-
-An over-budget file passes only with an exception in its owning manifest's
-`exceptions` field: `{path, budget, reason, exit}` (validated by
-`tools/ownership`; `budget` is `lines` or `doc`). Exceptions are shrink-only
-against the base revision (default `origin/main`; it must be measurable):
-- an over-budget file with no exception fails;
-- an exception the base lacks fails. A Git move (`diff -B -M`) keeps its
-  exception, bounded by the base path. A new file at a path whose old file
-  moved away inherits nothing, and a copy inherits nothing;
-- an excepted file larger than at the base fails;
-- an exception whose file is within budget, or deleted, is stale and fails
-  until removed.
-
-Only the change that introduces this checker seeds exceptions: the base has no
-`tools/budgets/budgets.py`, and neither does `origin/main` (so once it lands,
-no `--base` can reopen seeding). As with every repository tool, the rules
-themselves are the checked-out code; a change to them is reviewed like any
-other change. That was #1460: 226 exceptions
-in 51 manifests, covering 202 code files over 500 lines and 24 docs over their
-budget. `docs/restructure/plan.md` is exempt from budgets entirely under plan §0
-until M6 (its steward records decisions in it), so it carries no exception.
+The root `README.md` (250) and `AGENTS.md` (150) keep their hard budgets in
+`scripts/check-documentation-policy.py`, which the charter names.
+`docs/restructure/plan.md` is exempt until M6 (plan §0). Manifests carry no
+size exceptions.
 
 ## Verify
 
 `scripts/tron test tooling scripts/test-tron-budgets.py` runs the CLI on
-disposable repositories. It covers seeding; growth, new-file and
-new-exception known-bads; the 500/501 edge; shrink, stale, removal and rename;
-doc budgets; and error exits. Output is kept in `test-results/budgets-cli/`.
+disposable repositories: a new 801-line production file fails and 800 passes;
+new tests and tooling only report; an over-500 file growing and an over-800 file
+moved pass, and a new file at its old path fails; docs at twice their budget
+pass and one line more fails; an unknown base exits 2. Output is kept in
+`test-results/budgets-cli/`.

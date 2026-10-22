@@ -27,19 +27,24 @@ the build that stamped it).
 ## Static checks (existing tools only)
 
 1. `scripts/tron ownership`
-2. `scripts/tron budgets HEAD --base <base>`
-3. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check`
-   when Markdown, a manifest or the Gateway (its generated blocks' sources) changed
+2. `scripts/tron budgets HEAD --base <base>`: sizes are reported; a new production
+   file over 800 lines or a doc over twice its budget fails
+3. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
+   --base <base>` when Markdown, a manifest or the Gateway (its generated blocks'
+   sources) changed. A block whose generator loads Gateway code (`settings`) is
+   regenerated only when its sources or its text changed since the base, so a
+   Markdown-only change needs no Gateway `node_modules`.
 4. the privacy guard over `git diff <base>..HEAD`
 5. `git diff --check`
-6. `scripts/tron work ledger`, which is **advisory**: issue state is shared
-   coordination, not this commit's code, so its violations are reported but
-   never fail the run.
-7. When the selection touches the Gateway: `npm run check` (production and test
+6. When the selection touches the Gateway: `npm run check` (production and test
    support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
-8. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
+7. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
    below). A selection without the iOS lane runs it only when a fresh index
    exists; otherwise it is reported as skipped, never as passed.
+
+A failure that also reproduces on the base commit does not block landing: run the
+same step on the base, cite that run in the closing comment and file the failure as
+its own issue (charter, Validation and landing).
 
 V10 also runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file
 moved/rewrite counts to `test-results/measure/`; its counts and errors never fail verify.
@@ -134,7 +139,7 @@ lock sensitivity (plan §6.6; the maintainer's 0.10 decision). For one file it:
 
 The file is restored after every mutant, also on interrupt or SIGTERM. The
 report goes to `test-results/mutate/` and is rewritten after each mutant
-(`complete: false` until the run ends), so an interrupted run keeps its results. It measures and never gates. Stryker is deferred until a
+(`complete: false` until the run ends), so an interrupted run keeps its results. It is a milestone measurement (and a lock author's tool), never a per-slice gate. Stryker is deferred until a
 known-kill probe proves its vitest runner activates mutants with the pinned vitest.
 
 ## Verify

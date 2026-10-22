@@ -56,7 +56,7 @@ This file's lifecycle:
 | Tests | Journey catalog plus pruning. **Kernel contract tests are allowed** (real kernel, faux model); classic mocked unit tests remain banned. |
 | UI proof | Accessibility-tree snapshot **and** screenshot diff per catalogued screen state, plus interaction journeys. |
 | Tooling languages | Prune; no language migration. |
-| Tracking | Epic → Phase → Area → **Module issue with a file checklist** → Slice. A tool proves every tracked file is covered. |
+| Tracking | Epic → Phase → Area → **Module issue** → Slice. Module manifests own every tracked file, and `scripts/tron ownership` proves it (#1687 dropped the file checklists). |
 | Execution | Home dispatches workers, **at most 4 in parallel**, with **one simulator-heavy iOS job** in the epic at a time. Fresh-context review applies to risky slices. |
 | Backlog | Phase 0 triages all open issues, epics, worktrees and branches. Nothing unmerged or live is deleted without the maintainer's approval. |
 | Targets | **Stretch** (see §3). |
@@ -69,6 +69,7 @@ This file's lifecycle:
 | Maintainer decisions 2026-10-19 (set 2) | #1227 `oxlint-tsgolint`: a measured trial in one slice, kept or dropped on its numbers. #1176 ast-grep deferred to Phase 1 (#1177 stays blocked). #1178/#1185 retired. #1042 Dependabot alerts only, no automatic PRs. #825 HOME isolation hardened now. Computer use: #1201 approved; #1196/#1198 held until #1193 has numbers. #239 deferred until Watch work resumes. The feature pause still allows small leaf UI requests (e.g. #1461); anything touching hot owners waits (§4.2.9). #515 accepted without a manual handoff. #986 tested by the maintainer on the next iPhone build. #1338 applies at end of turn. Worktree cleanup approved and done (#1345). |
 | Maintainer decisions 2026-10-19 (set 3) | #399: iOS keeps accepting both `pong_timeout` and `ping_timeout`; `tron_triage.py` drops the historical `connection.admitted/.handshake/.rejected/.capacity` names, accepting that old packs lose their connection timeline. #1205: closed-lid qualification uses a real external monitor only (MagSafe, Ethernet, Apple closed-display mode). #1207 parked: no dedicated test Mac, so locked use is never prototyped on the daily Mac (Home decision, delegated by the maintainer). |
 | Mutation tool 2026-10-19 | The maintainer adopted the **scripted sampled mutation** tool from the slice 0.10 evaluation (#1465) for milestone lock sensitivity: `scripts/tron mutate`. It is seeded, sampled operator flips against the locks `verify` selects, with no dependency, and it measures, never gates. Stryker is deferred until a known-kill probe proves its vitest runner activates mutants (§6.6). |
+| Rules audit 2026-10-22 | The maintainer approved #1687: optimize the outcome goals G1–G6 (§3); size is reported, never gated. The 500-line budget reports, failing only a change that creates a production file over 800 lines; docs other than the charter (150) and root README (250) fail only above twice their budget; manifest budget exceptions are deleted. Undeclared layer pairs are reported only and imports into L0/L1 are always allowed; upward, two-way and Pi-seam stay hard. Module-issue file checklists and the ledger are dropped (manifests are the ownership record). Mutation runs are milestone measurements. Closeouts ≤ 1,500 characters, no per-slice net-lines expectation (concepts deleted are still listed). A verify failure that reproduces on base does not block landing. Golden approval shows the intended before/after beside the actual diff. Clean move-only slices need no review. The −40% size target is dropped. |
 | iOS UI framework 2026-10-19 | SwiftUI by default; UIKit only for measured hotspots, one gated slice each, after motion/interaction locks exist (§7 Phase 4). |
 | Deliverable | This plan, approved, is handed to **Home**. Home's steward commits it and creates the epic plus the Phase and Area skeleton. Scoping workers create the leaf issues (§14). |
 
@@ -121,7 +122,20 @@ These figures come from a first-pass classification.
 
 ## 3. Metrics, definitions and targets
 
-Ranked. A lower-ranked metric never justifies regressing a higher one.
+**Outcome goals (what slices optimize; maintainer, 2026-10-22, #1687).** Land correct
+changes quickly, in parallel, without regressions:
+
+| Goal | Measured as | Target |
+|---|---|---|
+| G1 Change failure | landed changes needing a fix, revert or "regression of #N" bug within 7 days | ≤ 5% of changes; 0 Stable incidents per milestone |
+| G2 Lead time | claim → landed (issue timestamps); maintainer stops | median ≤ 2 h, p90 ≤ 6 h; ≤ 1 human stop per 10 slices, only for behavior decisions |
+| G3 Verify speed and honesty | `verify --changed` wall time; runs failing for reasons outside the change | p50 ≤ 5 min, p90 ≤ 12 min (Gateway); unrelated failures ≤ 5% |
+| G4 Locality | 7-day hotspot share (top 10 files' share of commits) | ≤ 20% |
+| G5 Architecture | upward and two-way module pairs; Pi-seam violations | upward + two-way → 0 by M3/M4, shrink-only now; Pi seam 0 |
+| G6 Test confidence | sampled mutation kill on kernel and protocol lock families (non-equivalent); lock determinism under concurrent verify load | ≥ 90% at milestones; 20/20 under load |
+
+Size (M3) is reported, never gated. The M1–M4 metrics below measure toward
+these goals. Ranked: a lower-ranked metric never justifies regressing a higher one.
 
 ### M1. Confidence (precondition; slices cannot land without it)
 - **Lock coverage:** the share of catalogued capabilities (§6.3) that have at
@@ -134,12 +148,13 @@ Ranked. A lower-ranked metric never justifies regressing a higher one.
   protocol code; reported for everything else.**
 
 ### M2. Locality and conflict surface (primary objective)
-- **Layer violations:** import or reference edges against the declared
-  direction, plus directory or module cycles. **Target: 0** (Gateway and iOS),
-  enforced by ratchet.
-- **File size:** hand-written files over 500 lines. **Target: 0**, except
-  recorded exceptions in the owning manifest, each with a reason and an
-  exit condition.
+- **Layer violations:** upward module pairs and two-way module pairs (cycles).
+  **Target: 0** (Gateway and iOS), enforced by a shrink-only baseline.
+  Undeclared pairs (no `dependsOn`) are reported only, and imports into L0/L1
+  are always allowed (#1687).
+- **File size:** hand-written files over 500 lines, **reported**. A change
+  that creates a production file over 800 lines fails. Splitting an owner is
+  justified by locality and ownership, never by its line count.
 - **Hotspot share:** the share of non-merge commits in a trailing 30-day
   window that touch any of the 10 most-touched files. **Target: < 10%**
   (from 44%).
@@ -150,18 +165,11 @@ Ranked. A lower-ranked metric never justifies regressing a higher one.
   tokens read. The trend must improve each milestone.
 
 ### M3. Size
-- Hand-written lines by category (production, tests, tooling, docs).
-  **Target: ≤ 260k total (−40%)**, reported per category.
-- Each **phase** must be net-negative. **Each slice** is expected to be net ≤ 0
-  in production lines (moves count as neutral). Growth needs a one-line
-  justification (the locality gain it buys) and a named follow-up that
-  removes it. Each slice also lists the concepts it deleted (Appendix D).
-  This is closeout acceptance, not a gate.
-- Milestone targets: from M1 on, each milestone's hand-written total is at or
-  below the previous milestone's and the 434,127 baseline; M6 ≤ 260k.
-- Planning budget (a guide, not a promise): docs −70%, tests −40%,
-  production −35%, tooling −35%. Production at −35% without behavior change is
-  the riskiest number; it never outranks M1 or M2.
+- Hand-written lines by category (production, tests, tooling, docs),
+  **reported** per milestone, with net lines per milestone as a signal. There
+  is no size target, line quota or per-slice net-lines expectation.
+- Each slice lists the **concepts** it deleted: types, ports, bindings, flags,
+  duplicate paths (Appendix D).
 - Golden and fixture data is tracked separately, so adding locks does not
   fight this metric.
 
@@ -228,11 +236,12 @@ prints the delta table that every slice summarizes in its closing comment, and
    visibility).
 5. **No shims.** Replace imports atomically. No re-exports, aliases or
    fallbacks. The one deliberate seam is the Pi adapter (§5.2).
-6. **Ratchets only tighten.** Layer violations, file-size exceptions, doc
-   budgets and unowned files can only go down. `scripts/tron verify` fails a
-   slice that adds one.
-7. **Every tracked file has exactly one owner module.** Every file appears in
-   exactly one module-issue checklist. Moved files carry their audit state.
+6. **Hard structure checks.** Upward and two-way layer pairs only shrink, and
+   the Pi seam has no exception. A change may not create a production file over
+   800 lines, and a doc fails only above twice its budget. `scripts/tron verify`
+   fails a slice that breaks one. Sizes and undeclared pairs are reported only.
+7. **Every tracked file has exactly one owner module** (`scripts/tron ownership`).
+   The manifests are the ownership record; module issues carry no file checklist.
 8. **Delete with an oracle.** Removing a test or mechanism names the surviving
    behavioral oracle and shows a known-bad control failing it. "Unused by grep"
    is not proof (check dynamic registration, generated, external and runtime
@@ -246,13 +255,13 @@ prints the delta table that every slice summarizes in its closing comment, and
    continue; bug fixes in those owners announce their files in the module
    issue (or #1345) first.
 10. **Short evidence.** Restructure slice closing comments under #1345 use the
-    template in Appendix D (≤ 25 lines). Long logs go to `test-results/` or the internal workspace and
+    template in Appendix D (≤ 1,500 characters of plain prose). Long logs go to `test-results/` or the internal workspace and
     are linked, not pasted. Docs never carry history.
 11. **Resources.** At most 4 restructure workers. At most one simulator-heavy
     iOS job in the epic at a time. Clean up your own processes. Never touch
     Stable, the installed app, or another worker's tree. Never `git stash`.
 12. **Stop conditions:**
-    - a golden diff;
+    - a golden diff (in a refactor slice);
     - an unknown dynamic consumer;
     - an overlap with another live claim;
     - two diagnosed verification failures you can't explain;
@@ -458,7 +467,6 @@ than inventing a parallel framework:
   | `capabilities` | no | catalog entries (§6.3) |
   | `verify` | no | extra `scripts/tron …` commands that ownership can't imply (UITest selectors, contract scripts). Owned tests are run by their runner by default. There is no `static` set; static checks are global (§6.2) |
   | `riskClass` | no | review triggers (§8.4) |
-  | `exceptions` | no | `[{path, budget: lines\|doc, reason, exit}]` |
 
 - **Ownership:** every tracked path matches **exactly one** manifest `owns`
   entry. There is no precedence and no negation: a double claim is an error,
@@ -473,8 +481,7 @@ than inventing a parallel framework:
 - **What manifests don't copy:** npm dependencies (`package.json`), targets
   and compiler deps (`project.yml`/`Package.swift`), deploy config, or claim
   config. Those stay canonical where they are. Hand-kept file-location tables
-  in docs and the file lists in module issues become generated from manifests
-  (`scripts/tron docs modules`, `ledger --sync`).
+  in docs become generated from manifests (`scripts/tron docs modules`).
 - **Prerequisite (first, its own `tooling` commit):** every directory `sources:`
   entry in `packages/ios-app/project.yml` and `packages/mac-app/project.yml`
   excludes `**/*.module.json` and `**/README.md`. XcodeGen otherwise copies
@@ -493,7 +500,7 @@ scripts/tron verify --update-locks <module>     # lock / approved-migration slic
    - typecheck (production and test support);
    - lint;
    - layer/import ratchet (V5);
-   - size/doc-budget ratchet (V6);
+   - size and doc budgets (V6);
    - ownership completeness (every file has one manifest owner);
    - documentation links;
    - privacy guard;
@@ -513,6 +520,9 @@ scripts/tron verify --update-locks <module>     # lock / approved-migration slic
    closing comment.
    - It must contain a non-empty count of executed passing tests per runner.
    - Skipped or empty runs count as failures of evidence.
+   - A failure that also reproduces on the base commit does not block landing;
+     the closing comment cites that base run and files the failure as its own
+     issue.
 
 It is local and worker-owned. It never queues, waits on another worker, caches
 a pass or writes a receipt.
@@ -584,11 +594,14 @@ generated with `scripts/tron docs capabilities`. Starting set for scoping:
   are committed as compressed, versioned PNGs for roughly ≤ 80 key UI states.
   Slice 0.9 stores the PNGs in Git LFS (#1466; see the UI locks README). The approval
   covers the strategy only. The initial goldens and every later golden change
-  still need the maintainer's review (§14.7).
+  still need the maintainer's review (§14.7). The approval request shows the
+  intended user-visible before/after next to the actual golden diff, and lists
+  every other state that changed; an unintended change blocks.
 - **Mac:** wizard and menu a11y snapshots use the same pattern.
 - **Known-bad:** each lock records, at creation, a temporary injected change
   that makes it fail. The change is reverted and the evidence kept in the issue.
-- **Sensitivity:** at each milestone, sample mutations for kernel, protocol and
+- **Sensitivity:** a milestone measurement, never a per-slice gate. At each
+  milestone, sample mutations for kernel, protocol and
   each touched module. TS uses `scripts/tron mutate`: seeded, sampled operator
   flips run against the locks `verify` selects (maintainer, 2026-10-19, #1465).
   Stryker is deferred until a known-kill probe proves its vitest runner works.
@@ -604,15 +617,13 @@ generated with `scripts/tron docs capabilities`. Starting set for scoping:
     symbol-scan fallback. Owned Swift files the index does not cover are
     ratcheted gaps, not checked files.
   - Mac: the same reader once Mac builds carry a build stamp.
-  - The baseline file lists today's violating module pairs and unindexed
-    files. It can only shrink, and a new pair or unindexed file fails; file-edge
-    counts are reported, never ratcheted (maintainer, #1489).
-- **V6 Budget checker.** File-size (500) and doc budgets, with the
-  per-manifest exception list as a ratchet.
-- **V8 Ledger.** `scripts/tron work ledger` compares `git ls-files` with
-  manifest ownership and with module-issue checklists (via GitHub). It reports
-  unowned, unchecklisted, double-claimed and unaudited files, and keeps audit
-  state across renames with `--sync <module-issue>`.
+  - The baseline file lists today's upward and two-way module pairs and
+    unindexed files. It can only shrink, and a new one fails; file-edge counts
+    are reported, never ratcheted (maintainer, #1489). Undeclared pairs are
+    reported only, and an edge into L0/L1 is never a violation (#1687).
+- **V6 Budget checker.** Reports files over 500 lines and docs over budget.
+  It fails a change that creates a production file over 800 lines, or a doc
+  above twice its budget (#1687).
 - **V9 Metrics.** See §3.
 - **V10 Moved-lines report.** `git diff --color-moved` with indentation-tolerant
   matching, summarized as moved / changed-in-move / new / deleted lines per
@@ -666,7 +677,7 @@ No Stable handoff is needed, because there is no runtime change.
 - **M1 exit:** docs −50% or more; hotspot list free of docs; a Stable handoff
   if any shipped code changed.
 
-### Phase 2: Gateway kernel → **M2** (highest risk; independent review on every slice)
+### Phase 2: Gateway kernel → **M2** (highest risk; review per §8.4)
 1. **K-0 design** (≤ 300 lines). Covers:
    - kernel primitive list (K1–K8) and the port interfaces;
    - the module host contract and module descriptor;
@@ -686,7 +697,7 @@ No Stable handoff is needed, because there is no runtime change.
 **M2 exit:**
 - the kernel imports no module;
 - zero layer violations inside `kernel/`;
-- no kernel file over 500 lines;
+- kernel file sizes reported;
 - `RuntimeSlot` and `RuntimeRegistry` are gone as god objects;
 - full locks pass;
 - milestone mutation sensitivity is reported;
@@ -700,11 +711,11 @@ No Stable handoff is needed, because there is no runtime change.
 - Reduce `GatewayServer` to transport and `gateway-main` to the module list.
 - Split large tests by journey along with their modules (for example the
   registry test's 13k lines).
-- **M3 exit:** zero Gateway layer violations; zero Gateway files over 500 lines
-  (or recorded exceptions); registration ≤ 1 line per module;
+- **M3 exit:** zero Gateway upward or two-way pairs; registration ≤ 1 line per
+  module; Gateway file sizes reported;
   **Stable handoff.**
 
-### Phase 4: iOS → **M4** (UI-risk; independent review for State/UI slices)
+### Phase 4: iOS → **M4** (UI-risk; review per §8.4)
 - Reduce `AppModel` to composition plus `Kernel/`.
 - Move features into `Features/<Name>/{State,UI}`.
 - Split `ChatView`, `SessionPresentationStore`, `ComposerDraftCoordinator` and
@@ -729,8 +740,8 @@ No Stable handoff is needed, because there is no runtime change.
   **Prerequisite:** before any transcript, composer or list port, add motion
   and interaction locks (scroll position, keyboard, animation timing); the
   current locks are static.
-- **M4 exit:** zero reference violations; no file over 500 lines (or
-  exceptions); all UI locks identical; **device install plus Stable handoff
+- **M4 exit:** zero upward or two-way reference pairs; file sizes reported;
+  all UI locks identical; **device install plus Stable handoff
   plus 1 day of use.**
 
 ### Phase 5: Mac, relay, tooling, work tooling, skills → **M5**
@@ -749,7 +760,7 @@ No Stable handoff is needed, because there is no runtime change.
   kernel, modules and transport, plus the remaining Swift module promotion, each
   with measured build cost.
 - **Epic exit:** every §3 target is met or carries an explicit exception the
-  maintainer approves; the ledger is 100% `done`; final Stable handoff.
+  maintainer approves; final Stable handoff.
 
 ---
 
@@ -771,36 +782,35 @@ No Stable handoff is needed, because there is no runtime change.
 - Move complete cohesive operations: helpers, local types and invariants
   together. Keep admission, serialization, cancellation and cleanup with their
   authority.
-- Update the manifest (`owns`, `dependsOn`), README, tests and the checklist
-  path in the same slice.
+- Update the manifest (`owns`, `dependsOn`), README and tests in the same slice.
 - If you touch behavior without a lock, stop: the next slice is the lock slice.
 
 ### 8.3 Verify and land
 1. `scripts/tron verify --changed`. Goldens must be unchanged.
 2. Every `move` commit needs a clean moved-lines report.
 3. Every deletion needs its surviving oracle plus known-bad evidence.
-4. `scripts/tron metrics --compare <base>` and `scripts/tron measure <base>`
-   for the net-lines line; list the concepts deleted (§3 M3, Appendix D).
-5. Review if the slice is risk-class (§8.4).
+4. List the concepts deleted (§3 M3, Appendix D); `scripts/tron measure <base>`
+   for a move's moved-lines line.
+5. Review if the slice needs it (§8.4).
 6. `git fetch && git rebase origin/main`. Rerun **only** verify sets
    invalidated by the integrated diff. Kernel or contract changes from others
    mean `verify --all`.
 7. `git push origin HEAD:main`. Never force.
-8. Close with the evidence template (Appendix D). Update the module checklist
-   states (`ledger --sync`).
+8. Close with the evidence template (Appendix D).
 
 ### 8.4 Risk classes (fresh-context, read-only reviewer before landing)
-Review is required for slices that touch:
-- the kernel;
+Review is required for slices that add or change:
+- tooling, harnesses or checkers;
+- locks;
+- kernel semantics or lifecycle (admission, cancellation, shutdown, receipts);
 - contracts or the wire;
 - persistence or migrations;
 - security, auth or trust;
-- concurrency or lifecycle (admission, cancellation, shutdown, receipts);
-- iOS State or UI;
+- iOS State or UI behavior;
 - the Mac installer or launcher.
 
-A pure `move` with a clean moved-lines report and passing locks in a non-risk
-module self-lands.
+A clean move-only slice (a clean moved-lines report, passing locks, no
+semantic edit) self-lands without review, in any module (#1687).
 
 The reviewer checks:
 - the moved-lines report;
@@ -827,7 +837,7 @@ That is enough room, so no issue per file is needed.
 [epic] Multi-agent-native restructure (master)            level 1
  ├─ [epic] Phase N: <name>                                 level 2
  │   ├─ [epic] Area: <package/layer>  (e.g. Gateway kernel) level 3
- │   │   ├─ Module: <module id>   (file checklist)         level 4  kind:maintenance
+ │   │   ├─ Module: <module id>                             level 4  kind:maintenance
  │   │   │   ├─ Slice: <type> <what>                       level 5  claimable
  │   │   │   │   └─ (optional) sub-slice / follow-up       level 6
 ```
@@ -841,30 +851,12 @@ That is enough room, so no issue per file is needed.
 - Dependencies use `work issue block`, for coordination only (never a landing
   lock).
 
-### 9.2 Module issue = the audit ledger
-- The body holds the module's purpose, its target location, its locks, and a
-  **checklist of every file it owns**:
-  `- [ ] `path` — state`.
-- States:
-
-  | State | Meaning |
-  |---|---|
-  | `unreviewed` | not yet read |
-  | `keep` | stays as is |
-  | `delete` | to be removed |
-  | `simplify` | to be reduced in place |
-  | `move→<dest>` | to be relocated |
-  | `done` | final location, within budget, fully reviewed |
-
-- "Fully reviewed" means substantive types, functions, state, branches,
-  failure paths, callers and cross-file effects were inspected (the code-health
-  skill's ledger standard).
-- `scripts/tron work ledger` proves:
-  - every `git ls-files` path is in exactly one module issue;
-  - every module issue lists only real files;
-  - state rolls up per module, area, phase and epic.
-- Issue bodies cap at 65,536 characters. Modules with more than ~350 files
-  split into sub-modules.
+### 9.2 Module issue
+- The body holds the module's purpose, its target location, its locks, its
+  edges and its slices. It carries no file checklist: the manifest's `owns`
+  is the file list, and `scripts/tron ownership` proves every tracked path has
+  exactly one owner (#1687).
+- Issue bodies cap at 65,536 characters.
 
 ### 9.3 What the master epic body holds
 It stays short and current:
@@ -885,8 +877,8 @@ No running history; history lives in child issues.
 A scoping worker owns one **Area** or **Module** issue and produces slices.
 Other workers then execute them without re-deriving context.
 
-1. **Inventory.** Run `scripts/tron work ledger --module <m>` to get the owned
-   files. Read each one fully, and record states in the checklist.
+1. **Inventory.** Read the module's manifest (`owns`) for its files, and read
+   each one fully.
 2. **Trace operations, not folders.** For each capability the module serves,
    follow one real operation:
    - entrypoint → admission → state owner → observable result → retirement;
@@ -913,8 +905,8 @@ Other workers then execute them without re-deriving context.
    Record `blocks` links only for true ordering.
 6. **File slices** as sub-issues using Appendix B. Each is self-contained: a
    worker should not need to read the scoping thread.
-7. **Close the scoping slice** once every file has a state other than
-   `unreviewed` and every non-`keep` state has a slice. List the
+7. **Close the scoping slice** once every file that must move, shrink or go
+   has a slice. List the
    cross-boundary questions you couldn't resolve as explicit issues (never as
    prose buried in a comment).
 
@@ -926,15 +918,14 @@ Other workers then execute them without re-deriving context.
 |---|---|
 | A hidden behavior change in a "mechanical" TS move. Examples: module evaluation order or top-level side effects; `instanceof` across duplicated classes; changed `this` binding; async ordering when a helper gains an `await`. | Moved-lines report; no top-level side effects in moved modules; locks; review for kernel/lifecycle |
 | Swift moves change `private`/`fileprivate` reach, actor isolation (`@MainActor` inference), or initialization order. SwiftUI extraction changes `@State` scoping, view identity or animation. | UI locks (a11y plus screenshot) plus interaction journeys; UI-class review; a rule that extracting a view must not change the hierarchy or state ownership in a `move` commit |
-| Locks with blind spots. | Known-bad at creation, milestone mutation sensitivity, real-use Stable handoffs, catalog completeness via the ledger |
+| Locks with blind spots. | Known-bad at creation, milestone mutation sensitivity, real-use Stable handoffs |
 | Flaky locks erode trust. | 5/5 determinism before adoption; one owned normalization; a fixed clock and seed; flakes are bugs fixed at the lock, never retried |
 | Conflicts with ~556 commits/week. | Small slices, announcements, docs decomposed first (biggest hotspot), feature pause in hot owners, fast landing |
 | Kernel design is wrong. | K-0 review by the maintainer; a pilot module before mass migration; ports can change until M2 |
 | The selector misses dynamic consumers (the #1259 lesson). | Declared `dynamicEdges`; unknown means all; kernel/contract/platform changes mean all |
-| Process bloat returns: long evidence, ceremony. | ≤ 25-line closing template; charter ≤ 150 lines; no evidence in docs; metrics generated |
+| Process bloat returns: long evidence, ceremony. | ≤ 1,500-character closing template; charter ≤ 150 lines; no evidence in docs; metrics generated; size reported, never gated |
 | Host load or swapping. | ≤ 4 workers; one heavy iOS job; owned cleanup; measure swap before heavy runs |
 | A Pi SDK upgrade (#1025) lands mid-epic. | Schedule it before Phase 2 starts or after the K8 seam lands; never during kernel extraction |
-| −40% LOC pressure tempts unsafe deletion. | Ranking: size never outranks confidence or locality; every deletion needs an oracle |
 
 ---
 
@@ -949,7 +940,7 @@ Other workers then execute them without re-deriving context.
 | Kernel ports and module descriptor | K-0 | Maintainer review |
 | Hosted fixtures as a separate target | Phase 1/4 | Only if the build measurement is neutral or better |
 | Which feature epics pause (e.g. #1192 computer use, #1156 Swift apps) | 0.2 | Decided 2026-10-19: new features overlapping hot owners pause; bug fixes, disjoint leaf work and small leaf UI requests continue |
-| Work-tooling simplification scope | Phase 5 | Keep start/land/close/ledger/dashboard; re-evaluate release/handoff/recover against actual use |
+| Work-tooling simplification scope | Phase 5 | Keep start/land/close/dashboard; re-evaluate release/handoff/recover against actual use |
 
 ---
 
@@ -967,7 +958,7 @@ Other workers then execute them without re-deriving context.
   It never assigns merge turns or retries pushes for workers.
 - **Scoping workers:** own Area and Module issues (§10).
 - **Slice workers:** own one slice (§8).
-- **Reviewers:** fresh context, read-only, for risk-class slices (§8.4).
+- **Reviewers:** fresh context, read-only, for slices that need review (§8.4).
 - **Maintainer:** approves the charter (0.1), deletions of unmerged or live
   work (0.2), the K-0 kernel design, migrations, and exceptions to the
   targets. Performs the milestone Stable/iPhone handoffs and uses each for
@@ -1013,7 +1004,7 @@ that has read §0–§13 and this section knows what to do next.
 ### 14.2 Standing roles Home dispatches
 | Role | Task ID pattern | Lifetime | Does |
 |---|---|---|---|
-| **Steward** | `rs-steward-<n>` | one bounded session per batch of issue work | All GitHub writes for the epic: create, edit, parent, labels, close, comment. Epic body refresh. Metrics snapshot. Ledger sync. Supersession of old epics. Census. Primary checkout ff-sync. Never edits product code. |
+| **Steward** | `rs-steward-<n>` | one bounded session per batch of issue work | All GitHub writes for the epic: create, edit, parent, labels, close, comment. Epic body refresh. Metrics snapshot. Supersession of old epics. Census. Primary checkout ff-sync. Never edits product code. |
 | **Census** | `rs-census-<date>` | one-shot, read-only | Inventory of live and in-flight work (§14.4) |
 | **Scoper** | `rs-scope-<module>` | one Module or Area issue | §10 playbook; files slice issues through `work issue create` (it may do its own issue writes for its module's subtree) |
 | **Slice worker** | `rs-<issue>` | one slice issue | §8 protocol; lands on `main` |
@@ -1130,7 +1121,6 @@ writes an audit. Reads may use `gh`.
 | Order | `work issue block <later> --blocked-by <earlier>` (coordination only) |
 | Supersede an epic | 1) `work issue edit <old> --body-file F`: prepend "Superseded by #E — <one line>" and keep the remaining-scope text. 2) For each open child: `work issue parent <child> --epic <new parent> --replace-parent` (or close as `not_planned` with a pointer if obsolete). 3) `work issue close <old> --reason not_planned --comment-file F` (epic closure requires zero open children). |
 | Update the master epic body | Regenerate it from the §9.3 template with fresh `scripts/tron metrics` output and the dashboard. Replace the whole body (`work issue edit`). No appended history. |
-| Ledger sync | `scripts/tron work ledger --sync <module-issue>` after each landed slice in that module. Slice workers do this themselves; the steward runs a full `ledger` check weekly and at milestones. |
 | Comment | `work comment <n> --body-file F` |
 
 A nonzero GraphQL exit is **uncertain**, not failed. Inspect remote state
@@ -1141,9 +1131,9 @@ before retrying, and never replay blindly (work README).
    `needsAttention` first.
 2. For each finished slice task, check its report against the Appendix D
    template:
-   - verify output present;
+   - verify output present (a base-reproduced failure cites its base run);
    - goldens unchanged;
-   - metrics delta;
+   - concepts deleted;
    - landed SHA.
 
    If anything is missing, `resume` with a one-line request. Don't accept
@@ -1154,11 +1144,11 @@ before retrying, and never replay blindly (work README).
    claim (`work status --area`).
    - Prefer, in order: locks, then hotspot-reducing slices (docs, hot owners),
      then deletions, then moves, then simplifications.
-   - A slice in a risk class gets a reviewer task as soon as its worker reports
+   - A slice that needs review (§8.4) gets a reviewer task as soon as its worker reports
      a branch head ready for review. The worker lands only after the review
      reports no blocking defect (the worker owns fixes).
 5. **Every ~10 landed slices or weekly:** dispatch a steward refresh (epic
-   body, metrics, ledger).
+   body, metrics).
 6. **Stuck work:**
    - No check-in for 90 minutes on a running slice: `task status`, then one
      `steer` asking for the current step.
@@ -1172,7 +1162,8 @@ before retrying, and never replay blindly (work README).
 - Charter 0.1 approval.
 - The K-0 kernel design.
 - Each migration slice.
-- Any golden change.
+- Any golden change, asked with the intended before/after beside the actual
+  diff (§6.6).
 - Releasing another session's claim.
 - Deleting any branch or worktree with unmerged or uncertain work.
 - Pausing or resuming feature epics.
@@ -1244,13 +1235,14 @@ M<k> <name> — <state>. Next: <one line>.
 ## Metrics (scripts/tron metrics, <sha> vs baseline dc289f47e)
 | Metric | Baseline | Now | Target |
 |---|---|---|---|
-| Hand-written LOC | 434k | … | ≤260k |
-| Files >500 lines | 133 | … | 0 (+exceptions) |
-| Layer violations / dir cycles | …/23 | … | 0/0 |
-| Hotspot share (30d) | 44% | … | <10% |
-| Lock coverage / determinism | 0% | … | 100% / 5-of-5 |
-| Slice verify p50 | — | … | <5 min |
-| Ledger done | 0/1153 | … | 100% |
+| G1 Change failure (7 days) | — | … | ≤5% |
+| G2 Lead time median / p90 | — | … | ≤2 h / ≤6 h |
+| G3 Slice verify p50 / unrelated failures | — | … | ≤5 min / ≤5% |
+| G4 Hotspot share (7d) | 51% | … | ≤20% |
+| G5 Upward + two-way pairs (Gateway / iOS) | 49 / 20 | … | 0 / 0 |
+| G6 Mutation kill (kernel, protocol) | — | … | ≥90% |
+| Hand-written LOC (reported) | 434k | … | — |
+| Files >500 lines (reported) | 133 | … | — |
 
 ## Active
 <dashboard rows: slice issue · worker task · owner module>
@@ -1270,10 +1262,6 @@ Parent: <area epic>. Module: `<id>` · layer L<k> · target `<dest path>`
 Owns capabilities: <list> · Risk class: <none|kernel|…>
 Locks: <existing / missing → slice #…>
 Manifest: `<manifest path (format per §6.1)>`
-
-## Files (ledger; states: unreviewed|keep|delete|simplify|move→<dest>|done)
-- [ ] `path/a.ts` — unreviewed
-- [ ] `path/b.ts` — unreviewed
 
 ## Edges
 dependsOn: <modules/ports> · dynamicEdges: <registration, spawn, fs, generated>
@@ -1296,8 +1284,8 @@ Locks/journeys: `<verify sets>`; known-bad: <what must fail if broken>.
 For delete: surviving oracle `<test>` + known-bad.
 
 ## Done when
-Goldens unchanged; `verify --changed` green with non-empty counts; moved-lines clean (moves);
-metrics delta recorded; module checklist synced; owning README/manifest updated.
+Goldens unchanged; `verify --changed` green with non-empty counts (or base-reproduced, cited);
+moved-lines clean (moves); concepts deleted listed; owning README/manifest updated.
 
 ## Out of scope / stop if
 <adjacent owners, protected paths, any golden diff>
@@ -1309,19 +1297,18 @@ metrics delta recorded; module checklist synced; owning README/manifest updated.
 Files: `<exact list>` · Locks to run: `<sets>` · Expected land: <hours>
 ```
 
-## Appendix D. Closing evidence (≤ 25 lines; `work issue close --comment-file`)
+## Appendix D. Closing evidence (≤ 1,500 characters; `work issue close --comment-file`)
+Plain prose with ordinary spacing; everything else is linked.
 ```markdown
 **Landed** <sha> on main (base <sha>). Type <t>. Review: <none|#… no blocking defects>.
-Change: <2–4 lines: what moved/was deleted/simplified, where>.
-Verify: `scripts/tron verify --changed` → <runner: passed/total> … ; goldens unchanged.
+Change: <what moved/was deleted/simplified, where>.
+Verify: `scripts/tron verify --changed` → <runner: passed/total>; goldens unchanged. A failure
+that also fails on base: <step>, base run <sha/report>, filed #<…>.
 Known-bad: <mutation> → failed as expected (restored).        # lock/delete/semantic slices
 Moved-lines: <moved N / edited-in-move M (declared: renames/imports)>.  # moves
-Net lines: prod <Δ> (moved <N>, neutral); tests/locks <Δ>; fixtures/goldens <Δ>; generated (data, excluded) <Δ>. Prod > 0: <why> → follow-up #<…>.
-Deleted: <files, modules, types, exports, settings keys, routes, flags, shims, duplicate paths | none: why>.
-Metrics Δ: docs <…>; files>500 <…>; violations <…>; hotspot <…>.
-Ledger: module #<m> files <…> → done.
+Deleted: <concepts: types, ports, bindings, flags, shims, duplicate paths | none: why>.
 Residual: <unknowns, follow-up issues #…, or "none">.
-Artifacts: test-results/verify/<sha>.json, test-results/metrics/<sha>.json
+Artifacts: test-results/verify/<sha>.json
 ```
 
 ## Appendix E. Dispatch brief templates (Home → `delegate` intent)
@@ -1352,11 +1339,11 @@ supersede old epics or touch any other issue yet.
 
 **E2 Census** — §14.4. Read-only; post the table on #E; report proposed dispositions.
 
-**E3 Steward (supersession / refresh / ledger)** — §14.5 recipe named in the brief, plus
+**E3 Steward (supersession / refresh)** — §14.5 recipe named in the brief, plus
 the maintainer's decisions verbatim. Never edit product code.
 
-**E4 Scoper** — §10 for module/area #<n>; create slice issues per Appendix B; keep the
-module checklist complete; report the slice list with order and risk classes.
+**E4 Scoper** — §10 for module/area #<n>; create slice issues per Appendix B; report the
+slice list with order and risk classes.
 
 **E5 Slice worker** — §8 for slice #<n>. If locks are missing, stop and report that a
 lock slice is needed (don't write behavior changes without locks).

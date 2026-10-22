@@ -52,7 +52,6 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   | `capabilities` | no | non-empty strings (the catalog does not exist yet) |
   | `verify` | no | `scripts/tron …` commands |
   | `riskClass` | no | `kernel`, `contracts`, `persistence`, `security`, `lifecycle`, `ios-ui`, `mac-installer` |
-  | `exceptions` | no | `{path, budget, reason, exit}`: `path` is a file this module owns (relative), `budget` is `lines` or `doc`, and `reason` and `exit` are non-empty |
 
   Lists must not repeat an entry.
 

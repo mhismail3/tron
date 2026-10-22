@@ -100,9 +100,9 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 Workers run relevant tests directly. No hosted check, gate, queue, admission, receipt,
 post-merge checker or auto-revert; none without measured benefit and maintainer approval.
 
-1. Commit in your own worktree (`git config rerere.enabled true`); `git fetch origin &&
-   git rebase origin/main` (or merge); run `scripts/tron verify --changed`: it selects only
-   the checks the change can break ([tools/verify](tools/verify/README.md)), so never whole suites.
+1. Commit in your own worktree (`git config rerere.enabled true`); `git fetch origin && git
+   rebase origin/main`; run `scripts/tron verify --changed`, only what the change can break
+   ([tools/verify](tools/verify/README.md)); a failure also on base never blocks (cite that run).
 2. `git push origin HEAD:main`; on non-fast-forward repeat step 1, rerunning tests only if
    integration changed their dependencies. Never force-push main.
 3. Close the issue with the change, actual commands and results, and residual risk;
@@ -125,26 +125,26 @@ post-merge checker or auto-revert; none without measured benefit and maintainer 
 
 ## Restructure slices (while epic #1345 is open)
 
-- [Plan](docs/restructure/plan.md) §4.2/§8 govern. One slice = one issue, worktree and
-  owner module, files announced in its module issue first; one change type per commit,
-  never move and change together.
-- **Lock before touch:** refactors need the module's behavior locks passing on base;
-  every new or changed golden needs maintainer review; `verify --changed` is mandatory.
-  **Ratchets only tighten** (layers, files > 500 lines, doc budgets, unowned files).
+- [Plan](docs/restructure/plan.md) §4.2/§8 govern, aiming at its goals G1–G6 (§3). One slice =
+  one issue, worktree and owner module, files announced in its module issue first; one
+  change type per commit, never move and change together.
+- **Lock before touch:** refactors need the module's locks passing on base; a golden change needs
+  maintainer review of the intended before/after beside the actual diff. **Hard checks:** upward,
+  two-way and Pi-seam pairs only shrink; one owner per file; no new production file > 800 lines.
 - **Feature pause for every worker:** no new features in `RuntimeSlot`, `RuntimeRegistry`,
   `GatewayService`, `GatewayServer`, `gateway-main`, `protocol/types.ts`, `projection.ts`,
   `AppModel`, `SessionPresentationStore`, `ChatView`, `GatewayClient` until their target
   module exists. Bug fixes and disjoint leaf work continue; bug fixes in those owners
   announce their files in the module issue (or #1345) first.
-- Risk-class slices (plan §8.4) get a fresh read-only review before landing; the worker
-  fixes defects. Slice closing evidence ≤ 25 lines (plan App. D). At most 4 restructure
-  workers + 1 steward, one simulator-heavy job. Stop on any plan §4.2 stop condition.
+- Fresh read-only review before landing for new tooling, locks and kernel semantics, not
+  clean moves (plan §8.4); the worker fixes defects. Closing evidence ≤ 1,500 characters
+  (App. D). ≤ 4 restructure workers + 1 steward, one simulator-heavy job; stop on plan §4.2.
 
 ## Documentation
 
 - Owners: `README.md` (≤ 250 lines), `packages/gateway/README.md`,
   `packages/ios-app/docs/`, `packages/mac-app/docs/`, repo runbooks `docs/development.md`
   and `scripts/tron --help`, `tools/work/README.md`, skills only in `.agents/skills/`.
-- Docs state current behavior: no history, evidence or audit ledgers; indexes are
-  generated; module READMEs ≤ 150 lines and this charter ≤ 150. [check:
+- Docs state current behavior: no history, evidence or audit ledgers; indexes are generated;
+  this charter ≤ 150 lines, other docs ≤ 2× budget. [check: `scripts/tron budgets`,
   `scripts/check-documentation-policy.py`, `scripts/check-agent-policy.sh`]

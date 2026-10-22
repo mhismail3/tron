@@ -210,7 +210,8 @@ Store and wire locks run in the parallel pass: `npx vitest run .lock.integration
 
 `TRON_UPDATE_LOCKS` names the modules (comma-separated, or `all`) whose goldens
 a run may rewrite. Only an approved behavior change or migration rewrites a
-golden, and the change lists every hunk; a refactor never does.
+golden; the approval request shows the intended before/after next to the actual
+diff and lists every hunk. A refactor never rewrites one.
 
 Event shapes leave out admission-window state (`pendingPrompt`,
 `activeToolSegmentId`, a new session's not-yet-persisted context notice), and

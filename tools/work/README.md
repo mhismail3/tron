@@ -182,49 +182,6 @@ step required to close an issue. Claim metadata is never a check receipt.
   byte-preserved history, explicit recovery after fixture-owner repair, overlapping
   linked-worktree calls with reverse completion, and near-capacity reservation.
 
-## Ledger
-
-`scripts/tron work ledger` is the restructure audit ledger ([plan §9.2](../../docs/restructure/plan.md#92-module-issue-the-audit-ledger)).
-It reads Git-tracked paths and their owners from `tools/ownership` (the one ownership
-authority) and the module issues on GitHub: open or closed issues labeled
-`restructure` whose body names `Module: \`<id>\``. Issues closed as not planned or
-duplicate are retired. It reports, and never gates:
-- ownership violations, unissued modules, and module issues that are duplicates, have
-  no manifest or no Area parent;
-- checklist entries that are stale (not tracked), owned by another module, listed
-  twice or malformed; and owned files missing from their module's checklist;
-- states (`unreviewed|keep|delete|simplify|move→<dest>|done`) rolled up per area,
-  phase and epic.
-
-Exit 0 means every path is checklisted exactly once; 1 means violations. 3 means
-GitHub could not be read: the checklists were **not** checked, which is never
-reported as clean. `--module <id>` prints a module's files without GitHub.
-
-`--create <id> --epic <area>` files the module issue (Appendix B body, every file
-`unreviewed`, labeled `restructure` at creation) unless one exists, then links it
-under the Area. It is safe to re-run after an uncertain or partial failure.
-`--sync <issue>` regenerates that issue's `## Files` checklist from the committed
-manifests at `HEAD` and records the revision. It needs a committed index and clean
-ownership, and re-reads the issue just before writing, refusing a concurrent edit.
-- States are kept and follow Git renames (`diff -B -M`) since the recorded
-  revision. This includes a path whose state another module issue holds, or a
-  file that changed owner. A brand-new file never inherits a stale listing.
-- New files are `unreviewed`; sync never marks a file audited. Scopers change
-  states in the issue only with review evidence.
-- An entry that moved to another module is dropped only after that module's
-  issue lists it (sync it first), so sync order cannot lose state.
-- An audited entry whose content vanished without a pairing Git can see is
-  refused, not dropped. This covers a heavy rewrite during a move and a
-  replacement below Git's 400-byte break size. Record its state on the new path
-  by hand, set the entry to `delete` or `unreviewed`, and re-run. Only
-  `unreviewed` or `delete` entries are dropped silently, and they are still named.
-- Issues retired as not planned or duplicate are ignored entirely, including
-  their states.
-
-`scripts/tron test tooling scripts/test-work-ledger.py` runs these cases through
-the real CLI and Git with a process-level `gh` fixture. Outputs are kept in
-`test-results/work-ledger/`.
-
 ## Build and installation
 
 Mac Replace chooses fetched `origin/main`, not a last-passed-main receipt. If

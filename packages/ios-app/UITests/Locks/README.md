@@ -79,7 +79,9 @@ scripts/tron-ios-test build   # goldens are source: rebuild before comparing
 
 A missing golden fails; it is never recorded silently. A changed text golden
 is a reviewable `git diff`. The maintainer reviews initial and changed goldens
-(plan §14.7).
+(plan §14.7): the request shows the intended before/after of the user-visible
+change next to the actual golden diff, and lists every other state that changed;
+an unintended change blocks.
 
 ## Golden storage
 

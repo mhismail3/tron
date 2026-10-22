@@ -11,7 +11,7 @@ scripts/tron docs modules [<path>]   # module map, optionally only manifests und
 scripts/tron docs signals            # Signals rows of every module README
 scripts/tron docs rpc                # Gateway RPC methods
 scripts/tron docs settings           # settings keys and record subjects
-scripts/tron docs check              # exit 1 when a generated block in tracked Markdown is stale
+scripts/tron docs check [--base <ref>]  # exit 1 when a generated block in tracked Markdown is stale
 scripts/tron docs update             # rewrite stale generated blocks
 ```
 
@@ -42,7 +42,12 @@ generator's arguments:
 
 `check` regenerates every block in tracked Markdown and fails, naming the file
 and generator, when one differs, has no end marker or names an unknown
-generator. `update` rewrites the stale ones, and never a file with an unclosed block. Nothing runs these automatically:
+generator. With `--base <ref>` (as `verify` runs it), a `settings` block is
+regenerated only when one of its sources (Gateway `src/**/*.ts`, `package.json`,
+`package-lock.json`, `tools/docs/`) or the block's own text changed since `<ref>`:
+otherwise regenerating cannot differ, and the Gateway's `node_modules` is not
+needed. A missing `node_modules` is named in one line. `update` rewrites the stale
+ones, and never a file with an unclosed block. Nothing runs these automatically:
 a slice that embeds a block runs `check`. An embedded index makes its doc an
 edit point for every change to the source, so embed only where readers need
 the table in place.

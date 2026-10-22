@@ -1,6 +1,6 @@
 # K-0: Gateway kernel design
 
-Phase 2 step 1 of [the restructure plan](plan.md#phase-2-gateway-kernel-m2-highest-risk-independent-review-on-every-slice)
+Phase 2 step 1 of [the restructure plan](plan.md#phase-2-gateway-kernel-m2-highest-risk-review-per-84)
 (issue #1524). It fixes the kernel ports, the module host contract, the Pi seam and the
 extraction order. **Approved by the maintainer on 2026-10-20 with decisions D1–D7 (§10).**
 References are `file:line` at base `096b35f8a`, relative to the Gateway's `src/`. Invariants

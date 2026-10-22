@@ -12,8 +12,8 @@ scripts/tron layers ios --update    # remove fixed entries (or write the first b
 scripts/tron layers --base <ref>    # bound the baseline by <ref>'s (default origin/main)
 ```
 
-Exit 0: no violation beyond the baseline. Exit 1: problems, listed one per line.
-Exit 2: usage error, ownership violations, an unowned graph file (`git add` and
+Exit 0: no upward, two-way or Pi-seam violation beyond the baseline. Exit 1:
+problems, listed one per line. Exit 2: usage error, ownership violations, an unowned graph file (`git add` and
 own it), a missing compiler or Xcode library, or stale iOS evidence. None of
 these is ever reported as clean.
 
@@ -59,10 +59,15 @@ compiler resolved them.
 ## Rules
 
 For each pair of distinct modules A → B with at least one file edge:
-- **upward**: B's layer number is higher than A's;
-- **undeclared**: B is not in A's `dependsOn`. Declaring a dependency never
-  legalizes an upward edge;
-- **two-way**: B also imports A (recorded once per pair).
+- **upward** (hard): B's layer number is higher than A's. Declaring a dependency
+  never legalizes it;
+- **two-way** (hard): B also imports A (recorded once per pair), so a cycle fails
+  even inside one layer;
+- **undeclared** (reported only): B is not in A's `dependsOn`. It is counted in the
+  summary and never ratcheted or failed, until modules declare their dependencies.
+
+An edge into an L0 (platform) or L1 (contracts) module is never upward or
+undeclared: every module may import them. A cycle through one is still two-way.
 
 **Pi seam** (Gateway, decision D2 of [K-0](../../docs/restructure/k0-kernel.md#4-k8-pi-seam)):
 a production file not owned by `gateway/pi` (`src/kernel/pi/`) must neither import a
@@ -76,8 +81,10 @@ code inside an already-violating pair never fails. Edge counts are reported
 
 ## Baseline
 
-`packages/<package>/layer-baseline.json` lists today's violating pair rules
-(`violations`) and, for iOS, each module's unindexed file count (`unindexed`).
+`packages/<package>/layer-baseline.json` lists today's upward and two-way pair
+rules (`violations`) and, for iOS, each module's unindexed file count
+(`unindexed`). An `undeclared` entry left in a base revision's baseline bounds
+nothing.
 It only shrinks:
 - a pair rule missing from the baseline, or an unindexed count above it, fails;
 - a rule fixed or a count reduced fails until `--update` tightens the baseline;
@@ -87,12 +94,9 @@ It only shrinks:
   committed increase is caught. The base must exist (exit 2 otherwise), and a
   deleted baseline cannot be rebuilt by `--update` while the base has one.
 
-The first baselines record the as-is graphs. No manifest declares `dependsOn`
-yet; scopers declare real dependencies and the baselines shrink with each slice.
-- Gateway (#1457): 35 upward, 206 undeclared and 30 two-way module pairs from
-  1,094 file edges.
-- iOS (#1459, #1483): 7 upward, 69 undeclared and 13 two-way module pairs from
-  2,870 file edges, plus the 18 unindexed files.
+Today's baselines: Gateway 23 upward and 26 two-way pairs; iOS 7 upward and 13
+two-way pairs plus the 18 unindexed files. They shrink with each slice that
+removes one.
 
 ## Verify
 
@@ -103,8 +107,9 @@ real identity script. It covers:
 - declared, type-only and dynamic TypeScript edges;
 - the Pi seam: type-only and value imports and a resolution string outside it fail,
   its own re-exports pass;
-- upward, re-export and two-way mutations in both languages, and a move-only
-  split inside a baselined pair, which passes;
+- upward, re-export, two-way and same-layer cycle mutations, which fail; undeclared
+  downward pairs and imports into L0/L1, which pass; and a move-only split inside a
+  baselined pair, which passes;
 - units of renamed files, and a new unindexed file;
 - stale, dirty and missing-store refusals;
 - baseline shrink-only rules and error exits. Output is kept in
