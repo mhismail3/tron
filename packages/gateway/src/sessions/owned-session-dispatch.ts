@@ -1,11 +1,20 @@
-import type { RuntimeRegistry } from "./runtime-registry.js";
-import type { RuntimeSlot } from "./runtime-slot.js";
 import type { HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
 
 /** Internal runaway ceiling for callers that explicitly opt into deadline ownership. */
 export const OWNED_OPERATION_DEADLINE_MS = 24 * 60 * 60 * 1_000;
 
-type OwnedLease = { slot: RuntimeSlot; release: () => void };
+type OwnedLease<Session> = { slot: Session; release: () => void };
+/** The session runtime's owned-session operations (RuntimeRegistry implements them). The
+ * run owner imports delegation, so the session handle and recovery evidence stay its types. */
+export interface OwnedSessions<Session extends { retainLease(): () => void }, Evidence> {
+  create(cwd: string, profile: "ordinary", report: HomeTaskReportOwner): Promise<Session>;
+  resumeTaskWorker(sessionId: string, report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<OwnedLease<Session>>;
+  acquireOwnedSessionLease(sessionId: string): Promise<OwnedLease<Session>>;
+  ownedOperationRecoveryEvidence(sessionId: string, operationId: string): Promise<Evidence>;
+  clearOwnedOperationMarker(sessionId: string, operationId: string): Promise<void>;
+}
+/** The dispatch over one implementer, for a field typed before construction. */
+export type OwnedSessionDispatchOver<Sessions> = Sessions extends OwnedSessions<infer Session, infer Evidence> ? OwnedSessionDispatch<Session, Evidence> : never;
 type OperationHandle<T> = {
   operationId: string;
   completion: Promise<T>;
@@ -16,32 +25,32 @@ export interface OwnedOperationDeadline { readonly signal: AbortSignal; readonly
 
 /** The shared owned-session boundary: session lease, exact operation evidence,
  * and settlement acknowledgement remain with RuntimeRegistry / RuntimeSlot. */
-export class OwnedSessionDispatch {
-  constructor(private readonly sessions: RuntimeRegistry) {}
+export class OwnedSessionDispatch<Session extends { retainLease(): () => void }, Evidence> {
+  constructor(private readonly sessions: OwnedSessions<Session, Evidence>) {}
 
-  async createWorker(cwd: string, report: HomeTaskReportOwner): Promise<OwnedLease> {
+  async createWorker(cwd: string, report: HomeTaskReportOwner): Promise<OwnedLease<Session>> {
     const slot = await this.sessions.create(cwd, "ordinary", report);
     return { slot, release: slot.retainLease() };
   }
 
   /** Rebinds an existing worker session to a resumed task's report owner (#929). */
-  resumeWorker(sessionId: string, report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<OwnedLease> {
+  resumeWorker(sessionId: string, report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<OwnedLease<Session>> {
     return this.sessions.resumeTaskWorker(sessionId, report, exceptWorkToken);
   }
 
-  lease(sessionId: string): Promise<OwnedLease> {
+  lease(sessionId: string): Promise<OwnedLease<Session>> {
     return this.sessions.acquireOwnedSessionLease(sessionId);
   }
 
-  recoveryEvidence(sessionId: string, operationId: string) {
+  recoveryEvidence(sessionId: string, operationId: string): Promise<Evidence> {
     return this.sessions.ownedOperationRecoveryEvidence(sessionId, operationId);
   }
 
-  admit(slot: RuntimeSlot, ...args: Parameters<RuntimeSlot["prompt"]>): ReturnType<RuntimeSlot["prompt"]> {
+  admit<Args extends unknown[], Admission>(slot: { prompt(...args: Args): Admission }, ...args: Args): Admission {
     return slot.prompt(...args);
   }
 
-  async acknowledge(sessionId: string, operationId: string, lease: OwnedLease): Promise<void> {
+  async acknowledge(sessionId: string, operationId: string, lease: OwnedLease<Session>): Promise<void> {
     await this.sessions.clearOwnedOperationMarker(sessionId, operationId);
     lease.release();
   }

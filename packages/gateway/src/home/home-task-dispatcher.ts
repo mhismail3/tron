@@ -531,7 +531,7 @@ export class HomeTaskDispatcher {
     let { task } = launch;
     const { authority, input, title, choice, deferredThinking } = launch;
     const taskId = task.taskId;
-    let lease: Awaited<ReturnType<OwnedSessionDispatch["createWorker"]>> | undefined;
+    let lease: Awaited<ReturnType<RuntimeRegistry["acquireOwnedSessionLease"]>> | undefined;
     let deadline: OwnedOperationDeadline | undefined;
     try {
       const operationId = launch.operationId ?? `task-${randomUUID()}`;

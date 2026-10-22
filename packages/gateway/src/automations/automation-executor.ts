@@ -3,7 +3,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { canonicalResourceName } from "../sessions/resource-invocation.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
+import { OwnedSessionDispatch, type OwnedSessionDispatchOver } from "../sessions/owned-session-dispatch.js";
 import type { OwnedOperationTerminal } from "../kernel/run/invocation-receipts.js";
 import {
   AutomationAdmissionError,
@@ -37,7 +37,7 @@ function terminalResult(terminal: OwnedOperationTerminal): AutomationExecutionRe
 }
 
 export class GatewayAutomationExecutor implements AutomationExecutor {
-  private readonly dispatch: OwnedSessionDispatch;
+  private readonly dispatch: OwnedSessionDispatchOver<RuntimeRegistry>;
 
   constructor(
     private readonly sessions: RuntimeRegistry,
