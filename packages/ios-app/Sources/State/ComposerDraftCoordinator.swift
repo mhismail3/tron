@@ -1115,11 +1115,7 @@ extension ComposerDraftCoordinator {
             preparedThumbnail: preparedThumbnail
         ))
         uploadAdmissionByAttachmentID[localID] = admission
-        defer {
-            if uploadAdmissionByAttachmentID[localID] == admission {
-                uploadAdmissionByAttachmentID[localID] = nil
-            }
-        }
+        defer { releaseTransfer(localID, admission: admission, scope: scope) }
         schedulePersistence(for: scope)
 
         let task = Task { try await uploadOperation(name, mimeType, data) }
@@ -1141,9 +1137,8 @@ extension ComposerDraftCoordinator {
         do {
             try require(admission)
         } catch {
-            // The Gateway completed after this local chip/presentation lost
-            // ownership. Its unclaimed staging blob has one cleanup owner.
-            discardUpload(uploadID)
+            // The Gateway completed after this presentation lost ownership.
+            adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope)
             throw error
         }
         guard var attachments = attachmentsByScope[scope],
@@ -1240,9 +1235,7 @@ extension ComposerDraftCoordinator {
                 let localID = localIDs[index]
                 uploadAdmissions.remove(admission)
                 uploadTasks[admission] = nil
-                if uploadAdmissionByAttachmentID[localID] == admission {
-                    uploadAdmissionByAttachmentID[localID] = nil
-                }
+                releaseTransfer(localID, admission: admission, scope: scope)
             }
         }
 
@@ -1253,8 +1246,11 @@ extension ComposerDraftCoordinator {
                 let localID = localIDs[index]
                 do {
                     let uploadID = try await transportTasks[index].value
-                    guard uploadAdmissions.contains(admission),
-                          var attachments = attachmentsByScope[scope],
+                    guard uploadAdmissions.contains(admission) else {
+                        adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope)
+                        continue
+                    }
+                    guard var attachments = attachmentsByScope[scope],
                           let attachmentIndex = attachments.firstIndex(where: {
                               $0.id == localID
                           }) else {
@@ -1370,11 +1366,7 @@ extension ComposerDraftCoordinator {
             preparedThumbnail: preparedThumbnail
         ))
         uploadAdmissionByAttachmentID[localID] = admission
-        defer {
-            if uploadAdmissionByAttachmentID[localID] == admission {
-                uploadAdmissionByAttachmentID[localID] = nil
-            }
-        }
+        defer { releaseTransfer(localID, admission: admission, scope: scope) }
         schedulePersistence(for: scope)
 
         let task = Task { try await fileUploadOperation(name, mimeType, staged, size) }
@@ -1394,7 +1386,7 @@ extension ComposerDraftCoordinator {
         do {
             try require(admission)
         } catch {
-            discardUpload(uploadID)
+            adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope)
             throw error
         }
         guard var attachments = attachmentsByScope[scope],
@@ -1427,6 +1419,8 @@ extension ComposerDraftCoordinator {
     func hasActiveUploads(for target: SessionPresentationIdentity) -> Bool {
         guard admits(target), let scope = scope(for: target) else { return false }
         if uploadAdmissions.contains(where: { $0.target == target }) { return true }
+        // A transfer a replaced presentation started still owns its chip until it settles.
+        if attachmentsByScope[scope]?.contains(where: { uploadAdmissionByAttachmentID[$0.id] != nil }) == true { return true }
         // A newly scheduled restored upload may not have registered its first
         // per-attachment admission yet. Keep send closed only while an
         // unresolved chip still exists; removing the last chip releases it
@@ -1717,11 +1711,14 @@ extension ComposerDraftCoordinator {
         }
         restoredUploadTasks[target] = Task { @MainActor [weak self] in
             guard let self else { return }
-            let identities = self.attachmentsByScope[scope]?.compactMap {
-                $0.gatewayUploadID == nil && self.uploadAdmissionByAttachmentID[$0.id] == nil ? $0.id : nil
-            } ?? []
-            for identity in identities {
-                guard !Task.isCancelled else { break }
+            // The next unowned chip is chosen at each step, not from a snapshot: a
+            // chip a replaced presentation's transfer released meanwhile joins, and
+            // one another transfer owns is never uploaded twice (#1665).
+            var attempted: Set<String> = []
+            while !Task.isCancelled, let identity = self.attachmentsByScope[scope]?.first(where: {
+                $0.gatewayUploadID == nil && self.uploadAdmissionByAttachmentID[$0.id] == nil && !attempted.contains($0.id)
+            })?.id {
+                attempted.insert(identity)
                 await self.uploadRestoredAttachment(
                     identity: identity,
                     scope: scope,
@@ -1757,9 +1754,7 @@ extension ComposerDraftCoordinator {
         defer {
             uploadAdmissions.remove(admission)
             uploadTasks[admission] = nil
-            if uploadAdmissionByAttachmentID[identity] == admission {
-                uploadAdmissionByAttachmentID[identity] = nil
-            }
+            releaseTransfer(identity, admission: admission, scope: scope)
         }
         let uploadID: String
         do {
@@ -1776,7 +1771,7 @@ extension ComposerDraftCoordinator {
         do {
             try require(admission)
         } catch {
-            discardUpload(uploadID)
+            adoptOrDiscard(uploadID, identity: identity, admission: admission, scope: scope)
             return
         }
         guard self.lease?.scope == scope,
@@ -1787,6 +1782,38 @@ extension ComposerDraftCoordinator {
             return
         }
         attachmentsByScope[scope]?[index] = attachment.replacingGatewayUploadID(uploadID)
+        schedulePersistence(for: scope)
+    }
+
+    /// A chip stays owned by its transfer until that transfer settles, also across a
+    /// presentation replacement, which skips the chip instead of staging the same
+    /// bytes a second time (#1665). Releasing it hands an unstaged chip of the
+    /// mounted scope to that presentation's restored uploads, but only when the
+    /// transfer belonged to a replaced presentation: a failure in the current one
+    /// waits for a later mount, as before.
+    private func releaseTransfer(_ identity: String, admission: UploadAdmission, scope: ComposerDraftScope) {
+        guard uploadAdmissionByAttachmentID[identity] == admission else { return }
+        uploadAdmissionByAttachmentID[identity] = nil
+        guard let lease, lease.scope == scope, lease.target != admission.target,
+              attachmentsByScope[scope]?.contains(where: { $0.id == identity && $0.gatewayUploadID == nil }) == true
+        else { return }
+        beginRestoredAttachmentUploads(scope: scope, target: lease.target)
+    }
+
+    /// A transfer that completed after its presentation lost ownership. Staged IDs
+    /// are scope-owned (#916): the chip it was made for adopts it while that chip is
+    /// still in its scope, unstaged and owned by this transfer. Otherwise (the chip
+    /// was removed or its scope retired) the unclaimed staging blob is discarded.
+    private func adoptOrDiscard(_ uploadID: String, identity: String, admission: UploadAdmission, scope: ComposerDraftScope) {
+        guard uploadAdmissionByAttachmentID[identity] == admission,
+              var attachments = attachmentsByScope[scope],
+              let index = attachments.firstIndex(where: { $0.id == identity && $0.gatewayUploadID == nil })
+        else {
+            discardUpload(uploadID)
+            return
+        }
+        attachments[index] = attachments[index].replacingGatewayUploadID(uploadID)
+        attachmentsByScope[scope] = attachments
         schedulePersistence(for: scope)
     }
 
@@ -2484,10 +2511,9 @@ extension ComposerDraftCoordinator {
         for (admission, task) in uploadTasks where admission.target == lease.target {
             task.cancel()
         }
+        // Each chip stays owned by its cancelled transfer until it settles
+        // (`releaseTransfer`): a non-cooperative request may still stage it.
         uploadAdmissions = uploadAdmissions.filter { $0.target != lease.target }
-        uploadAdmissionByAttachmentID = uploadAdmissionByAttachmentID.filter {
-            $0.value.target != lease.target
-        }
         let retainedSubmission = submissionByScope[lease.scope]
         self.lease = nil
         // Route replacement revokes presentation-only artifacts, never the
