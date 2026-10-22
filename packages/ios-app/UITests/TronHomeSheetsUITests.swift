@@ -64,8 +64,8 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("931-\(level)-manage")
     }
 
-    /// Home Settings stacks its cards with one shared gap and no section header
-    /// above the inline Tools card (#1478), in light, dark and accessibility text.
+    /// Home Settings uses Global Settings' titled group cards of drill-in rows
+    /// (#1651), in light, dark and accessibility text.
     @MainActor func testHomeSettingsCardsLight() { homeSettingsCards(name: "light", arguments: []) }
     @MainActor func testHomeSettingsCardsDark() { homeSettingsCards(name: "dark", arguments: ["-home-dark"]) }
     @MainActor func testHomeSettingsCardsAccessibilityText() {
@@ -88,21 +88,14 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, row, ready: "home-settings-content", name: "home-settings")
         expandSheet(app, title: "Home Settings")
         let content = element(app, "home-settings-content")
-        let models = app.buttons["settings-section-model-open"], tools = element(app, "settings-row-tools.active")
+        let models = app.buttons["settings-section-model-open"]
         XCTAssertTrue(models.waitForExistence(timeout: 8), app.debugDescription)
-        XCTAssertTrue(tools.waitForExistence(timeout: 5), app.debugDescription)
         shot("1478-home-settings-\(name)")
-        // The Tools row names its card; the only "Tools" text is the row's own title.
-        XCTAssertEqual(content.staticTexts.matching(NSPredicate(format: "label == 'Tools'")).count, 1, content.debugDescription)
-        let cards = [models, element(app, "settings-section-tools-detail"), content.buttons["settings-section-advanced-open"]]
-        for card in cards.dropFirst() { for _ in 0..<4 where !card.isHittable { app.swipeUp() } }
+        groupCards(app, content)
         shot("1478-home-settings-\(name)-bottom")
-        let gaps = zip(cards, cards.dropFirst()).map { $1.frame.minY - $0.frame.maxY }
-        XCTAssertEqual(gaps.max()! - gaps.min()!, 0, accuracy: 1, "One gap between every card: \(gaps)")
-        XCTAssertLessThan(gaps.max()!, 12, "Cards sit tightly together: \(gaps)")
     }
 
-    /// Session Settings shares Home Settings' container: the same card gap (#1478).
+    /// Session Settings shares Home and Global Settings' group cards (#1651).
     @MainActor func testSessionSettingsCardsShareHomeGap() {
         continueAfterFailure = false
         for (appearance, size) in [("light", "UICTContentSizeCategoryL"), ("dark", "UICTContentSizeCategoryL"),
@@ -118,19 +111,30 @@ final class TronHomeSheetsUITests: XCTestCase {
             link.tap()
             expandSheet(app, title: "Session Settings")
             let content = element(app, "session-settings-content")
-            let tools = element(app, "settings-section-tools-detail"), more = content.buttons["settings-section-advanced-open"]
-            XCTAssertTrue(tools.waitForExistence(timeout: 8), app.debugDescription)
-            // The image rows name their card: no "Images" heading above them (#1510).
-            XCTAssertTrue(element(app, "settings-row-context.images.autoResize").exists, content.debugDescription)
-            XCTAssertTrue(element(app, "settings-row-context.images.block").exists, content.debugDescription)
-            XCTAssertEqual(content.staticTexts.matching(NSPredicate(format: "label == 'Images'")).count, 0, content.debugDescription)
+            XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 8), app.debugDescription)
             let suffix = size.contains("Accessibility") ? "ax-large" : appearance
             shot("1478-session-settings-\(suffix)")
-            for _ in 0..<6 where !more.isHittable { app.swipeUp() }
+            groupCards(app, content)
+            // The image rows open with Tools; they are not inline on this sheet.
+            XCTAssertFalse(element(app, "settings-row-context.images.autoResize").exists, content.debugDescription)
             shot("1478-session-settings-\(suffix)-bottom")
-            XCTAssertLessThan(more.frame.minY - tools.frame.maxY, 12, "Session Settings shares the tight card gap")
             app.terminate()
         }
+    }
+
+    /// Global's Agent card holds Models and More Settings as adjacent rows of one
+    /// card; Tools is a drill-in row in Tools & Extensions, not an inline editor.
+    @MainActor private func groupCards(_ app: XCUIApplication, _ content: XCUIElement) {
+        let models = app.buttons["settings-section-model-open"], more = content.buttons["settings-section-advanced-open"]
+        let tools = app.buttons["settings-section-tools-open"]
+        XCTAssertTrue(content.staticTexts["Agent"].exists, content.debugDescription)
+        XCTAssertFalse(element(app, "settings-row-tools.active").exists, "Tools opens from its row")
+        for row in [more, tools] { for _ in 0..<4 where !row.isHittable { app.swipeUp() } }
+        XCTAssertTrue(more.exists && tools.exists, content.debugDescription)
+        XCTAssertTrue(content.staticTexts["Tools & Extensions"].exists, content.debugDescription)
+        XCTAssertEqual(models.frame.minX, tools.frame.minX, accuracy: 1, "Rows share one card width")
+        XCTAssertEqual(models.frame.width, tools.frame.width, accuracy: 1, "Rows share one card width")
+        XCTAssertLessThan(more.frame.minY, tools.frame.minY, "Agent precedes Tools & Extensions")
     }
 
     /// Brings a settings sheet to its large detent.

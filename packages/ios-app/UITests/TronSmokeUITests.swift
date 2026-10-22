@@ -1131,6 +1131,11 @@ final class TronSmokeUITests: XCTestCase {
             closeTopSheet(app)
             return
         }
+        // Session and Home open Tools from Global's Tools & Extensions row (#1651).
+        let section = app.buttons["settings-section-tools-open"]
+        reveal(section, in: app)
+        section.tap()
+        expandSettingsSheet(app, title: "Tools")
         let row = app.descendants(matching: .any)["settings-row-tools.active"]
         let editor = settingEditor(row)
         reveal(editor, in: app)
@@ -1149,6 +1154,7 @@ final class TronSmokeUITests: XCTestCase {
         let tool = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", scope == "home" ? "Ask User" : "Read File")).firstMatch
         XCTAssertTrue(tool.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "1325-\(scope)-\(appearance)-populated-tools")
+        closeTopSheet(app)
         closeTopSheet(app)
     }
 
@@ -2905,13 +2911,17 @@ final class TronSmokeUITests: XCTestCase {
             tapManageRow(app, "home-manage-settings")
             expandSettingsSheet(app, title: "Home Settings")
             let models = app.buttons["settings-section-model-open"]
-            let tools = app.descendants(matching: .any)["settings-row-tools.active"]
+            let section = app.buttons["settings-section-tools-open"]
             XCTAssertTrue(models.waitForExistence(timeout: 5))
-            XCTAssertTrue(tools.exists)
-            XCTAssertLessThan(models.frame.minY, tools.frame.minY, "Models precedes Tools in Home Settings")
+            XCTAssertTrue(section.exists)
+            XCTAssertLessThan(models.frame.minY, section.frame.minY, "Models precedes Tools in Home Settings")
             XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Claude Opus 5.5 · ")).firstMatch.exists,
                           "The Models row names Home's current model")
             keepScreenshot(named: "1332-home-settings-\(appearance)")
+            section.tap()
+            expandSettingsSheet(app, title: "Tools")
+            let tools = app.descendants(matching: .any)["settings-row-tools.active"]
+            XCTAssertTrue(tools.waitForExistence(timeout: 5))
             tapScrolling(settingEditor(tools), in: app)
             XCTAssertTrue(app.switches["Ask User"].waitForExistence(timeout: 5))
             keepScreenshot(named: "1332-home-tools-\(appearance)")
@@ -2934,7 +2944,11 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
         tapManageRow(app, "home-manage-settings")
         expandSettingsSheet(app, title: "Home Settings")
-        XCTAssertFalse(app.buttons["settings-section-tools-open"].exists, "Tools is inline, not another category wrapper")
+        // Home Settings uses Global's Tools & Extensions row (#1651).
+        let section = app.buttons["settings-section-tools-open"]
+        XCTAssertTrue(section.waitForExistence(timeout: 5), app.debugDescription)
+        section.tap()
+        expandSettingsSheet(app, title: "Tools")
         let row = app.descendants(matching: .any)["settings-row-tools.active"]
         let count = app.staticTexts["fixture.home-control-count"]
         func openTools() {
