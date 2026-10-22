@@ -26,6 +26,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
   Stop steering recovery, with live SDK/queue ownership rechecks across awaits.
 - `run-queue-owner.ts`: SDK queue identities, reconciliation, pending admission and shared
   revision/ordinal clock, retaining exact work owners across Pi callback gaps.
+- `queue-commands.ts`: serialized clear/replace, receipt settlement, resource validation
+  and shared text/resource/queue bounds; public Slot ports return its promises directly.
 - `held-prompt-queue.ts`: accepted compaction/Stop-time input and its ordered deferred
   admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types/bounds.
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option

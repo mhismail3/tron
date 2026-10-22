@@ -49,6 +49,7 @@ import { RunPersistence, CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WR
 import { RunWorkOwner } from "../kernel/run/run-work-owner.js";
 import { RunAbortOwner } from "../kernel/run/run-abort-owner.js";
 import { RunQueueOwner } from "../kernel/run/run-queue-owner.js";
+import { RunQueueCommands, MAXIMUM_QUEUED_MESSAGE_BYTES, validateQueue, invocationResources, resourceIsInvocable } from "../kernel/run/queue-commands.js";
 import { HeldPromptQueue } from "../kernel/run/held-prompt-queue.js";
 import { MAXIMUM_PROMPT_ATTACHMENTS, type QueueAdmissionDisposition, type QueueBehavior, type RuntimeQueuedMessage, type HeldPrompt, type PromptQueueDisplay } from "../kernel/run/queue-input.js";
 import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
@@ -139,10 +140,10 @@ import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX
 import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "./child-session-admission.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../kernel/run/context-delivery-receipts.js";
-import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection, type InvokedResource } from "../kernel/run/invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "../kernel/run/invocation-receipts.js";
 import type { InputTrigger } from "../kernel/host/input-admission.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
-import { admitPromptText, admitResourceInvocations, canonicalResourceName, composeResourcePrompt, parsePiLiteralCommand, userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
+import { admitResourceInvocations, composeResourcePrompt, parsePiLiteralCommand, userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "../kernel/projection/process-activity-recency.js";
 import { redactProcessText } from "../kernel/projection/process-activity.js";
@@ -264,10 +265,7 @@ type PendingExtensionCanonicalEffect =
       createdAt: string;
     };
 
-const MAXIMUM_QUEUED_MESSAGES = 32;
-const MAXIMUM_QUEUED_MESSAGE_BYTES = 64 * 1_024;
 const MAXIMUM_PENDING_PROMPT_BYTES = MAXIMUM_QUEUED_MESSAGE_BYTES;
-const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
 /**
  * Streaming progress events republish the cumulative live message. Emitting
  * one per SDK update multiplies that payload across every subscribed mobile
@@ -839,6 +837,23 @@ export class RuntimeSlot {
     internalWakeSemantic: id => this.internalWakeSemantic(id),
     held: () => this.heldQueue.entries,
   });
+  private readonly queueCommands = new RunQueueCommands({
+    assertUsable: () => this.assertUsable(),
+    queue: () => this.runQueue,
+    held: () => this.heldQueue,
+    session: () => this.runtime.session,
+    runWork: () => this.runWork,
+    run: operation => this.lane.run(operation),
+    commands: () => this.commands(),
+    resourceExpansionCatalog: () => this.resourceExpansionCatalog(),
+    invocationForOperation: id => this.invocationForOperation(id),
+    terminalizeInvocation: (id, lifecycle, errorCode) => this.terminalizeInvocation(id, lifecycle, errorCode),
+    persistInvocationReceipt: (receipt, owner) => this.persistInvocationReceipt(receipt, owner),
+    setInvocation: (id, invocation) => this.invocations.set(id, invocation),
+    sessionId: () => this.id,
+    revision: () => this.revision,
+    publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
+  });
   private pendingPrompt: PendingPromptState | undefined;
   private readonly heldQueue = new HeldPromptQueue({
     assertUsable: () => this.assertUsable(),
@@ -854,7 +869,7 @@ export class RuntimeSlot {
     reconcileQueuedMessages: () => this.runQueue.reconcileQueuedMessages(),
     queued: () => this.runQueue.queuedMessages,
     nextOrdinal: () => this.runQueue.nextQueueOrdinal++,
-    validateQueue: items => RuntimeSlot.validateQueue(items),
+    validateQueue: items => validateQueue(items),
     beginWork: id => this.runWork.beginOperationWork(id, "queued-mutation"),
     settleWork: id => this.runWork.settleOperationWork(id),
     markRecovery: id => this.runAbort.stopRecoveryHoldIDs.add(id),
@@ -862,8 +877,8 @@ export class RuntimeSlot {
     publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
     queueRevision: () => this.runQueue.queueRevision,
     projectedQueue: () => this.runQueue.projectedQueue(),
-    editedQueueItem: (previous, item, composed) => this.editedQueueItem(previous, item, composed),
-    assertQueueableResources: items => this.assertQueueableResources(items),
+    editedQueueItem: (previous, item, composed) => this.queueCommands.editedQueueItem(previous, item, composed),
+    assertQueueableResources: items => this.queueCommands.assertQueueableResources(items),
     admitHeld: entry => this.admitPrompt(entry.runtimeText, entry.images, entry.behavior, {
           text: entry.text,
           attachmentEnvelope: entry.attachmentEnvelope,
@@ -6840,32 +6855,6 @@ export class RuntimeSlot {
     } : undefined;
   }
 
-  private static queueText(text: string, attachmentEnvelope: string): string {
-    return [text.trim(), attachmentEnvelope].filter(Boolean).join("\n\n");
-  }
-
-  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount"> & { resourceInvocations?: ResourceInvocation[] | undefined }>): void {
-    if (items.length > MAXIMUM_QUEUED_MESSAGES) {
-      throw new GatewayError("invalid_request", `At most ${MAXIMUM_QUEUED_MESSAGES} messages may be queued`);
-    }
-    let totalBytes = 0;
-    for (const item of items) {
-      admitPromptText(item.text, MAXIMUM_QUEUED_MESSAGE_BYTES);
-      if (item.resourceInvocations !== undefined) admitResourceInvocations(item.resourceInvocations, item.text);
-      const bytes = Buffer.byteLength(item.text);
-      if (bytes > MAXIMUM_QUEUED_MESSAGE_BYTES) {
-        throw new GatewayError("invalid_request", "A queued message is too large to manage safely");
-      }
-      if (item.text.trim().length === 0 && item.attachmentCount === 0 && item.resourceInvocations === undefined) {
-        throw new GatewayError("invalid_request", "Queued messages cannot be empty");
-      }
-      totalBytes += bytes;
-    }
-    if (totalBytes > MAXIMUM_QUEUED_TOTAL_BYTES) {
-      throw new GatewayError("invalid_request", "The queued message total is too large to manage safely");
-    }
-  }
-
   snapshot(sequence = this.eventSequence): SessionSnapshot {
     return stage("snapshot.build", () => this.buildSnapshot(sequence));
   }
@@ -7579,7 +7568,7 @@ export class RuntimeSlot {
       const invocationName = existingInvocation?.name ?? (isExactExtensionCommand
         ? extensionCommandName
         : resources?.[0]?.name);
-      const invokedResources = RuntimeSlot.invokedResources(composedResources);
+      const invokedResources = invocationResources(composedResources);
       const extensionArguments = composedResources === undefined ? resources?.[0]?.arguments : undefined;
       // A composed message's canonical text is its expansions followed by this text.
       const submittedText = images.length > 0 || composedResources !== undefined ? queueDisplay?.text ?? text : undefined;
@@ -7619,7 +7608,7 @@ export class RuntimeSlot {
             true,
           );
         }
-        RuntimeSlot.validateQueue([...this.runQueue.queuedMessages.filter((item) => item.id !== redelivery?.id), {
+        validateQueue([...this.runQueue.queuedMessages.filter((item) => item.id !== redelivery?.id), {
           text: queueAdmissionDisplay.text,
           attachmentCount: queueAdmissionDisplay.attachmentCount,
           ...(queueAdmissionDisplay.resourceInvocations === undefined
@@ -8280,61 +8269,8 @@ export class RuntimeSlot {
     this.publishSnapshot();
   }
 
-  async clearQueue(): Promise<void> {
-    // Waiting prompts are not admitted yet, so they clear immediately instead
-    // of behind the compaction that owns the session lane.
-    this.assertUsable();
-    this.heldQueue.clearWaiting();
-    this.runQueue.reconcileQueuedMessages();
-    if (this.runQueue.queuedMessages.length === 0 && !this.runQueue.pendingQueueAdmission) return;
-    return this.lane.run(async () => {
-      this.assertUsable();
-      const removed = this.runQueue.queuedMessages;
-      this.runQueue.suppressQueueEvents = true;
-      try {
-        this.runtime.session.clearQueue();
-      } finally {
-        this.runQueue.suppressQueueEvents = false;
-      }
-      this.runQueue.sdkQueuedSteeringIDs.clear();
-      for (const item of removed) {
-        await this.terminalizeInvocation(item.id, "interrupted", "queue-cleared");
-        this.runWork.settleOperationWork(item.id);
-      }
-      this.runQueue.queuedMessages = [];
-      this.runQueue.queueRevision += 1;
-      this.revision += 1;
-      this.publishSnapshot();
-    });
-  }
-
-  /** A held prompt keeps its visible runtime text (admission composes it); a
-   * message in Pi's queue is recomposed with its skills and prompts. */
-  private editedQueueItem<T extends RuntimeQueuedMessage>(
-    previous: T,
-    item: Pick<QueuedMessageState, "behavior" | "text">,
-    composed: boolean,
-  ): T {
-    const text = item.text.trim();
-    const visibleRuntimeText = RuntimeSlot.queueText(text, previous.attachmentEnvelope);
-    return {
-      ...previous,
-      behavior: item.behavior,
-      text,
-      runtimeText: text === previous.text
-        ? previous.runtimeText
-        : composed && previous.resourceInvocations !== undefined
-          ? composeResourcePrompt(previous.resourceInvocations, visibleRuntimeText, this.resourceExpansionCatalog())
-          : visibleRuntimeText,
-    };
-  }
-
-  /** The receipt form of a composed message's skills and prompts. */
-  private static invokedResources(resources: readonly ResourceInvocation[] | undefined): InvokedResource[] | undefined {
-    return resources?.map(({ source, name }) => {
-      if (source === "extension") throw new Error("An extension command is not a composed resource");
-      return { source, name };
-    });
+  clearQueue(): Promise<void> {
+    return this.queueCommands.clearQueue();
   }
 
   private resourceExpansionCatalog(): ResourceExpansionCatalog {
@@ -8342,219 +8278,19 @@ export class RuntimeSlot {
     return { skills: session.resourceLoader.getSkills().skills, promptTemplates: session.promptTemplates };
   }
 
-  private static resourceIsInvocable(commands: readonly CommandInfo[], resource: ResourceInvocation): boolean {
-    const catalogName = canonicalResourceName(resource.source, resource.name);
-    const matches = commands.filter(command => command.source === resource.source && command.name === catalogName);
-    // A skill or prompt sharing an extension command's name is ambiguous to pick.
-    const shadowed = resource.source !== "extension"
-      && commands.some(command => command.source === "extension" && command.name === catalogName);
-    return matches.length === 1 && !shadowed;
-  }
-
   /** Every resource a message invokes names exactly one loaded, unshadowed command. */
   assertInvocableResources(resources: readonly ResourceInvocation[]): void {
     const commands = this.commands();
-    if (!resources.every(resource => RuntimeSlot.resourceIsInvocable(commands, resource))) {
+    if (!resources.every(resource => resourceIsInvocable(commands, resource))) {
       throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
     }
   }
 
-  private assertQueueableResources(items: readonly RuntimeQueuedMessage[]): void {
-    const commands = this.commands();
-    const extensionCommands = new Set(
-      commands.filter((command) => command.source === "extension").map((command) => command.name),
-    );
-    for (const item of items) {
-      if (item.resourceInvocations !== undefined) {
-        if (!item.resourceInvocations.every(resource => RuntimeSlot.resourceIsInvocable(commands, resource))) {
-          throw new GatewayError("conflict", "A queued resource is no longer unambiguous for this session", true);
-        }
-        // A composed message is never a command, whatever its text begins with.
-        continue;
-      }
-      if (!item.runtimeText.startsWith("/")) continue;
-      const command = parsePiLiteralCommand(item.runtimeText)?.name ?? "";
-      if (extensionCommands.has(command)) {
-        throw new GatewayError("invalid_request", `Extension command "/${command}" cannot be queued`);
-      }
-    }
-  }
-
-  async replaceQueue(
+  replaceQueue(
     expectedRevision: number,
     items: Array<Pick<QueuedMessageState, "id" | "behavior" | "text">>,
   ): Promise<{ queueRevision: number; items: QueuedMessageState[] }> {
-    if (this.heldQueue.entries.length > 0) {
-      this.assertUsable();
-      this.runQueue.reconcileQueuedMessages();
-      // Pi's queue and the held queue have different owners and admission
-      // states; one atomic edit across both is not offered.
-      if (this.runQueue.queuedMessages.length > 0 || this.runQueue.pendingQueueAdmission) {
-        throw new GatewayError("conflict", "Messages are still moving into the active queue. Try again in a moment.", true);
-      }
-      return this.heldQueue.replaceHeldPrompts(expectedRevision, items);
-    }
-    return this.lane.run(async () => {
-      this.assertUsable();
-      const session = this.runtime.session;
-      this.runQueue.reconcileQueuedMessages();
-      if (expectedRevision !== this.runQueue.queueRevision) {
-        throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
-      }
-      if (!session.isStreaming && items.length > 0) {
-        throw new GatewayError("conflict", "The active run finished before the queue could be updated.", true);
-      }
-
-      const previousByID = new Map(this.runQueue.queuedMessages.map((item) => [item.id, item]));
-      const seen = new Set<string>();
-      const next = items.map((item) => {
-        const previous = previousByID.get(item.id);
-        if (!previous || !seen.add(item.id)) {
-          throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
-        }
-        return { ...this.editedQueueItem(previous, item, true), ordinal: this.runQueue.nextQueueOrdinal++ };
-      });
-      RuntimeSlot.validateQueue(next);
-      this.assertQueueableResources(next);
-
-      const replacementInvocations = new Map<string, InvocationProjection>();
-      for (const item of next) {
-        const previous = previousByID.get(item.id);
-        if (previous?.resourceInvocations === undefined || previous.text === item.text) continue;
-        const invocation = this.invocationForOperation(item.id);
-        if (!invocation || invocation.source === "plain" || invocation.name === undefined
-          || item.resourceInvocations === undefined) {
-          throw new GatewayError("conflict", "Queued resource invocation ownership changed", true);
-        }
-        replacementInvocations.set(item.id, invocation);
-      }
-
-      let rebuildError: unknown;
-      let handledItems = new Set<string>();
-      this.runQueue.suppressQueueEvents = true;
-      try {
-        session.clearQueue();
-        // Publish in requested order: each item is prepared (images may need resizing) and queued before the
-        // next starts, so a slow photo cannot let a later item of the same behavior enter Pi's queue first.
-        const dispositions: Array<"handled" | "queued"> = [];
-        for (const item of next) {
-          dispositions.push(item.behavior === "steer"
-            ? await session.steer(item.runtimeText, item.images)
-            : await session.followUp(item.runtimeText, item.images));
-        }
-        handledItems = new Set(next.flatMap((item, index) =>
-          dispositions[index] === "handled" ? [item.id] : []));
-      } catch (error) {
-        rebuildError = error;
-        // Queue replacement is one mutation. Do not retain a partially rebuilt
-        // queue whose items have no coherent invocation ownership.
-        session.clearQueue();
-      } finally {
-        this.runQueue.suppressQueueEvents = false;
-      }
-      if (rebuildError !== undefined) {
-        const removed = this.runQueue.queuedMessages;
-        for (const item of removed) {
-          await this.terminalizeInvocation(item.id, "interrupted", "queue-rebuild-failed");
-          this.runWork.settleOperationWork(item.id);
-        }
-        this.runQueue.queuedMessages = [];
-        this.runQueue.queueRevision += 1;
-        this.revision += 1;
-        this.publishSnapshot();
-        throw rebuildError;
-      }
-
-      const actual: Record<QueueBehavior, readonly string[]> = {
-        steer: session.getSteeringMessages(),
-        followUp: session.getFollowUpMessages(),
-      };
-      const survivors: RuntimeQueuedMessage[] = [];
-      for (const behavior of ["steer", "followUp"] as const) {
-        const desired = next.filter((item) => item.behavior === behavior && !handledItems.has(item.id));
-        const texts = actual[behavior];
-        const retained = desired.slice(Math.max(0, desired.length - texts.length));
-        const aligned = retained.slice(Math.max(0, retained.length - texts.length));
-        for (let index = 0; index < aligned.length; index += 1) {
-          survivors.push({ ...aligned[index]!, runtimeText: texts[texts.length - aligned.length + index]! });
-        }
-      }
-      const removed = this.runQueue.queuedMessages.filter(item => !survivors.some(candidate => candidate.id === item.id));
-      const revised = survivors.filter(item => {
-        const previous = previousByID.get(item.id);
-        return previous?.resourceInvocations !== undefined && previous.text !== item.text;
-      });
-      for (const item of revised) {
-        const previousInvocation = replacementInvocations.get(item.id)!;
-        const resourceInvocations = item.resourceInvocations;
-        const invocationName = previousInvocation.name;
-        if (!resourceInvocations || !invocationName) throw new Error("revised resource invocation is unavailable");
-        // Start receipts are immutable. Editing a queued message's text terminalizes
-        // the prior intent and starts a replacement invocation while retaining
-        // the queue operation ID used by native row identity.
-        await this.terminalizeInvocation(item.id, "interrupted", "queue-edited");
-        const invocationId = randomUUID();
-        const createdAt = new Date().toISOString();
-        await this.persistInvocationReceipt(makeInvocationReceipt({
-          version: 1,
-          receiptId: `start:${invocationId}`,
-          receiptKind: "start",
-          invocationId,
-          operationId: item.id,
-          sessionId: this.id,
-          source: previousInvocation.source,
-          name: invocationName,
-          resources: RuntimeSlot.invokedResources(resourceInvocations)!,
-          submittedText: item.text,
-          lifecycle: "staged",
-          origin: previousInvocation.origin,
-          sequence: this.revision + 1,
-          createdAt,
-        }), this.runWork.get(item.id));
-        await this.persistInvocationReceipt(makeInvocationReceipt({
-          version: 1,
-          receiptId: `accepted:${invocationId}`,
-          receiptKind: "transition",
-          invocationId,
-          operationId: item.id,
-          sessionId: this.id,
-          source: previousInvocation.source,
-          lifecycle: "accepted",
-          sequence: this.revision + 1,
-          createdAt: new Date().toISOString(),
-        }), this.runWork.get(item.id));
-        this.invocations.set(invocationId, {
-          version: 1,
-          invocationId,
-          operationId: item.id,
-          source: previousInvocation.source,
-          name: invocationName,
-          submittedText: item.text,
-          resourceInvocations,
-          lifecycle: "queued",
-          origin: previousInvocation.origin,
-          sequence: this.revision + 1,
-          updatedAt: createdAt,
-        });
-      }
-      for (const item of removed) {
-        await this.terminalizeInvocation(
-          item.id,
-          handledItems.has(item.id) ? "completed" : "interrupted",
-          handledItems.has(item.id) ? undefined : "queue-replaced",
-        );
-        this.runWork.settleOperationWork(item.id);
-      }
-      this.runQueue.queuedMessages = survivors.sort((left, right) => left.behavior === right.behavior
-        ? left.ordinal - right.ordinal
-        : left.behavior === "steer" ? -1 : 1);
-      this.runQueue.sdkQueuedSteeringIDs.clear();
-      for (const item of survivors) if (item.behavior === "steer") this.runQueue.sdkQueuedSteeringIDs.add(item.id);
-      this.runQueue.queueRevision += 1;
-      this.revision += 1;
-      this.publishSnapshot();
-      return { queueRevision: this.runQueue.queueRevision, items: this.runQueue.projectedQueue() };
-    });
+    return this.queueCommands.replaceQueue(expectedRevision, items);
   }
 
   /** The settings receipt coordinator publishes Home's recipe and adopts it
