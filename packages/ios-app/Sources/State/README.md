@@ -28,7 +28,7 @@ disposable projection or an in-flight command owner.
 | `AutomationCatalogCoordinator`, `AutomationRPCClient` | Automation summaries per Gateway. |
 | `KnowledgeRPCClient`, `KnowledgePresentationStores`, `KnowledgePreviewStore` | Knowledge reads and receipted mutations. |
 | `IntegrationsRPCClient` | Connection-owner projections and mutations. |
-| `SessionHistoryStore`, `SessionProcessHistoryStore`, `ReadOnlySubagentSessionStore`, `PagedListStore` | History pages, subagent history, read-only child transcripts, shared paging. |
+| `SessionHistoryStore`, `SessionProcessHistoryStore`, `ReadOnlySubagentSessionStore`, `FeedStore` | History pages, subagent history, read-only child transcripts, shared accumulating feed paging. |
 | `PresentationActivityCoordinator`, `PresentationRefreshPolicy`, `ManagedSheetPresentation`, `PresentationScopedState` | Foremost read demand, native sheet graphs, binding leases and presentation-lifetime state ([parity](../../docs/presentation-parity.md#presentation-activity)). |
 | `InAppNoticeCenter` | The one in-app notice queue. |
 | `SnapshotCache` | Disposable session-summary cache. |

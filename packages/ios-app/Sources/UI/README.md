@@ -12,7 +12,7 @@ reusable components. Its binding rules are [presentation parity](../../docs/pres
   `TronSettingControls`, `TronDateControls` (`TronDateValueButton`, `TronDatePickerSheet`, shared by
   Automations and Home), `TronCardRail`, `TronDisclosure`, `TronContentFitDetent`, `TronWidthCap`,
   `TronSafariView`.
-- `Components/`: `TronDocumentSheet`, `TronPagedList`, `TronTextEntrySheet`, `StructuredJSONView`,
+- `Components/`: `TronDocumentSheet`, `TronList` (the list standard), `TronTextEntrySheet`, `StructuredJSONView`,
   `TechnicalDetailPresentation`, `TronNativeSheetCanvas` (surface-level native containment for
   State-scoped `RetainedNativeSheetHost` graphs), `InAppNoticePresentation` (`InAppNoticeHost`),
   `ProcessActivityOrb`, `ResourceTagLabel`, `ThinkingLevelPresentation`, `TronHaptics` (the app's one
@@ -78,7 +78,7 @@ Physical feel and System Haptics off require a device; simulator journeys observ
 
 ## Entry points
 
-`Theme/TronPresentation.swift`, `Components/TronDocumentSheet.swift`, `Components/TronPagedList.swift`.
+`Theme/TronPresentation.swift`, `Components/TronDocumentSheet.swift`, `Components/TronList.swift`.
 
 ## Signals
 

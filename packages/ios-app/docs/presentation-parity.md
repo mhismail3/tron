@@ -160,11 +160,20 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 
 ## Shared lists and readers
 
-- Session History, Home Memory and Home Tasks share `TronPagedList`, `TronPageControls`,
-  `TronPagedListRow` and `PagedListStore`. Paging is explicit at both ends; a successful
-  navigation installs one bounded page and a fresh native viewport, while failure, refresh and
-  return from detail preserve page and scroll. Activity, identity and latest-request fences gate
-  publication; DTO bounds stay with their RPC owners.
+- Manage Home and Manage Session list sheets (#1691) share `Components/TronList.swift`. Short
+  fixed sets (Profile, Chapters, Instructions, Resources) are one `TronListGroup`, sectioned
+  inside one glass container. Unbounded feeds (Memory, Tasks, Session History, Subagent History)
+  are `TronFeed` with one `TronFeedCard` per row. Every row is `TronListRow`, with these parts:
+  - a leading icon or ordinal, vertically centred, used only when it carries kind;
+  - a title or a 3-line preview;
+  - one status pill at the top right;
+  - 12 pt subtext;
+  - tags on the left and the `TronListTime` on the right.
+
+  Actions live in the detail subsheet. A long-press menu offers the same actions, and rows have
+  no ⋯ buttons. Feeds load the next page through `FeedStore` while five rows remain. A
+  failure keeps the rows and shows a Retry row. The pinned `TronFeedPositionChip` appears only
+  on long feeds, and tapping it jumps to newest.
 - Technical detail uses `TronMetadataTable` for metadata and JSON (field, short type, trailing code
   preview; stacked at accessibility sizes); the raw JSON reader is one selectable, wrapping,
   vertically scrolling sheet, never a horizontal viewport.
