@@ -332,7 +332,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
       if (text.startsWith("first queued steer")) stopRecoveryPromptImages.push(options.images?.length ?? 0);
       return originalSessionPrompt(text, options);
     };
-    const queuedBeforeStop = (slotBeforeStop as any).queuedMessages.map((item: any) => ({ id: item.id, behavior: item.behavior, images: item.images?.length }));
+    const queuedBeforeStop = (slotBeforeStop as any).runQueue.queuedMessages.map((item: any) => ({ id: item.id, behavior: item.behavior, images: item.images?.length }));
     const activeBashOwners = {
       sdk: (slotBeforeStop as any).runtime.session.isBashRunning,
       direct: (slotBeforeStop as any).directBashProcesses?.hasActiveProcesses,
@@ -511,7 +511,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
     });
     await abortIsRunning;
     expect((slot as any).runtime.session.getSteeringMessages()).toHaveLength(0);
-    expect((slot as any).queuedMessages.map((item: any) => item.text)).toContain("steer before stop");
+    expect((slot as any).runQueue.queuedMessages.map((item: any) => item.text)).toContain("steer before stop");
     const late = await client.request("race-late-steer", "session.prompt", {
       sessionId: session.id, commandId: "race-late-steer", text: "steer during stop", behavior: "steer",
     });
@@ -529,7 +529,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
       }, "both stop-racing steers admitted and consumed once");
     } catch (error) {
       const snapshot = client.frames.filter((frame: any) => frame.topic === "session.snapshot" && frame.payload?.sessionId === session.id).at(-1)?.payload;
-      throw new Error(`${String(error)}\n${JSON.stringify({snapshot, queued:(slot as any).queuedMessages, held:(slot as any).heldQueue.entries, recovery:[...(slot as any).runAbort.stopSteeringRecoveryIDs], closed:(slot as any).runAbort.stopRecoveryQueueClosed})}`);
+      throw new Error(`${String(error)}\n${JSON.stringify({snapshot, queued:(slot as any).runQueue.queuedMessages, held:(slot as any).heldQueue.entries, recovery:[...(slot as any).runAbort.stopSteeringRecoveryIDs], closed:(slot as any).runAbort.stopRecoveryQueueClosed})}`);
     }
     expect(continuationInputs).toHaveLength(1);
     expect(continuationInputs[0]!.some((text) => text.startsWith("steer before stop"))).toBe(true);

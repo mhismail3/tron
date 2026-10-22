@@ -5,6 +5,13 @@ export const MAXIMUM_PROMPT_ATTACHMENTS = 10;
 
 export type QueueBehavior = QueuedMessageState["behavior"];
 
+export type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
+
+export type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal"> & {
+  redelivery?: boolean;
+  resolveDisposition: (disposition: QueueAdmissionDisposition) => void;
+};
+
 export type RuntimeQueuedMessage = QueuedMessageState & {
   runtimeText: string;
   attachmentEnvelope: string;

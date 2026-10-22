@@ -7948,7 +7948,7 @@ export default function (pi) {
       phase: "running" | "idle";
       activeOperationId?: string;
       operation?: { id?: string; kind: "prompt"; startedAt: string };
-      pendingQueueAdmission?: unknown;
+      runQueue: import("../kernel/run/run-queue-owner.js").RunQueueOwner;
       runtime: { session: {
         readonly isStreaming: boolean;
         prompt: (text: string, options?: {
@@ -7972,7 +7972,7 @@ export default function (pi) {
     });
 
     await expect(slot.prompt("never queued", [], "steer")).rejects.toThrow("queue admission failed");
-    expect(internal.pendingQueueAdmission).toBeUndefined();
+    expect(internal.runQueue.pendingQueueAdmission).toBeUndefined();
     const entries = (await readFile(slot.sessionFile!, "utf8"))
       .trimEnd().split("\n").map(line => JSON.parse(line) as any);
     const starts = entries.filter(entry =>

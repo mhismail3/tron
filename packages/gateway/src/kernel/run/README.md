@@ -24,6 +24,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
   generation, provider 413 classification and the `tron-compaction-policy` descriptor.
 - `run-abort-owner.ts`: foreground cancellation intent, exact settlement and accepted
   Stop steering recovery, with live SDK/queue ownership rechecks across awaits.
+- `run-queue-owner.ts`: SDK queue identities, reconciliation, pending admission and shared
+  revision/ordinal clock, retaining exact work owners across Pi callback gaps.
 - `held-prompt-queue.ts`: accepted compaction/Stop-time input and its ordered deferred
   admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types/bounds.
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option
@@ -70,5 +72,5 @@ scripts/tron verify --module gateway/run
 
 ## Not here
 
-Prompt admission, canonical Pi appends, profiles, Pi's active queue and compaction orchestration remain with
+Prompt admission, canonical Pi appends, profiles, queue commands and compaction orchestration remain with
 `RuntimeSlot`; delegated worker lifecycle is separate.
