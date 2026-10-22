@@ -28,6 +28,7 @@ import type { PresentedResolution } from "./settings-presentation.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { waitFor } from "../../test-support/wait-for.js";
 /**
  * The one settings change path at its real boundaries (docs/settings-model.md
  * 5.1-5.3, 5.7, foundation F2): `settings.change`, `settings.undo` and
@@ -63,6 +64,26 @@ function ownCase(owner: CaseOwner, body: () => Promise<void>): Promise<void> {
   const running = body();
   owner.bodies.push(running);
   return running;
+}
+/**
+ * Resolves once the directory watcher `startWatching` armed delivers events. `fs.watch`
+ * has no readiness signal, and on macOS a write made before its FSEvents stream starts
+ * is never reported; under parallel load that window outlasted these cases' first write,
+ * so no rescan ever ran (#1650, #1506). The probe rewrites `settings.json` with its own
+ * bytes, an unchanged digest that records nothing, until a watcher-driven rescan rewrites
+ * `observed.json` (every rescan stamps `seen`). It never reads settings itself, so a
+ * broken watcher still fails here with this label.
+ */
+async function watcherDelivers(outside: OutsideChanges, agentDir: string): Promise<void> {
+  const settings = join(agentDir, "settings.json");
+  const bytes = await readFile(settings);
+  const observed = () => readFile(outside.path, "utf8").catch(() => "");
+  const before = await observed();
+  await waitFor(async () => {
+    await writeFile(settings, bytes);
+    await new Promise(resolve => setTimeout(resolve, 400)); // past the watcher's 250 ms settle
+    return await observed() !== before;
+  }, "the settings directory watcher delivers an event", { intervalMs: 0 });
 }
 /** Every `it` runs through here: its own owner, and its body joined by that owner's teardown. */
 const caseIt = (name: string, body: (owner: CaseOwner) => Promise<void>) => it(name, () => {
@@ -278,6 +299,7 @@ describe("outside settings retirement", () => {
       finally { finished.release(); }
     } });
     outside.startWatching(error => { errors.push(error); finished.release(); });
+    await watcherDelivers(outside, f.agentDir);
     hold = true;
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 8 } }));
     await reading.promise; // the real directory watcher has entered the store reader
@@ -867,6 +889,7 @@ describe("outside changes", () => {
     const f = await fixture(owner);
     f.outside.startWatching(() => {});
     await row(f, { kind: "global" }, "run.retry.maxRetries");
+    await watcherDelivers(f.outside, f.agentDir);
     const until = async (done: () => boolean | Promise<boolean>) => {
       for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
     };
@@ -959,6 +982,7 @@ describe("outside changes to MCP servers and custom models", () => {
       finally { transcript.push({ case: "outside mcp and models stage", detail: { stage: `invoke ${method}`, ms: Math.round(performance.now() - started) } }); }
     }) as typeof f.service.invoke;
     f.outside.startWatching(() => {});
+    await watcherDelivers(f.outside, f.agentDir);
     return f;
   };
 
