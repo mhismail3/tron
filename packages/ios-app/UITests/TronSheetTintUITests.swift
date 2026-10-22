@@ -81,12 +81,13 @@ final class TronSheetTintUITests: XCTestCase {
             let history = app.buttons["Session History"]
             for _ in 0..<12 where !history.isHittable { app.swipeUp() }
             XCTAssertTrue(history.isHittable, app.debugDescription); history.tap()
-            let actions = app.buttons["Actions for Nested history prompt"]
+            // Rows have no ⋯ menu; a long-press offers the entry's actions.
+            let actions = app.buttons["history-row-fixture-prompt"]
             XCTAssertTrue(actions.waitForExistence(timeout: 10), app.debugDescription)
             assertToolbarTint(app, title: "Session History")
             for (action, destination) in [("Edit From This Prompt", "Edit From This Prompt"),
                                            ("Fork New Session", "Fork Session"), ("Add Bookmark", "Bookmark")] {
-                actions.tap()
+                actions.press(forDuration: 1.0)
                 let menuAction = app.buttons[action]
                 XCTAssertTrue(menuAction.waitForExistence(timeout: 5), app.debugDescription)
                 if action == "Edit From This Prompt" {
@@ -101,18 +102,19 @@ final class TronSheetTintUITests: XCTestCase {
                     XCTAssertTrue(app.textFields["Label"].exists)
                     XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "Bookmark retains the native alert’s field autofocus")
                     cancel.tap()
-                    actions.tap(); app.buttons["Add Bookmark"].tap()
+                    actions.press(forDuration: 1.0); app.buttons["Add Bookmark"].tap()
                     let field = app.textFields["Label"]
                     XCTAssertTrue(field.waitForExistence(timeout: 5))
                     field.tap(); field.typeText("Saved bookmark")
                     let entryCapture = XCTAttachment(screenshot: app.screenshot())
                     entryCapture.name = "1261-bookmark-\(appearance)"; entryCapture.lifetime = .keepAlways; add(entryCapture)
                     app.buttons["Save"].tap()
-                    XCTAssertTrue(app.staticTexts["Saved bookmark"].waitForExistence(timeout: 5), app.debugDescription)
-                    actions.tap(); app.buttons["Edit Bookmark"].tap()
+                    // The bookmark now reads inside the row's one combined label.
+                    XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Saved bookmark'")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+                    actions.press(forDuration: 1.0); app.buttons["Edit Bookmark"].tap()
                     XCTAssertTrue(app.buttons["Remove"].waitForExistence(timeout: 5))
                     app.buttons["Remove"].tap()
-                    XCTAssertTrue(app.staticTexts["Saved bookmark"].waitForNonExistence(timeout: 5))
+                    XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Saved bookmark'")).firstMatch.waitForNonExistence(timeout: 5))
                 } else {
                     XCTAssertTrue(app.navigationBars.staticTexts[destination].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
                     let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.filter(\.isHittable)

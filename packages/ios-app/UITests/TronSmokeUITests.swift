@@ -402,8 +402,10 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         // The oldest summary is on the next page of the newest-first view.
         XCTAssertFalse(app.descendants(matching: .any)["home-memory-summary-0-16"].exists)
-        tapManageRow(app, "home-memory-older-top")
-        XCTAssertTrue(app.descendants(matching: .any)["home-memory-summary-0-16"].waitForExistence(timeout: 5))
+        // The feed loads that page itself as the reader scrolls toward it.
+        let oldest = app.descendants(matching: .any)["home-memory-summary-0-16"]
+        for _ in 0..<12 where !oldest.exists { app.swipeUp() }
+        XCTAssertTrue(oldest.waitForExistence(timeout: 5))
         keepScreenshot(named: "home-memory-next-page")
     }
 

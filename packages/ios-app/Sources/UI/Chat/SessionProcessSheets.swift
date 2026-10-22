@@ -414,7 +414,8 @@ enum SessionProcessRowPresentation {
             subtext: preview, tags: tags,
             timestamp: TronListTime.short(iso: process.startedAt, now: now),
             accessibilityHint: process.lifecycle.isActiveWork ? "Opens the live read-only subagent session"
-                : "Opens the completed read-only subagent session")
+                : "Opens the completed read-only subagent session",
+            accessibilityValueHoldsDetails: true)
     }
 
     static let outputLineLimit = 3

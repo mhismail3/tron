@@ -18,23 +18,18 @@ final class TronSubagentParityUITests: XCTestCase {
             open.tap()
             let worker = app.buttons["subagent-row-worker"]
             XCTAssertTrue(worker.waitForExistence(timeout: 5), app.debugDescription)
-            // Expand the real medium-first sheet to show both lifecycle sections.
+            // Expand the real medium-first sheet; live work precedes finished runs.
             app.swipeUp()
-            XCTAssertTrue(app.staticTexts["Recently finished"].waitForExistence(timeout: 5))
-            XCTAssertTrue((worker.value as? String)?.contains("Live") == true)
-            XCTAssertLessThan(app.staticTexts["Active"].frame.maxY, worker.frame.minY)
-            XCTAssertLessThan(worker.frame.maxY, app.staticTexts["Recently finished"].frame.minY)
+            XCTAssertTrue((worker.value as? String)?.contains("Running") == true)
             let completed = app.buttons["subagent-row-completed"]
-            XCTAssertLessThan(app.staticTexts["Recently finished"].frame.maxY, completed.frame.minY)
+            XCTAssertLessThan(worker.frame.maxY, completed.frame.minY)
             try capture("1306-history-mixed-\(scheme)")
             app.buttons["Finish worker"].tap()
             let settled = NSPredicate(format: "value CONTAINS %@", "Completed")
             expectation(for: settled, evaluatedWith: worker)
             waitForExpectations(timeout: 5)
-            XCTAssertFalse(app.staticTexts["Active"].exists, app.debugDescription)
             XCTAssertEqual(app.buttons.matching(identifier: "subagent-row-worker").count, 1)
             XCTAssertFalse((worker.value as? String)?.contains("LIVE OUTPUT") == true)
-            XCTAssertLessThan(app.staticTexts["Recently finished"].frame.maxY, worker.frame.minY)
             try capture("1306-history-finished-\(scheme)")
         }
     }
@@ -53,9 +48,9 @@ final class TronSubagentParityUITests: XCTestCase {
             app.buttons["Subagent History"].tap()
             XCTAssertTrue(app.buttons["subagent-row-worker"].waitForExistence(timeout: 5))
             app.swipeUp()
-            let stages = [("worker", "Queued", true), ("worker", "Live", true),
+            let stages = [("worker", "Queued", true), ("worker", "Running", true),
                           ("worker", "Pausing…", true), ("worker", "Paused", false),
-                          ("resumed", "Queued", true), ("resumed", "Live", true),
+                          ("resumed", "Queued", true), ("resumed", "Running", true),
                           ("resumed", outcome.capitalized, false)]
             for (index, stage) in stages.enumerated() {
                 if index > 0 { app.buttons["Advance lifecycle"].tap() }
@@ -65,7 +60,6 @@ final class TronSubagentParityUITests: XCTestCase {
                     assertHistoryRow(app, id: "worker", status: "Paused", active: false)
                     XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "subagent-row-")).count, 3)
                 }
-                if !stage.2 { XCTAssertFalse(app.staticTexts["Active"].exists) }
                 if index == 3 || index == 4 || index == 6 {
                     try capture("1306-history-\(outcome)-stage-\(index)")
                 }
@@ -81,14 +75,7 @@ final class TronSubagentParityUITests: XCTestCase {
         expectation(for: NSPredicate(format: "value BEGINSWITH %@", "\(status),"), evaluatedWith: row)
         waitForExpectations(timeout: 5)
         XCTAssertEqual(app.buttons.matching(identifier: "subagent-row-\(id)").count, 1, file: file, line: line)
-        let recent = app.staticTexts["Recently finished"]
-        XCTAssertTrue(recent.exists, file: file, line: line)
-        if active {
-            XCTAssertTrue(app.staticTexts["Active"].exists, file: file, line: line)
-            XCTAssertLessThan(app.staticTexts["Active"].frame.maxY, row.frame.minY, file: file, line: line)
-            XCTAssertLessThan(row.frame.maxY, recent.frame.minY, file: file, line: line)
-        } else {
-            XCTAssertLessThan(recent.frame.maxY, row.frame.minY, file: file, line: line)
+        if !active {
             XCTAssertFalse((row.value as? String)?.contains("LIVE OUTPUT") == true, file: file, line: line)
         }
     }

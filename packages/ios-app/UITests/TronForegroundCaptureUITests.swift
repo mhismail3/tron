@@ -92,16 +92,14 @@ final class TronForegroundCaptureUITests: XCTestCase {
         let memory = app.descendants(matching: .any)["home-manage-memory-browser"].firstMatch
         reveal(memory, in: app); memory.tap()
         XCTAssertTrue(app.buttons["home-sheet-done-memory"].waitForExistence(timeout: 20))
-        let older = app.buttons["home-memory-older-top"]
-        reveal(older, in: app); older.tap()
+        // The feed loads the older page itself as the reader scrolls toward it.
         let olderPage = app.descendants(matching: .any)["home-memory-summary-0-16"].firstMatch
-        XCTAssertTrue(olderPage.waitForExistence(timeout: 20), app.debugDescription)
         reveal(olderPage, in: app)
         try capture(app, name: "memory-\(dark ? "dark" : "light")", reads: ["home.memory.view": 1],
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "settings.resolve", "home.status", "home.taskList"])
         XCTAssertTrue(olderPage.isHittable, "Foreground preserves the current page, not merely a cached first page")
-        app.buttons["home-memory-newer-top"].tap()
         let item = app.descendants(matching: .any)["home-memory-row-34"].firstMatch
+        for _ in 0..<12 where !item.isHittable { app.swipeDown() }
         reveal(item, in: app)
         try capture(app, name: "memory-viewport-\(dark ? "dark" : "light")", reads: ["home.memory.view": 1],
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "home.status", "home.taskList"])

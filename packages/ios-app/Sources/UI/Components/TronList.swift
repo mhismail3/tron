@@ -40,6 +40,18 @@ struct TronListRowContent {
     var tags: [TronListTag] = []
     var timestamp: String?
     var accessibilityHint: String?
+    /// Name the row by its title alone and read status and details as its value,
+    /// for rows whose title is a stable name (a subagent) rather than content.
+    var accessibilityValueHoldsDetails = false
+
+    private var details: [String] {
+        [status?.text, subtext, tags.map(\.text).joined(separator: ", "), timestamp]
+            .compactMap { $0 }.filter { !$0.isEmpty }
+    }
+    var accessibilityLabelText: String {
+        accessibilityValueHoldsDetails ? title : ([title] + details).joined(separator: ", ")
+    }
+    var accessibilityValueText: String { accessibilityValueHoldsDetails ? details.joined(separator: ", ") : "" }
 }
 
 enum TronListMetrics {
@@ -87,7 +99,8 @@ struct TronListRow: View {
         .frame(maxWidth: .infinity, minHeight: TronListMetrics.minimumHeight, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
+        .accessibilityLabel(content.accessibilityLabelText)
+        .accessibilityValue(content.accessibilityValueText)
         .accessibilityHint(content.accessibilityHint ?? "")
     }
 
@@ -123,11 +136,6 @@ struct TronListRow: View {
         .padding(.top, 2)
     }
 
-    private var accessibilityLabel: String {
-        [content.title, content.status?.text, content.subtext,
-         content.tags.map(\.text).joined(separator: ", "), content.timestamp]
-            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
-    }
 }
 
 private struct TronListLeadingView: View {
@@ -285,6 +293,9 @@ struct TronListButton<Menu: View>: View {
     var body: some View {
         Button(action: action) { TronListRow(content) }
             .buttonStyle(.plain)
+            .accessibilityLabel(content.accessibilityLabelText)
+            .accessibilityValue(content.accessibilityValueText)
+            .accessibilityHint(content.accessibilityHint ?? "")
             .contextMenu { menu() }
             .accessibilityIdentifier(identifier)
             .tronListMarkers(identifier)
@@ -360,6 +371,7 @@ final class TronFeedPosition {
     var newest: Int?
     var oldest: Int?
     var long = false
+    static let hysteresis: CGFloat = 60
 }
 
 /// "6,689–6,714 of 6,733", newest first; tapping jumps to the newest entry.
@@ -430,33 +442,41 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
         let trigger = items.count > 5 ? items[items.count - 5].id : items.last?.id
         ScrollViewReader { reader in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: TronListMetrics.feedGap, pinnedViews: [.sectionHeaders]) {
+                LazyVStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
                     header()
-                    Section {
-                        ForEach(items) { item in
-                            row(item)
-                                .id(item.id)
-                                .onAppear { if item.id == trigger { loadMore() } }
-                        }
-                        TronFeedStateRow(tail: tail, retry: retry)
-                            .onAppear { if tail == .idle { loadMore() } }
-                    } header: {
-                        TronFeedPositionChip(position: position, total: total, totalIsExact: totalIsExact) {
-                            guard let first = items.first?.id else { return }
-                            withAnimation(.snappy) { reader.scrollTo(first, anchor: .top) }
-                        }
+                    ForEach(items) { item in
+                        row(item)
+                            .id(item.id)
+                            .onAppear { if item.id == trigger { loadMore() } }
                     }
+                    TronFeedStateRow(tail: tail, retry: retry)
+                        .onAppear { if tail == .idle { loadMore() } }
                 }
                 .scrollTargetLayout()
                 .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
             }
+            // The chip floats above the feed rather than inside the lazy stack, so
+            // updating it never re-places rows (a pinned header did, without end).
+            .safeAreaInset(edge: .top, spacing: 0) {
+                TronFeedPositionChip(position: position, total: total, totalIsExact: totalIsExact) {
+                    guard let first = items.first?.id else { return }
+                    withAnimation(.snappy) { reader.scrollTo(first, anchor: .top) }
+                }
+            }
             .tronScrollEdgeChrome()
-            .onScrollGeometryChange(for: Bool.self) { $0.contentSize.height > $0.containerSize.height + 1 } action: { _, long in
-                position.long = long
+            // The chip adds its own height, so it hides only well below the threshold
+            // that shows it; otherwise a feed near one screen would toggle it forever.
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height - $0.containerSize.height } action: { _, excess in
+                if position.long { if excess < -TronFeedPosition.hysteresis { position.long = false } }
+                else if excess > 1 { position.long = true }
             }
             .onScrollTargetVisibilityChange(idType: Item.ID.self, threshold: 0.3) { visible in
+                // Keep the last range while no row is visible, and publish only a
+                // real change: the chip must never resize the feed under the reader.
                 let values = visible.compactMap { ordinals[$0] }
-                position.newest = values.max(); position.oldest = values.min()
+                guard let newest = values.max(), let oldest = values.min(),
+                      newest != position.newest || oldest != position.oldest else { return }
+                position.newest = newest; position.oldest = oldest
             }
             .onChange(of: items.count, initial: true) { _, _ in
                 ordinals = Dictionary(items.map { ($0.id, ordinal($0)) }, uniquingKeysWith: { first, _ in first })
