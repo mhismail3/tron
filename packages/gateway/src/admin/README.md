@@ -111,7 +111,8 @@ running-worker `announce`; Home supplies `HomeProfileItems` for learned notes.
 | `settings.risk.failed` | warning | Risk classification failed or hit its 1.5 s deadline; the deterministic tier stands |
 | `settings.notification.failed` | warning | A notify or pending-approval push could not be queued; the change is already recorded |
 | `settings.outside.failed` | warning | An outside-change comparison failed |
-| `settings.migration-session-skipped` | error | The three-layer startup migration left one chat or subagent session byte-for-byte unmigrated; the message names the file and refusal. Startup continued |
+| `settings.migration` | info | The three-layer migration of the shared settings stores ran after the listener bound: `counts.inputs`, `counts.replaced`, or "already complete" |
+| `settings.migration-failed` | error | That migration refused; every shared store is unchanged, startup continued, and it retries next start. `error` names the file and reason |
 | `session_configuration_*` on a `busy` settings refusal | retryable error | Home's runtime boundary refused before recipe publication; its stored and SDK selections remain unchanged |
 | `settings-run-applied` code on `session.diagnostic` | session diagnostic | The operational settings resolved and applied at request admission |
 | `gateway.shutdown-step` `step=outside-settings-dispose` | info | Time spent retiring outside-change watches and observers at shutdown |

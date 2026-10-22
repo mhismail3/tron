@@ -192,21 +192,20 @@ legacy undo applier may retire only when no retained undoable entry references i
 - Prepare on an isolated copy of real state, never mutate live state in this task. Enumerate settings,
   profile, session JSONLs, audit segments, approvals and observed baselines; hash an automatic backup
   before any mutation. Preserve unknown fields, IDs, titles, timestamps, reasons and redacted data.
-- One versioned forward migration owned by settings startup, before sessions open. Preflight all
-  transformations and stage replacements; crash recovery completes the same migration, never exposes
-  half-upgraded stores. Backup/version completion only after durable writes; rerun is a no-op. A
-  failed preflight changes nothing; corrupt/unclassifiable legacy state refuses with path, not drops.
-  Session JSONL is read as Pi reads it (`\n` lines; malformed lines kept byte-for-byte). An
-  unconvertible chat or subagent session stays untouched and is logged
-  (`settings.migration-session-skipped`) while startup continues; Home and audit inputs still refuse.
-- Preserve saved Global values in their owned stores as Global. Convert Profile entries to the same
-  override vocabulary. Fold active Home chapter choices into Profile while preserving currently
-  effective behavior; no extra chapter setting layer. Archive superseded provenance in the backup.
-- Explicit/legacy Session values remain overrides. Old inherited launch snapshots that differ from
-  current lower defaults become explicit overrides to preserve effective values; equal snapshots may
-  become inheritance. Never guess provenance from history. Fixed resource settings retain runtime
-  boundary snapshots, not a new user override layer. Unsupported legacy fields stay backed up with a
-  diagnostic; valid supported values must remain effective except approved Project precedence/safety.
+- One versioned forward migration of the small shared stores (approvals, audit ledger, Home
+  record/Profile), run after the listener binds and before their owners load. Preflight and
+  stage replacements; an automatic backup precedes publication; crash recovery completes the same
+  transaction; rerun is a no-op. It never fails startup: a refusal changes nothing, logs
+  `settings.migration-failed` and retries next start (#1649).
+- Session JSONL is never rewritten. The Session reader (`sessions/session-settings.ts`
+  `RETIRED_SCOPES`) maps retired scope names (`mac`/`builtin` → Global, `chat`/`profile` →
+  Session) and the next settings write persists current names. Remove the map once no retained
+  session predates #1634. The Home record model moves into the Profile when none is saved.
+- Preserve saved Global values in their owned stores as Global. Active Home chapter sessions are
+  not read or folded; Home's saved choices live in the Profile.
+- Explicit/legacy Session values remain overrides; old inherited `mac`/`builtin` frames are
+  inheritance from Global. Fixed resource settings retain runtime boundary snapshots, not a new
+  user override layer. Unrecognized scope names refuse at read for that session only.
 - Migrate audit/approval vocabulary once (including before/after/target references) rather than keep
   dual live schemas. Preserve undo/conflict behavior and pending approvals/expiry; never auto-approve.
   Old titles unavailable in retained metadata show the stable id, not an invented historical title.
