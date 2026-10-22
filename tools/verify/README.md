@@ -27,13 +27,10 @@ the build that stamped it).
 ## Static checks (existing tools only)
 
 1. `scripts/tron ownership`
-2. `scripts/tron budgets HEAD --base <base>`: sizes are reported; a new production
-   file over 800 lines or a doc over twice its budget fails
+2. `scripts/tron budgets HEAD --base <base>` (sizes are reported; few cases fail)
 3. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
-   --base <base>` when Markdown, a manifest or the Gateway (its generated blocks'
-   sources) changed. A block whose generator loads Gateway code (`settings`) is
-   regenerated only when its sources or its text changed since the base, so a
-   Markdown-only change needs no Gateway `node_modules`.
+   --base <base>` when Markdown, a manifest or the Gateway changed (a Markdown-only
+   change needs no Gateway `node_modules`; [tools/docs](../docs/README.md))
 4. the privacy guard over `git diff <base>..HEAD`
 5. `git diff --check`
 6. When the selection touches the Gateway: `npm run check` (production and test
@@ -42,12 +39,10 @@ the build that stamped it).
    below). A selection without the iOS lane runs it only when a fresh index
    exists; otherwise it is reported as skipped, never as passed.
 
-A failure that also reproduces on the base commit does not block landing: run the
-same step on the base, cite that run in the closing comment and file the failure as
-its own issue (charter, Validation and landing).
-
-V10 also runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file
-moved/rewrite counts to `test-results/measure/`; its counts and errors never fail verify.
+A failure that also reproduces on the base commit does not block landing: cite the
+base run in the closing comment and file the failure as its own issue. V10 also
+runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file moved/rewrite
+counts to `test-results/measure/`; its counts and errors never fail verify.
 
 ## Selection
 
