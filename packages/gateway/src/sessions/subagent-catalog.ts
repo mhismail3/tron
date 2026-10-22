@@ -6,6 +6,7 @@ import type { ManagedSubagents } from "./managed-subagents.js";
 import type { ResourceDistribution } from "../protocol/types.js";
 import { boundCommandContent } from "../kernel/projection/projection.js";
 import { redactCredentials } from "../util/credential-redaction.js";
+import { GatewayError } from "../errors.js";
 
 /** The third-party package that owns subagent discovery. */
 const SUBAGENT_PACKAGE = "pi-subagents";
@@ -186,9 +187,12 @@ export interface SubagentDetail extends AvailableSubagent {
   contentTruncated?: boolean;
 }
 
-/** One subagent's wire row plus its definition body, credential-redacted and
- * bounded like a command's source document. The file path stays internal. */
-export function subagentDetail(subagent: AvailableSubagent): SubagentDetail {
+/** One discovered subagent's wire row plus its definition body, credential-
+ * redacted and bounded like a command's source document; the file path stays
+ * internal. A name discovery no longer reports is not found. */
+export function subagentDetail(subagents: readonly AvailableSubagent[], name: string): SubagentDetail {
+  const subagent = subagents.find((candidate) => candidate.name === name);
+  if (!subagent) throw new GatewayError("not_found", "That subagent is no longer available");
   return {
     ...availableSubagentRow(subagent),
     ...(subagent.systemPrompt !== undefined ? boundCommandContent(redactCredentials(subagent.systemPrompt)) : {}),
