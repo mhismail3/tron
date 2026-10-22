@@ -397,7 +397,7 @@ def main(argv: list[str]) -> int:
         ("ownership", [tron, "ownership"], {}),
         ("budgets", [tron, "budgets", "HEAD", "--base", base], {}),
         ("documentation policy", ["python3", "scripts/check-documentation-policy.py"], {}),
-        ("generated docs", [tron, "docs", "check"] if selection["docInputs"] or gateway_touched else None, {}),
+        ("generated docs", [tron, "docs", "check", "--base", base] if selection["docInputs"] or gateway_touched else None, {}),
         ("agent policy", ["bash", "scripts/check-agent-policy.sh"], {}),
         ("privacy guard", f"git diff {base}..HEAD | scripts/personal-info-guard.sh --stdin", {}),
         ("git diff --check", ["git", "diff", "--check", f"{base}..HEAD"], {}),

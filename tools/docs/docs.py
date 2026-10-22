@@ -21,8 +21,12 @@ BLOCK = re.compile(r"^<!-- tron docs ([^>]*?) -->\n(.*?)^<!-- /tron docs -->$", 
 OPENER = re.compile(r"^<!-- tron docs [^>]*-->", re.M)
 FENCE = re.compile(r"^```.*?^```", re.S | re.M)
 CELL = re.compile(r"(?<!\\)\|")
+# Generators that load Gateway code, so need its installed dependencies, and whether a path is a source of
+# theirs. With `check --base`, their blocks are regenerated only when a source or the block itself changed.
+LOADED = {"settings": lambda path: path.startswith("tools/docs/") or path in (f"{GATEWAY}/package.json",
+          f"{GATEWAY}/package-lock.json") or (path.startswith(f"{GATEWAY}/src/") and path.endswith(".ts"))}
 
-USAGE = """usage: scripts/tron docs modules [<path>] | signals | rpc | settings | check | update
+USAGE = """usage: scripts/tron docs modules [<path>] | signals | rpc | settings | check [--base <ref>] | update
 Prints a generated Markdown index, or checks/rewrites the generated blocks in tracked Markdown
 (tools/docs/README.md). Exit 0 current, 1 stale or failed, 2 usage."""
 
@@ -155,9 +159,12 @@ def schema() -> dict:
                            str(Path(__file__).with_name("settings-keys.mjs")), str(ROOT / SCHEMA), str(ROOT / SCHEMA_TYPES)],
                           cwd=ROOT / GATEWAY, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
     if done.returncode != 0:
-        hint = "" if (ROOT / GATEWAY / "node_modules").is_dir() else \
-            f"; {GATEWAY}/node_modules is missing (install with: cd {GATEWAY} && ../../scripts/tron-node exec npm ci)"
-        raise DocsError(f"loading {SCHEMA} failed{hint}:\n{done.stderr.strip()[-2000:]}")
+        if not (ROOT / GATEWAY / "node_modules").is_dir():
+            error = next((line for line in done.stderr.splitlines() if "Error" in line), "").strip()
+            raise DocsError(f"loading {SCHEMA} needs the Gateway dependencies, and {GATEWAY}/node_modules is missing "
+                            f"(install with: cd {GATEWAY} && ../../scripts/tron-node exec npm ci){': ' if error else ''}"
+                            f"{error}")
+        raise DocsError(f"loading {SCHEMA} failed:\n{done.stderr.strip()[-2000:]}")
     return json.loads(done.stdout)
 
 
@@ -200,10 +207,30 @@ def generate(args: list[str]) -> str:
     return GENERATORS[args[0]][0](*args[1:])
 
 
-def blocks(write: bool) -> int:
+def unchanged_loaded(base: str) -> set[str]:
+    """The LOADED generators none of whose sources changed between `base` and the working tree."""
+    try:
+        changed = ownership.git("diff", "--name-only", "-z", base, "--").split(b"\0") \
+            + ownership.git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0")
+    except ownership.GitError as error:
+        raise DocsError(f"base {base}: {error}") from None
+    paths = [p.decode("utf-8", "surrogateescape") for p in changed if p]
+    return {name for name, source in LOADED.items() if not any(source(path) for path in paths)}
+
+
+def base_bodies(base: str, path: str) -> dict:
+    try:
+        text = ownership.git("show", f"{base}:{path}").decode("utf-8")
+    except (ownership.GitError, UnicodeDecodeError):
+        return {}
+    return {tuple(m.group(1).split()): m.group(2) for m in BLOCK.finditer(text)}
+
+
+def blocks(write: bool, base: str | None = None) -> int:
     """Check (or rewrite) every `<!-- tron docs … -->` block in tracked Markdown."""
     outputs: dict[tuple, str] = {}
-    problems, count = [], 0
+    problems, count, kept = [], 0, 0
+    quiet = unchanged_loaded(base) if base else set()
     for path in tracked("*.md"):
         text = read(path)
         fences = [match.span() for match in FENCE.finditer(text)]
@@ -216,9 +243,14 @@ def blocks(write: bool) -> int:
             problems.append(f"{path}: a `<!-- tron docs … -->` block has no `<!-- /tron docs -->` end")
             continue
         updated = text
+        named = {m.group(1).split()[0] for m in found if m.group(1).split()}
+        before = base_bodies(base, path) if named & quiet else {}
         for match in reversed(found):
             count += 1
             args = tuple(match.group(1).split())
+            if args[:1] and args[0] in quiet and before.get(args) == match.group(2):
+                kept += 1  # its sources and its text are as at the base: regenerating cannot differ
+                continue
             try:
                 expected = outputs[args] if args in outputs else outputs.setdefault(args, generate(list(args)))
             except DocsError as error:
@@ -235,17 +267,19 @@ def blocks(write: bool) -> int:
     for problem in problems:
         print(problem)
     state = f"{len(problems)} problem(s)" if problems else "current"
-    print(f"docs: {count} generated block(s), {state}")
+    print(f"docs: {count} generated block(s), {state}"
+          + (f" ({kept} unchanged since {base} with unchanged sources, not regenerated)" if kept else ""))
     return 1 if problems else 0
 
 
 def main(argv: list[str]) -> int:
-    if not argv or argv[0] in ("-h", "--help") or (argv[0] in ("check", "update") and len(argv) > 1):
+    base = argv[2] if len(argv) == 3 and argv[:2] == ["check", "--base"] else None
+    if not argv or argv[0] in ("-h", "--help") or (argv[0] in ("check", "update") and len(argv) > 1 and not base):
         print(USAGE, file=sys.stderr)
         return 0 if argv and argv[0] in ("-h", "--help") else 2
     try:
         if argv[0] in ("check", "update"):
-            return blocks(write=argv[0] == "update")
+            return blocks(write=argv[0] == "update", base=base)
         if not usable(argv):
             print(USAGE, file=sys.stderr)
             return 2

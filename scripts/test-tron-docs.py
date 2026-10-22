@@ -268,6 +268,36 @@ class FixtureTests(unittest.TestCase):
             '"background"]', '"background", "subagent"]'))
         self.assertIn("settings.md: `tron docs settings` is stale", self.docs("check", code=1))
 
+    def test_check_against_a_base_needs_gateway_dependencies_only_when_a_loaded_block_can_change(self) -> None:
+        """#1640: a Markdown-only change in a worktree without Gateway node_modules checks its generated docs."""
+        schema = "export const KEYS = [];\nexport const RECORD_SUBJECTS = [];\n"
+        self.module("packages/gateway/src/admin", "admin", {"settings-schema.ts": schema})
+        self.module("packages/gateway/src/kernel/settings", "settings",
+                    {"tool-contract.ts": "export const LAYERS = [];\n"})
+        self.write("settings.md", "<!-- tron docs settings -->\n<!-- /tron docs -->\n")
+        self.write("other.md", "# Other\n")
+        self.write("root.module.json", json.dumps({"layer": "L5", "owns": ["settings.md", "other.md", "root.module.json"]}))
+        self.docs("update")
+        # The schema now needs a package this worktree has not installed, as a fresh worktree's Gateway does.
+        self.write("packages/gateway/src/admin/settings-schema.ts", 'import "@earendil-works/pi-ai";\n' + schema)
+        self.git("add", "-A")
+        self.git("-c", "user.name=F", "-c", "user.email=f@example.invalid", "commit", "-q", "-m", "base")
+        missing = self.docs("check", code=1)
+        self.assertIn("settings.md: loading packages/gateway/src/admin/settings-schema.ts needs the Gateway "
+                      "dependencies, and packages/gateway/node_modules is missing (install with:", missing)
+        self.assertIn("ERR_MODULE_NOT_FOUND", missing)
+        self.write("other.md", "# Other, edited\n")
+        self.assertEqual(self.docs("check", "--base", "main"), "docs: 1 generated block(s), current (1 unchanged "
+                         "since main with unchanged sources, not regenerated)\n")
+        # Known bad: an edited block, or a changed Gateway source, is regenerated against the base.
+        self.write("settings.md", "<!-- tron docs settings -->\nhand-edited\n<!-- /tron docs -->\n")
+        self.assertIn("node_modules is missing", self.docs("check", "--base", "main", code=1))
+        self.write("settings.md", (self.repo / "settings.md").read_text().replace("hand-edited\n", ""))
+        self.git("checkout", "-q", "--", "settings.md")
+        self.write("packages/gateway/src/admin/other.ts", "export const x = 1;\n")
+        self.assertIn("node_modules is missing", self.docs("check", "--base", "main", code=1))
+        self.docs("check", "--base", "nope", code=1)
+
     def test_malformed_blocks_and_usage_fail(self) -> None:
         unclosed = "<!-- tron docs modules -->\nopen\n\n<!-- tron docs modules -->\nold\n<!-- /tron docs -->\n"
         self.write("open.md", unclosed)
