@@ -227,6 +227,11 @@ describe("Home task subagents: refusals, restarts and reports", () => {
         const childId = await workflowChildRunId(seen.workflowDir);
         seen.childDir = join(dirname(seen.workflowDir), childId);
         const slot = await f.registry.acquire(run.sessionId);
+        // The workflow returned once its child launched, but disk durability is not Gateway
+        // observation: until its completed frame is admitted the workflow itself is the one
+        // live run (#1693). Cross the real public discovery boundary first.
+        await waitFor(async () => await asyncState(seen.workflowDir!) === "complete"
+          && await slot.discoverExtensionArtifact(seen.workflowDir!) === "accepted", "completed workflow frame admitted", bound);
         await waitFor(() => slot.liveSubagentRuns().length === 1, "detached execution is live", bound);
         seen.liveChildRunId = slot.liveSubagentRuns()[0]?.runId;
         return fauxAssistantMessage([fauxToolCall("subagent", { action: "interrupt", id: childId }, { id: "pause-child" })], { stopReason: "toolUse" });
