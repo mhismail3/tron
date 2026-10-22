@@ -1,13 +1,10 @@
 import SwiftUI
 import TronMobileCore
+import UIKit
 
 enum SessionForkPosition: String, Equatable, Sendable { case before, at }
 enum SessionForkChoicePolicy {
     static func supportsBefore(_ role: TranscriptItem.Role?) -> Bool { role == .user }
-}
-
-enum SessionHistoryLayout {
-    static let summaryBottomPadding: CGFloat = 4
 }
 
 enum SessionHistoryPolicy {
@@ -45,19 +42,16 @@ enum SessionHistoryPreview {
     }
 }
 
+
+/// One history entry in the shared list anatomy: a kind icon and colour, the
+/// entry's preview, Current/Other branch as its status, kind and branch facts as tags.
 struct SessionHistoryRowPresentation: Identifiable {
     var id: String { node.id }
     let node: SessionTreeNode
     let title: String
     let kindLabel: String
-    let timestamp: String
-    var accent: Color {
-        if node.kind == "branchSummary" || !node.isCurrentPath { return .tronPurple }
-        if node.kind == "label" || node.label != nil { return .tronAmber }
-        if node.role == .assistant { return .tronEmerald }
-        if node.role == .toolResult || node.kind == "bash" { return .tronSlate }
-        return .tronEmerald
-    }
+    let date: Date?
+
     init(node: SessionTreeNode) {
         self.node = node
         title = SessionHistoryPreview.title(node)
@@ -78,7 +72,42 @@ struct SessionHistoryRowPresentation: Identifiable {
             default: "Log"
             }
         }
-        timestamp = GatewayTimestamp.parse(node.timestamp)?.formatted(date: .abbreviated, time: .shortened) ?? node.timestamp
+        date = GatewayTimestamp.parse(node.timestamp)
+    }
+
+    /// One distinct icon and colour per kind; the card itself stays uniform.
+    var icon: (String, Color) {
+        if node.role == .user { return ("person", .tronEmerald) }
+        if node.role == .assistant { return ("text.bubble", .tronTeal) }
+        if node.role == .toolResult { return ("arrow.uturn.left", .tronSlate) }
+        return switch node.kind {
+        case "branchSummary": ("arrow.triangle.branch", .tronPurple)
+        case "label": ("bookmark", .tronAmber)
+        case "compaction": ("archivebox", .tronPurple)
+        case "modelChange": ("cpu", .tronSlate)
+        case "thinkingChange": ("brain", .tronSlate)
+        case "bash": ("apple.terminal", .tronSlate)
+        case "sessionInfo": ("bolt", .tronAmber)
+        case "contextEdit": ("scissors", .tronInfo)
+        case "systemMessage": ("gearshape", .tronInfo)
+        default: ("doc.text", .tronSlate)
+        }
+    }
+
+    var fullTimestamp: String {
+        date?.formatted(date: .abbreviated, time: .shortened) ?? node.timestamp
+    }
+
+    func content(current: Bool, now: Date = .now) -> TronListRowContent {
+        var tags = [TronListTag(text: kindLabel)]
+        if node.childCount > 1 { tags.append(TronListTag(text: "\(node.childCount) branches")) }
+        if node.label != nil { tags.append(TronListTag(text: "Bookmarked")) }
+        let status: TronListStatus? = current ? TronListStatus(text: "Current", tone: .tronEmerald)
+            : !node.isCurrentPath ? TronListStatus(text: "Other branch", tone: .tronSlate) : nil
+        return TronListRowContent(leading: .icon(icon.0, icon.1), title: title, preview: true, status: status,
+                                  subtext: node.label.map { "Bookmark: \($0)" }, tags: tags,
+                                  timestamp: date.map { TronListTime.short($0, now: now) },
+                                  accessibilityHint: "Opens the entry and its actions")
     }
 }
 
@@ -90,13 +119,35 @@ private struct HistorySelection: Identifiable {
     let identity: SessionHistoryReadIdentity
     let initialPage: SessionHistoryEntryPage?
 }
-private typealias HistoryPageRequest = PagedListRequest<SessionHistoryCursor>
 
 private struct HistoryLoadKey: Hashable {
     let identity: SessionHistoryReadIdentity?
     let active: Bool
     let supported: Bool
-    let revision: Int
+}
+
+/// One entry in the flattened feed with its canonical one-based ordinal.
+private struct HistoryFeedRow: Identifiable {
+    var id: String { node.id }
+    let node: SessionTreeNode
+    let ordinal: Int
+}
+
+/// The actions an entry offers, identical in its detail and its long-press menu.
+struct SessionHistoryEntryActions {
+    let navigationTitle: String?
+    let bookmarkTitle: String?
+    let navigate: () -> Void
+    let fork: () -> Void
+    let bookmark: () -> Void
+    let copy: () -> Void
+
+    @ViewBuilder var menu: some View {
+        if let navigationTitle { Button(navigationTitle, systemImage: "arrow.turn.down.right", action: navigate) }
+        Button("Fork New Session", systemImage: "arrow.triangle.branch", action: fork)
+        if let bookmarkTitle { Button(bookmarkTitle, systemImage: "bookmark", action: bookmark) }
+        Button("Copy Text", systemImage: "doc.on.doc", action: copy)
+    }
 }
 
 struct SessionTreeSheet: View {
@@ -116,12 +167,6 @@ struct SessionTreeSheet: View {
     @PresentationState private var labelNode: SessionTreeNode?
     @PresentationState private var labelIdentity: SessionHistoryReadIdentity?
     @PresentationState private var label = ""
-    @PresentationState private var pageRequest = HistoryPageRequest()
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    #if HOSTED_TEST
-    @Environment(\.sessionHistoryPagingProbe) private var pagingProbe
-    #endif
-    @PresentationState private var installedRevision = -1
     @PresentationState private var initialEntryResolved = false
     @PresentationState private var initialEntryStore = SessionHistoryEntryStore()
     @PresentationState private var forkNavigation = ChatForkNavigationOwner()
@@ -137,50 +182,66 @@ struct SessionTreeSheet: View {
     private var identity: SessionHistoryReadIdentity? { .current(model: model, sessionID: sessionID) }
     private var supported: Bool { model.gatewayInfo?.capabilities.contains("session-history-pages.v1") == true }
     private var labelPresented: Binding<Bool> { Binding(get: { labelNode != nil }, set: { if !$0 { labelNode = nil } }) }
+    private var canAct: Bool { active && identity != nil && store.identity == identity }
+
+    private var rows: [HistoryFeedRow] {
+        var seen = Set<String>()
+        var result: [HistoryFeedRow] = []
+        for installed in store.pages {
+            guard let range = installed.page.entryRange else { continue }
+            for (offset, node) in installed.page.nodes.enumerated() where seen.insert(node.id).inserted {
+                result.append(HistoryFeedRow(node: node, ordinal: range.upperBound - offset))
+            }
+        }
+        return result
+    }
+
+    private var tail: TronFeedTail {
+        if let error = store.error, store.failed != .reset { return .failed(error) }
+        if store.loading { return .loading }
+        guard let last = store.pages.last?.page else { return .idle }
+        if last.older == nil {
+            let start = last.nodes.last.flatMap { GatewayTimestamp.parse($0.timestamp) }
+            return .end(start.map { "Start of session · \(TronListTime.short($0))" } ?? "Start of session")
+        }
+        return .idle
+    }
 
     var body: some View {
         NavigationStack {
-            TronPagedList(viewportGeneration: store.viewportGeneration, identifier: "session-history-viewport",
-                          active: active, loading: store.loading && supported, hasPage: store.page != nil && supported,
-                          hasRows: store.page?.nodes.isEmpty == false, error: store.error,
-                          loadingLabel: "Loading history…", accent: .tronEmerald, retry: retryPage) {
-                summary.padding(.bottom, SessionHistoryLayout.summaryBottomPadding).id("history-top")
-                if !supported {
-                    TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronEmerald)
+            Group {
+                if supported, store.hasPage {
+                    TronFeed(items: rows, identifier: "session-history-viewport", ordinal: \.ordinal,
+                             total: store.pages.first?.page.totalEntries, tail: tail,
+                             loadMore: loadOlder, retry: retry) {
+                        caption
+                    } row: { row in historyRow(row.node) }
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+                            caption
+                            if !supported {
+                                TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronEmerald)
+                            } else if let error = store.error {
+                                TronSettingsNotice(message: error, retry: retry)
+                            } else if store.pages.first?.page.nodes.isEmpty == true {
+                                TronPlaceholderState(title: "No history yet", detail: "Entries appear as this session runs.", icon: "clock.arrow.circlepath")
+                            } else {
+                                TronSheetLoadingState(label: "Loading history…", accent: .tronEmerald)
+                            }
+                        }
+                        .padding(.horizontal, 16).padding(.top, 4)
+                    }
+                    .tronScrollEdgeChrome()
+                    .accessibilityIdentifier("session-history-viewport")
                 }
-                if let page = store.page, let initialEntryID, !initialEntryResolved,
-                   !page.nodes.contains(where: { $0.id == initialEntryID }) {
-                    if initialEntryStore.error != nil {
-                        TronSettingsNotice(message: "The cited history entry is unavailable; no evidence was substituted.", accent: .tronAmber)
-                    } else { TronLoadingState(label: "Opening cited entry…", accent: .tronEmerald) }
-                }
-            } rows: {
-                if let page = store.page {
-                    ForEach(page.nodes) { node in historyRow(node, in: page) }
-                }
-            } controls: { location in
-                if let page = store.page { pagingControls(page, location: location) }
             }
-            .task(id: HistoryLoadKey(identity: identity, active: active, supported: supported, revision: pageRequest.revision)) {
+            .task(id: HistoryLoadKey(identity: identity, active: active, supported: supported)) {
                 guard active, supported, let identity else { store.suspend(); return }
-                guard store.identity != identity || store.page == nil || installedRevision != pageRequest.revision else { return }
-                let request = pageRequest
-                let changedSource = store.identity?.retainsContent(from: identity) != true
-                let client = model.client
-                let loaded = await store.load(identity: identity, cursor: changedSource ? nil : request.cursor,
-                    resetViewport: changedSource || (request.resetsViewport && installedRevision != request.revision),
-                    request: { try await client.requestValue($0, $1) },
-                    isCurrent: { active && self.identity == identity && pageRequest.revision == request.revision })
-                guard loaded, !Task.isCancelled, active, self.identity == identity,
-                      pageRequest.revision == request.revision else { return }
-                installedRevision = request.revision
-                if changedSource { pageRequest.cursor = nil }
+                guard store.identity != identity || !store.hasPage else { return }
+                await load(.reset, identity: identity)
                 await resolveInitialEntryIfPresent(identity: identity)
             }
-            #if HOSTED_TEST
-            .onAppear { installPagingProbe() }
-            .onChange(of: store.viewportGeneration) { _, _ in installPagingProbe() }
-            #endif
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -188,7 +249,7 @@ struct SessionTreeSheet: View {
                         TronToolbarTextLabel("Reload", systemImage: "arrow.clockwise", isWorking: store.loading)
                             .tronToolbarAction(accent: .tronEmerald)
                     }
-                        .disabled(store.loading || !supported || identity == nil)
+                    .disabled(store.loading || !supported || identity == nil)
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: Self.title, accent: .tronEmerald) }
                 ToolbarItem(placement: .confirmationAction) {
@@ -204,7 +265,11 @@ struct SessionTreeSheet: View {
                 if let route = forkNavigation.consume() { onForkCreated(route) }
             }) { selection in
                 switch selection.action {
-                case .details: HistoryEntryDetailsSheet(node: selection.node, identity: selection.identity, initialPage: selection.initialPage)
+                case .details:
+                    HistoryEntryDetailsSheet(node: selection.node, identity: selection.identity, initialPage: selection.initialPage,
+                                             current: selection.node.id == leafID, onNavigated: onNavigated,
+                                             onForkCreated: { route in forkNavigation.stage(route); self.selection = nil },
+                                             onSaveLabel: { value in saveLabel(value, node: selection.node, expected: selection.identity) })
                 case .navigate: HistoryNavigationSheet(node: selection.node, identity: selection.identity, onNavigated: onNavigated)
                 case .fork: HistoryForkSheet(node: selection.node, identity: selection.identity) { route in
                     forkNavigation.stage(route); self.selection = nil
@@ -212,17 +277,68 @@ struct SessionTreeSheet: View {
                 }
             }
             .tronConfirmation("Bookmark", isPresented: labelPresented) {
-                TronConfirmationTextField(placeholder: "Label", text: $label) { saveLabel(label) }
-                Button("Save") { saveLabel(label) }
-                if labelNode?.label != nil { Button("Remove", role: .destructive) { saveLabel(nil) } }
+                TronConfirmationTextField(placeholder: "Label", text: $label) { saveLabelFromMenu(label) }
+                Button("Save") { saveLabelFromMenu(label) }
+                if labelNode?.label != nil { Button("Remove", role: .destructive) { saveLabelFromMenu(nil) } }
             }
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: .tronEmerald).tint(.tronEmerald)
     }
 
+    private var leafID: String? { model.sessionHistoryPresentation(for: sessionID)?.leafEntryId }
+
+    private var caption: some View {
+        VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+            TronSettingsCaption("All branches, newest first. Tap an entry for details; long-press for quick actions.")
+            if let page = store.pages.first?.page, let initialEntryID, !initialEntryResolved,
+               !page.nodes.contains(where: { $0.id == initialEntryID }) {
+                if initialEntryStore.error != nil {
+                    TronSettingsNotice(message: "The cited history entry is unavailable; no evidence was substituted.", accent: .tronAmber)
+                } else { TronLoadingState(label: "Opening cited entry…", accent: .tronEmerald) }
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    // One row outside the body's result builder: inline, its closures and
+    // comparisons were solved with the whole sheet body (~1.3 s, #1066).
+    private func historyRow(_ node: SessionTreeNode) -> some View {
+        let row = SessionHistoryRowPresentation(node: node)
+        let current: Bool = node.id == leafID
+        let actions = entryActions(node)
+        return TronFeedCard {
+            TronListButton(row.content(current: current), identifier: "history-row-\(node.id)",
+                           action: { select(node, .details) }) { actions.menu }
+        }
+    }
+
+    private func entryActions(_ node: SessionTreeNode) -> SessionHistoryEntryActions {
+        SessionHistoryEntryActions(
+            navigationTitle: SessionHistoryPolicy.canNavigate(node: node, leafID: leafID) ? SessionHistoryPolicy.navigationTitle(for: node) : nil,
+            bookmarkTitle: SessionHistoryPolicy.canBookmark(node) ? SessionHistoryPolicy.bookmarkTitle(node) : nil,
+            navigate: { select(node, .navigate) },
+            fork: { select(node, .fork) },
+            bookmark: {
+                guard canAct else { return }
+                label = node.label ?? ""; labelIdentity = identity; labelNode = node
+            },
+            copy: { copy(node) })
+    }
+
+    private func copy(_ node: SessionTreeNode) {
+        guard canAct, let identity else { return }
+        let client = model.client
+        Task {
+            do {
+                UIPasteboard.general.string = try await SessionHistoryEntryStore.fullText(
+                    identity: identity, entryID: node.id, request: { try await client.requestValue($0, $1) })
+            } catch is CancellationError {} catch { model.presentError(error) }
+        }
+    }
+
     private func resolveInitialEntryIfPresent(identity: SessionHistoryReadIdentity) async {
-        guard let initialEntryID, !initialEntryResolved, let page = store.page,
+        guard let initialEntryID, !initialEntryResolved, let page = store.pages.first?.page,
               store.identity == identity, active else { return }
         if let node = page.nodes.first(where: { $0.id == initialEntryID }) {
             initialEntryResolved = true
@@ -238,185 +354,69 @@ struct SessionTreeSheet: View {
         select(SessionHistoryEntryStore.node(for: exact), .details, initialPage: exact)
     }
 
-    // One row outside the body's result builder: inline, its closures and
-    // comparisons were solved with the whole sheet body (~1.3 s, #1066).
-    private func historyRow(_ node: SessionTreeNode, in page: SessionHistoryPage) -> some View {
-        let row = SessionHistoryRowPresentation(node: node)
-        let current: Bool = node.id == model.sessionHistoryPresentation(for: sessionID)?.leafEntryId
-        let canAct: Bool = active && !store.loading && identity != nil && store.identity == identity
-        return SessionHistoryRow(row: row, current: current,
-            canAct: canAct,
-            select: { select(node, .details) }, navigate: { select(node, .navigate) },
-            fork: { select(node, .fork) }, bookmark: {
-                label = node.label ?? ""; labelIdentity = identity; labelNode = node
-            })
-            #if HOSTED_TEST
-            .background {
-                if node.id == page.nodes.first?.id {
-                    HistoryFirstRowMarker(entryID: node.id)
-                }
-            }
-            #endif
+    private func load(_ request: SessionHistoryStore.Request, identity: SessionHistoryReadIdentity) async {
+        let client = model.client
+        await store.load(request, identity: identity, request: { try await client.requestValue($0, $1) },
+                         isCurrent: { active && self.identity == identity })
     }
 
-    private func pagingControls(_ page: SessionHistoryPage, location: String) -> some View {
-        SessionHistoryPagingControls(page: page, enabled: active && !store.loading && store.identity == identity,
-                                     location: location, select: changePage)
+    private func loadOlder() {
+        guard active, supported, let identity, store.identity == identity, !store.loading, store.error == nil,
+              let older = store.pages.last?.page.older else { return }
+        Task { await load(.append(older), identity: identity) }
     }
 
-    #if HOSTED_TEST
-    private func installPagingProbe() {
-        pagingProbe?.store = store
-        pagingProbe?.older = { if let cursor = store.page?.older { changePage(cursor) } }
-        pagingProbe?.newer = { if let cursor = store.page?.newer { changePage(cursor) } }
-        pagingProbe?.refresh = { refreshPage() }
-        pagingProbe?.retry = { retryPage() }
-    }
-    #endif
-
-    private var summary: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(TronTypography.body.weight(.semibold))
-                .foregroundStyle(Color.tronEmerald)
-                .frame(width: 20)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 12) {
-                if let snapshot = model.sessionHistoryPresentation(for: sessionID) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
-                            .font(TronTypography.body.weight(.bold))
-                        Spacer()
-                        Text(snapshot.phase.rawValue.capitalized).font(TronTypography.secondaryCodeDescription)
-                    }
-                }
-                Text("Activity across all branches, newest first. Tap an entry for full content; use its menu to continue, fork or bookmark.")
-                    .font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary)
-            }
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, 20)
-        .padding(.vertical, 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 16, tintOpacity: 0.12)
-    }
     private func reload() {
-        guard active, !store.loading else { return }
-        pageRequest.advance(cursor: nil, resetsViewport: true)
+        guard active, !store.loading, let identity else { return }
+        Task { await load(.reset, identity: identity) }
     }
-    private func changePage(_ cursor: SessionHistoryCursor) {
-        guard active, !store.loading, store.identity == identity,
-              cursor == store.page?.older || cursor == store.page?.newer else { return }
-        pageRequest.advance(cursor: cursor, resetsViewport: true)
+
+    private func retry() {
+        guard active, !store.loading, let identity else { return }
+        Task { await load(store.failed ?? .reset, identity: identity) }
     }
-    private func refreshPage() {
-        // A late bookmark receipt must neither turn a pending navigation into
-        // an in-place refresh nor retry a failed cursor instead of the read page.
-        let navigating = pageRequest.revision != installedRevision && pageRequest.resetsViewport && store.error == nil
-        pageRequest.advance(cursor: navigating ? pageRequest.cursor : store.pageCursor, resetsViewport: navigating)
+
+    /// Re-reads the installed page that holds this entry, keeping every other row and the scroll position.
+    private func refresh(entryID: String) {
+        guard active, let identity, store.identity == identity else { return }
+        let index = store.pages.firstIndex { $0.page.nodes.contains { $0.id == entryID } } ?? 0
+        Task { await load(.refresh(index), identity: identity) }
     }
-    private func retryPage() {
-        guard active, !store.loading else { return }
-        pageRequest.advance(cursor: pageRequest.cursor, resetsViewport: pageRequest.resetsViewport)
-    }
+
     private func select(_ node: SessionTreeNode, _ action: HistorySelection.Action, initialPage: SessionHistoryEntryPage? = nil) {
-        guard active, !store.loading, let identity, store.identity == identity else { return }
+        guard canAct, let identity else { return }
         selection = HistorySelection(node: node, action: action, identity: identity, initialPage: initialPage)
     }
-    private func saveLabel(_ value: String?) {
-        guard let node = labelNode, SessionHistoryPolicy.canBookmark(node), let expected = labelIdentity, expected == identity else { labelNode = nil; return }
+
+    private func saveLabelFromMenu(_ value: String?) {
+        guard let node = labelNode, let expected = labelIdentity else { labelNode = nil; return }
         labelNode = nil
+        saveLabel(value, node: node, expected: expected)
+    }
+
+    private func saveLabel(_ value: String?, node: SessionTreeNode, expected: SessionHistoryReadIdentity) {
+        guard SessionHistoryPolicy.canBookmark(node), expected == identity else { return }
         // Accepted mutations remain owned by AppModel's receipt coordinator.
         Task {
             guard expected == identity else { return }
             do {
                 try await model.setLabel(sessionID: sessionID, entryID: SessionHistoryPolicy.bookmarkEntryID(node), label: value)
                 guard expected == identity else { return }
-                refreshPage()
+                refresh(entryID: node.id)
             }
             catch is CancellationError {} catch { model.presentError(error) }
         }
     }
 }
 
-struct SessionHistoryPagingControls: View {
-    let page: SessionHistoryPage
-    let enabled: Bool
-    let location: String
-    let select: (SessionHistoryCursor) -> Void
-
-    var body: some View {
-        TronPageControls(range: page.rangeDescription, enabled: enabled, location: location,
-                         identifier: "history", olderTitle: "Older entries", newerTitle: "Newer entries",
-                         accent: .tronEmerald,
-                         older: page.older.map { cursor in { select(cursor) } },
-                         newer: page.newer.map { cursor in { select(cursor) } })
-    }
-}
-
-#if HOSTED_TEST
-@MainActor
-final class SessionHistoryPagingProbe {
-    var store: SessionHistoryStore?
-    var older: (() -> Void)?
-    var newer: (() -> Void)?
-    var refresh: (() -> Void)?
-    var retry: (() -> Void)?
-}
-extension EnvironmentValues {
-    @Entry var sessionHistoryPagingProbe: SessionHistoryPagingProbe? = nil
-}
-private struct HistoryFirstRowMarker: UIViewRepresentable {
-    let entryID: String
-    func makeUIView(context: Context) -> UIView { UIView() }
-    func updateUIView(_ view: UIView, context: Context) { view.accessibilityIdentifier = "history-first-\(entryID)" }
-}
-#endif
-
-struct SessionHistoryRow: View {
-    let row: SessionHistoryRowPresentation
-    let current: Bool
-    let canAct: Bool
-    let select: () -> Void
-    let navigate: () -> Void
-    let fork: () -> Void
-    let bookmark: () -> Void
-    var body: some View {
-        TronPagedListRow(title: row.title, accent: row.accent, emphasized: current, select: select) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 7) { badges; Text(row.timestamp) }
-                VStack(alignment: .leading, spacing: 4) { badges; Text(row.timestamp) }
-            }
-            if let label = row.node.label { Text(label).foregroundStyle(row.accent).lineLimit(1) }
-        } trailing: {
-            Menu {
-                if !current || row.node.role == .user {
-                    Button(SessionHistoryPolicy.navigationTitle(for: row.node), systemImage: "arrow.turn.down.right", action: navigate)
-                }
-                Button("Fork New Session", systemImage: "arrow.triangle.branch", action: fork)
-                if SessionHistoryPolicy.canBookmark(row.node) {
-                    Button(SessionHistoryPolicy.bookmarkTitle(row.node), systemImage: "bookmark", action: bookmark)
-                }
-            } label: {
-                Image(systemName: "ellipsis").font(TronTypography.bodySM.weight(.bold)).foregroundStyle(row.accent)
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
-            }.disabled(!canAct).accessibilityLabel("Actions for \(row.title)")
-        }
-    }
-    private var badges: some View {
-        HStack(spacing: 5) {
-            Text(row.kindLabel).foregroundStyle(row.accent)
-            if current { Text("Current") }
-            if !row.node.isCurrentPath { Text("Other branch") }
-            if row.node.childCount > 1 { Text("\(row.node.childCount) branches") }
-            if row.node.label != nil { Text("Bookmarked") }
-        }
-    }
-}
-
+/// One entry in full: when and what it is, every action it offers, then its content.
 struct HistoryEntryDetailsSheet: View {
     let node: SessionTreeNode
     let identity: SessionHistoryReadIdentity
+    let current: Bool
+    let onNavigated: () -> Void
+    let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
+    let onSaveLabel: (String?) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var activity
@@ -425,52 +425,174 @@ struct HistoryEntryDetailsSheet: View {
     @PresentationState private var store = SessionHistoryEntryStore()
     @PresentationState private var offset = 0
     @PresentationState private var revision = 0
-    init(node: SessionTreeNode, identity: SessionHistoryReadIdentity, initialPage: SessionHistoryEntryPage? = nil) {
-        self.node = node; self.identity = identity
+    @PresentationState private var child: HistoryEntryChild?
+    @PresentationState private var labeling = false
+    @PresentationState private var label = ""
+
+    private enum HistoryEntryChild: String, Identifiable { case navigate, fork; var id: String { rawValue } }
+
+    init(node: SessionTreeNode, identity: SessionHistoryReadIdentity, initialPage: SessionHistoryEntryPage? = nil,
+         current: Bool = false, onNavigated: @escaping () -> Void = {},
+         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
+         onSaveLabel: @escaping (String?) -> Void = { _ in }) {
+        self.node = node; self.identity = identity; self.current = current
+        self.onNavigated = onNavigated; self.onForkCreated = onForkCreated; self.onSaveLabel = onSaveLabel
         _store = PresentationState(wrappedValue: SessionHistoryEntryStore(initialPage: initialPage))
     }
     private var active: Bool { activity.allowsPresentationPublication && (coordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true) }
-    private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
+    private var readable: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
+    private var leafID: String? { model.sessionHistoryPresentation(for: identity.target.sessionID)?.leafEntryId }
+    private var row: SessionHistoryRowPresentation { SessionHistoryRowPresentation(node: node) }
+    private var actions: SessionHistoryEntryActions {
+        SessionHistoryEntryActions(
+            navigationTitle: SessionHistoryPolicy.canNavigate(node: node, leafID: leafID) ? SessionHistoryPolicy.navigationTitle(for: node) : nil,
+            bookmarkTitle: SessionHistoryPolicy.canBookmark(node) ? SessionHistoryPolicy.bookmarkTitle(node) : nil,
+            navigate: { if readable { child = .navigate } },
+            fork: { if readable { child = .fork } },
+            bookmark: { label = node.label ?? ""; labeling = true },
+            copy: copy)
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if !current { TronSettingsNotice(message: "Session changed. Reopen this entry from current history.") }
-                else if let page = store.page {
-                    TronReadOnlyTextView(text: page.text, style: node.role == .user || node.role == .assistant ? .body : .code)
-                        .id(page.offset)
-                    // Paging remains available only for bounded multipart entries.
-                    if page.previousOffset != nil || page.nextOffset != nil {
-                        HStack {
-                            if let previous = page.previousOffset { Button("Previous part") { offset = previous } }
-                            Spacer()
-                            if let next = page.nextOffset { Button("Continue reading") { offset = next } }
-                        }
-                        .font(TronTypography.buttonSM)
-                        .disabled(store.loading)
-                        .padding(12)
-                    }
-                } else if store.error == nil { TronSheetLoadingState(label: "Loading entry…", accent: .tronEmerald) }
-                if current, let error = store.error { TronSettingsNotice(message: error, retry: { revision &+= 1 }).padding(12) }
+            // The entry's facts and actions stay put; its content is the one scrolling reader below.
+            VStack(alignment: .leading, spacing: 16) {
+                if !readable { TronSettingsNotice(message: "Session changed. Reopen this entry from current history.") }
+                header
+                actionGroup
+                content.frame(maxHeight: .infinity, alignment: .top)
             }
+            .padding(.horizontal, 16).padding(.top, 8)
             .tronDocumentTopBlurSurface()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: SessionHistoryRowPresentation(node: node).kindLabel, accent: .tronEmerald) }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: "History Entry", accent: .tronEmerald) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronEmerald) }.accessibilityLabel("Done")
                 }
             }
-            .task(id: "\(active):\(current):\(offset):\(revision)") {
-                guard active, current else { store.suspend(); return }
+            .task(id: "\(active):\(readable):\(offset):\(revision)") {
+                guard active, readable else { store.suspend(); return }
                 guard store.page?.offset != offset || store.error != nil else { return }
                 let client = model.client
                 await store.load(identity: identity, entryID: node.id, offset: offset,
-                    request: { try await client.requestValue($0, $1) }, isCurrent: { active && current })
+                    request: { try await client.requestValue($0, $1) }, isCurrent: { active && readable })
             }
             .onChange(of: active) { _, value in if !value { store.suspend() } }
             .onDisappear { store.suspend() }
+            .tronManagedSheet(item: $child, identity: { "history-entry.\(node.id).\($0.rawValue)" }) { child in
+                switch child {
+                case .navigate: HistoryNavigationSheet(node: node, identity: identity, onNavigated: onNavigated)
+                case .fork: HistoryForkSheet(node: node, identity: identity, onCreated: onForkCreated)
+                }
+            }
+            .tronConfirmation("Bookmark", isPresented: $labeling) {
+                TronConfirmationTextField(placeholder: "Label", text: $label) { labeling = false; onSaveLabel(label) }
+                Button("Save") { onSaveLabel(label) }
+                if node.label != nil { Button("Remove", role: .destructive) { onSaveLabel(nil) } }
+            }
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden).tint(.tronEmerald)
+        .accessibilityIdentifier("history-entry-detail")
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: row.icon.0).foregroundStyle(row.icon.1).frame(width: 22)
+                Text(row.kindLabel).font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary)
+                Spacer(minLength: 8)
+                if let status = row.content(current: current).status { TronListStatusPill(status: status) }
+            }
+            detailLine("Time", row.fullTimestamp)
+            detailLine("Entry", node.id, mono: true)
+            if node.childCount > 1 { detailLine("Branches", "\(node.childCount) from here") }
+            if let bookmark = node.label { TronListTagPill(tag: TronListTag(text: "Bookmarked · \(bookmark)")) }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronGlassSurface(accent: .tronEmerald, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.10)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func detailLine(_ name: String, _ value: String, mono: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(name).foregroundStyle(Color.tronTextSecondary)
+            Spacer(minLength: 12)
+            Text(value).font(mono ? TronTypography.code(size: TronTypography.sizeSecondary) : TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextPrimary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+        }
+        .font(TronTypography.bodySM)
+    }
+
+    private struct ActionRow: Identifiable { let id: String; let icon: String; let tone: Color; let title: String; let detail: String; let run: () -> Void }
+
+    private var actionGroup: some View {
+        let actions = actions
+        var rows: [ActionRow] = []
+        if let title = actions.navigationTitle {
+            rows.append(ActionRow(id: "navigate", icon: "arrow.turn.down.right", tone: .tronEmerald, title: title,
+                                  detail: SessionHistoryPolicy.navigationDetail(for: node), run: actions.navigate))
+        }
+        rows.append(ActionRow(id: "fork", icon: "arrow.triangle.branch", tone: .tronPurple, title: "Fork New Session",
+                              detail: "Start a separate session with history up to this entry", run: actions.fork))
+        if let title = actions.bookmarkTitle {
+            rows.append(ActionRow(id: "bookmark", icon: "bookmark", tone: .tronAmber, title: title,
+                                  detail: node.label.map { "Rename or remove “\($0)”" } ?? "Label this entry to find it again", run: actions.bookmark))
+        }
+        rows.append(ActionRow(id: "copy", icon: "doc.on.doc", tone: .tronSlate, title: "Copy Text", detail: "The entry's full text", run: actions.copy))
+        return VStack(alignment: .leading, spacing: 7) {
+            Text("Actions").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary).padding(.horizontal, 4)
+            TronListGroup(rows, hasLeading: true, identifier: "history-entry-actions") { action in
+                TronListButton(TronListRowContent(leading: .icon(action.icon, action.tone), title: action.title, subtext: action.detail),
+                               identifier: "history-entry-action-\(action.id)", action: action.run)
+                    .disabled(!readable)
+            }
+            TronSettingsCaption("Long-press the entry in Session History for the same actions.")
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("Content").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
+                Spacer()
+                if let page = store.page { Text("\(page.totalCharacters.formatted()) characters").font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted) }
+            }
+            .padding(.horizontal, 4)
+            if let page = store.page, readable {
+                TronReadOnlyTextView(text: page.text, style: node.role == .user || node.role == .assistant ? .body : .code)
+                    .id(page.offset)
+                    .frame(maxHeight: .infinity)
+                    .tronGlassSurface(accent: .tronEmerald, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.06)
+                // Paging remains available only for bounded multipart entries.
+                if page.previousOffset != nil || page.nextOffset != nil {
+                    HStack {
+                        if let previous = page.previousOffset { Button("Previous part") { offset = previous } }
+                        Spacer()
+                        if let next = page.nextOffset { Button("Continue reading") { offset = next } }
+                    }
+                    .font(TronTypography.buttonSM)
+                    .disabled(store.loading)
+                    .padding(.horizontal, 4)
+                }
+            } else if readable, store.error == nil { TronSheetLoadingState(label: "Loading entry…", accent: .tronEmerald) }
+            if readable, let error = store.error { TronSettingsNotice(message: error, retry: { revision &+= 1 }) }
+        }
+    }
+
+    private func copy() {
+        guard readable else { return }
+        if let page = store.page, page.previousOffset == nil, page.nextOffset == nil {
+            UIPasteboard.general.string = page.text; return
+        }
+        let client = model.client
+        Task {
+            do {
+                UIPasteboard.general.string = try await SessionHistoryEntryStore.fullText(
+                    identity: identity, entryID: node.id, request: { try await client.requestValue($0, $1) })
+            } catch is CancellationError {} catch { model.presentError(error) }
+        }
     }
 }
 

@@ -4659,7 +4659,7 @@ extension AppModel {
             return .profile(try HomeProfileListDTO.decode(try await read("home.profileList")))
         case .memory(let sessionID, let continuation):
             try requireMemoryBrowser()
-            var values: [String: JSONValue] = ["limit": .number(30)]
+            var values: [String: JSONValue] = ["limit": .number(20)]
             if let continuation { values["cursor"] = .string(continuation.cursor) }
             if let sessionID { values["sessionId"] = .string(sessionID) }
             return .memory(try HomeMemoryViewDTO.decode(try await read("home.memory.view", .object(values)), continuation: continuation))

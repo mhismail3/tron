@@ -1,14 +1,9 @@
 import SwiftUI
 import TronMobileCore
 
-private struct HomeListCursor: Equatable {
-    let query: HomeSheetReadQuery
-    let index: Int
-}
-
-/// Memory and tasks keep their own RPC admission and detail destinations. Only
-/// cursor bookmarks (never old pages) are retained for reverse navigation over
-/// the Gateway's forward cursors; each revisit is an authoritative bounded read.
+/// Memory and Tasks: newest-first feeds that load 20 more before the reader
+/// reaches the bottom. Each read is an authoritative bounded read fenced to the
+/// sheet's identity; detail destinations keep their own RPC admission.
 struct HomePagedListSheet: View {
     let destination: HomeSheetDestination
     let profileID: String
@@ -19,10 +14,7 @@ struct HomePagedListSheet: View {
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var token
     @Environment(\.tronSettingsVisualTheme) private var theme
-    @PresentationState private var store = PagedListStore<HomeSheetContent, HomeListCursor, HomeSheetReadIdentity>()
-    @PresentationState private var request = PagedListRequest<HomeListCursor>()
-    @PresentationState private var installedRevision = -1
-    @PresentationState private var bookmarks: [HomeSheetReadQuery] = []
+    @PresentationState private var store = FeedStore<HomeSheetContent, HomeSheetReadQuery, HomeSheetReadIdentity>()
     @PresentationState private var child: HomeSheetDestination?
 
     private var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
@@ -30,50 +22,71 @@ struct HomePagedListSheet: View {
     private var accent: Color { theme?.accent ?? .tronEmerald }
     private var isMemory: Bool { if case .memory = destination { return true }; return false }
     private var identifier: String { isMemory ? "home-memory" : "home-tasks" }
-    private var index: Int { store.pageCursor?.index ?? 0 }
-    private var canAct: Bool { active && !store.loading && identity != nil && store.identity == identity }
-    private var memory: HomeMemoryViewDTO? { if case .memory(let page) = store.page { return page }; return nil }
-    private var tasks: HomeTaskPageDTO? { if case .tasks(let page, _) = store.page { return page }; return nil }
+    private var canAct: Bool { active && identity != nil && store.identity == identity }
+    private var memoryFilter: String? { if case .memory(let sessionID, _) = destination { return sessionID }; return nil }
+
+    private var memoryPages: [HomeMemoryViewDTO] { store.pages.compactMap { if case .memory(let page) = $0.page { page } else { nil } } }
+    private var taskPages: [HomeTaskPageDTO] { store.pages.compactMap { if case .tasks(let page?, _) = $0.page { page } else { nil } } }
+    private var taskStatus: HomeStatusDTO? { if case .tasks(_, let status) = store.pages.first?.page { status } else { nil } }
+
     private var next: HomeSheetReadQuery? {
-        if let memory, let cursor = memory.nextCursor {
+        if let memory = memoryPages.last, let cursor = memory.nextCursor {
             return .memory(sessionID: memoryFilter, continuation: .init(cursor: cursor, revision: memory.revision, homeId: memory.homeId))
         }
-        if let cursor = tasks?.nextCursor { return .tasks(cursor) }
+        if !isMemory, let cursor = taskPages.last?.nextCursor { return .tasks(cursor) }
         return nil
     }
-    private var memoryFilter: String? { if case .memory(let sessionID, _) = destination { return sessionID }; return nil }
-    private var range: String {
-        if let memory {
-            guard let newest = memory.lines.first, let oldest = memory.lines.last else { return "No recorded memories" }
-            return "Messages \((oldest.start + 1).formatted())–\((newest.start + newest.span).formatted()) of \(memory.totalMessages.formatted())"
-        }
-        guard let tasks, !tasks.items.isEmpty else { return "No recorded tasks" }
-        return "Page \((index + 1).formatted()) · \(tasks.items.count.formatted()) tasks"
+
+    private var tail: TronFeedTail {
+        if let error = store.error, store.failed != .reset { return .failed(error) }
+        if store.loading { return .loading }
+        guard store.hasPage, next == nil else { return .idle }
+        if isMemory { return memoryRows.isEmpty ? .idle : .end("Oldest memory") }
+        guard let first = taskRows.last?.row else { return .idle }
+        return .end("First task · \(TronListTime.short(milliseconds: first.createdAt))")
     }
-    private struct LoadKey: Hashable { let identity: HomeSheetReadIdentity?; let active: Bool; let revision: Int }
+
+    private struct MemoryRow: Identifiable { let line: HomeMemoryViewDTO.Line; var id: String { line.id } }
+    private struct TaskRow: Identifiable { let row: HomeTaskPageDTO.Row; let position: Int; var id: String { row.id } }
+
+    private var memoryRows: [MemoryRow] {
+        var seen = Set<String>()
+        return memoryPages.flatMap(\.lines).filter { seen.insert($0.id).inserted }.map(MemoryRow.init)
+    }
+    private var taskRows: [TaskRow] {
+        var seen = Set<String>()
+        return taskPages.flatMap(\.items).filter { seen.insert($0.id).inserted }.enumerated().map { TaskRow(row: $1, position: $0 + 1) }
+    }
+
+    private struct LoadKey: Hashable { let identity: HomeSheetReadIdentity?; let active: Bool }
 
     var body: some View {
         NavigationStack {
-            TronPagedList(viewportGeneration: store.viewportGeneration, identifier: "\(identifier)-viewport",
-                          active: active, loading: store.loading, hasPage: store.page != nil,
-                          hasRows: memory?.lines.isEmpty == false || tasks?.items.isEmpty == false,
-                          error: store.error, loadingLabel: "Loading Home…", accent: accent,
-                          retry: retry) {
-                TronSettingsCaption(isMemory
-                    ? "Newest first. Open a message for full content, or a summary to see what it covers."
-                    : "Newest first. Open a task to see its brief and worker.")
-                if case .memory(.some, let ordinal) = destination {
-                    TronSettingsCaption(ordinal.map { "Chapter \($0) only" } ?? "This chapter only")
+            Group {
+                if store.hasPage {
+                    if isMemory {
+                        TronFeed(items: memoryRows, identifier: "\(identifier)-viewport", ordinal: { $0.line.start + $0.line.span },
+                                 total: memoryPages.first?.totalMessages, tail: tail, loadMore: loadMore, retry: retry) {
+                            header
+                        } row: { memoryRow($0.line) }
+                    } else {
+                        TronFeed(items: taskRows, identifier: "\(identifier)-viewport", ordinal: \.position,
+                                 total: taskRows.count, totalIsExact: next == nil, tail: tail, loadMore: loadMore, retry: retry) {
+                            header
+                        } row: { taskRow($0.row) }
+                    }
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+                            captions
+                            if let error = store.error { TronSettingsNotice(message: error, retry: retry) }
+                            else { TronSheetLoadingState(label: "Loading Home…", accent: accent) }
+                        }
+                        .padding(.horizontal, 16).padding(.top, 4)
+                    }
+                    .tronScrollEdgeChrome()
+                    .accessibilityIdentifier("\(identifier)-viewport")
                 }
-            } rows: {
-                pageRows
-            } controls: { location in
-                TronPageControls(range: range, enabled: canAct, location: location, identifier: identifier,
-                                 olderTitle: isMemory ? "Older memory" : "Older tasks",
-                                 newerTitle: isMemory ? "Newer memory" : "Newer tasks", accent: accent,
-                                 older: next.map { query in { navigate(query, index: index + 1) } },
-                                 newer: index > 0 && bookmarks.indices.contains(index - 1)
-                                    ? { navigate(bookmarks[index - 1], index: index - 1) } : nil)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -90,7 +103,11 @@ struct HomePagedListSheet: View {
                     }.accessibilityLabel("Done").accessibilityIdentifier("home-sheet-done-\(destination.id)")
                 }
             }
-            .task(id: LoadKey(identity: identity, active: active, revision: request.revision)) { await load() }
+            .task(id: LoadKey(identity: identity, active: active)) {
+                guard active, let identity else { store.suspend(); return }
+                guard store.identity != identity || !store.hasPage else { return }
+                await load(.reset, identity: identity)
+            }
             .onChange(of: active) { _, active in if !active { store.suspend() } }
             .onPresentationRetire { store.suspend() }
             .tronManagedSheet(item: $child, identity: { "home.\(profileID).\($0.id)" }) {
@@ -100,79 +117,130 @@ struct HomePagedListSheet: View {
         }
     }
 
-    @ViewBuilder private var pageRows: some View {
-        if let memory {
-            if memory.lines.isEmpty {
+    @ViewBuilder private var captions: some View {
+        TronSettingsCaption(isMemory
+            ? "Newest first. Open a message for full content, or a summary to see what it covers."
+            : "Newest first. Open a task to see its brief, worker and check-ins.")
+        if case .memory(.some, let ordinal) = destination {
+            TronSettingsCaption(ordinal.map { "Chapter \($0) only" } ?? "This chapter only")
+        }
+    }
+
+    @ViewBuilder private var header: some View {
+        VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+            captions
+            if let status = taskStatus, !status.available || status.taskRecovery?.available != true {
+                TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery?.reason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
+            }
+            if isMemory, memoryRows.isEmpty {
                 TronPlaceholderState(title: "No memory yet", detail: "Memory appears after Home admits conversation history.", icon: "brain")
             }
-            ForEach(memory.lines) { line in
-                TronPagedListRow(title: SessionHistoryPreview.plain(HomeMemoryPresentation.text(line)), accent: accent,
-                    identifier: line.isSummary ? "home-memory-summary-\(line.start)-\(line.span)" : "home-memory-row-\(line.start)", select: {
-                    guard canAct else { return }
-                    if let item = line.item { child = .memoryItem(item) }
-                    else { child = .memorySummary(line, sessionID: memoryFilter) }
-                }) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 7) { memoryMetadata(line) }
-                        VStack(alignment: .leading, spacing: 4) { memoryMetadata(line) }
-                    }
-                } trailing: { EmptyView() }
+            if !isMemory, taskRows.isEmpty, taskStatus?.admitsTaskReads != false {
+                TronPlaceholderState(title: "No tasks", detail: "Home has not recorded any tasks.", icon: "checklist")
             }
         }
-        if case .tasks(_, let status) = store.page, !status.available || status.taskRecovery?.available != true {
-            TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery?.reason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
-        }
-        if let tasks {
-            if tasks.items.isEmpty { TronPlaceholderState(title: "No tasks", detail: "Home has not recorded any tasks.", icon: "checklist") }
-            ForEach(tasks.items) { row in
-                TronPagedListRow(title: HomeTaskPresentation.title(title: row.title, briefText: nil, project: row.project), accent: accent,
-                    identifier: "home-task-\(row.taskId)", select: {
-                    guard canAct else { return }; child = .task(row.taskId)
-                }) {
-                    Text(HomeTaskPresentation.stateLabel(lifecycle: row.lifecycle, outcome: row.outcome)).foregroundStyle(accent)
-                    Text([row.project, HomeSheetTime.relative(milliseconds: row.updatedAt)].compactMap { $0 }.joined(separator: " · "))
-                    if let checkin = row.checkins?.last {
-                        Text([checkin.step, HomeSheetTime.relative(checkin.at)].compactMap { $0 }.joined(separator: " · ")).lineLimit(2)
-                    }
-                } trailing: { EmptyView() }
+        .padding(.bottom, 4)
+    }
+
+    private func memoryRow(_ line: HomeMemoryViewDTO.Line) -> some View {
+        TronFeedCard {
+            TronListButton(HomeMemoryPresentation.rowContent(line),
+                           identifier: line.isSummary ? "home-memory-summary-\(line.start)-\(line.span)" : "home-memory-row-\(line.start)") {
+                guard canAct else { return }
+                if let item = line.item { child = .memoryItem(item) }
+                else { child = .memorySummary(line, sessionID: memoryFilter) }
             }
         }
     }
 
-    @ViewBuilder private func memoryMetadata(_ line: HomeMemoryViewDTO.Line) -> some View {
-        Text(HomeMemoryPresentation.title(line)).foregroundStyle(accent)
-        if let when = HomeMemoryPresentation.when(line) { Text(when) }
-    }
-    private func navigate(_ query: HomeSheetReadQuery, index: Int) {
-        guard canAct else { return }
-        request.advance(cursor: HomeListCursor(query: query, index: index), resetsViewport: true)
-    }
-    private func reload() {
-        guard active, !store.loading else { return }
-        request.advance(cursor: nil, resetsViewport: true)
-    }
-    private func retry() {
-        guard active, !store.loading else { return }
-        request.advance(cursor: request.cursor, resetsViewport: request.resetsViewport)
-    }
-    private func load() async {
-        guard active, let identity else { store.suspend(); return }
-        guard store.identity != identity || store.page == nil || installedRevision != request.revision else { return }
-        let pending = request
-        let changedSource = store.identity.map { !identity.retainsContent(from: $0) } ?? true
-        let cursor = changedSource ? nil : pending.cursor
-        let query = cursor?.query ?? destination.initialQuery
-        let loaded = await store.load(identity: identity, cursor: cursor,
-            resetViewport: changedSource || (pending.resetsViewport && installedRevision != pending.revision),
-            isCurrent: { active && self.identity == identity && request.revision == pending.revision }) {
-                try await model.readHomeSheet(query, identity: identity,
-                    isCurrent: { active && self.identity == identity && request.revision == pending.revision })
+    private func taskRow(_ row: HomeTaskPageDTO.Row) -> some View {
+        TronFeedCard {
+            TronListButton(HomeTaskPresentation.rowContent(row), identifier: "home-task-\(row.taskId)") {
+                guard canAct else { return }; child = .task(row.taskId)
             }
-        guard loaded, !Task.isCancelled, active, self.identity == identity, request.revision == pending.revision else { return }
-        installedRevision = pending.revision
-        // A new baseline invalidates all reverse-navigation bookmarks. A failed
-        // read never changes them or the installed page/scroll position.
-        if cursor == nil { bookmarks = [query]; request.cursor = nil }
-        else { bookmarks = Array(bookmarks.prefix(cursor!.index)) + [query] }
+        }
+    }
+
+    private func load(_ request: FeedStore<HomeSheetContent, HomeSheetReadQuery, HomeSheetReadIdentity>.Request,
+                      identity: HomeSheetReadIdentity) async {
+        let initial = destination.initialQuery
+        await store.load(request, identity: identity, isCurrent: { active && self.identity == identity }) { cursor in
+            try await model.readHomeSheet(cursor ?? initial, identity: identity,
+                                          isCurrent: { active && self.identity == identity })
+        }
+    }
+
+    private func loadMore() {
+        guard active, let identity, store.identity == identity, !store.loading, store.error == nil, let next else { return }
+        Task { await load(.append(next), identity: identity) }
+    }
+
+    private func reload() {
+        guard active, !store.loading, let identity else { return }
+        Task { await load(.reset, identity: identity) }
+    }
+
+    private func retry() {
+        guard active, !store.loading, let identity else { return }
+        Task { await load(store.failed ?? .reset, identity: identity) }
+    }
+}
+
+extension HomeMemoryPresentation {
+    /// One kind icon and colour per memory line; the card itself stays uniform.
+    static func kind(_ line: HomeMemoryViewDTO.Line) -> (icon: String, tone: Color, label: String) {
+        guard let item = line.item else { return ("square.stack.3d.up", .tronPurple, "Summary") }
+        return switch item.attribution {
+        case .user: ("person", .tronEmerald, "You")
+        case .assistant: ("text.bubble", .tronTeal, "Home")
+        case .tool: ("wrench.adjustable", .tronInfo, "Tool")
+        case .event: ("bolt", .tronAmber, "Result")
+        }
+    }
+
+    static func rowContent(_ line: HomeMemoryViewDTO.Line, now: Date = .now) -> TronListRowContent {
+        let kind = kind(line)
+        return TronListRowContent(
+            leading: .icon(kind.icon, kind.tone), title: SessionHistoryPreview.plain(text(line)), preview: true,
+            subtext: line.isSummary ? "Summary of \(line.span.formatted()) messages" : nil,
+            tags: [TronListTag(text: kind.label)],
+            timestamp: line.isSummary ? HomeSheetTime.range(line.firstAt, line.lastAt) : TronListTime.short(iso: line.firstAt, now: now))
+    }
+}
+
+extension HomeTaskPresentation {
+    /// The task's one status pill.
+    static func status(_ row: HomeTaskPageDTO.Row) -> TronListStatus {
+        switch row.lifecycle {
+        case .pending: return TronListStatus(text: "Pending", tone: .tronSlate)
+        case .active:
+            return row.attention || row.pendingGrant ? TronListStatus(text: "Needs Input", tone: .tronAmber)
+                : TronListStatus(text: "Running", tone: .tronEmerald, live: true)
+        case .terminal:
+            return switch row.outcome {
+            case .final: TronListStatus(text: "Completed", tone: .tronSuccess)
+            case .needsInput: TronListStatus(text: "Needs Input", tone: .tronAmber)
+            case .limited: TronListStatus(text: "Limited", tone: .tronAmber)
+            case .interrupted: TronListStatus(text: "Stopped", tone: .tronSlate)
+            case .progress, .unknown, nil: TronListStatus(text: "Finished", tone: .tronSlate)
+            }
+        }
+    }
+
+    /// The latest check-in, or what the task waits for.
+    static func subtext(_ row: HomeTaskPageDTO.Row) -> String? {
+        if let checkin = row.checkins?.last {
+            if let blocker = checkin.blocker, !blocker.isEmpty { return "\(checkin.step) — blocked: \(blocker)" }
+            return checkin.next.isEmpty ? checkin.step : "\(checkin.step) — next: \(checkin.next)"
+        }
+        if row.pendingGrant { return "Waiting for a grant" }
+        if row.attention { return "Waiting for your input" }
+        return nil
+    }
+
+    static func rowContent(_ row: HomeTaskPageDTO.Row, now: Date = .now) -> TronListRowContent {
+        TronListRowContent(title: title(title: row.title, briefText: nil, project: row.project), status: status(row),
+                           subtext: subtext(row), tags: row.project.map { [TronListTag(text: $0)] } ?? [],
+                           timestamp: TronListTime.short(milliseconds: row.updatedAt, now: now))
     }
 }

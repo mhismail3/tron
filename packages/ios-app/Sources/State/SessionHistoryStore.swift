@@ -28,11 +28,6 @@ struct SessionHistoryPage: Codable, Sendable {
         return (upper - nodes.count + 1)...upper
     }
 
-    var rangeDescription: String {
-        guard let range = entryRange else { return "No recorded entries" }
-        return "Entries \(range.lowerBound.formatted())–\(range.upperBound.formatted()) of \(totalEntries.formatted())"
-    }
-
     func admitted(runtime: String, cursor: SessionHistoryCursor? = nil) throws -> Self {
         guard runtimeGeneration == runtime, nodes.count <= 100, totalEntries >= nodes.count else {
             throw SessionHistoryReadError.invalidPage
@@ -108,17 +103,18 @@ struct SessionHistoryReadIdentity: Hashable, Sendable {
     }
 }
 
-typealias SessionHistoryStore = PagedListStore<SessionHistoryPage, SessionHistoryCursor, SessionHistoryReadIdentity>
+typealias SessionHistoryStore = FeedStore<SessionHistoryPage, SessionHistoryCursor, SessionHistoryReadIdentity>
 
-extension PagedListStore where Page == SessionHistoryPage, Cursor == SessionHistoryCursor, Identity == SessionHistoryReadIdentity {
-    func load(identity: SessionHistoryReadIdentity, cursor: SessionHistoryCursor?, resetViewport: Bool = false,
-              request: @Sendable (String, JSONValue) async throws -> JSONValue,
+extension FeedStore where Page == SessionHistoryPage, Cursor == SessionHistoryCursor, Identity == SessionHistoryReadIdentity {
+    @discardableResult
+    func load(_ request: Request, identity: SessionHistoryReadIdentity,
+              request send: @Sendable (String, JSONValue) async throws -> JSONValue,
               isCurrent: @MainActor () -> Bool) async -> Bool {
-        await load(identity: identity, cursor: cursor, resetViewport: resetViewport, isCurrent: isCurrent) {
+        await load(request, identity: identity, isCurrent: isCurrent) { cursor in
             var params: [String: JSONValue] = ["sessionId": .string(identity.target.sessionID),
                 "runtimeGeneration": .string(identity.runtimeGeneration)]
             if let cursor { params["cursor"] = try JSONValue.encode(cursor) }
-            let raw = try await request("session.history.list", .object(params))
+            let raw = try await send("session.history.list", .object(params))
             return try raw.decode(SessionHistoryPage.self).admitted(runtime: identity.runtimeGeneration, cursor: cursor)
         }
     }
@@ -152,6 +148,24 @@ final class SessionHistoryEntryStore {
             preview: String(page.text.prefix(SessionHistoryPreview.maximumCharacters)), role: role,
             depth: 0, childCount: 0, isCurrentPath: true
         )
+    }
+
+    /// An entry's whole text for Copy, read part by part (at most 40 parts of 24,000 characters).
+    static func fullText(identity: SessionHistoryReadIdentity, entryID: String,
+                         request: @Sendable (String, JSONValue) async throws -> JSONValue) async throws -> String {
+        var text = ""
+        var offset: Int? = 0
+        for _ in 0..<40 {
+            guard let current = offset else { break }
+            let raw = try await request("session.history.entry", .object([
+                "sessionId": .string(identity.target.sessionID), "runtimeGeneration": .string(identity.runtimeGeneration),
+                "entryId": .string(entryID), "offset": .number(Double(current))
+            ]))
+            let page = try raw.decode(SessionHistoryEntryPage.self).admitted(runtime: identity.runtimeGeneration, entry: entryID, requestedOffset: current)
+            text += page.text
+            offset = page.nextOffset
+        }
+        return text
     }
 
     func suspend() { generation &+= 1; loading = false }
