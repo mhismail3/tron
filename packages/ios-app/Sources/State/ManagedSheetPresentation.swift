@@ -359,8 +359,12 @@ extension View {
         ))
     }
 
+    /// `instance` names a presenter that repeats inside one surface (a chip in
+    /// a `ForEach`): presenter state is keyed by call site, so without it every
+    /// repetition shares one presentation and only the last one presents.
     func tronManagedSheet<Item: Identifiable, SheetContent: View>(
         item: Binding<Item?>,
+        instance: String? = nil,
         identity: @escaping (Item) -> String,
         dependencies: ((Item) -> Set<PresentationRefreshDependency>)? = nil,
         onDismiss: (() -> Void)? = nil,
@@ -373,7 +377,7 @@ extension View {
             item: item,
             identity: identity,
             dependencies: dependencies,
-            site: "\(fileID):\(line)",
+            site: "\(fileID):\(line)" + (instance.map { "#\($0)" } ?? ""),
             onDismiss: onDismiss,
             haptic: presentationHaptic,
             sheetContent: content

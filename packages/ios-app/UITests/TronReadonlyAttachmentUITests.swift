@@ -22,6 +22,31 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         }
     }
 
+    /// Every photo chip of one sent message opens the preview of its own photo,
+    /// inside a chat route's presentation surface as in production (#1652).
+    @MainActor func testEveryPhotoChipOpensItsOwnPreview() {
+        continueAfterFailure = false
+        let app = launch("multi-image"); defer { app.terminate() }
+        let chips = app.buttons.matching(NSPredicate(format: "label == 'Image attachment'"))
+        XCTAssertTrue(wait(chips.element(boundBy: 4), predicate: "exists == true"), app.debugDescription)
+        keepScreenshot(app, "1652-photo-chip-row")
+        let ordered = chips.allElementsBoundByIndex.sorted { $0.frame.minX < $1.frame.minX }
+        XCTAssertEqual(ordered.count, 5)
+        // The last chip first: once any chip of the row has presented, every
+        // other chip must still present its own photo.
+        for index in [4, 0, 1, 2, 3] {
+            let chip = ordered[index]
+            XCTAssertTrue(chip.isHittable, "Chip \(index) is reachable: \(chip.frame)")
+            chip.tap()
+            let height = 200 + index * 10
+            let opened = wait(app.staticTexts["fixture.preview-native"], predicate: "label BEGINSWITH 'image native:' AND label CONTAINS %@", value: "height:\(height) ")
+            keepScreenshot(app, opened ? "1652-chip-\(index)-preview" : "1652-chip-\(index)-no-preview")
+            XCTAssertTrue(opened, "Chip \(index) opens its own photo (height \(height)); native: \(app.staticTexts["fixture.preview-native"].label)")
+            app.buttons["Close"].tap()
+            XCTAssertTrue(wait(app.staticTexts["fixture.preview-native"], predicate: "label == 'none'"), "Chip \(index) preview closes")
+        }
+    }
+
     /// The fitted, unzoomed photo opens below the sheet's title row with the
     /// shared `TronSpacing.section` gap instead of underlapping the title or Done.
     @MainActor func testFittedPhotoClearsSheetTitleRow() {

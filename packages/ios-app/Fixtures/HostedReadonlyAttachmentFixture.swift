@@ -53,6 +53,12 @@ struct HostedReadonlyAttachmentFixture: View {
             VStack(spacing: 0) {
                 if let localAttachment {
                     HostedLocalAttachmentChip(attachment: localAttachment, onRemove: { self.localAttachment = nil }).equatable()
+                } else if ready, scenario == "multi-image" {
+                    // Production chat routes mount inside a presentation surface,
+                    // which gives every presenter in the transcript one shared
+                    // presentation-state scope (#1652).
+                    ChatView(sessionID: sessionID)
+                        .tronPresentationSurface(id: "chat.fixture.\(sessionID)", dependencies: [.session(sessionID)])
                 } else if ready {
                     ChatView(sessionID: sessionID)
                         .id("\(model.knowledgeDestinationIdentity):\(sessionID)")
@@ -323,9 +329,18 @@ private actor ReadonlyAttachmentGateway {
                 ? ChatMediaPayload(data: Data("Retired fixture payload must not publish".utf8), mimeType: "text/plain")
                 : ChatMediaPayload(data: poison, mimeType: "image/png")
         }
+        if let height = Self.multiImageHeight(identity.blobID) {
+            return await ChatMediaPayload(data: Self.image(height: height), mimeType: "image/png")
+        }
         return isFile
             ? ChatMediaPayload(data: file, mimeType: "text/plain")
             : ChatMediaPayload(data: image, mimeType: "image/png")
+    }
+    /// `multi-image` blobs are distinguishable by their decoded pixel height.
+    static let multiImageCount = 5
+    static func multiImageHeight(_ blobID: String) -> Int? {
+        guard blobID.hasPrefix("multi-image-"), let index = Int(blobID.dropFirst("multi-image-".count)) else { return nil }
+        return 200 + index * 10
     }
     func handle(_ method: String, params: [String: JSONValue]) -> JSONValue? {
         switch method {
@@ -355,7 +370,9 @@ private actor ReadonlyAttachmentGateway {
         let row: [String: Any] = ["id": "readonly-row", "presentationId": "readonly-row", "timestamp": "2026-01-01T00:00:00Z", "kind": "message", "role": "user", "content": [
             ["id": "readonly-image-part", "ordinal": 0, "type": "image", "blobId": "readonly-image", "mimeType": "image/png"],
             ["id": "readonly-file-part", "ordinal": 1, "type": "text", "text": "", "blobId": "readonly-file", "attachment": ["name": "readonly.txt", "mimeType": "text/plain", "size": file.count]]]]
-        snapshot.transcript = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: [row]))
+        let multiImageRow: [String: Any] = ["id": "multi-row", "presentationId": "multi-row", "timestamp": "2026-01-01T00:00:00Z", "kind": "message", "role": "user", "content":
+            (0..<Self.multiImageCount).map { ["id": "multi-row:\($0)", "ordinal": $0, "type": "image", "blobId": "multi-image-\($0)", "mimeType": "image/png"] }]
+        snapshot.transcript = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: [scenario == "multi-image" ? multiImageRow : row]))
         if scenario.contains("display") { snapshot.transcript = displayRows }
         snapshot.transcriptTotal = snapshot.transcript.count
         return snapshot

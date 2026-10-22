@@ -351,9 +351,10 @@ struct TranscriptRow: View, Equatable {
         ChatChipStrip(alignment: item.role == .user ? .trailing : .leading) {
             ForEach(displayedAttachments) { part in
                 if part.type == .image, let id = part.blobId {
-                    TranscriptImageChip(blobID: id)
+                    TranscriptImageChip(partID: part.id, blobID: id)
                 } else if let attachment = part.attachment {
                     TranscriptFileChip(
+                        partID: part.id,
                         name: attachment.name,
                         mimeType: attachment.mimeType,
                         size: attachment.size,
@@ -917,6 +918,7 @@ private struct TranscriptImageChip: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    let partID: String
     let blobID: String
     @State private var thumbnail: UIImage?
     @State private var thumbnailIdentity: ChatMediaIdentity?
@@ -1014,6 +1016,7 @@ private struct TranscriptImageChip: View {
         .accessibilityHint(currentThumbnail == nil ? "Loads the unavailable image again" : "Opens a photo preview")
         .tronManagedSheet(
             item: $previewRequest,
+            instance: partID,
             identity: { "chat.image-preview.\($0.id)" }
         ) { request in
             AttachmentImagePreviewSheet(remote: request.identity, leaseID: request.leaseID,
@@ -1027,6 +1030,8 @@ private struct TranscriptImageChip: View {
 struct TranscriptFileChip: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    /// Names this chip's preview presenter among its siblings (#1652).
+    let partID: String
     let name: String
     let mimeType: String
     let size: Int?
@@ -1082,6 +1087,7 @@ struct TranscriptFileChip: View {
         .onChange(of: selectionIdentity) { _, _ in previewRequest = nil }
         .tronManagedSheet(
             item: $previewRequest,
+            instance: partID,
             identity: { "chat.file-preview.\($0.id)" }
         ) { request in
             AttachmentFilePreviewSheet(

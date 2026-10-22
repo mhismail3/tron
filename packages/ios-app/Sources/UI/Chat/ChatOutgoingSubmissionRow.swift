@@ -319,6 +319,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                             .accessibilityLabel("Attachment \(attachment.name)")
                         } else if let blobID = attachment.transportBlobID {
                             TranscriptFileChip(
+                                partID: attachment.id,
                                 name: attachment.name,
                                 mimeType: attachment.mimeType,
                                 size: attachment.size,
