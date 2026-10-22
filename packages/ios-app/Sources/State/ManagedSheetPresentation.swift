@@ -6,11 +6,17 @@ struct PresentationDismissalLease: Equatable {
     struct Transition: Equatable {
         let retired: PresentationSurfaceToken?
         let registered: PresentationSurfaceToken?
+        /// The retired presentation was requested but its content never appeared.
+        var neverAppeared: PresentationSurfaceToken? = nil
     }
 
     private(set) var generation = UUID()
     private(set) var registeredToken: PresentationSurfaceToken?
     private(set) var dismissingToken: PresentationSurfaceToken?
+    /// A presentation a live request registered whose content has not appeared
+    /// yet. The sheet haptic plays when that content appears, so a refused or
+    /// deferred presentation is silent until it actually happens (#1695).
+    private(set) var awaitingAppearance: PresentationSurfaceToken?
 
     func contentToken(identity: String) -> PresentationSurfaceToken {
         if let registeredToken, registeredToken.id == identity { return registeredToken }
@@ -33,7 +39,27 @@ struct PresentationDismissalLease: Equatable {
         let retired = registeredToken
         registeredToken = nil
         generation = UUID()
-        return Transition(retired: retired, registered: register(identity: identity))
+        let neverAppeared = endAppearance(of: retired.map { [$0] } ?? [])
+        return Transition(retired: retired, registered: register(identity: identity), neverAppeared: neverAppeared)
+    }
+
+    /// A live request (not a restored or replaced presentation) opened `token`.
+    mutating func expectAppearance(of token: PresentationSurfaceToken?) {
+        if let token { awaitingAppearance = token }
+    }
+
+    /// True once, when the content of the presentation a live request opened appears.
+    mutating func contentAppeared(_ token: PresentationSurfaceToken) -> Bool {
+        guard awaitingAppearance == token else { return false }
+        awaitingAppearance = nil
+        return true
+    }
+
+    /// Ends the wait for `tokens`; returns the one whose content never appeared.
+    private mutating func endAppearance(of tokens: [PresentationSurfaceToken]) -> PresentationSurfaceToken? {
+        guard let awaiting = awaitingAppearance, tokens.contains(awaiting) else { return nil }
+        awaitingAppearance = nil
+        return awaiting
     }
 
     mutating func beginDismissal() {
@@ -48,16 +74,17 @@ struct PresentationDismissalLease: Equatable {
         }
         dismissingToken = nil
         generation = UUID()
+        let neverAppeared = endAppearance(of: [retired])
         let registered = nextIdentity.flatMap { register(identity: $0) }
-        return Transition(retired: retired, registered: registered)
+        return Transition(retired: retired, registered: registered, neverAppeared: neverAppeared)
     }
 
-    mutating func retireAll() -> [PresentationSurfaceToken] {
+    mutating func retireAll() -> (tokens: [PresentationSurfaceToken], neverAppeared: PresentationSurfaceToken?) {
         let tokens = [registeredToken, dismissingToken].compactMap { $0 }
         registeredToken = nil
         dismissingToken = nil
         generation = UUID()
-        return tokens
+        return (tokens, endAppearance(of: tokens))
     }
 }
 
@@ -67,6 +94,26 @@ struct PresentationDismissalLease: Equatable {
 /// repeated in one scope without a distinct key shares that state, and only the
 /// last-rendered sibling can present (#1652, #1656). Sharing is a programming
 /// error reported the moment one of them starts presenting.
+/// Faults a managed presenter reports: programming errors and presentations
+/// that were requested but never shown (see State README Signals).
+enum ManagedSheetPresentationSignal {
+    private static let logger = Logger(subsystem: "com.tron.mobile", category: "ManagedSheetPresentation")
+
+    /// A live request registered a presentation that retired before its content
+    /// ever appeared: the user asked for a sheet and saw nothing (#1695).
+    @MainActor static func neverAppeared(_ token: PresentationSurfaceToken?, site: String) {
+        guard let token else { return }
+        #if HOSTED_TEST
+        HostedPresentationProbe.record?("never-appeared", "\(token.id)@\(site)")
+        #endif
+        logger.fault("managed-sheet.never-appeared identity=\(token.id, privacy: .public) site=\(site, privacy: .public)")
+    }
+
+    static func fault(_ message: String) {
+        logger.fault("\(message, privacy: .public)")
+    }
+}
+
 @MainActor
 final class ManagedSheetPresenterClaims {
     private var live: Set<UUID> = []
@@ -77,7 +124,7 @@ final class ManagedSheetPresenterClaims {
     func willPresent(site: String) {
         guard live.count > 1 else { return }
         let message = "Managed sheet presenter \(site) is shared by \(live.count) live views; a repeated presenter needs a distinct identity or instance:"
-        Logger(subsystem: "com.tron.mobile", category: "ManagedSheetPresentation").fault("\(message, privacy: .public)")
+        ManagedSheetPresentationSignal.fault(message)
         #if HOSTED_TEST
         preconditionFailure(message)
         #endif
@@ -132,10 +179,12 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         let source: NativeSheetSource? = isPresented || nativeHost.isInstalled ? NativeSheetSource(
             owner: nativeHost,
             content: AnyView(Color.clear.accessibilityHidden(true).sheet(isPresented: $isPresented, onDismiss: didDismiss) {
-                TronPresentationSurface(token: lease.contentToken(identity: identity), parent: parent) {
+                let token = lease.contentToken(identity: identity)
+                TronPresentationSurface(token: token, parent: parent) {
                     sheetContent().environment(\.chatOwnsStatusBar, false)
                 }
                 .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
+                .onAppear { contentAppeared(token) }
             }),
             environment: environment,
             onRemoval: sourceDidDisappear
@@ -144,15 +193,16 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
             .transformPreference(NativeSheetSources.self) { sources in
                 if let source { sources.append(source) }
             }
-            // Only a live false → true change plays: a sheet already presented
-            // when its presenter mounts (launch, reconnect, rebuild) is silent.
+            // Only a live false → true request plays, once its content appears: a
+            // sheet already presented when its presenter mounts (launch, reconnect,
+            // rebuild) is silent, and so is a request UIKit has not presented.
             .onChange(of: isPresented, initial: true) { wasPresented, presented in
                 #if HOSTED_TEST
                 HostedPresentationProbe.record?("binding", "\(identity) \(wasPresented)→\(presented) parent=\(parentStateScope?.path ?? "nil")")
                 #endif
                 if presented {
                     if !wasPresented { claims.willPresent(site: "\(identity)@\(site)") }
-                    registerIfPossible(playHaptic: !wasPresented)
+                    registerIfPossible(live: !wasPresented)
                 } else {
                     lease.beginDismissal()
                 }
@@ -172,11 +222,15 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         }
     }
 
-    private func registerIfPossible(playHaptic: Bool) {
+    private func registerIfPossible(live: Bool) {
         if let token = lease.register(identity: identity) {
             coordinator?.register(token, parent: parent, dependencies: dependencies)
-            if playHaptic, let haptic { TronHaptics.shared.play(haptic) }
+            if live { lease.expectAppearance(of: token) }
         }
+    }
+
+    private func contentAppeared(_ token: PresentationSurfaceToken) {
+        if lease.contentAppeared(token), let haptic { TronHaptics.shared.play(haptic) }
     }
 
     private func didDismiss() {
@@ -186,13 +240,15 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         if lease.dismissingToken == nil, !isPresented { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: isPresented ? identity : nil)
         apply(transition)
-        if transition.registered != nil, let haptic { TronHaptics.shared.play(haptic) }
+        // A request made while the previous sheet was leaving presents now.
+        lease.expectAppearance(of: transition.registered)
         // Only an actual dismissal ends the presentation's state.
         if !isPresented { stateStore.retire(path: statePath) }
         if !isPresented, transition.retired != nil { onDismiss?() }
     }
 
     private func apply(_ transition: PresentationDismissalLease.Transition) {
+        ManagedSheetPresentationSignal.neverAppeared(transition.neverAppeared, site: site)
         if let retired = transition.retired { coordinator?.retire(retired) }
         if let registered = transition.registered {
             coordinator?.register(registered, parent: parent, dependencies: dependencies)
@@ -200,7 +256,9 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     }
 
     private func retireAllTokens() {
-        for token in lease.retireAll() { coordinator?.retire(token) }
+        let retired = lease.retireAll()
+        ManagedSheetPresentationSignal.neverAppeared(retired.neverAppeared, site: site)
+        for token in retired.tokens { coordinator?.retire(token) }
     }
 }
 
@@ -258,10 +316,12 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         let source: NativeSheetSource? = item != nil || nativeHost.isInstalled ? NativeSheetSource(
             owner: nativeHost,
             content: AnyView(Color.clear.accessibilityHidden(true).sheet(item: $item, onDismiss: didDismiss) { value in
-                TronPresentationSurface(token: lease.contentToken(identity: identity(value)), parent: parent) {
+                let token = lease.contentToken(identity: identity(value))
+                TronPresentationSurface(token: token, parent: parent) {
                     sheetContent(value).environment(\.chatOwnsStatusBar, false)
                 }
                 .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
+                .onAppear { if lease.contentAppeared(token), let haptic { TronHaptics.shared.play(haptic) } }
             }),
             environment: environment,
             onRemoval: sourceDidDisappear
@@ -270,12 +330,12 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
             .transformPreference(NativeSheetSources.self) { sources in
                 if let source { sources.append(source) }
             }
+            // Only a live nil → item request plays, once its content appears; replacing
+            // a presented item is not a new presentation.
             .onChange(of: item.map(identity), initial: true) { previous, current in
                 if previous == nil, current != nil { claims.willPresent(site: site) }
-                itemChanged()
-                // Replacing a presented item is not a new presentation.
-                if previous == nil, current != nil, lease.dismissingToken == nil,
-                   let haptic { TronHaptics.shared.play(haptic) }
+                let registered = itemChanged()
+                if previous == nil, current != nil { lease.expectAppearance(of: registered) }
             }
             .onPresentationRetire(fileID: "native-source:\(site)", line: 0, perform: sourceDidDisappear)
             .onAppear { claims.appear(claimant) }
@@ -293,10 +353,11 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         }
     }
 
-    private func itemChanged() {
+    /// Returns the presentation a new item registered, if any.
+    private func itemChanged() -> PresentationSurfaceToken? {
         guard let item else {
             lease.beginDismissal()
-            return
+            return nil
         }
         // A different item replaces the presentation: the old one's state ends.
         let path = statePath(item)
@@ -304,12 +365,15 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         presentedStatePath = path
         let itemIdentity = identity(item)
         if lease.registeredToken == nil {
-            if let token = lease.register(identity: itemIdentity) {
-                coordinator?.register(token, parent: parent, dependencies: dependencies?(item))
-            }
-        } else {
-            apply(lease.replace(identity: itemIdentity))
+            guard let token = lease.register(identity: itemIdentity) else { return nil }
+            coordinator?.register(token, parent: parent, dependencies: dependencies?(item))
+            return token
         }
+        let transition = lease.replace(identity: itemIdentity)
+        apply(transition)
+        // Replacing a request that never appeared is still the first presentation.
+        if transition.neverAppeared != nil { lease.expectAppearance(of: transition.registered) }
+        return transition.registered
     }
 
     private func didDismiss() {
@@ -319,7 +383,8 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         if lease.dismissingToken == nil, item == nil { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: item.map(identity))
         apply(transition)
-        if transition.registered != nil, let haptic { TronHaptics.shared.play(haptic) }
+        // A request made while the previous sheet was leaving presents now.
+        lease.expectAppearance(of: transition.registered)
         if item == nil, let presentedStatePath {
             stateStore.retire(path: presentedStatePath)
             self.presentedStatePath = nil
@@ -328,6 +393,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     }
 
     private func apply(_ transition: PresentationDismissalLease.Transition) {
+        ManagedSheetPresentationSignal.neverAppeared(transition.neverAppeared, site: site)
         if let retired = transition.retired { coordinator?.retire(retired) }
         if let registered = transition.registered {
             coordinator?.register(registered, parent: parent, dependencies: item.flatMap { dependencies?($0) })
@@ -335,7 +401,9 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     }
 
     private func retireAllTokens() {
-        for token in lease.retireAll() { coordinator?.retire(token) }
+        let retired = lease.retireAll()
+        ManagedSheetPresentationSignal.neverAppeared(retired.neverAppeared, site: site)
+        for token in retired.tokens { coordinator?.retire(token) }
     }
 }
 

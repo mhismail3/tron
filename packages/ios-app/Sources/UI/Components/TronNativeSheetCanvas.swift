@@ -17,7 +17,10 @@ final class RetainedNativeSheetHost {
     private weak var canvas: NativeSheetCanvas?
     private var onSourceRemoval: (@MainActor () -> Void)?
     private var retired = false
-    nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
+    /// Never an object address: a freed host's address can be reused by its
+    /// replacement within one canvas update, and SwiftUI would then keep the
+    /// old sheet node's presentation state for the new source (#1695).
+    nonisolated let id = UUID()
     var isInstalled: Bool { content != nil }
     var isAttached: Bool { canvas?.isAttached == true }
 
@@ -78,7 +81,7 @@ struct NativeSheetSources: PreferenceKey {
 
 private struct NativeSheetCanvasContent: View {
     struct Source: Identifiable {
-        let id: ObjectIdentifier
+        let id: UUID
         let content: AnyView
     }
     let sources: [Source]

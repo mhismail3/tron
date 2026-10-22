@@ -84,10 +84,12 @@ extension PresentationStateBox: PresentationStateBoxValue { var anyValue: Any { 
 /// content, so a rebuilt sheet finds its scope again by identity path.
 @MainActor
 final class PresentationStateStore {
-    /// A bound on scopes whose sheet never reported a dismissal (its presenter
-    /// was removed while presented). Oldest first out; a live scope is
-    /// re-created empty only after this many newer presentations.
-    static let scopeLimit = 256
+    /// Live scopes beyond this many report a leak. Scopes are never evicted:
+    /// evicting a live one would retire a sheet's state while it stays on
+    /// screen and orphan its native canvas, so its rows play the presentation
+    /// request but nothing appears (#1695). Dismissal, presenter removal and
+    /// the enclosing surface own retirement.
+    static let leakReportThreshold = 256
 
     private var scopes: [String: PresentationStateScope] = [:]
     private var order: [String] = []
@@ -105,9 +107,8 @@ final class PresentationStateStore {
         let scope = PresentationStateScope(path: path)
         scopes[path] = scope
         order.append(path)
-        if order.count > Self.scopeLimit {
-            let expired = order.removeFirst()
-            scopes.removeValue(forKey: expired)?.retire()
+        if order.count == Self.leakReportThreshold + 1 {
+            ManagedSheetPresentationSignal.fault("presentation-state.scope-leak live=\(order.count) newest=\(path)")
         }
         return scope
     }
