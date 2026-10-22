@@ -70,105 +70,87 @@ struct ProcessHistorySheet: View {
         )
     }
 
-    @ViewBuilder
-    private func history(_ store: SessionProcessHistoryStore) -> some View {
+    private struct HistoryRow: Identifiable {
+        let process: SessionProcessActivity
+        let position: Int
+        var id: String { process.id }
+    }
+
+    /// One newest-first feed: live and recent runs, then earlier canonical history.
+    private func rows(_ store: SessionProcessHistoryStore) -> [HistoryRow] {
         let mounted = mountedProcesses
         let sections = SessionProcessProjection.sections(mounted)
         let mountedIDs = Set(mounted.map(\.processId))
-        let earlier = store.processes.filter { !mountedIDs.contains($0.processId) }
-        let hasMounted = !mounted.isEmpty
-
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 6) {
-                // One lazy collection preserves exact process identity as live
-                // rows settle or resume across sections (as in Activity).
-                ForEach(rows(sections, earlier: earlier)) { row in
-                    switch row {
-                    case .heading(let title):
-                        Text(title)
-                            .font(TronTypography.sheetSectionHeader)
-                            .foregroundStyle(Color.tronTextMuted)
-                            .padding(.top, 4)
-                            .accessibilityAddTraits(.isHeader)
-                    case .process(let process):
-                        SessionProcessRow(process: process, style: .history) {
-                            selectedProcess = process
-                        }
-                    }
-                }
-
-                switch store.status {
-                case .conflict:
-                    SessionProcessPlaceholder(
-                        title: "History changed",
-                        detail: "Reload to continue from the latest canonical page.",
-                        icon: "arrow.triangle.2.circlepath",
-                        actionTitle: "Reload History"
-                    ) {
-                        store.retryReload(sessionID: sessionID, presentationGeneration: generation)
-                    }
-                case .unavailable:
-                    unavailable(
-                        "History unavailable",
-                        detail: hasMounted
-                            ? "Current and recent subagent activity remains available above."
-                            : "Update Tron on your Mac to load canonical subagent history.",
-                        icon: "externaldrive.badge.questionmark"
-                    )
-                case .disconnected:
-                    unavailable(
-                        "Gateway disconnected",
-                        detail: "Reconnect to load canonical subagent history.",
-                        icon: "wifi.slash"
-                    )
-                case .failed(let message):
-                    unavailable("Unable to load history", detail: message, icon: "exclamationmark.triangle")
-                case .idle where earlier.isEmpty && !hasMounted,
-                     .loading where earlier.isEmpty && !hasMounted:
-                    TronSheetLoadingState(label: "Loading subagent history…", accent: .tronEmerald)
-                case .loaded where earlier.isEmpty && !hasMounted:
-                    SessionProcessPlaceholder(
-                        title: "No recorded subagents",
-                        detail: "Completed subagent sessions will appear here.",
-                        icon: "clock.arrow.circlepath"
-                    )
-                default:
-                    EmptyView()
-                }
-
-                if store.nextCursor != nil, store.status != .conflict {
-                    TronPaginationButton(label: "Load More", loadingLabel: "Loading…", icon: "arrow.down", isLoading: store.status == .loading, accent: .tronEmerald) {
-                        store.loadNext(sessionID: sessionID, presentationGeneration: generation)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                }
-            }
-            .padding(18)
-        }
-        .tronScrollEdgeChrome()
+        let ordered = sections.active + sections.recent + store.processes.filter { !mountedIDs.contains($0.processId) }
+        return ordered.enumerated().map { HistoryRow(process: $1, position: $0 + 1) }
     }
 
-    private enum Row: Identifiable {
-        case heading(String)
-        case process(SessionProcessActivity)
+    private func tail(_ store: SessionProcessHistoryStore, empty: Bool) -> TronFeedTail {
+        switch store.status {
+        case .loading: return .loading
+        case .failed(let message): return .failed(message)
+        case .loaded where store.nextCursor == nil: return empty ? .idle : .end("Earliest run")
+        default: return .idle
+        }
+    }
 
-        var id: String {
-            switch self {
-            case .heading(let title): "heading.\(title)"
-            case .process(let process): "process.\(process.id)"
+    @ViewBuilder
+    private func history(_ store: SessionProcessHistoryStore) -> some View {
+        let rows = rows(store)
+        TronFeed(items: rows, identifier: "process-history-feed", ordinal: \.position, total: rows.count,
+                 totalIsExact: store.nextCursor == nil, tail: tail(store, empty: rows.isEmpty),
+                 loadMore: {
+                     guard store.nextCursor != nil, store.status != .loading, store.status != .conflict else { return }
+                     store.loadNext(sessionID: sessionID, presentationGeneration: generation)
+                 },
+                 retry: { store.loadNext(sessionID: sessionID, presentationGeneration: generation) }) {
+            VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+                TronSettingsCaption("Newest first. Open a run to read its transcript.")
+                placeholder(store, empty: rows.isEmpty, hasMounted: !mountedProcesses.isEmpty)
+            }
+            .padding(.bottom, 4)
+        } row: { row in
+            TronFeedCard {
+                TronListButton(SessionProcessRowPresentation.listContent(row.process), identifier: "subagent-row-\(row.process.id)") {
+                    selectedProcess = row.process
+                }
             }
         }
     }
 
-    private func rows(_ sections: SessionProcessProjection.Sections, earlier: [SessionProcessActivity]) -> [Row] {
-        var rows: [Row] = []
-        for (title, processes) in [("Active", sections.active), ("Recently finished", sections.recent), ("Earlier", earlier)] {
-            guard !processes.isEmpty else { continue }
-            rows.append(.heading(title))
-            rows += processes.map(Row.process)
+    @ViewBuilder
+    private func placeholder(_ store: SessionProcessHistoryStore, empty: Bool, hasMounted: Bool) -> some View {
+        switch store.status {
+        case .conflict:
+            SessionProcessPlaceholder(
+                title: "History changed",
+                detail: "Reload to continue from the latest canonical page.",
+                icon: "arrow.triangle.2.circlepath",
+                actionTitle: "Reload History"
+            ) {
+                store.retryReload(sessionID: sessionID, presentationGeneration: generation)
+            }
+        case .unavailable:
+            unavailable(
+                "History unavailable",
+                detail: hasMounted
+                    ? "Current and recent subagent activity remains available below."
+                    : "Update Tron on your Mac to load canonical subagent history.",
+                icon: "externaldrive.badge.questionmark"
+            )
+        case .disconnected:
+            unavailable("Gateway disconnected", detail: "Reconnect to load canonical subagent history.", icon: "wifi.slash")
+        case .idle where empty:
+            TronSheetLoadingState(label: "Loading subagent history…", accent: .tronEmerald)
+        case .loaded where empty:
+            SessionProcessPlaceholder(
+                title: "No recorded subagents",
+                detail: "Completed subagent sessions will appear here.",
+                icon: "clock.arrow.circlepath"
+            )
+        default:
+            EmptyView()
         }
-        return rows
     }
 
     private func unavailable(_ title: String, detail: String, icon: String) -> some View {
@@ -408,6 +390,34 @@ enum SessionProcessRowTone: Equatable, Sendable {
 }
 
 enum SessionProcessRowPresentation {
+    /// A Subagent History row: what the run produced (or is doing) as its title,
+    /// lifecycle as the one pill, agent, mode and duration as tags.
+    @MainActor static func listContent(_ process: SessionProcessActivity, now: Date = .now,
+                                       uptime: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TronListRowContent {
+        let lines = (outputPreview(process.outputTail)?.text ?? "")
+            .split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let action = latestAction(for: process)
+        let title = lines.first ?? action ?? process.title
+        var subtext = lines.dropFirst().joined(separator: " ")
+        if process.lifecycle.isActiveWork, let action, action != title { subtext = action }
+        let accent: Color = switch tone(for: process.lifecycle) {
+        case .inProgress: .tronEmerald
+        case .pausedSettled: .tronSlate
+        case .succeeded: .tronSuccess
+        case .unsuccessful: .tronError
+        }
+        let status = process.lifecycle.state == .running ? "Running" : statusText(for: process.lifecycle)
+        var tags = [TronListTag(text: process.title)]
+        if !process.executionMode.displayName.isEmpty { tags.append(TronListTag(text: process.executionMode == .asynchronous ? "Async" : process.executionMode.displayName)) }
+        if let elapsed = elapsedMilliseconds(for: process, at: now, uptime: uptime) { tags.append(TronListTag(text: durationText(elapsed), mono: true)) }
+        return TronListRowContent(
+            title: title, status: TronListStatus(text: status, tone: accent, live: process.lifecycle.isActiveWork),
+            subtext: subtext.isEmpty ? nil : subtext, tags: tags,
+            timestamp: TronListTime.short(iso: process.startedAt, now: now),
+            accessibilityHint: process.lifecycle.isActiveWork ? "Opens the live read-only subagent session"
+                : "Opens the completed read-only subagent session")
+    }
+
     static let outputLineLimit = 3
     private static let maximumActionCharacters = 96
     private static let absentValues: Set<String> = ["null", "undefined"]

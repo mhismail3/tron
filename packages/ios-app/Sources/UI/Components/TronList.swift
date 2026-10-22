@@ -35,6 +35,8 @@ struct TronListRowContent {
     var monoTitle = false
     var status: TronListStatus?
     var subtext: String?
+    /// A path or ID subtext reads in mono and shortens in the middle.
+    var monoSubtext = false
     var tags: [TronListTag] = []
     var timestamp: String?
     var accessibilityHint: String?
@@ -71,9 +73,10 @@ struct TronListRow: View {
                 titleLine
                 if let subtext = content.subtext, !subtext.isEmpty {
                     Text(subtext)
-                        .font(TronTypography.settingsRowSubtext)
+                        .font(content.monoSubtext ? TronTypography.code(size: TronTypography.sizeSecondary) : TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextSecondary)
-                        .lineLimit(2)
+                        .lineLimit(content.monoSubtext ? 1 : 2)
+                        .truncationMode(content.monoSubtext ? .middle : .tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !content.tags.isEmpty || content.timestamp != nil { metadataLine }

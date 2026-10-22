@@ -275,26 +275,26 @@ struct AgentInstructionsOverview: View {
         ScrollView {
             // A dozen rows at most; eager layout keeps every row addressable
             // while the sheet rests at its medium detent.
-            VStack(alignment: .leading, spacing: TronSpacing.md) {
+            VStack(alignment: .leading, spacing: 18) {
                 TronSettingsCaption("The model reads these sections in this order for every turn. Open one to see where it comes from.")
-                    .padding(.bottom, TronSpacing.xs)
-                ForEach(Array(projection.sections.enumerated()), id: \.element.id) { index, section in
-                    sectionRow(section, number: index + 1)
+                    .padding(.bottom, -8)
+                TronListGroup(Array(projection.sections.enumerated()).map(NumberedSection.init), hasLeading: true,
+                              identifier: "agent-instructions-sections") { numbered in
+                    TronListButton(AgentInstructionsPresentation.rowContent(numbered.section, number: numbered.number),
+                                   identifier: "agent-instructions-section-\(numbered.section.id)") {
+                        selection = numbered.section
+                    }
                 }
-                Button {
-                    reading = AgentInstructionsReading(id: "full", title: "Full Prompt", text: projection.text)
-                } label: {
-                    AgentInstructionsSummaryRow(icon: "doc.plaintext", title: "View Full Prompt",
-                                                summary: "\(projection.text.count.formatted()) characters")
+                TronListGroup([FullPrompt(characters: projection.text.count)]) { prompt in
+                    TronListButton(TronListRowContent(title: "View Full Prompt", subtext: "\(prompt.characters.formatted()) characters"),
+                                   identifier: "agent-instructions-full-prompt") {
+                        reading = AgentInstructionsReading(id: "full", title: "Full Prompt", text: projection.text)
+                    }
                 }
-                .buttonStyle(.plain)
-                .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.10, interactive: true)
-                .padding(.top, TronSpacing.md)
-                .accessibilityIdentifier("agent-instructions-full-prompt")
                 TronSettingsCaption("Some model providers add their own text to each request. That text is not part of these instructions.")
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
         .tronScrollEdgeChrome()
         .tronManagedSheet(item: $selection, identity: { "agent-instructions.section.\($0.id)" }) { selection in
@@ -305,81 +305,33 @@ struct AgentInstructionsOverview: View {
         }
     }
 
-    private func sectionRow(_ section: AgentInstructionsProjection.Section, number: Int) -> some View {
-        let copy = AgentInstructionsPresentation.copy(for: section)
-        return Button {
-            selection = section
-        } label: {
-            AgentInstructionsSummaryRow(
-                // The numbered symbol keeps the model's reading order visible.
-                icon: number <= 50 ? "\(number).circle" : copy.icon,
-                title: copy.title,
-                summary: AgentInstructionsPresentation.summary(for: section),
-                perTurn: section.perTurn
-            )
-        }
-        .buttonStyle(.plain)
-        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.10, interactive: true)
-        .accessibilityIdentifier("agent-instructions-section-\(section.id)")
+    private struct NumberedSection: Identifiable {
+        let number: Int
+        let section: AgentInstructionsProjection.Section
+        var id: String { section.id }
+        init(_ pair: (offset: Int, element: AgentInstructionsProjection.Section)) { number = pair.offset + 1; section = pair.element }
+    }
+
+    private struct FullPrompt: Identifiable {
+        let characters: Int
+        var id: String { "full" }
     }
 }
 
-/// An overview row: the title, then its summary trailing on the same line,
-/// right-aligned, with the Each turn tag before it. A path may shorten in the
-/// middle, keeping both ends; any other summary shows whole or, when it does not
-/// fit beside the title, returns below it. At accessibility sizes the summary is
-/// always below the title and wraps.
-private struct AgentInstructionsSummaryRow: View {
-    let icon: String
-    let title: String
-    let summary: String
-    var perTurn = false
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
-
-    /// The narrowest trailing path still worth reading on the title's line.
-    private static let minimumPathWidth: CGFloat = 72
-
-    private var isPath: Bool { summary.hasPrefix("/") || summary.hasPrefix("~/") }
-
-    var body: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            stacked
-        } else {
-            // A path's ideal width here is its minimum, so a long path still
-            // takes the single line and truncates; only a crowded title stacks.
-            ViewThatFits(in: .horizontal) { singleLine; stacked }
+extension AgentInstructionsPresentation {
+    /// A section row: its reading-order number, title, what it holds, and where it comes from.
+    static func rowContent(_ section: AgentInstructionsProjection.Section, number: Int) -> TronListRowContent {
+        let copy = copy(for: section)
+        var sources = section.source.map { [sourceTag($0)] } ?? []
+        if sources.isEmpty {
+            for entry in section.entries where !sources.contains(sourceTag(entry.source)) { sources.append(sourceTag(entry.source)) }
         }
-    }
-
-    private var singleLine: some View {
-        TronSettingsRow(icon: icon, title: title) {
-            HStack(spacing: TronSpacing.sm) {
-                tag
-                if !summary.isEmpty {
-                    let text = Text(summary)
-                        .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .lineLimit(1)
-                    if isPath {
-                        text.truncationMode(.middle)
-                            .frame(minWidth: Self.minimumPathWidth, idealWidth: Self.minimumPathWidth,
-                                   maxWidth: .infinity, alignment: .trailing)
-                    } else {
-                        text.fixedSize()
-                    }
-                }
-            }
-        }
-    }
-
-    private var stacked: some View {
-        TronSettingsRow(icon: icon, title: title, subtitle: summary.isEmpty ? nil : summary,
-                        subtitleLineLimit: dynamicTypeSize.isAccessibilitySize ? nil : 1) { tag }
-    }
-
-    @ViewBuilder private var tag: some View {
-        if perTurn { ResourceTagLabel(title: "Each turn", accent: .tronEmerald) }
+        let summary = summary(for: section)
+        return TronListRowContent(
+            leading: .ordinal(number), title: copy.title,
+            subtext: summary.isEmpty ? nil : summary,
+            monoSubtext: summary.hasPrefix("/") || summary.hasPrefix("~/"),
+            tags: Array(sources.prefix(2)).map { TronListTag(text: $0) } + (section.perTurn ? [TronListTag(text: "Each turn")] : []))
     }
 }
 

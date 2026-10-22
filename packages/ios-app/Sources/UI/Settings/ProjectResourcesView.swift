@@ -47,15 +47,6 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
         }
     }
     var emptyMessage: String { "No \(rawValue.lowercased()) were discovered for this project." }
-    var explanation: String {
-        switch self {
-        case .prompts: "Reusable prompt templates available as slash commands."
-        case .skills: "On-demand capability guides the agent can load when a task matches."
-        case .commands: "Slash commands registered by loaded extensions."
-        case .tools: "Actions the active model can call in this session."
-        case .subagents: "Agent definitions this session can delegate work to."
-        }
-    }
 }
 
 struct ProjectResourceSelection: Identifiable {
@@ -114,6 +105,13 @@ struct ProjectResourceOverviewContent: Equatable, Sendable {
 }
 
 enum ProjectResourceOverviewPresentation {
+    /// A resource row: name, description, and where it comes from as tags.
+    static func rowContent(_ row: ProjectResourceOverviewRow) -> TronListRowContent {
+        let tags = ComposerResourceBadges.titles(origin: row.resourceOrigin, scope: row.resourceScope)
+            + [ResourceDistributionTag.title(for: row.distribution, scope: row.resourceScope)].compactMap { $0 }
+        return TronListRowContent(title: row.title, subtext: row.subtitle, tags: tags.map { TronListTag(text: $0) })
+    }
+
     static func content(from resources: JSONValue?) -> ProjectResourceOverviewContent {
         guard let root = resources?.objectValue else { return .empty }
         // Tools are listed once, in Manage Session → Available Tools, where
@@ -327,6 +325,13 @@ struct ProjectResourceDetailPresentation: Equatable {
     }
 }
 
+private struct ProjectResourceListRow: Identifiable {
+    let kind: ProjectResourceKind
+    let index: Int
+    let row: ProjectResourceOverviewRow?
+    var id: String { row?.id ?? "\(kind.key):empty" }
+}
+
 struct ProjectResourcesView: View {
     /// The one label of this sheet's title and the Manage Session row that opens it.
     static let title = "Resources"
@@ -346,11 +351,7 @@ struct ProjectResourcesView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if model.resources?.objectValue != nil {
-                        VStack(alignment: .leading, spacing: 18) {
-                            ForEach(content.sections) { section in
-                                resourceGroup(section)
-                            }
-                        }
+                        resourceGroup
                         .tronSettingsCaption("These are resolved resources actually available to this session, tagged by where they come from. Open a row to inspect its source, path, capabilities, or schema.")
                         if content.diagnostics != .array([]) || content.subagentDiagnostic != nil {
                             TronSettingsGroup("Diagnostics", accent: .tronError, surfaceStyle: .scrollOptimized) {
@@ -436,62 +437,21 @@ struct ProjectResourcesView: View {
         .tint(Color.tronEmerald)
     }
 
-    private func resourceGroup(_ section: ProjectResourceOverviewSection) -> some View {
-        let kind = section.kind
-        return TronSettingsGroup(
-            kind.rawValue,
-            detail: "\(section.rows.count) loaded · \(kind.explanation)",
-            accent: kind.accent,
-            surfaceStyle: .scrollOptimized
-        ) {
-            if section.rows.isEmpty {
-                TronSettingsRow(
-                    icon: kind.icon,
-                    title: "None loaded",
-                    subtitle: kind.emptyMessage,
-                    accent: kind.accent
-                )
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, row in
-                        if index > 0 { TronSettingsDivider(accent: kind.accent) }
-                        Button {
-                            selected = ProjectResourceSelection(
-                                kind: kind,
-                                title: row.title,
-                                value: row.value
-                            )
-                        } label: {
-                            TronSettingsRow(
-                                icon: kind.icon,
-                                title: row.title,
-                                subtitle: row.subtitle,
-                                subtitleLineLimit: 1,
-                                accent: kind.accent
-                            ) {
-                                HStack(spacing: 4) {
-                                    ResourceDistributionTag(
-                                        distribution: row.distribution,
-                                        scope: row.resourceScope,
-                                        accent: kind.accent
-                                    )
-                                    ComposerResourceBadges(
-                                        origin: row.resourceOrigin,
-                                        scope: row.resourceScope,
-                                        accent: kind.accent
-                                    )
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("project-resource-\(kind.key)-\(index)")
-                    }
+    /// One sectioned container, a section per kind; a kind with nothing loaded says so.
+    private var resourceGroup: some View {
+        TronListGroup(sections: content.sections.map { section in
+            TronListSection(title: section.kind.rawValue, rows: section.rows.isEmpty
+                ? [ProjectResourceListRow(kind: section.kind, index: -1, row: nil)]
+                : section.rows.enumerated().map { ProjectResourceListRow(kind: section.kind, index: $0.offset, row: $0.element) })
+        }, identifier: "project-resource-groups") { item in
+            if let row = item.row {
+                TronListButton(ProjectResourceOverviewPresentation.rowContent(row), identifier: "project-resource-\(item.kind.key)-\(item.index)") {
+                    selected = ProjectResourceSelection(kind: item.kind, title: row.title, value: row.value)
                 }
+            } else {
+                TronListRow(TronListRowContent(title: "None loaded", subtext: item.kind.emptyMessage))
             }
         }
-        // Resource kinds retain their own accents; the teal theme belongs to
-        // this destination's navigation chrome and generic session surfaces.
-        .environment(\.tronSettingsVisualTheme, nil)
     }
 
     private func installOverview() {

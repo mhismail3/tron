@@ -9,21 +9,10 @@ extension HomeSheet {
         // The sheet's title already names the list: one intro line, then the rows.
         VStack(alignment: .leading, spacing: 10) {
             TronSettingsCaption("Newest first. Sealed chapters stay readable and refuse changes.")
-            TronGlassCard(accent: accent) {
-                VStack(spacing: 0) {
-                    ForEach(Array(list.chapters.reversed().enumerated()), id: \.element.id) { index, chapter in
-                        if index > 0 { divider() }
-                        Button { present(.chapter(chapter, limits: list.limits)) } label: {
-                            TronSettingsRow(icon: chapter.state == .active ? "book" : "book.closed",
-                                            title: "Chapter \(chapter.ordinal)",
-                                            subtitle: HomeChapterPresentation.dateRange(chapter),
-                                            accent: accent) {
-                                TronStatusPill(text: HomeChapterPresentation.stateLabel(chapter.state), accent: Self.chapterAccent(chapter.state))
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("home-chapter-\(chapter.ordinal)")
-                    }
+            TronListGroup(Array(list.chapters.reversed()), identifier: "home-chapter-list") { chapter in
+                TronListButton(HomeChapterPresentation.rowContent(chapter, accent: Self.chapterAccent(chapter.state)),
+                               identifier: "home-chapter-\(chapter.ordinal)") {
+                    present(.chapter(chapter, limits: list.limits))
                 }
             }
         }
@@ -126,5 +115,28 @@ extension HomeSheet {
         case .sealed: .tronSlate
         case .reserved, .materializing: .tronWarning
         }
+    }
+}
+
+extension HomeChapterPresentation {
+    /// A chapter row: its state as the pill, its newest topic as subtext, counts as tags.
+    static func rowContent(_ chapter: HomeChapterListDTO.Chapter, accent: Color) -> TronListRowContent {
+        let contents = chapter.contents
+        let tags = [contents?.userMessages.map { "\($0.formatted()) \($0 == 1 ? "message" : "messages")" },
+                    contents?.tasksDelegated.map { "\($0.formatted()) \($0 == 1 ? "task" : "tasks")" }]
+            .compactMap { $0 }.map { TronListTag(text: $0) }
+        return TronListRowContent(
+            title: "Chapter \(chapter.ordinal)",
+            status: TronListStatus(text: stateLabel(chapter.state), tone: accent, live: chapter.state == .active),
+            subtext: contents?.topics?.first.map { topicPreview($0) },
+            tags: tags, timestamp: shortRange(chapter))
+    }
+
+    /// "Oct 20 – now" for the active chapter, "Oct 14 – Oct 19" once sealed.
+    static func shortRange(_ chapter: HomeChapterListDTO.Chapter) -> String? {
+        guard let start = parse(chapter.createdAt) else { return nil }
+        let style = Date.FormatStyle().month(.abbreviated).day()
+        guard let sealed = chapter.sealedAt.flatMap(parse) else { return "\(start.formatted(style)) – now" }
+        return HomeSheetTime.range(chapter.createdAt, chapter.sealedAt) ?? sealed.formatted(style)
     }
 }

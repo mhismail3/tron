@@ -23,16 +23,11 @@ extension HomeSheet {
                                      icon: "person.text.rectangle")
             }
             if editable, inferred.count > 1 {
-                TronGlassCard(accent: accent) {
-                    Button { profileEdit.confirmingAll = true } label: {
-                        TronSettingsRow(icon: "checkmark.seal", title: "Confirm all inferred",
-                                        subtitle: "\(inferred.count) items become binding on every Home turn", accent: accent) {
-                            TronInlineActionLabel("Confirm all", isWorking: profileEdit.working, accent: accent)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(profileEdit.working)
-                    .accessibilityIdentifier("home-profile-confirm-all")
+                TronListGroup([HomeProfileConfirmAll(count: inferred.count)]) { row in
+                    TronListButton(TronListRowContent(title: profileEdit.working ? "Confirming…" : "Confirm all inferred",
+                                                      subtext: "\(row.count) items become binding on every Home turn"),
+                                   identifier: "home-profile-confirm-all") { profileEdit.confirmingAll = true }
+                        .disabled(profileEdit.working)
                 }
                 .tronManagedSheet(isPresented: $profileEdit.confirmingAll, identity: "home.\(profileID).profile-confirm-all") {
                     TronConfirmationSheet(
@@ -48,39 +43,22 @@ extension HomeSheet {
                     )
                 }
             }
-            ForEach(HomeProfilePresentation.groups(active), id: \.kind) { group in
-                TronSettingsGroup(HomeProfilePresentation.groupTitle(group.kind), accent: accent) {
-                    profileRows(group.items)
+            // One sectioned container: Home's kinds in the order it applies them,
+            // then what no longer applies.
+            if !list.items.isEmpty {
+                TronListGroup(sections: HomeProfilePresentation.groups(active).map {
+                    TronListSection(title: HomeProfilePresentation.groupTitle($0.kind), rows: $0.items)
+                } + [TronListSection(title: "No longer applied", rows: inactive)], identifier: "home-profile-items") { item in
+                    TronListButton(HomeProfilePresentation.rowContent(item), identifier: "home-profile-item-\(item.id)") {
+                        present(.profileItem(item))
+                    }
                 }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("home-profile-group-\(group.kind.rawValue)")
             }
             if !inactive.isEmpty {
-                TronSettingsGroup("No longer applied", detail: "Superseded or retired items, kept in Knowledge.", accent: accent) {
-                    profileRows(inactive)
-                }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("home-profile-inactive")
+                TronSettingsCaption("Superseded or retired items stay in Knowledge.")
             }
             if list.unclassified > 0 {
                 TronSettingsCaption("\(list.unclassified) profile \(list.unclassified == 1 ? "note has" : "notes have") no single kind and \(list.unclassified == 1 ? "is" : "are") not applied.")
-            }
-        }
-    }
-
-    /// Each row only opens its item; Confirm, Edit and Retire live in the item's
-    /// sheet so the row text keeps the full width (#971).
-    private func profileRows(_ items: [HomeProfileListDTO.Item]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                if index > 0 { divider() }
-                Button { present(.profileItem(item)) } label: {
-                    TronSettingsRow(icon: HomeProfilePresentation.stateIcon(item), title: HomeChapterPresentation.topicPreview(item.text, limit: 160),
-                                    subtitle: HomeProfilePresentation.rowSubtitle(item), accent: accent,
-                                    titleFont: TronTypography.sans(size: TronTypography.sizeBody))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("home-profile-item-\(item.id)")
             }
         }
     }
@@ -488,9 +466,16 @@ enum HomeProfilePresentation {
         }
     }
 
-    /// The row's second line: its state, then the note it is, by its short ID.
-    static func rowSubtitle(_ item: HomeProfileListDTO.Item) -> String {
-        let state = item.status == .active ? stateLabel(item) : "\(kindTitle(item.kind)) · \(stateLabel(item))"
-        return "\(state) · note \(item.id.prefix(8))"
+    /// Each row only opens its item; Confirm, Edit and Retire live in the item's
+    /// sheet. The note ID and dates stay in the detail.
+    static func rowContent(_ item: HomeProfileListDTO.Item) -> TronListRowContent {
+        TronListRowContent(title: HomeChapterPresentation.topicPreview(item.text, limit: 160), preview: true,
+                           status: TronListStatus(text: stateLabel(item), tone: stateAccent(item)),
+                           tags: item.status == .active ? [] : [TronListTag(text: kindTitle(item.kind))])
     }
+}
+
+private struct HomeProfileConfirmAll: Identifiable {
+    let count: Int
+    var id: String { "confirm-all" }
 }
