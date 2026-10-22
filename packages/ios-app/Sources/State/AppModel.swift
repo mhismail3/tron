@@ -3233,16 +3233,16 @@ extension AppModel {
                 details: nil
             )
         }
-        // The payload already carries the admitted canonical identity. Do not
-        // gate chat availability on a potentially paginated dashboard catalog;
-        // `session.open` remains the authoritative existence/permission check.
+        // The payload carries the admitted canonical identity; `session.open`, not a paginated
+        // dashboard catalog, checks it. Home's chapter opens Home itself, by the Gateway's own status.
         acknowledgePushNavigation(tap)
-        return SessionNavigationRoute(
-            sessionID: route.sessionID,
-            editorText: nil,
-            gatewayProfileID: profile.id,
-            gatewayLifecycleGeneration: routeAdmission.generation
-        )
+        let home = try await (lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true ? HomeStatusDTO.decode(lifecycle.client.requestValue(
+            "home.status", JSONValue.object([:]), expectedConnection: GatewayConnectionAdmission(connectionID: routeAdmission.connectionID))) : nil)
+        guard lifecycle.admits(routeAdmission) else { throw CancellationError() }
+        let homeSessionID: String? = if let home, [home.sessionId, home.openSessionId].contains(route.sessionID),
+            case .open(let sessionID) = HomePinnedRowPolicy.action(for: home) { sessionID } else { nil }
+        return SessionNavigationRoute(sessionID: homeSessionID ?? route.sessionID, editorText: nil, isHome: homeSessionID != nil,
+                                      gatewayProfileID: profile.id, gatewayLifecycleGeneration: routeAdmission.generation)
     }
 
     private func pushNavigationProfile(machineID: String) -> GatewayProfile? {

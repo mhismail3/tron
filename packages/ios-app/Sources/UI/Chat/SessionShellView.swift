@@ -32,9 +32,9 @@ enum PushNavigationFailureAdmission {
 }
 
 enum PushNavigationPresentationPolicy {
-    /// A tap for the conversation already presented keeps that chat, so a push
-    /// for Home's chapter keeps the Home route instead of remounting it as an
-    /// ordinary chat.
+    /// A tap for the conversation already presented keeps that chat, whether it
+    /// shows as Home or as an ordinary chat on Home's chapter, so a tap never
+    /// remounts the chat the user is reading.
     static func retainsCurrent(
         presented: AppModel.SessionNavigationRoute?,
         target: AppModel.SessionNavigationRoute
