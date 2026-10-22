@@ -84,6 +84,10 @@ struct TronMobileApp: App {
                 HostedChatDisplayFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-annotation-fixture") {
                 HostedChatAnnotationFixture()
+            } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-tron-inline-approvals-preview"),
+                      ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
+                HostedInlineApprovalsPreview(surface: ProcessInfo.processInfo.arguments[index + 1],
+                                             dark: ProcessInfo.processInfo.arguments.contains("-preview-dark"))
             } else if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-fixture") {
                 HostedAskUserFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-pagination-fixture") {
