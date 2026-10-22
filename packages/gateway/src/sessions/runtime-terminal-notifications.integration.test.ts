@@ -840,7 +840,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     if (!observed) value.registry.subscribe("phone", value.slot.id);
     const writing = barrier();
     const release = barrier();
-    const owner = value.slot as unknown as { persistInvocationReceipt(...args: any[]): Promise<void> };
+    const owner = (value.slot as unknown as { runInvocations: { persistInvocationReceipt(...args: any[]): Promise<void> } }).runInvocations;
     const persist = owner.persistInvocationReceipt.bind(owner);
     vi.spyOn(owner, "persistInvocationReceipt").mockImplementation(async (...args) => {
       if (args[0].receiptKind === "terminal") { writing.release(); await release.promise; }

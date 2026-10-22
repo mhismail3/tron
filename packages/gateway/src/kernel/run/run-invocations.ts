@@ -1,0 +1,197 @@
+import type { JsonValue, SessionOperationState } from "../../protocol/types.js";
+import type { SessionManager } from "../pi/coding-agent.js";
+import type { ModuleHost } from "../host/module-host.js";
+import type { GatewayWorkHandle } from "./gateway-work-registry.js";
+import type { RunPersistence } from "./run-persistence.js";
+import type { RunWorkOwner } from "./run-work-owner.js";
+import type { RunQueueOwner } from "./run-queue-owner.js";
+import type { RunAbortOwner } from "./run-abort-owner.js";
+import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection, type OwnedOperationTerminal } from "./invocation-receipts.js";
+
+/** Volatile cancellation attribution shares the invocation's receipt lifetime. */
+type LiveInvocation = InvocationProjection & { stopReason?: string };
+
+export interface CommandReplacement {
+  /** Set once Pi commits the replacement and the command is settled in its origin. */
+  settlement?: Promise<void>;
+}
+
+export interface RunInvocationContext {
+  readonly id: string;
+  readonly revision: number;
+  readonly sessionManager: Pick<SessionManager, "getBranch">;
+  readonly homeRequestPolicy: unknown;
+  readonly dependencies: { modules: ModuleHost };
+  readonly commandReplacement: CommandReplacement | undefined;
+  readonly pendingExtensionCommand: SessionOperationState | undefined;
+  readonly completionOwnershipQueue: readonly { completion: { id: string; operationId?: string | undefined } }[];
+  readonly operationObservations: ReadonlyMap<string, { observedCompletionId?: string | undefined }>;
+  readonly attentionBarrier: Promise<void> | undefined;
+  readonly runPersistence: RunPersistence;
+  readonly runWork: RunWorkOwner;
+  readonly runAbort: Pick<RunAbortOwner, "abortedOperations">;
+  readonly runQueue: RunQueueOwner;
+  persistCanonicalCustomEntry(customType: string, data: JsonValue, identity: string, owner?: GatewayWorkHandle): Promise<void>;
+  clearMarkerOwnership(operationId?: string): Promise<void>;
+  notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void>;
+  emit(topic: string, data: JsonValue): void;
+}
+
+export class RunInvocations {
+  readonly invocations = new Map<string, LiveInvocation>();
+  readonly invocationFailures = new Map<string, string>();
+  private readonly handedOffInvocations = new Set<string>();
+
+  constructor(private readonly context: RunInvocationContext) {}
+
+  async persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
+    if (this.handedOffInvocations.has(receipt.invocationId)) return;
+    await this.context.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
+    if (receipt.receiptKind === "terminal" && this.context.homeRequestPolicy) {
+      // The terminal receipt is already canonical. A failed settlement leaves its
+      // delivery admitted for the next activation to re-prove; it must not strand
+      // this operation's work entry or its terminal observers.
+      await this.context.dependencies.modules.policy("inputAdmission")?.().settle(this.context.id, receipt.operationId).catch(error => {
+        this.context.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
+      });
+    }
+  }
+
+  invocationForOperation(operationId: string | undefined): LiveInvocation | undefined {
+    if (!operationId) return undefined;
+    const live = [...this.invocations.values()]
+      .filter(invocation => invocation.operationId === operationId)
+      .at(-1);
+    if (live) return live;
+    const canonical = invocationProjection(invocationReceipts(
+      this.context.sessionManager.getBranch(),
+      this.context.id,
+    )).filter(invocation => invocation.operationId === operationId).at(-1);
+    if (canonical) this.invocations.set(canonical.invocationId, canonical);
+    return canonical;
+  }
+
+  async terminalizeInvocation(
+    operationId: string | undefined,
+    lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown",
+    errorCode?: string,
+    owner?: GatewayWorkHandle,
+    assistantCompletionId?: string,
+  ): Promise<void> {
+    const terminal = await this.persistInvocationTerminal(operationId, lifecycle, errorCode, owner, assistantCompletionId);
+    if (terminal) await this.context.notifyOwnedTerminal(terminal);
+  }
+
+  async persistInvocationTerminal(
+    operationId: string | undefined,
+    lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown",
+    errorCode?: string,
+    owner?: GatewayWorkHandle,
+    assistantCompletionId?: string,
+  ): Promise<OwnedOperationTerminal | undefined> {
+    if (operationId) this.context.runQueue.retireTerminalOwnership(operationId);
+    this.context.runPersistence.assertOwnershipPersistence();
+    const invocation = this.invocationForOperation(operationId);
+    if (!invocation || ["completed", "failed", "interrupted", "outcomeUnknown"].includes(invocation.lifecycle)) return;
+    // Stop records attribution before cancellation yields. All terminal
+    // observers, including successful completion, publish that same fact.
+    if (invocation.stopReason) {
+      lifecycle = "interrupted";
+      errorCode = invocation.stopReason;
+    }
+    // SDK append is synchronous, but receipt acknowledgement and live-map
+    // retirement yield. A second terminal observer must join the first exact
+    // receipt, not manufacture a second timestamp/lifecycle while that live map
+    // still looks active. The first observer owns terminal notification.
+    const priorTerminal = invocationReceipts(this.context.sessionManager.getBranch(), this.context.id)
+      .find(receipt => receipt.invocationId === invocation.invocationId && receipt.receiptKind === "terminal");
+    if (priorTerminal) {
+      await this.persistInvocationReceipt(priorTerminal, owner ?? this.context.runWork.get(invocation.operationId));
+      return;
+    }
+    await this.persistInvocationReceipt(makeInvocationReceipt({
+      version: 1,
+      receiptId: `terminal:${invocation.invocationId}`,
+      receiptKind: "terminal",
+      invocationId: invocation.invocationId,
+      operationId: invocation.operationId,
+      sessionId: this.context.id,
+      source: invocation.source,
+      ...(invocation.name ? { name: invocation.name } : {}),
+      lifecycle,
+      ...(errorCode ? { errorCode } : {}),
+      origin: invocation.origin,
+      sequence: this.context.revision + 1,
+      createdAt: new Date().toISOString(),
+    }), owner ?? this.context.runWork.get(invocation.operationId));
+    this.invocations.delete(invocation.invocationId);
+    return {
+      lifecycle,
+      operationId: invocation.operationId,
+      invocationId: invocation.invocationId,
+      ...(errorCode === undefined ? {} : { errorCode }),
+      ...(assistantCompletionId === undefined ? {} : { assistantCompletionId }),
+    };
+  }
+
+  /** A distinct successor ends the predecessor; another assistant turn or
+   * automatic compaction does not. Capture exact completion evidence before
+   * the transfer retires its operation observation. */
+  terminalizeTransferredOperation(operationId: string | undefined): void {
+    if (!operationId) return;
+    const completionId = this.context.completionOwnershipQueue.findLast(item => item.completion.operationId === operationId)?.completion.id
+      ?? this.context.operationObservations.get(operationId)?.observedCompletionId;
+    if (!completionId) return;
+    const interrupted = this.context.runAbort.abortedOperations.has(operationId);
+    const attention = this.context.attentionBarrier;
+    void this.persistInvocationTerminal(
+      operationId, interrupted ? "interrupted" : "completed", interrupted ? "user-abort" : undefined,
+      this.context.runWork.get(operationId), completionId,
+    ).then(async terminal => {
+      if (attention) await attention;
+      if (terminal) await this.context.notifyOwnedTerminal(terminal);
+      this.context.runAbort.abortedOperations.delete(operationId);
+    }).catch(() => {});
+  }
+
+  async joinTerminalReceiptWrites(): Promise<void> {
+    // Guarantees receipt order against the next admitted user input, not
+    // SDK-owned between-turn entries (such as tool-loadout system messages)
+    // emitted before that exact boundary. Their relative order proves nothing.
+    const prefix = `canonical:${INVOCATION_RECEIPT_TYPE}:terminal:`;
+    await Promise.all([...this.context.runPersistence.durableWrites.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, write]) => write.waiter));
+    this.context.runPersistence.assertOwnershipPersistence();
+  }
+
+  handOffReplacedCommand(): void {
+    const replacement = this.context.commandReplacement;
+    const command = this.context.pendingExtensionCommand;
+    const operationId = command?.id;
+    const invocation = command?.invocationId ? this.invocations.get(command.invocationId) : undefined;
+    if (!replacement || replacement.settlement || !operationId || !invocation) return;
+    // Only the durable facts move here, while the origin is still bound: its
+    // terminal receipt and its marker. The live command state still settles
+    // through the command's own completion, now under the replacement identity,
+    // which is why every later receipt for it is refused.
+    this.handedOffInvocations.add(invocation.invocationId);
+    while (this.handedOffInvocations.size > 32) this.handedOffInvocations.delete(this.handedOffInvocations.values().next().value!);
+    const terminal = this.context.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(makeInvocationReceipt({
+      version: 1,
+      receiptId: `terminal:${invocation.invocationId}`,
+      receiptKind: "terminal",
+      invocationId: invocation.invocationId,
+      operationId,
+      sessionId: this.context.id,
+      source: invocation.source,
+      ...(invocation.name ? { name: invocation.name } : {}),
+      lifecycle: "completed",
+      origin: invocation.origin,
+      sequence: this.context.revision + 1,
+      createdAt: new Date().toISOString(),
+    })), `terminal:${invocation.invocationId}`, this.context.runWork.get(operationId));
+    replacement.settlement = Promise.all([terminal, this.context.clearMarkerOwnership(operationId)]).then(() => {});
+  }
+
+}

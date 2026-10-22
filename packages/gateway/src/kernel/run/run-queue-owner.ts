@@ -51,6 +51,15 @@ export class RunQueueOwner {
 
   constructor(private readonly context: RunQueueContext) {}
 
+  retireTerminalOwnership(operationId: string): void {
+    this.consumedSteeringOperationIDs.delete(operationId);
+    for (let index = this.dequeuedSteeringOwners.indexOf(operationId);
+      index >= 0;
+      index = this.dequeuedSteeringOwners.indexOf(operationId)) {
+      this.dequeuedSteeringOwners.splice(index, 1);
+    }
+  }
+
   validateAdmission(display: PromptQueueDisplay, redelivery?: RuntimeQueuedMessage): void {
     this.reconcileQueuedMessages();
     if (this.pendingQueueAdmission) {

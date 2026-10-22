@@ -49,6 +49,7 @@ import { RunPersistence, CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WR
 import { RunWorkOwner } from "../kernel/run/run-work-owner.js";
 import { RunAbortOwner } from "../kernel/run/run-abort-owner.js";
 import { RunQueueOwner } from "../kernel/run/run-queue-owner.js";
+import { RunInvocations, type RunInvocationContext, type CommandReplacement } from "../kernel/run/run-invocations.js";
 import { ManualCompactionOwner, type ManualCompactionContext } from "../kernel/run/manual-compaction.js";
 import type { HomeTaskControlRequest } from "../home/home-task-dispatcher.js";
 import type { PromptOwnership, PromptAdmissionContext } from "../kernel/run/prompt-input.js";
@@ -146,7 +147,7 @@ import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX
 import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "./child-session-admission.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../kernel/run/context-delivery-receipts.js";
-import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "../kernel/run/invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "../kernel/run/invocation-receipts.js";
 import type { InputTrigger } from "../kernel/host/input-admission.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
 import { parsePiLiteralCommand, userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
@@ -321,18 +322,10 @@ export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "trans
 
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
 
-/** Volatile cancellation attribution shares the invocation's receipt lifetime. */
-type LiveInvocation = InvocationProjection & { stopReason?: string };
-
 interface OperationObservation {
   cursor?: { entryIndex: number };
   observedCompletionId?: string;
   pendingCompletionId?: string;
-}
-
-interface CommandReplacement {
-  /** Set once Pi commits the replacement and the command is settled in its origin. */
-  settlement?: Promise<void>;
 }
 
 export interface CanonicalAssistantCompletion {
@@ -539,9 +532,9 @@ export class RuntimeSlot {
     clearSdkSteeringIds: () => this.runQueue.sdkQueuedSteeringIDs.clear(),
     bumpQueueRevision: () => { this.runQueue.queueRevision += 1; },
     cancelRequest: operationId => this.homeRequestPolicy?.cancel(operationId),
-    invocation: operationId => this.invocationForOperation(operationId),
+    invocation: operationId => this.runInvocations.invocationForOperation(operationId),
     directBashProcesses: () => this.directBashProcesses,
-    terminalizeInvocation: (operationId, lifecycle, errorCode) => this.terminalizeInvocation(operationId, lifecycle, errorCode),
+    terminalizeInvocation: (operationId, lifecycle, errorCode) => this.runInvocations.terminalizeInvocation(operationId, lifecycle, errorCode),
     settleOperationWork: operationId => this.runWork.settleOperationWork(operationId),
     diagnostic: () => this.dependencies.stopSteeringDiagnostic?.bind(this.dependencies),
     heldQueue: () => this.heldQueue,
@@ -590,7 +583,6 @@ export class RuntimeSlot {
   /** The session replacement a running extension command requested. */
   private commandReplacement: CommandReplacement | undefined;
   /** Commands settled in their origin at a replacement; bounded. */
-  private readonly handedOffInvocations = new Set<string>();
   /** Disposable runtime-only bridge from canonical entry IDs to mounted turn IDs. */
   private readonly presentationIDs = new Map<string, string>();
   private readonly presentationIDOrder: string[] = [];
@@ -635,8 +627,7 @@ export class RuntimeSlot {
   private pendingExtensionCommand: SessionOperationState | undefined;
   /** Gateway-owned causal graph. Canonical receipts remain the durable source;
    * these bounded maps are only the live projection used by snapshots. */
-  private readonly invocations = new Map<string, LiveInvocation>();
-  private readonly invocationFailures = new Map<string, string>();
+  private readonly runInvocations = new RunInvocations(this.runInvocationBindings());
   private retry: RetryState | undefined;
   private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
   private projectTrustReloadOverride: boolean | undefined;
@@ -783,8 +774,8 @@ export class RuntimeSlot {
     setActiveOperationId: id => { this.activeOperationId = id; },
     setOperation: operation => { this.operation = operation; },
     ensureAgentProjection: () => this.ensureAgentProjection(),
-    invocationForOperation: id => this.invocationForOperation(id),
-    terminalizeTransferredOperation: id => this.terminalizeTransferredOperation(id),
+    invocationForOperation: id => this.runInvocations.invocationForOperation(id),
+    terminalizeTransferredOperation: id => this.runInvocations.terminalizeTransferredOperation(id),
     retireOperationObservation: id => this.retireOperationObservation(id),
     enqueueMarkerOwnership: id => this.enqueueMarkerOwnership(id),
     clearMarkerOwnership: id => this.clearMarkerOwnership(id),
@@ -800,10 +791,10 @@ export class RuntimeSlot {
     run: operation => this.lane.run(operation),
     commands: () => this.commands(),
     resourceExpansionCatalog: () => this.resourceExpansionCatalog(),
-    invocationForOperation: id => this.invocationForOperation(id),
-    terminalizeInvocation: (id, lifecycle, errorCode) => this.terminalizeInvocation(id, lifecycle, errorCode),
-    persistInvocationReceipt: (receipt, owner) => this.persistInvocationReceipt(receipt, owner),
-    setInvocation: (id, invocation) => this.invocations.set(id, invocation),
+    invocationForOperation: id => this.runInvocations.invocationForOperation(id),
+    terminalizeInvocation: (id, lifecycle, errorCode) => this.runInvocations.terminalizeInvocation(id, lifecycle, errorCode),
+    persistInvocationReceipt: (receipt, owner) => this.runInvocations.persistInvocationReceipt(receipt, owner),
+    setInvocation: (id, invocation) => this.runInvocations.invocations.set(id, invocation),
     sessionId: () => this.id,
     revision: () => this.revision,
     publishChanged: () => { this.revision += 1; this.publishSnapshot(); },
@@ -981,9 +972,9 @@ export class RuntimeSlot {
     const callbackOwner = currentExtensionOwner();
     const callbackInvocation = currentInvocationContext();
     const invocation = callbackInvocation
-      ? this.invocations.get(callbackInvocation.invocationId)
-        ?? this.invocationForOperation(callbackInvocation.operationId)
-      : this.invocationForOperation(this.pendingExtensionCommand?.id);
+      ? this.runInvocations.invocations.get(callbackInvocation.invocationId)
+        ?? this.runInvocations.invocationForOperation(callbackInvocation.operationId)
+      : this.runInvocations.invocationForOperation(this.pendingExtensionCommand?.id);
     const invocationOrigin = invocation?.name
       ? this.extensionCommandContextOrigin(invocation.name)
       : undefined;
@@ -1003,9 +994,9 @@ export class RuntimeSlot {
     }
     this.pendingExtensionNotificationWrites += 1;
     const invocation = notification.invocation
-      ? this.invocations.get(notification.invocation.invocationId)
-        ?? this.invocationForOperation(notification.invocation.operationId)
-      : this.invocationForOperation(this.pendingExtensionCommand?.id);
+      ? this.runInvocations.invocations.get(notification.invocation.invocationId)
+        ?? this.runInvocations.invocationForOperation(notification.invocation.operationId)
+      : this.runInvocations.invocationForOperation(this.pendingExtensionCommand?.id);
     // The exact callback owner is the producer. The enclosing invocation adds
     // causality but must not restyle an extension tool notification as user UI.
     const origin: ChatOrigin = notification.owner
@@ -2020,7 +2011,7 @@ export class RuntimeSlot {
             || (event.reason !== "manual" && this.activeOperationId !== undefined && this.runAbort.abortedOperations.has(this.activeOperationId)),
           changed: () => { this.revision += 1; this.publishSnapshot(); },
         },
-        joinTerminalReceiptWrites: () => this.joinTerminalReceiptWrites(),
+        joinTerminalReceiptWrites: () => this.runInvocations.joinTerminalReceiptWrites(),
         settings: () => this.settingsToolAccess(),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
@@ -2415,7 +2406,7 @@ export class RuntimeSlot {
   private installRuntimeHooks(): void {
     bindRuntimeSession(this.runtime, {
       beforeInvalidate: () => {
-        this.handOffReplacedCommand();
+        this.runInvocations.handOffReplacedCommand();
         this.dependencies.browserLiveViews?.retireSession(this.id);
       },
       rebind: async () => this.bindSession(),
@@ -2443,35 +2434,6 @@ export class RuntimeSlot {
         message: error instanceof Error ? error.message : String(error),
       })));
     }
-  }
-
-  private handOffReplacedCommand(): void {
-    const replacement = this.commandReplacement;
-    const command = this.pendingExtensionCommand;
-    const operationId = command?.id;
-    const invocation = command?.invocationId ? this.invocations.get(command.invocationId) : undefined;
-    if (!replacement || replacement.settlement || !operationId || !invocation) return;
-    // Only the durable facts move here, while the origin is still bound: its
-    // terminal receipt and its marker. The live command state still settles
-    // through the command's own completion, now under the replacement identity,
-    // which is why every later receipt for it is refused.
-    this.handedOffInvocations.add(invocation.invocationId);
-    while (this.handedOffInvocations.size > 32) this.handedOffInvocations.delete(this.handedOffInvocations.values().next().value!);
-    const terminal = this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(makeInvocationReceipt({
-      version: 1,
-      receiptId: `terminal:${invocation.invocationId}`,
-      receiptKind: "terminal",
-      invocationId: invocation.invocationId,
-      operationId,
-      sessionId: this.id,
-      source: invocation.source,
-      ...(invocation.name ? { name: invocation.name } : {}),
-      lifecycle: "completed",
-      origin: invocation.origin,
-      sequence: this.revision + 1,
-      createdAt: new Date().toISOString(),
-    })), `terminal:${invocation.invocationId}`, this.runWork.get(operationId));
-    replacement.settlement = Promise.all([terminal, this.clearMarkerOwnership(operationId)]).then(() => {});
   }
 
   private async withRebindAttentionDisposition<T>(
@@ -2516,7 +2478,7 @@ export class RuntimeSlot {
         const context = currentInvocationContext();
         const invocationId = context?.invocationId;
         if (invocationId && this.pendingExtensionCommand?.invocationId === invocationId) {
-          this.invocationFailures.set(invocationId, "extension-error");
+          this.runInvocations.invocationFailures.set(invocationId, "extension-error");
         }
         this.emit("session.extensionError", safeJson({ error, ...(invocationId ? { invocationId } : {}) }));
       },
@@ -3424,7 +3386,7 @@ export class RuntimeSlot {
     // Retry errors remain canonical even when Pi removes them from model context.
     const entry = assistant && this.sessionManager.getBranch().findLast((candidate) =>
       candidate.type === "message" && candidate.message === assistant);
-    const invocation = this.invocationForOperation(operationId);
+    const invocation = this.runInvocations.invocationForOperation(operationId);
     const sourceId = entry?.id ?? (invocation ? `terminal:${invocation.invocationId}` : operationId);
     const reason = assistant?.role === "assistant" ? assistant.stopReason : undefined;
     // A task operation whose report is sealed ended at the report's tool boundary
@@ -3602,31 +3564,28 @@ export class RuntimeSlot {
     );
   }
 
-  private async persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
-    if (this.handedOffInvocations.has(receipt.invocationId)) return;
-    await this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
-    if (receipt.receiptKind === "terminal" && this.homeRequestPolicy) {
-      // The terminal receipt is already canonical. A failed settlement leaves its
-      // delivery admitted for the next activation to re-prove; it must not strand
-      // this operation's work entry or its terminal observers.
-      await this.dependencies.modules.policy("inputAdmission")?.().settle(this.id, receipt.operationId).catch(error => {
-        this.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
-      });
-    }
-  }
-
-  private invocationForOperation(operationId: string | undefined): LiveInvocation | undefined {
-    if (!operationId) return undefined;
-    const live = [...this.invocations.values()]
-      .filter(invocation => invocation.operationId === operationId)
-      .at(-1);
-    if (live) return live;
-    const canonical = invocationProjection(invocationReceipts(
-      this.sessionManager.getBranch(),
-      this.id,
-    )).filter(invocation => invocation.operationId === operationId).at(-1);
-    if (canonical) this.invocations.set(canonical.invocationId, canonical);
-    return canonical;
+  private runInvocationBindings(): RunInvocationContext {
+    const slot = this;
+    return {
+      get id() { return slot.id; },
+      get revision() { return slot.revision; },
+      get sessionManager() { return slot.sessionManager; },
+      get homeRequestPolicy() { return slot.homeRequestPolicy; },
+      get dependencies() { return slot.dependencies; },
+      get commandReplacement() { return slot.commandReplacement; },
+      get pendingExtensionCommand() { return slot.pendingExtensionCommand; },
+      get completionOwnershipQueue() { return slot.completionOwnershipQueue; },
+      get operationObservations() { return slot.operationObservations; },
+      get attentionBarrier() { return slot.attentionBarrier; },
+      get runPersistence() { return slot.runPersistence; },
+      get runWork() { return slot.runWork; },
+      get runAbort() { return slot.runAbort; },
+      get runQueue() { return slot.runQueue; },
+      persistCanonicalCustomEntry: (...args) => slot.persistCanonicalCustomEntry(...args),
+      clearMarkerOwnership: operationId => slot.clearMarkerOwnership(operationId),
+      notifyOwnedTerminal: terminal => slot.notifyOwnedTerminal(terminal),
+      emit: (topic, data) => slot.emit(topic, data),
+    };
   }
 
   private async notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void> {
@@ -3678,107 +3637,6 @@ export class RuntimeSlot {
     const last = this.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant");
     return last?.type === "message" && last.message.role === "assistant" && last.message.stopReason === "stop"
       && this.hasDetachedDashboardWork();
-  }
-
-  private async terminalizeInvocation(
-    operationId: string | undefined,
-    lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown",
-    errorCode?: string,
-    owner?: GatewayWorkHandle,
-    assistantCompletionId?: string,
-  ): Promise<void> {
-    const terminal = await this.persistInvocationTerminal(operationId, lifecycle, errorCode, owner, assistantCompletionId);
-    if (terminal) await this.notifyOwnedTerminal(terminal);
-  }
-
-  private async persistInvocationTerminal(
-    operationId: string | undefined,
-    lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown",
-    errorCode?: string,
-    owner?: GatewayWorkHandle,
-    assistantCompletionId?: string,
-  ): Promise<OwnedOperationTerminal | undefined> {
-    if (operationId) {
-      this.runQueue.consumedSteeringOperationIDs.delete(operationId);
-      for (let index = this.runQueue.dequeuedSteeringOwners.indexOf(operationId);
-        index >= 0;
-        index = this.runQueue.dequeuedSteeringOwners.indexOf(operationId)) {
-        this.runQueue.dequeuedSteeringOwners.splice(index, 1);
-      }
-    }
-    this.runPersistence.assertOwnershipPersistence();
-    const invocation = this.invocationForOperation(operationId);
-    if (!invocation || ["completed", "failed", "interrupted", "outcomeUnknown"].includes(invocation.lifecycle)) return;
-    // Stop records attribution before cancellation yields. All terminal
-    // observers, including successful completion, publish that same fact.
-    if (invocation.stopReason) {
-      lifecycle = "interrupted";
-      errorCode = invocation.stopReason;
-    }
-    // SDK append is synchronous, but receipt acknowledgement and live-map
-    // retirement yield. A second terminal observer must join the first exact
-    // receipt, not manufacture a second timestamp/lifecycle while that live map
-    // still looks active. The first observer owns terminal notification.
-    const priorTerminal = invocationReceipts(this.sessionManager.getBranch(), this.id)
-      .find(receipt => receipt.invocationId === invocation.invocationId && receipt.receiptKind === "terminal");
-    if (priorTerminal) {
-      await this.persistInvocationReceipt(priorTerminal, owner ?? this.runWork.get(invocation.operationId));
-      return;
-    }
-    await this.persistInvocationReceipt(makeInvocationReceipt({
-      version: 1,
-      receiptId: `terminal:${invocation.invocationId}`,
-      receiptKind: "terminal",
-      invocationId: invocation.invocationId,
-      operationId: invocation.operationId,
-      sessionId: this.id,
-      source: invocation.source,
-      ...(invocation.name ? { name: invocation.name } : {}),
-      lifecycle,
-      ...(errorCode ? { errorCode } : {}),
-      origin: invocation.origin,
-      sequence: this.revision + 1,
-      createdAt: new Date().toISOString(),
-    }), owner ?? this.runWork.get(invocation.operationId));
-    this.invocations.delete(invocation.invocationId);
-    return {
-      lifecycle,
-      operationId: invocation.operationId,
-      invocationId: invocation.invocationId,
-      ...(errorCode === undefined ? {} : { errorCode }),
-      ...(assistantCompletionId === undefined ? {} : { assistantCompletionId }),
-    };
-  }
-
-  /** A distinct successor ends the predecessor; another assistant turn or
-   * automatic compaction does not. Capture exact completion evidence before
-   * the transfer retires its operation observation. */
-  private terminalizeTransferredOperation(operationId: string | undefined): void {
-    if (!operationId) return;
-    const completionId = this.completionOwnershipQueue.findLast(item => item.completion.operationId === operationId)?.completion.id
-      ?? this.operationObservations.get(operationId)?.observedCompletionId;
-    if (!completionId) return;
-    const interrupted = this.runAbort.abortedOperations.has(operationId);
-    const attention = this.attentionBarrier;
-    void this.persistInvocationTerminal(
-      operationId, interrupted ? "interrupted" : "completed", interrupted ? "user-abort" : undefined,
-      this.runWork.get(operationId), completionId,
-    ).then(async terminal => {
-      if (attention) await attention;
-      if (terminal) await this.notifyOwnedTerminal(terminal);
-      this.runAbort.abortedOperations.delete(operationId);
-    }).catch(() => {});
-  }
-
-  private async joinTerminalReceiptWrites(): Promise<void> {
-    // Guarantees receipt order against the next admitted user input, not
-    // SDK-owned between-turn entries (such as tool-loadout system messages)
-    // emitted before that exact boundary. Their relative order proves nothing.
-    const prefix = `canonical:${INVOCATION_RECEIPT_TYPE}:terminal:`;
-    await Promise.all([...this.runPersistence.durableWrites.entries()]
-      .filter(([key]) => key.startsWith(prefix))
-      .map(([, write]) => write.waiter));
-    this.runPersistence.assertOwnershipPersistence();
   }
 
   private enqueueMarkerOwnership(operationId: string): Promise<void> {
@@ -4059,7 +3917,7 @@ export class RuntimeSlot {
         const queuedOwner = dequeuedOwner
           ?? this.runQueue.queuedMessages.find((item) => item.behavior === "followUp")?.id;
         if (this.compactionOperation && this.pendingPrompt?.id === this.activeOperationId
-          && this.invocationForOperation(this.activeOperationId)?.lifecycle === "staged") {
+          && this.runInvocations.invocationForOperation(this.activeOperationId)?.lifecycle === "staged") {
           // An extension triggerTurn during pre-prompt compaction is not the
           // pending user's admitted turn. Give it a separate owner; the public
           // preflight callback will reject the displaced request without replay.
@@ -4105,7 +3963,7 @@ export class RuntimeSlot {
           // `message_end` may still be waiting for Pi's canonical append. Its
           // callback-turn binding owns the preceding operation even before a
           // completion object exists, so the new run must rotate now.
-          this.terminalizeTransferredOperation(this.activeOperationId);
+          this.runInvocations.terminalizeTransferredOperation(this.activeOperationId);
           this.activeOperationId = undefined;
           this.operation = undefined;
         }
@@ -4119,7 +3977,7 @@ export class RuntimeSlot {
           this.emit("session.operationFailed", {
             message: "Extension continuation was rejected after the administrative drain cutoff",
           });
-          const rejectedInvocation = this.invocationForOperation(rejectedOperationId);
+          const rejectedInvocation = this.runInvocations.invocationForOperation(rejectedOperationId);
           const precedingEntry = continuationFromSettlement && precedingAssistant
             ? this.sessionManager.getBranch().findLast((entry) => entry.type === "message" && entry.message === precedingAssistant)
             : undefined;
@@ -4131,7 +3989,7 @@ export class RuntimeSlot {
             // rejected extension continuation must not overwrite that receipt
             // with a contradictory interruption under the same invocation ID.
             if (continuationFromSettlement) await this.reconcileAttention();
-            else await this.terminalizeInvocation(rejectedOperationId, "interrupted", "drain-cutoff");
+            else await this.runInvocations.terminalizeInvocation(rejectedOperationId, "interrupted", "drain-cutoff");
             if (rejectedSource) await this.notifyAgentTerminal(rejectedSource, "stopped");
           }).catch(() => {
             this.emit("session.diagnostic", { code: "drain-cutoff-settlement-failed" });
@@ -4142,7 +4000,7 @@ export class RuntimeSlot {
         this.notificationRun = {};
         if (dequeuedOwner && preflightOwner === dequeuedOwner) this.runQueue.dequeuedFollowUpOwners.shift();
         if (queuedOwner && preflightOwner === queuedOwner && this.activeOperationId !== queuedOwner) {
-          this.terminalizeTransferredOperation(this.activeOperationId);
+          this.runInvocations.terminalizeTransferredOperation(this.activeOperationId);
           this.retireOperationObservation(this.activeOperationId);
           this.activeOperationId = undefined;
           this.operation = undefined;
@@ -4163,7 +4021,7 @@ export class RuntimeSlot {
             if (usedModel) this.dependencies.noteModelUsed?.(this.id, { provider: usedModel.provider, id: usedModel.id });
           } else this.prepareAssistantOwnedToolSegment();
         }
-        const activeInvocation = this.invocationForOperation(this.activeOperationId);
+        const activeInvocation = this.runInvocations.invocationForOperation(this.activeOperationId);
         // A public session_compact hook can start the next Agent turn before
         // compaction_end. Keep the captured compaction owner for its cleanup,
         // but give the live turn its own visible Stop identity now.
@@ -4257,7 +4115,7 @@ export class RuntimeSlot {
               // An earlier success can still await attention while a queued
               // follow-up fails. Its receipt cannot stand in for this exact
               // terminal owner (or overwrite its failure when owners coincide).
-              const terminal = await this.persistInvocationTerminal(
+              const terminal = await this.runInvocations.persistInvocationTerminal(
                 settledOperationId, terminalLifecycle, terminalErrorCode, undefined,
                 settledOperationId === completion.operationId ? completion.id : undefined,
               );
@@ -4277,7 +4135,7 @@ export class RuntimeSlot {
           }
           if (settledOperationId) {
             this.runWork.get(settledOperationId)?.transition("terminal-receipt-persistence");
-            const markerClear = this.terminalizeInvocation(
+            const markerClear = this.runInvocations.terminalizeInvocation(
               settledOperationId,
               terminalLifecycle,
               terminalErrorCode,
@@ -4495,7 +4353,7 @@ export class RuntimeSlot {
             // prompt that the Gateway initially classified for the queue. In
             // that case no queue_update arrives: the next otherwise-unowned
             // user object is exact proof that Pi admitted an ordinary prompt.
-            const activeInvocation = this.invocationForOperation(this.activeOperationId);
+            const activeInvocation = this.runInvocations.invocationForOperation(this.activeOperationId);
             const pendingQueueAdmission = this.runQueue.pendingQueueAdmission;
             const reclassifiedAdmission = dequeuedSteeringOperationID === undefined
               && (activeInvocation === undefined
@@ -4507,12 +4365,12 @@ export class RuntimeSlot {
               reclassifiedAdmission.resolveDisposition("foreground");
               const displacedOwner = this.activeOperationId;
               if (displacedOwner !== reclassifiedAdmission.id) {
-                this.terminalizeTransferredOperation(displacedOwner);
+                this.runInvocations.terminalizeTransferredOperation(displacedOwner);
                 this.retireOperationObservation(displacedOwner);
               }
               this.activeOperationId = reclassifiedAdmission.id;
               this.homeRequestPolicy?.transferOperation(displacedOwner, reclassifiedAdmission.id);
-              const invocation = this.invocationForOperation(reclassifiedAdmission.id);
+              const invocation = this.runInvocations.invocationForOperation(reclassifiedAdmission.id);
               this.operation = {
                 id: reclassifiedAdmission.id,
                 kind: "prompt",
@@ -4535,7 +4393,7 @@ export class RuntimeSlot {
             // the exact nested steering/reclassified prompt owner rather than
             // retaining the enclosing agent operation's older segment.
             if (operationId) this.ownToolSegment(operationId);
-            const invocation = this.invocationForOperation(operationId);
+            const invocation = this.runInvocations.invocationForOperation(operationId);
             if (operationId && invocation) {
               this.pendingInvocationUserMessages.set(event.message, {
                 operationId,
@@ -4899,7 +4757,7 @@ export class RuntimeSlot {
             ? this.pendingPrompt?.id
             : queuedBinding?.operationId;
           const invocationID = operationID
-            ? queuedBinding?.invocationId ?? this.invocationForOperation(operationID)?.invocationId
+            ? queuedBinding?.invocationId ?? this.runInvocations.invocationForOperation(operationID)?.invocationId
             : undefined;
           if (!operationID || !invocationID) {
             this.scheduleSnapshot();
@@ -4928,7 +4786,7 @@ export class RuntimeSlot {
             // The live map is only an optimization. A fast run may already
             // have terminalized and evicted it; recover immutable ownership
             // from the canonical start receipt before binding.
-            const invocation = this.invocationForOperation(operationID);
+            const invocation = this.runInvocations.invocationForOperation(operationID);
             if (!invocation || invocation.invocationId !== invocationID) {
               throw new Error("canonical invocation start receipt is unavailable");
             }
@@ -4954,7 +4812,7 @@ export class RuntimeSlot {
             // canonical user entry is bound; the enclosing run retains its own
             // activeOperationId and completion lifecycle.
             if (this.runQueue.consumedSteeringOperationIDs.delete(operationID)) {
-              await this.terminalizeInvocation(
+              await this.runInvocations.terminalizeInvocation(
                 operationID,
                 "completed",
                 undefined,
@@ -6756,7 +6614,7 @@ export class RuntimeSlot {
   }
 
   private internalWakeSemantic(operationId: string): ChatSemanticMetadata | undefined {
-    const invocation = this.invocationForOperation(operationId);
+    const invocation = this.runInvocations.invocationForOperation(operationId);
     return invocation?.source === "subagentWake" ? {
       version: 1, kind: "prompt", direction: "hiddenInternal", contextEffect: "modelInput",
       delivery: "stored", visibility: "hidden", origin: invocation.origin,
@@ -7264,7 +7122,7 @@ export class RuntimeSlot {
       const candidate = this.sessionManager.getBranch().find(entry => entry.type === "custom_message"
         && (entry.details as { eventId?: unknown } | undefined)?.eventId === trigger.eventId);
       if (!candidate) throw new Error("canonical Home wake trigger is unavailable");
-      const invocation = this.invocationForOperation(trigger.operationId);
+      const invocation = this.runInvocations.invocationForOperation(trigger.operationId);
       if (!invocation) throw new Error("canonical invocation start receipt is unavailable");
       await this.persistCanonicalCustomEntry(
         INVOCATION_RECEIPT_TYPE,
@@ -7401,7 +7259,7 @@ export class RuntimeSlot {
       get runQueue() { return slot.runQueue; },
       get runWork() { return slot.runWork; },
       get heldQueue() { return slot.heldQueue; },
-      get invocations() { return slot.invocations; },
+      get invocations() { return slot.runInvocations.invocations; },
       get ownedTerminalObservers() { return slot.ownedTerminalObservers; },
       get compactionPolicies() { return slot.compactionPolicies; },
       get contextPolicies() { return slot.contextPolicies; },
@@ -7418,17 +7276,17 @@ export class RuntimeSlot {
       applyLiveRunSettings: (...args) => slot.applyLiveRunSettings(...args),
       assertInvocableResources: (...args) => slot.assertInvocableResources(...args),
       resourceExpansionCatalog: (...args) => slot.resourceExpansionCatalog(...args),
-      invocationForOperation: (...args) => slot.invocationForOperation(...args),
+      invocationForOperation: (...args) => slot.runInvocations.invocationForOperation(...args),
       extensionCommandOrigin: (...args) => slot.extensionCommandOrigin(...args),
       promptDisplay: (...args) => slot.promptDisplay(...args),
-      persistInvocationReceipt: (...args) => slot.persistInvocationReceipt(...args),
+      persistInvocationReceipt: (...args) => slot.runInvocations.persistInvocationReceipt(...args),
       persistCanonicalCustomEntry: (...args) => slot.persistCanonicalCustomEntry(...args),
       enqueueMarkerOwnership: (...args) => slot.enqueueMarkerOwnership(...args),
       clearMarkerOwnership: (...args) => slot.clearMarkerOwnership(...args),
       notifyOwnedTerminal: (...args) => slot.notifyOwnedTerminal(...args),
       notifyAgentTerminal: (...args) => slot.notifyAgentTerminal(...args),
       completionObserved: (...args) => slot.completionObserved(...args),
-      terminalizeInvocation: (...args) => slot.terminalizeInvocation(...args),
+      terminalizeInvocation: (...args) => slot.runInvocations.terminalizeInvocation(...args),
       startHomeWake: (...args) => slot.startHomeWake(...args),
       publishSnapshot: (...args) => slot.publishSnapshot(...args),
       emit: (...args) => slot.emit(...args),
@@ -7447,8 +7305,8 @@ export class RuntimeSlot {
         runQueue: slot.runQueue,
         runAbort: slot.runAbort,
         runWork: slot.runWork,
-        invocations: slot.invocations,
-        invocationFailures: slot.invocationFailures,
+        invocations: slot.runInvocations.invocations,
+        invocationFailures: slot.runInvocations.invocationFailures,
         shuttingDown: () => slot.shuttingDown,
         hasActiveAgentRun: () => slot.hasActiveAgentRun,
         activeOperationId: () => slot.activeOperationId,
@@ -7468,11 +7326,11 @@ export class RuntimeSlot {
         beginAttentionSettlement: completion => slot.beginAttentionSettlement(completion),
         queuesIntoActiveRun,
         completionObserved: id => slot.completionObserved(id),
-        terminalizeInvocation: (id, lifecycle, errorCode) => slot.terminalizeInvocation(id, lifecycle, errorCode),
+        terminalizeInvocation: (id, lifecycle, errorCode) => slot.runInvocations.terminalizeInvocation(id, lifecycle, errorCode),
         clearMarkerOwnership: id => slot.clearMarkerOwnership(id),
         enqueueMarkerOwnership: id => slot.enqueueMarkerOwnership(id),
         notifyAgentTerminal: (id, outcome) => slot.notifyAgentTerminal(id, outcome),
-        persistInvocationReceipt: (receipt, owner) => slot.persistInvocationReceipt(receipt, owner),
+        persistInvocationReceipt: (receipt, owner) => slot.runInvocations.persistInvocationReceipt(receipt, owner),
         setIdle: () => { slot.phase = "idle"; },
         noteHomeIdle: () => slot.noteHomeIdle(),
         publishSnapshot: () => slot.publishSnapshot(),
@@ -8418,7 +8276,7 @@ export class RuntimeSlot {
     const hadAdmittedWork = this.isBusy;
     const sessionID = this.id;
     const interruptedOperationId = this.operation?.kind === "command" ? undefined : this.activeOperationId ?? this.pendingPrompt?.id;
-    const interruptedInvocation = this.invocationForOperation(interruptedOperationId);
+    const interruptedInvocation = this.runInvocations.invocationForOperation(interruptedOperationId);
     const interruptedSource = interruptedInvocation ? `terminal:${interruptedInvocation.invocationId}` : interruptedOperationId;
     if (interruptedSource) this.completionObserved(interruptedSource);
     this.shuttingDown = true;
@@ -8444,7 +8302,7 @@ export class RuntimeSlot {
     await this.lane.run(async () => {
       this.manualCompaction.finishShutdown(cancellation);
       if (interruptedSource) {
-        await this.terminalizeInvocation(interruptedOperationId, "outcomeUnknown", "runtime-disposed");
+        await this.runInvocations.terminalizeInvocation(interruptedOperationId, "outcomeUnknown", "runtime-disposed");
         await this.notifyAgentTerminal(interruptedSource, "interrupted");
       }
       await this.disposeRuntime();
@@ -8508,9 +8366,9 @@ export class RuntimeSlot {
     // teardown wins a callback race. Persist uncertainty while the canonical
     // manager is still writable; recovery can then block instead of replaying.
     for (const operationId of [...this.ownedTerminalObservers.keys()]) {
-      const invocation = this.invocationForOperation(operationId);
+      const invocation = this.runInvocations.invocationForOperation(operationId);
       if (invocation) {
-        await this.terminalizeInvocation(operationId, "outcomeUnknown", "runtime-disposed");
+        await this.runInvocations.terminalizeInvocation(operationId, "outcomeUnknown", "runtime-disposed");
       } else {
         await this.notifyOwnedTerminal({
           lifecycle: "outcomeUnknown",

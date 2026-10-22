@@ -84,6 +84,7 @@ import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { RuntimeSlot } from "./runtime-slot.js";
+import { RunInvocations } from "../kernel/run/run-invocations.js";
 import { invocationReceipts } from "../kernel/run/invocation-receipts.js";
 import { logHomeDiagnostic } from "../home/home-diagnostic.js";
 import { GatewayLogger } from "../transport/logger.js";
@@ -538,11 +539,9 @@ describe("Tron Home activations end to end", () => {
           await original(...args); await hold();
         });
       } else {
-        const prototype = RuntimeSlot.prototype as unknown as {
-          persistInvocationReceipt: (...args: unknown[]) => Promise<void>;
-        };
+        const prototype = RunInvocations.prototype;
         const original = prototype.persistInvocationReceipt;
-        vi.spyOn(prototype, "persistInvocationReceipt").mockImplementationOnce(async function (this: RuntimeSlot, ...args) {
+        vi.spyOn(prototype, "persistInvocationReceipt").mockImplementationOnce(async function (this: RunInvocations, ...args) {
           await hold(); await original.apply(this, args);
         });
       }
@@ -909,8 +908,8 @@ describe("Tron Home activations end to end", () => {
     expect(before).toBeLessThan(admissionLimits.bytes);
     // Both abort and agent settlement persist through this owner; the wrapper
     // now only adds terminal notification and is not the completion boundary.
-    const internal = slot as unknown as { persistInvocationTerminal(...args: unknown[]): Promise<unknown> };
-    const terminalize = internal.persistInvocationTerminal.bind(slot);
+    const internal = (slot as unknown as { runInvocations: { persistInvocationTerminal(...args: unknown[]): Promise<unknown> } }).runInvocations;
+    const terminalize = internal.persistInvocationTerminal.bind(internal);
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     let losingObserverEntered = false;

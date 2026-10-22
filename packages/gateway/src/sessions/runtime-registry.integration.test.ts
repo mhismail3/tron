@@ -8752,8 +8752,8 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     // Hold only the settlement chain's terminal persistence, its first await.
-    const internal = slot as unknown as { persistInvocationTerminal(...args: unknown[]): Promise<unknown> };
-    const terminalize = internal.persistInvocationTerminal.bind(slot);
+    const internal = (slot as unknown as { runInvocations: { persistInvocationTerminal(...args: unknown[]): Promise<unknown> } }).runInvocations;
+    const terminalize = internal.persistInvocationTerminal.bind(internal);
     let releaseTerminal!: () => void;
     const terminalGate = new Promise<void>((resolve) => { releaseTerminal = resolve; });
     let held = 0;
