@@ -27,9 +27,11 @@ const SETTLE_MS = 150;
  * `prompts/` and `skills/`, and `~/.agents/skills` — and reloads when they
  * change. A change that arrives while Home runs waits for Home to settle. The
  * reload publishes `session.resourcesChanged`, so clients refetch commands.
- * A directory created after start is watched once the agent directory reports
- * it; `~/.agents/skills` created later is seen after the next agent-directory
- * change.
+ * The agent directory is watched recursively from start, so `prompts/` and
+ * `skills/` created, deleted or replaced later need no watcher of their own:
+ * `fs.watch` has no readiness signal, and a watcher armed only once such a
+ * directory appeared missed the edits made before its stream started (#1664).
+ * `~/.agents/skills` created later is seen after the next agent-directory change.
  */
 export class HomeGlobalResources {
   private readonly watchers = new Map<string, FSWatcher>();
@@ -68,10 +70,8 @@ export class HomeGlobalResources {
 
   private arm(): void {
     const { agentDir } = this.options;
-    this.watch(agentDir, false, name => name === null || AGENT_DIR_INPUTS.has(name));
-    for (const directory of [join(agentDir, "prompts"), join(agentDir, "skills"), join(homedir(), ".agents", "skills")]) {
-      this.watch(directory, true, () => true);
-    }
+    this.watch(agentDir, true, name => name === null || AGENT_DIR_INPUTS.has(name.split(/[\\/]/)[0]!));
+    this.watch(join(homedir(), ".agents", "skills"), true, () => true);
   }
 
   private watch(path: string, recursive: boolean, relevant: (name: string | null) => boolean): void {

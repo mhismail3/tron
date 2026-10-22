@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
@@ -44,6 +44,7 @@ async function liveHome() {
   const model = f.faux.getModel();
   await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
   const home = await f.registry.acquire(f.home.sessionId);
+  await watchersDeliver(f, userHome);
   const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
     uploads: new UploadStore(join(f.root, "composer-uploads"), 1024),
     receipts: new CommandReceiptStore(join(f.root, "composer-receipts")) } as unknown as GatewayServiceDependencies);
@@ -64,6 +65,27 @@ async function liveHome() {
     return prompts.at(-1)!;
   };
   return { f, home, commands, turn, service, client, userHome };
+}
+
+/**
+ * Resolves once Home's resource watchers deliver events. `fs.watch` has no readiness
+ * signal, and on macOS a write made before its FSEvents stream starts is never reported;
+ * under parallel load the cases' first write landed in that window (#1664). Each probe
+ * rewrites an input with its own bytes (no resource changes) until Home reloads, seen as
+ * a `session.resourcesChanged` broadcast. Nothing here reloads Home itself, so a dead
+ * watcher still fails with this label.
+ */
+async function watchersDeliver(f: { agentDir: string; events: Array<{ topic: string }> }, userHome: string): Promise<void> {
+  const reloads = () => f.events.filter(event => event.topic === "session.resourcesChanged").length;
+  for (const [input, label] of [[join(f.agentDir, "settings.json"), "agent directory"], [join(userHome, ".agents", "skills", "probe.txt"), "~/.agents/skills"]] as const) {
+    const bytes = await readFile(input).catch(() => Buffer.from("probe\n"));
+    const before = reloads();
+    await waitFor(async () => {
+      await writeFile(input, bytes);
+      await new Promise(resolve => setTimeout(resolve, 400)); // past the watcher's 150 ms settle
+      return reloads() > before;
+    }, `Home's ${label} watcher delivers an event`, { intervalMs: 0 });
+  }
 }
 
 async function writeSkill(agentDir: string, name: string, description: string, body: string): Promise<void> {
