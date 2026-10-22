@@ -43,14 +43,14 @@ function fixture(run, usable = false) {
     writeFileSync(join(target, "package.json"), JSON.stringify({ type: "module", scripts: { "check:pi-subagents": "node scripts/check-pi-subagents.mjs" } }));
     git(target, "add", "."); git(target, "commit", "-qm", "initial pin");
     const version = "0.76.1-tron.99";
-    const manifest = { name: "pi-subagents", version, dependencies: {}, scripts: { prepack: "node build.mjs" } };
+    const manifest = { name: "pi-subagents", version, dependencies: {}, scripts: { "build:pkg": "node build.mjs" } };
     writeFileSync(join(fork, "package.json"), JSON.stringify(manifest));
-    writeFileSync(join(fork, "build.mjs"), 'import { writeFileSync } from "node:fs"; writeFileSync("index.js", "export default () => {};\\n");\n');
+    writeFileSync(join(fork, "build.mjs"), 'import { cpSync, mkdirSync, readdirSync } from "node:fs"; mkdirSync("dist-pkg"); for (const entry of readdirSync(".")) if (!["dist-pkg", "node_modules", ".git"].includes(entry)) cpSync(entry, `dist-pkg/${entry}`, { recursive: true });\n');
     writeFileSync(join(fork, "package-lock.json"), JSON.stringify({ name: manifest.name, version, lockfileVersion: 3, packages: { "": { name: manifest.name, version, dependencies: {} } } }));
     if (usable) {
       command("tar", ["-xzf", join(gateway, pin.sourceArchive.path), "--strip-components=1", "-C", fork], { env });
       const realManifest = JSON.parse(readFileSync(join(fork, "package.json"), "utf8"));
-      realManifest.version = version; realManifest.scripts = {}; delete realManifest.devDependencies;
+      realManifest.version = version; realManifest.scripts = manifest.scripts; delete realManifest.devDependencies;
       writeFileSync(join(fork, "package.json"), JSON.stringify(realManifest));
       const lock = JSON.parse(readFileSync(join(gateway, pin.lockfile.path), "utf8"));
       lock.version = version; lock.packages[""].version = version; delete lock.packages[""].devDependencies;

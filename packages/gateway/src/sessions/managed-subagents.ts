@@ -333,15 +333,17 @@ export class ManagedSubagents {
   async requireChildExtensions(sessionId: string, extensions: readonly { id: string; path: string }[]): Promise<{ dispose(): void }> {
     this.requireBoundArtifactRoot(this.tronHome);
     const root = this.verify();
-    // One load per verified install: every session start registers through it.
-    this.requiredChildApi ??= this.loadModule(join(root, "src", "api", "required-child-extensions.ts")) as Promise<RequiredChildApi>;
+    // The package owns its public API path; source and compiled selections expose
+    // the same registry through their exports, including during rollback.
+    const apiPath = createRequire(join(root, "package.json")).resolve("pi-subagents/required-child-extensions");
+    this.requiredChildApi ??= this.loadModule(apiPath) as Promise<RequiredChildApi>;
     const api = await this.requiredChildApi;
     if (typeof api.registerRequiredChildExtensions !== "function") throw new GatewayError("conflict", "managed pi-subagents has no required child extension API");
     return api.registerRequiredChildExtensions({ sessionId, extensions });
   }
   private requiredChildApi: Promise<RequiredChildApi> | undefined;
 
-  /** Use the closure's declared TypeScript loader with exact host peer aliases.
+  /** Use the closure's declared loader with exact host peer aliases.
    * No user package tree or copied SDK participates in factory execution. */
   private async loadFactory(path: string): Promise<ExtensionFactory> {
     const factory = await this.loadModule(path, true);

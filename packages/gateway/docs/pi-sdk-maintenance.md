@@ -62,8 +62,11 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
   the lock-resolved graph inside the closure with matching `resolved`/`integrity`.
 - **Build:** `npm run build:pi-subagents-closure` with the pinned toolchain (`TRON_NODE_BIN`);
   predecessors only in disposable copies.
-- **Update:** verifies upstream tag and fork ancestry, builds a new `-tron.N` in a disposable
-  tree, and must pass the offline real-Gateway activation/child-execution gate and the previous
+- **Update:** verifies upstream tag and fork ancestry, runs the fork's `build:pkg` and packs
+  its emitted `dist-pkg` (JS imports/exports, declarations and resources), then builds a new
+  `-tron.N` closure in a disposable tree. The package owns public API paths; the Gateway
+  resolves required-child extensions through its export, with jiti host aliases unchanged.
+  It must pass the offline real-Gateway activation/child-execution gate and the previous
   → candidate → previous probe before publishing immutable artifacts and renaming the pin
   (current kept as previous). `.pi-subagents-update-staging` is the exclusive lease; an
   interrupted update leaves it for the operator. It never edits the fork, homes or manifests.
