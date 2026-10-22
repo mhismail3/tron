@@ -152,6 +152,32 @@ describe("Home's global skills and prompt templates follow the agent directory l
     expect(globalResources(await commands(chat.id))).toEqual(expected);
   }, 60_000);
 
+  it("does not reload Home for agent-directory writes made before its watchers started (#1694)", async () => {
+    const userHome = await mkdtemp(join(tmpdir(), "tron-home-resources-"));
+    homes.push(userHome);
+    vi.stubEnv("HOME", userHome);
+    const f = await fixture();
+    // A conversation file exists only after its first message, which a cold registry needs to find Home.
+    const greeted = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Hello.")]);
+    await greeted.prompt("Hello");
+    await waitFor(() => !greeted.isBusy && greeted.snapshot().operation === undefined, "greeting settled");
+    // An outside write lands just before the Gateway starts and arms Home's watchers;
+    // macOS FSEvents may still report it once the new stream starts.
+    const settings = await readFile(join(f.agentDir, "settings.json"));
+    await f.registry.dispose();
+    await writeFile(join(f.agentDir, "settings.json"), settings);
+    const restarted = await f.restartToReadiness();
+    const before = f.events.length;
+    await restarted.acquire(f.home.sessionId);
+    // Past FSEvents delivery latency and the watcher's 150 ms settle.
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+    expect(f.events.slice(before).filter(event => event.topic === "session.resourcesChanged")).toEqual([]);
+    // The watcher is live: a real write after it started still reloads Home.
+    await writePrompt(f.agentDir, "after-start", "Written after start", "BODY");
+    await waitFor(() => f.events.slice(before).some(event => event.topic === "session.resourcesChanged"), "Home reloads for a write after its watchers started");
+  }, 60_000);
+
   it("applies a change made during a Home run once that run settles", async () => {
     const { f, home, commands, service, client } = await liveHome();
     let release!: () => void;
