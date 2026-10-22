@@ -189,33 +189,33 @@ struct KnowledgeSheet: View {
     let onOpenDraft: @MainActor (KnowledgeRecord) -> Void
     let onOpenSession: @MainActor (String, String) -> Void
     let onDone: () -> Void
-    @State private var page: KnowledgeCataloguePage?
-    @State private var section: KnowledgeDashboardSection = .sources
-    @State private var sourceVisibility: KnowledgeSourceVisibility = .saved
-    @State private var scope: KnowledgeScope?
-    @State private var selectedSubject: KnowledgeDetailSubject?
-    @State private var selectedIdentity: KnowledgePresentationIdentity?
-    @State private var pendingDetailAction: DetailAction?
+    @PresentationState private var page: KnowledgeCataloguePage?
+    @PresentationState private var section: KnowledgeDashboardSection = .sources
+    @PresentationState private var sourceVisibility: KnowledgeSourceVisibility = .saved
+    @PresentationState private var scope: KnowledgeScope?
+    @PresentationState private var selectedSubject: KnowledgeDetailSubject?
+    @PresentationState private var selectedIdentity: KnowledgePresentationIdentity?
+    @PresentationState private var pendingDetailAction: DetailAction?
     private enum DetailAction { case draft(KnowledgeRecord), session(String, String) }
-    @State private var search = ""
+    @PresentationState private var search = ""
     /// The query the presented page was asked for. Typing debounces into it so a
     /// word costs one request rather than one per keystroke.
-    @State private var effectiveSearch = ""
-    @State private var searchDebouncer = KnowledgeSearchDebouncer()
+    @PresentationState private var effectiveSearch = ""
+    @PresentationState private var searchDebouncer = KnowledgeSearchDebouncer()
     /// A surface starts loading: its empty state waits for the first read.
-    @State private var loading = true
-    @State private var error: String?
-    @State private var continuationTask: Task<Void, Never>?
+    @PresentationState private var loading = true
+    @PresentationState private var error: String?
+    @PresentationState private var continuationTask: Task<Void, Never>?
     private var loadingMore: Bool { continuationTask != nil }
-    @State private var loadGeneration = 0
-    @State private var observedKnowledgeInvalidationRevision: Int?
-    @State private var pendingCatalogueReconciliation: KnowledgeCatalogueReconciliationIntent?
-    @State private var activeCatalogueReconciliation: KnowledgeCatalogueReconciliationIntent?
-    @State private var catalogueReconciliationTask: Task<Void, Never>?
-    @State private var catalogueReconciliationOwner = 0
-    @State private var authoritativeCatalogueBaselineKey: KnowledgeCatalogRequestKey?
-    @State private var showingFilters = false
-    @State private var showingSearch = false
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var observedKnowledgeInvalidationRevision: Int?
+    @PresentationState private var pendingCatalogueReconciliation: KnowledgeCatalogueReconciliationIntent?
+    @PresentationState private var activeCatalogueReconciliation: KnowledgeCatalogueReconciliationIntent?
+    @PresentationState private var catalogueReconciliationTask: Task<Void, Never>?
+    @PresentationState private var catalogueReconciliationOwner = 0
+    @PresentationState private var authoritativeCatalogueBaselineKey: KnowledgeCatalogRequestKey?
+    @PresentationState private var showingFilters = false
+    @PresentationState private var showingSearch = false
 
     private var activeSourceVisibility: KnowledgeSourceVisibility { section == .sources ? sourceVisibility : .saved }
     private var requestKind: KnowledgeRecordKind? { section.kind }
@@ -870,15 +870,15 @@ struct KnowledgeCoverageSheetHost: View {
     @Environment(\.tronSettingsVisualTheme) private var theme
     private var accent: Color { theme?.accent ?? .tronKnowledge }
     private var identity: KnowledgePresentationIdentity { model.knowledgePresentationIdentity }
-    @State private var store = KnowledgeCoveragePresentationStore()
+    @PresentationState private var store = KnowledgeCoveragePresentationStore()
     let onOpenSession: (KnowledgeObservationCoverage) -> Void
-    @State private var status: KnowledgeStatus?
-    @State private var statusError: String?
-    @State private var requestGeneration = 0
-    @State private var mutationError: String?
-    @State private var clearingID: String?
-    @State private var mutation: KnowledgeMutation?
-    @State private var detent: PresentationDetent = .medium
+    @PresentationState private var status: KnowledgeStatus?
+    @PresentationState private var statusError: String?
+    @PresentationState private var requestGeneration = 0
+    @PresentationState private var mutationError: String?
+    @PresentationState private var clearingID: String?
+    @PresentationState private var mutation: KnowledgeMutation?
+    @PresentationState private var detent: PresentationDetent = .medium
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
