@@ -4,9 +4,11 @@ import type { HomeTaskReportOwner } from "./task-report.js";
 export const OWNED_OPERATION_DEADLINE_MS = 24 * 60 * 60 * 1_000;
 
 type OwnedLease<Session> = { slot: Session; release: () => void };
+/** What the dispatch needs of a leased session itself: its lease. */
+type OwnedSession = { retainLease(): () => void };
 /** The session runtime's owned-session operations (RuntimeRegistry implements them). The
  * run owner imports delegation, so the session handle and recovery evidence stay its types. */
-export interface OwnedSessions<Session extends { retainLease(): () => void }, Evidence> {
+export interface OwnedSessions<Session extends OwnedSession, Evidence> {
   create(cwd: string, profile: "ordinary", report: HomeTaskReportOwner): Promise<Session>;
   resumeTaskWorker(sessionId: string, report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<OwnedLease<Session>>;
   acquireOwnedSessionLease(sessionId: string): Promise<OwnedLease<Session>>;
@@ -25,7 +27,7 @@ export interface OwnedOperationDeadline { readonly signal: AbortSignal; readonly
 
 /** The shared owned-session boundary: session lease, exact operation evidence,
  * and settlement acknowledgement remain with RuntimeRegistry / RuntimeSlot. */
-export class OwnedSessionDispatch<Session extends { retainLease(): () => void }, Evidence> {
+export class OwnedSessionDispatch<Session extends OwnedSession, Evidence> {
   constructor(private readonly sessions: OwnedSessions<Session, Evidence>) {}
 
   async createWorker(cwd: string, report: HomeTaskReportOwner): Promise<OwnedLease<Session>> {
@@ -46,7 +48,7 @@ export class OwnedSessionDispatch<Session extends { retainLease(): () => void },
     return this.sessions.ownedOperationRecoveryEvidence(sessionId, operationId);
   }
 
-  admit<Args extends unknown[], Admission>(slot: { prompt(...args: Args): Admission }, ...args: Args): Admission {
+  admit<Args extends unknown[], Admission>(slot: Session & { prompt(...args: Args): Admission }, ...args: Args): Admission {
     return slot.prompt(...args);
   }
 

@@ -17,7 +17,7 @@ import { UploadStore } from "../machine/upload-store.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { SessionCatalog } from "../sessions/session-catalog.js";
-import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch } from "../kernel/delegation/owned-session-dispatch.js";
+import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch, type OwnedSessionDispatchOver } from "../kernel/delegation/owned-session-dispatch.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayLogger } from "../transport/logger.js";
@@ -1818,7 +1818,7 @@ describe("Home task production dispatch", () => {
       vi.spyOn(tasks.store, "restoreEpoch").mockImplementation(() => created() ? hold(restoreEpoch) : restoreEpoch());
     } else {
       const createWorker = OwnedSessionDispatch.prototype.createWorker;
-      vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(function (this: OwnedSessionDispatch, ...args) { return hold(() => createWorker.apply(this, args)); });
+      vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(function (this: OwnedSessionDispatchOver<RuntimeRegistry>, ...args) { return hold(() => createWorker.apply(this, args)); });
     }
     let workerPrompts = 0; let homeRequests = 0;
     const response = (context: unknown) => {
