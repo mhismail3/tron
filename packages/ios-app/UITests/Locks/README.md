@@ -35,7 +35,14 @@ Each state has two goldens in `Goldens/`:
 Before capturing, a lock waits until two consecutive snapshots of the hierarchy
 and of the screen are byte-identical (up to 10 s), so it never captures an
 animation. A state that never settles fails and says so. A screen of any other
-size fails before anything is compared or recorded.
+size fails before anything is compared or recorded. Byte-identical frames alone
+cannot detect a stable fractional scroll offset left by animated sheet insets.
+The lock launch harness sets `TRON_UI_LOCK_RENDERING=1`; only `HOSTED_TEST`
+consumes it. App startup disables UIKit animations; each retained native sheet
+canvas also disables animation on its SwiftUI transactions. These are independent
+animation owners, so neither control alone pins initial sheet layout. Normal
+behavioral journeys retain both. Locks still wait for content to settle and
+compare the unchanged images and hierarchy.
 
 Fixed inputs:
 

@@ -85,6 +85,15 @@ private struct NativeSheetCanvasContent: View {
 
     var body: some View {
         ZStack { ForEach(sources) { $0.content } }
+            #if HOSTED_TEST
+            // Animated detent insets can leave a stable fractional scroll offset.
+            // Static locks pin the native sheet transaction, not its pixels.
+            .transaction { transaction in
+                if ProcessInfo.processInfo.environment["TRON_UI_LOCK_RENDERING"] == "1" {
+                    transaction.disablesAnimations = true
+                }
+            }
+            #endif
     }
 }
 

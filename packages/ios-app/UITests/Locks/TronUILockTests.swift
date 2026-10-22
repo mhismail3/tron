@@ -91,6 +91,7 @@ final class TronUILockTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = arguments + ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launchEnvironment["TZ"] = "UTC"
+        app.launchEnvironment["TRON_UI_LOCK_RENDERING"] = "1"
         app.launch()
         return app
     }

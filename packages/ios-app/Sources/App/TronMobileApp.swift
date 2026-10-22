@@ -24,6 +24,11 @@ struct TronMobileApp: App {
     @State private var hostedModel: AppModel
 
     init() {
+        // Static locks also disable transactions in each retained sheet canvas.
+        // UIKit alone does not govern SwiftUI's independently hosted sheets.
+        if ProcessInfo.processInfo.environment["TRON_UI_LOCK_RENDERING"] == "1" {
+            UIView.setAnimationsEnabled(false)
+        }
         // The fixture arms keep their own hosted views and this memory-only
         // model; the no-fixture arm renders the production scene with the same
         // owner the shipping app builds (`ProductionSceneRoot`).
