@@ -106,7 +106,7 @@ struct ProjectResourceOverviewContent: Equatable, Sendable {
 
 enum ProjectResourceOverviewPresentation {
     /// A resource row: name, description, and where it comes from as tags.
-    static func rowContent(_ row: ProjectResourceOverviewRow) -> TronListRowContent {
+    @MainActor static func rowContent(_ row: ProjectResourceOverviewRow) -> TronListRowContent {
         let tags = ComposerResourceBadges.titles(origin: row.resourceOrigin, scope: row.resourceScope)
             + [ResourceDistributionTag.title(for: row.distribution, scope: row.resourceScope)].compactMap { $0 }
         return TronListRowContent(title: row.title, subtext: row.subtitle, tags: tags.map { TronListTag(text: $0) })

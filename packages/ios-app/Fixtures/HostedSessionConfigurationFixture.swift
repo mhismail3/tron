@@ -32,7 +32,7 @@ struct HostedSessionConfigurationFixture: View {
             stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
                 tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
             queueRevision: 0, queuedItems: [], automaticCompactionEnabled: true, transcript: [], transcriptStart: 0,
-            transcriptTotal: 0, streaming: nil, leafEntryId: nil, operation: nil, retry: nil, toolExecutions: [],
+            transcriptTotal: 0, streaming: nil, leafEntryId: HostedLargeHistory.enabled ? HostedLargeHistory.leafID : nil, operation: nil, retry: nil, toolExecutions: [],
             extensionPresentation: ExtensionPresentationState(version: 3, hostEpoch: "fixture-host", revision: 1,
                 capabilities: [], diagnostics: [], semanticState: .init(statuses: [:], working: .init(message: nil, visible: false),
                     hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
@@ -375,6 +375,10 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             approvals.remove(at: index)
             decisions.append("\(approved ? "approved" : "declined"):\(requestID)")
             result = .object(["requestId": .string(requestID), "approved": .bool(approved)])
+        case "session.history.list" where HostedLargeHistory.enabled:
+            result = try HostedLargeHistory.page(params, runtime: snapshot.runtimeGeneration)
+        case "session.history.entry" where HostedLargeHistory.enabled:
+            result = try HostedLargeHistory.entry(params, runtime: snapshot.runtimeGeneration)
         case "session.history.list":
             result = try JSONValue.encode(SessionHistoryPage(runtimeGeneration: snapshot.runtimeGeneration,
                 nodes: [SessionTreeNode(id: "fixture-prompt", parentId: nil, timestamp: "2026-01-01T00:00:00Z",

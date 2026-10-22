@@ -458,12 +458,11 @@ struct HistoryEntryDetailsSheet: View {
             // The entry's facts and actions stay put; its content is the one scrolling reader below.
             VStack(alignment: .leading, spacing: 16) {
                 if !readable { TronSettingsNotice(message: "Session changed. Reopen this entry from current history.") }
-                header
-                actionGroup
+                header.fixedSize(horizontal: false, vertical: true)
+                actionGroup.fixedSize(horizontal: false, vertical: true)
                 content.frame(maxHeight: .infinity, alignment: .top)
             }
             .padding(.horizontal, 16).padding(.top, 8)
-            .tronDocumentTopBlurSurface()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "History Entry", accent: .tronEmerald) }
