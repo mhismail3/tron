@@ -64,23 +64,8 @@ struct HostedSessionConfigurationFixture: View {
         .tronManagedSheet(isPresented: $presented, identity: "session-configuration") {
             SessionContextSheet(sessionID: snapshot.sessionId, onForkCreated: { _ in })
                 .safeAreaInset(edge: .bottom) {
-                    VStack {
-                        Button("Release terminal settlement") { Task { try? await socket.releaseSettlement() } }
-                        Button("Complete superseded thinking") {
-                            Task { deliveredSupersededReceipt = (try? await socket.completeSupersededThinking()) == true }
-                        }
-                        if deliveredSupersededReceipt { Text("Superseded receipt delivered") }
-                        Text("decisions:\(decisionState)").accessibilityIdentifier("fixture.session-settings-decisions")
-                        Text("Model requests: \(modelRequests)").accessibilityIdentifier("fixture.model-requests")
-                    }
-                    // Fixture controls stay at the default size so an accessibility
-                    // type size measures the sheet's own content, not these probes.
-                    .dynamicTypeSize(.large)
-                    .task {
-                        for await count in socket.modelRequestCounts {
-                            modelRequests = count
-                        }
-                    }.padding()
+                    // Review captures (#1655) show the sheet without these probes.
+                    if !HostedManageSessionReview.enabled { probes }
                 }
         }
         .environment(model)
@@ -110,6 +95,26 @@ struct HostedSessionConfigurationFixture: View {
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
+    }
+
+    private var probes: some View {
+        VStack {
+            Button("Release terminal settlement") { Task { try? await socket.releaseSettlement() } }
+            Button("Complete superseded thinking") {
+                Task { deliveredSupersededReceipt = (try? await socket.completeSupersededThinking()) == true }
+            }
+            if deliveredSupersededReceipt { Text("Superseded receipt delivered") }
+            Text("decisions:\(decisionState)").accessibilityIdentifier("fixture.session-settings-decisions")
+            Text("Model requests: \(modelRequests)").accessibilityIdentifier("fixture.model-requests")
+        }
+        // Fixture controls stay at the default size so an accessibility
+        // type size measures the sheet's own content, not these probes.
+        .dynamicTypeSize(.large)
+        .task {
+            for await count in socket.modelRequestCounts {
+                modelRequests = count
+            }
+        }.padding()
     }
 
     /// The launch flag names the Approve or Decline action the push would carry.

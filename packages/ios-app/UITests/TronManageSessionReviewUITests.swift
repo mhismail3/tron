@@ -73,7 +73,8 @@ final class TronManageSessionReviewUITests: XCTestCase {
             let row = app.buttons["project-resource-\(kind)-0"]
             for _ in 0..<8 where !row.isHittable { app.swipeUp() }
             row.tap()
-            Thread.sleep(forTimeInterval: 1.5)
+            expandSheet(app, title: kind == "commands" ? "Review" : "Scout")
+            Thread.sleep(forTimeInterval: 1.0)
             shot("\(name)-detail-\(mode)")
             let viewAll = app.buttons["project-resource-view-all"]
             if viewAll.waitForExistence(timeout: 3) {
