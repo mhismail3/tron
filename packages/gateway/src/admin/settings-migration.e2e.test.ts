@@ -1,6 +1,10 @@
-import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
+import { connect, createServer as createNetServer } from "node:net";
+import { pathToFileURL } from "node:url";
+import WebSocket from "ws";
+import { createHash, randomUUID } from "node:crypto";
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -11,6 +15,8 @@ import { acquireAgentRuntimeLocks } from "../sessions/agent-runtime-lock.js";
 import { approvalDigest, SettingsApprovals } from "./settings-approvals.js";
 import { migrateSettings, SettingsMigration, type SettingsMigrationOptions } from "./settings-migration.js";
 import { migrationFileHash } from "./settings-migration-plan.js";
+import { PROTOCOL_VERSION } from "../version.js";
+import type { Resolution } from "../kernel/settings/tool-contract.js";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
@@ -231,5 +237,177 @@ describe("settings startup migration on copied state", () => {
     }
     expect((await readdir(join(restored, "home", ".tron", "gateway", "settings", "changes"))).sort()).toEqual(["000000.jsonl", "index.json"]);
     evidence.push({ case: "backup restoration on separate copy", passed: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1649: Stable rolled back because this migration ran before the listener and
+// read every session byte many times. The real production entry starts against
+// a Stable-shaped state (thousands of sessions, the legacy settings shapes found
+// on Stable, one unreadable file) under the deploy's own replace windows.
+const deployModule = pathToFileURL(resolve(packageRoot, "../../scripts/gateway-payload-deploy.mjs")).href;
+const children: ChildProcess[] = [];
+afterEach(async () => {
+  for (const child of children.splice(0)) {
+    if (child.exitCode !== null || child.signalCode !== null) continue;
+    const exited = once(child, "exit"); child.kill("SIGKILL"); await exited;
+  }
+});
+const SESSIONS = 5_800, LEGACY = 363, SUBAGENT_RUNS = 150;
+const stamp = "2026-10-16T05:58:22.227Z";
+const legacyFixed = (index: number) => ({
+  // The provenance vocabulary and keys counted on Stable's 363 legacy sessions.
+  "model.ref[role=chat]": index % 3 === 0 ? { value: { provider: "fixture", id: "chosen" }, from: "chat", at: stamp, ref: `m-${index}`, qualifiers: { role: "chat" } }
+    : { value: { provider: "fixture", id: "delegated" }, from: "delegate", at: stamp, ref: `m-${index}`, qualifiers: { role: "chat" } },
+  "model.thinking[role=chat]": { value: "medium", from: "mac", at: stamp, ref: `t-${index}`, qualifiers: { role: "chat", model: "fixture/chosen" } },
+  "model.contextWindow": { value: 200_000, from: "builtin", at: stamp, ref: `w-${index}`, qualifiers: { model: "fixture/chosen" } },
+  "context.images.autoResize": { value: true, from: "builtin", at: stamp, ref: `r-${index}` },
+  "tools.active": { value: ["read", "bash"], from: index % 2 ? "project" : "mac", at: stamp, ref: `a-${index}` },
+});
+function sessionText(id: string, cwd: string, index: number, legacy: boolean): string {
+  const lines: unknown[] = [{ type: "session", version: 3, id, timestamp: stamp, cwd },
+    { type: "model_change", id: "e0", parentId: null, timestamp: stamp, provider: "fixture", modelId: "chosen" },
+    { type: "thinking_level_change", id: "e1", parentId: "e0", timestamp: stamp, thinkingLevel: "medium" }];
+  let parent = "e1";
+  if (legacy) {
+    lines.push({ type: "custom", customType: "tron.settings.v1", id: "e2", parentId: parent, timestamp: stamp,
+      data: { receiptId: `receipt-${index}`, settings: {}, fixed: legacyFixed(index),
+        requestPins: { "context.images.block": { value: false, from: "builtin", at: stamp, ref: `b-${index}` } } } });
+    parent = "e2";
+  }
+  for (let turn = 0; turn < 6; turn += 1) {
+    const entry = `m${turn}`;
+    const text = `${index}:${turn} ${"transcript ".repeat(60)}${index === 7 && turn === 2 ? "raw\u2028separator\u2029kept" : ""}`;
+    lines.push({ type: "message", id: entry, parentId: parent, timestamp: stamp,
+      message: { role: turn % 2 ? "assistant" : "user", content: [{ type: "text", text }], timestamp: Date.parse(stamp) } });
+    parent = entry;
+  }
+  return `${lines.map(line => JSON.stringify(line)).join("\n")}\n${index === 11 ? `{"type":"message","id":"torn"` : ""}`;
+}
+async function stableShapedState() {
+  const root = await mkdtemp(join(tmpdir(), "tron-settings-startup-")); roots.push(root);
+  const tronHome = join(root, "tron"), agentDir = join(root, "agent"), sessions = join(agentDir, "sessions");
+  for (const directory of ["home", "tmp", "project", "agent", join("tron", "gateway", "home")]) await mkdir(join(root, directory), { recursive: true, mode: 0o700 });
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "fixture", defaultModel: "global", defaultThinkingLevel: "low" }));
+  const paths: string[] = [];
+  let homeSession = "";
+  for (let index = 0; index < SESSIONS; index += 1) {
+    const cwd = join(root, "project", `p${index % 200}`);
+    const directory = join(sessions, `--project-p${index % 200}--`);
+    const id = randomUUID();
+    let path = join(directory, `${stamp.replaceAll(":", "-")}_${id}.jsonl`);
+    // Nested subagent runs, the shape of the #1647 file.
+    if (index >= SESSIONS - SUBAGENT_RUNS) path = join(directory, `parent-${index}`, randomUUID().slice(0, 8), "run-0", "session.jsonl");
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, sessionText(id, cwd, index, index < LEGACY));
+    paths.push(path);
+    if (index === LEGACY) homeSession = id;
+  }
+  // One unreadable session: one bad file can never take the Gateway down.
+  const unreadable = paths[LEGACY - 1]!; await chmod(unreadable, 0o000);
+  await writeFile(join(tronHome, "gateway", "home", "profile.json"), JSON.stringify({ memory: { model: { provider: "fixture", id: "memory" } } }));
+  await writeFile(join(tronHome, "gateway", "home", "home.json"), JSON.stringify({ version: 2, homeId: "fixture-home", enabled: false,
+    model: { provider: "fixture", id: "record" }, chapters: [{ sessionId: homeSession, ordinal: 1, state: "active", createdAt: stamp, activationStarted: true }],
+    bindingRevision: 1, generation: 1, routeGeneration: 1, policyRevision: 3, createdAt: stamp, updatedAt: stamp }));
+  const pending = await legacyApproval({ settings: join(tronHome, "gateway", "settings") } as Awaited<ReturnType<typeof copiedState>>);
+  const hashes = async () => Promise.all(paths.map(path => path === unreadable ? "unreadable" : migrationFileHash(path)));
+  return { root, tronHome, agentDir, paths, unreadable, pending, hashes, legacySession: paths[3]! };
+}
+async function freePort(): Promise<number> {
+  return await new Promise((resolvePort, reject) => {
+    const server = createNetServer(); server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { const address = server.address(); server.close(() => typeof address === "object" && address ? resolvePort(address.port) : reject(new Error("no port"))); });
+  });
+}
+const accepts = (port: number) => new Promise<boolean>(done => {
+  const socket = connect(port, "127.0.0.1"); socket.once("connect", () => { socket.destroy(); done(true); }); socket.once("error", () => done(false));
+});
+/** Production entry and launch environment; the deploy's listener and startup windows. */
+async function startGateway(state: Awaited<ReturnType<typeof stableShapedState>>) {
+  const { RELAUNCH_LIMIT_MS, STARTUP_LIMIT_MS, readLocalCredential } = await import(deployModule) as
+    { RELAUNCH_LIMIT_MS: number; STARTUP_LIMIT_MS: number; readLocalCredential: (path: string) => Promise<string> };
+  const port = await freePort();
+  const started = performance.now();
+  const child = spawn(process.execPath, ["dist/index.js"], { cwd: packageRoot, stdio: ["ignore", "pipe", "pipe"], env: {
+    PATH: process.env.PATH, SHELL: "/bin/zsh", HOME: join(state.root, "home"), TMPDIR: join(state.root, "tmp"), TRON_DATA_DIR: state.tronHome,
+    PI_CODING_AGENT_DIR: state.agentDir, PI_SUBAGENTS_TEMP_ROOT: join(state.tronHome, "internal", "subagents"),
+    TRON_GATEWAY_HOST: "127.0.0.1", TRON_GATEWAY_PORT: String(port), TRON_MACHINE_GROUP_ID: "settings-startup-test" } });
+  children.push(child);
+  let output = "";
+  child.stdout!.on("data", (chunk: Buffer) => { output += chunk; }); child.stderr!.on("data", (chunk: Buffer) => { output += chunk; });
+  const exited = () => child.exitCode !== null || child.signalCode !== null;
+  let listenerMs: number | undefined;
+  while (listenerMs === undefined && performance.now() - started < RELAUNCH_LIMIT_MS && !exited()) {
+    if (await accepts(port)) listenerMs = performance.now() - started; else await new Promise(done => setTimeout(done, 100));
+  }
+  expect({ listener: listenerMs !== undefined, exited: exited(), output: listenerMs === undefined ? output.slice(-2_000) : "" })
+    .toEqual({ listener: true, exited: false, output: "" });
+  let readyMs: number | undefined;
+  const readyDeadline = performance.now() + STARTUP_LIMIT_MS;
+  while (readyMs === undefined && performance.now() < readyDeadline && !exited()) {
+    const health = await fetch(`http://127.0.0.1:${port}/health`).then(response => response.json() as Promise<{ status?: string }>).catch(() => ({ status: undefined }));
+    if (health.status === "ok") readyMs = performance.now() - started; else await new Promise(done => setTimeout(done, 100));
+  }
+  expect(readyMs).toBeDefined();
+  // An authenticated client connection, as the app's first contact after a rebuild.
+  const token = await readLocalCredential(join(state.tronHome, "gateway", "local-auth.json"));
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` }, perMessageDeflate: false });
+  const pending = new Map<string, (frame: Frame) => void>();
+  const hello = new Promise<void>((done, reject) => {
+    ws.once("error", reject);
+    ws.on("message", raw => { const frame = JSON.parse(raw.toString()) as Frame; if (frame.type === "hello") done(); else if (frame.type === "response" && frame.id) pending.get(frame.id)?.(frame); });
+  });
+  await once(ws, "open");
+  ws.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientId: randomUUID() }));
+  await hello;
+  const request = (method: string, params: Record<string, unknown>) => new Promise<Frame>(done => {
+    const id = randomUUID(); pending.set(id, done); ws.send(JSON.stringify({ type: "request", id, method, params }));
+  });
+  const stop = async () => {
+    ws.close();
+    const done = once(child, "exit"); child.kill("SIGTERM"); await done;
+  };
+  return { listenerMs, readyMs, request, stop, output: () => output };
+}
+type Frame = { type: string; id?: string; ok?: boolean; result?: unknown; error?: { message?: string } };
+const readGatewayLog = async (tronHome: string) => (await readFile(join(tronHome, "logs", "gateway.jsonl"), "utf8").catch(() => ""))
+  .split("\n").filter(Boolean).map(line => JSON.parse(line) as { event?: string; message?: string; durationMs?: number; counts?: Record<string, number> });
+
+describe("Gateway startup over Stable-shaped legacy state (#1649)", () => {
+  it("listens within the replace window, leaves session files untouched, reads legacy session settings and restarts as a no-op", { timeout: 420_000 }, async () => {
+    const state = await stableShapedState();
+    const before = await state.hashes();
+    const first = await startGateway(state);
+    try {
+      expect(await state.hashes()).toEqual(before);
+      // Shared stores moved to the current vocabulary at startup.
+      expect((await new SettingsApprovals(state.tronHome).pending())[0]).toMatchObject({ requestId: state.pending.requestId, target: { kind: "global" } });
+      const profile = JSON.parse(await readFile(join(state.tronHome, "gateway", "home", "profile.json"), "utf8"));
+      expect(profile.model.chat).toEqual({ provider: "fixture", id: "record" });
+      expect(Object.hasOwn(JSON.parse(await readFile(join(state.tronHome, "gateway", "home", "home.json"), "utf8")), "model")).toBe(false);
+      // A legacy chat reads in the current vocabulary when it is opened.
+      const header = JSON.parse((await readFile(state.legacySession, "utf8")).split("\n")[0]!) as { id: string };
+      const opened = await first.request("session.open", { sessionId: header.id });
+      expect(opened.ok, opened.error?.message).toBe(true);
+      const resolved = await first.request("settings.resolve", { target: { kind: "session", sessionId: header.id },
+        keys: ["model.thinking[role=chat]", "model.ref[role=chat]", "context.images.block"] });
+      expect(resolved.ok, resolved.error?.message).toBe(true);
+      const rows = Object.fromEntries((resolved.result as Resolution).keys.map(row => [row.key, { value: row.value, layer: row.layer }]));
+      evidence.push({ case: "#1649 startup", listenerMs: Math.round(first.listenerMs!), readyMs: Math.round(first.readyMs!), sessions: SESSIONS, legacy: LEGACY, rows });
+      // The legacy chat kept its own model and thinking, as the old Chat layer reported them.
+      expect(rows["model.thinking[role=chat]"]).toEqual({ value: "medium", layer: "session" });
+      expect(rows["model.ref[role=chat]"]).toEqual({ value: { provider: "fixture", id: "chosen" }, layer: "session" });
+      expect(rows["context.images.block"]?.value).toBe(false);
+    } finally { await first.stop(); }
+    const journal = join(state.tronHome, "gateway", "settings", "migrations", "three-layer-v1", "journal.json");
+    const settled = await migrationFileHash(journal);
+    const second = await startGateway(state);
+    try {
+      expect(await migrationFileHash(journal)).toBe(settled);
+      const log = await readGatewayLog(state.tronHome);
+      expect(log.filter(record => record.event === "settings.migration-failed")).toEqual([]);
+      expect(log.filter(record => record.event === "gateway.fatal-startup")).toEqual([]);
+      evidence.push({ case: "#1649 second start", listenerMs: Math.round(second.listenerMs!), readyMs: Math.round(second.readyMs!) });
+    } finally { await second.stop(); await chmod(state.unreadable, 0o600); }
   });
 });
