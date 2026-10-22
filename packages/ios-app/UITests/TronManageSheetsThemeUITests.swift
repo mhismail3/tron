@@ -135,8 +135,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
             let row = app.buttons["agent-instructions-section-\(id)"]
             XCTAssertTrue(row.isHittable, "\(id)\n\(app.debugDescription)")
             XCTAssertTrue(row.label.contains(summary), "\(id) shows its summary: \(row.label)")
-            // A stacked title and summary is ~70 pt; one line is the 48 pt row.
-            XCTAssertLessThan(row.frame.height, 56, "\(id)'s summary sits on the title's line: \(row.frame)")
+            // The list standard (#1691) puts the summary under the title, as subtext.
             assertInk(ink(app, row, leading: 56), theme, "\(id) number")
         }
         XCTAssertTrue(app.buttons["agent-instructions-section-tron"].label.contains("Each turn"))

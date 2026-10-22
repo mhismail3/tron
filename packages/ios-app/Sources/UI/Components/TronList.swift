@@ -455,6 +455,8 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                 .scrollTargetLayout()
                 .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
             }
+            // Name the scroll view itself; the floating chip keeps its own identifier.
+            .accessibilityIdentifier(identifier)
             // The chip floats above the feed rather than inside the lazy stack, so
             // updating it never re-places rows (a pinned header did, without end).
             .safeAreaInset(edge: .top, spacing: 0) {
@@ -481,7 +483,6 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
             .onChange(of: items.count, initial: true) { _, _ in
                 ordinals = Dictionary(items.map { ($0.id, ordinal($0)) }, uniquingKeysWith: { first, _ in first })
             }
-            .accessibilityIdentifier(identifier)
         }
     }
 }
