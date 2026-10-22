@@ -187,9 +187,12 @@ separate:
   `PresentationStateStore` (`TronPresentationStateRoot`), keyed by the presenter's scope path plus
   the sheet identity (and an item sheet's `id`). Rebuilt content finds the same scope; an actual
   dismissal or replacement item retires it and every scope presented from inside it. Route
-  surfaces (dashboard, chat route) are the parent scope of their sheets. An item sheet's
-  presenter state is keyed by call site, so a presenter repeated inside one surface (a
-  transcript attachment chip) passes `instance:`; otherwise siblings share one presenter.
+  surfaces (dashboard, chat route) are the parent scope of their sheets. Presenter state is
+  keyed by call site (plus the identity string for `isPresented:`; an item sheet's key has no
+  item), so a presenter repeated inside one surface (a chip, row or card) passes `instance:`.
+  Siblings sharing a key let only the last-rendered one present; the presenter logs a
+  `ManagedSheetPresentation` fault when a shared one starts presenting and traps under
+  `HOSTED_TEST`.
 - Managed sources publish render-input preferences without adding a background view or AX node
   to a control. `TronNativeSheetCanvas`, mounted at each scene/surface root, contains scope-owned
   `RetainedNativeSheetHost` nodes in one retained SwiftUI hosting controller per surface. Keeping
