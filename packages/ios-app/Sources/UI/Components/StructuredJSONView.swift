@@ -197,6 +197,7 @@ struct TronStructuredJSONView: View {
         }
         .tronManagedSheet(
             item: $selectedField,
+            instance: "\(title)|\(path)", // sections repeat in one sheet
             identity: { _ in "structured-json.field" }
         ) { selection in
             JSONFieldSheet(
@@ -279,6 +280,7 @@ struct TronTechnicalJSONRow: View {
         .accessibilityHint("Opens scrollable JSON details")
         .tronManagedSheet(
             isPresented: $isPresented,
+            instance: "\(title)|\(sheetTitle)", // rows (Request/Response JSON) repeat in one sheet
             identity: "structured-json.technical"
         ) {
             TechnicalJSONSheet(
