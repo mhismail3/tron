@@ -44,7 +44,7 @@ extension XCTestCase {
 
     /// The average colour of the saturated (inked) pixels in `area`: glyphs, never
     /// the neutral glass or sheet material behind them.
-    private func sheetInk(_ image: UIImage, _ area: CGRect, window: CGFloat) -> [Double]? {
+    func sheetInk(_ image: UIImage, _ area: CGRect, window: CGFloat) -> [Double]? {
         guard let source = image.cgImage else { return nil }
         let scale = CGFloat(source.width) / window
         guard let crop = source.cropping(to: area.applying(CGAffineTransform(scaleX: scale, y: scale))) else { return nil }

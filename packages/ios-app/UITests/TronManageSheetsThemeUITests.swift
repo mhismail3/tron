@@ -3,7 +3,7 @@ import XCTest
 /// Manage Session, Manage Home and the sheets they open share one emerald sheet
 /// theme; each sub-sheet is titled by the row that opens it; Instructions rows
 /// keep their summary on the title's line (#1680). The Capture journeys keep the
-/// light/dark review images.
+/// light/dark review images; the Behavior tests are the regression oracle.
 final class TronManageSheetsThemeUITests: XCTestCase {
     @MainActor func testCaptureManageSessionSheets() {
         for dark in [false, true] {
@@ -76,6 +76,90 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         }
     }
 
+    // MARK: Behavior
+
+    /// Each Manage Session row opens a sheet titled with the row's own label, and
+    /// the row's icon and that title are inked in Manage Session's emerald title
+    /// color: one sheet theme, no per-row teal.
+    @MainActor func testManageSessionRowsTitleTheirSheetsInTheSheetTheme() {
+        for dark in [false, true] {
+            let app = launchManageSession(dark: dark); defer { app.terminate() }
+            let mode = dark ? "dark" : "light"
+            let theme = ink(app, navigationTitle(app, "Manage Session"))
+            for label in ["Workspace", "Instructions", "Resources", "Session History", "Subagent History"] {
+                let row = app.buttons[label].firstMatch
+                XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
+                for _ in 0..<6 where !row.isHittable { app.swipeUp() }
+                assertInk(ink(app, row, leading: 56), theme, "\(label) row icon (\(mode))")
+                row.tap()
+                let title = navigationTitle(app, label)
+                XCTAssertTrue(title.waitForExistence(timeout: 8), "\(label) opens a sheet titled \(label)\n\(app.debugDescription)")
+                _ = waitFor(title, "hittable == true", timeout: 3)
+                assertInk(ink(app, title), theme, "\(label) sheet title (\(mode))")
+                closeTop(app)
+            }
+        }
+    }
+
+    /// Each Manage Home row opens a sheet titled with the row's title, inked in
+    /// Manage Home's own emerald.
+    @MainActor func testManageHomeRowsTitleTheirSheetsInTheSheetTheme() {
+        let app = launchManageHome(dark: false); defer { app.terminate() }
+        let theme = ink(app, navigationTitle(app, "Manage Home"))
+        for (id, done) in [("home-manage-profile", "home-sheet-done-profile"), ("home-manage-memory-browser", "home-sheet-done-memory"),
+                           ("home-manage-chapters", "home-sheet-done-chapters"), ("home-manage-tasks", "home-sheet-done-tasks")] {
+            let row = element(app, id)
+            XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
+            for _ in 0..<4 where !row.isHittable { app.swipeUp() }
+            let label = row.label.components(separatedBy: ", ").first ?? row.label
+            assertInk(ink(app, row, leading: 56), theme, "\(label) row icon")
+            row.tap()
+            XCTAssertTrue(app.buttons[done].waitForExistence(timeout: 8), app.debugDescription)
+            let title = navigationTitle(app, label)
+            XCTAssertTrue(title.waitForExistence(timeout: 5), "\(id) opens a sheet titled \(label)\n\(app.debugDescription)")
+            _ = waitFor(title, "hittable == true", timeout: 3)
+            assertInk(ink(app, title), theme, "\(label) sheet title")
+            app.buttons[done].tap()
+            Thread.sleep(forTimeInterval: 0.6)
+        }
+    }
+
+    /// Instructions rows are one line: the summary trails the title on its line,
+    /// every row's number is inked in the sheet's title color, and the per-turn
+    /// section keeps its Each turn tag. At XXXL the summary reads whole.
+    @MainActor func testInstructionsRowsKeepTheirSummaryOnTheTitleLine() {
+        let app = launchInstructions([]); defer { app.terminate() }
+        expand(app, title: AgentInstructions.title)
+        let theme = ink(app, navigationTitle(app, AgentInstructions.title))
+        for (id, summary) in AgentInstructions.summaries {
+            let row = app.buttons["agent-instructions-section-\(id)"]
+            XCTAssertTrue(row.isHittable, "\(id)\n\(app.debugDescription)")
+            XCTAssertTrue(row.label.contains(summary), "\(id) shows its summary: \(row.label)")
+            // A stacked title and summary is ~70 pt; one line is the 48 pt row.
+            XCTAssertLessThan(row.frame.height, 56, "\(id)'s summary sits on the title's line: \(row.frame)")
+            assertInk(ink(app, row, leading: 56), theme, "\(id) number")
+        }
+        XCTAssertTrue(app.buttons["agent-instructions-section-tron"].label.contains("Each turn"))
+        app.terminate()
+
+        let large = launchInstructions(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        defer { large.terminate() }
+        let window = large.windows.firstMatch.frame
+        for (id, summary) in AgentInstructions.summaries {
+            let row = large.buttons["agent-instructions-section-\(id)"]
+            for _ in 0..<6 where !row.isHittable { large.swipeUp() }
+            XCTAssertTrue(row.label.contains(summary), "\(id) at XXXL: \(row.label)")
+            XCTAssertLessThanOrEqual(row.frame.maxX, window.maxX, "\(id) stays within the screen at XXXL")
+            XCTAssertGreaterThan(row.frame.height, 56, "\(id)'s summary moves below its title at XXXL")
+        }
+    }
+
+    private enum AgentInstructions {
+        static let title = "Instructions"
+        static let summaries = [("preamble", "Built into Pi"), ("tools", "3 tools"), ("rules", "3 rules · 1 from tools"),
+                                ("cwd", "~/Workspace/project")]
+    }
+
     // MARK: Journeys
 
     @MainActor private func launchManageSession(dark: Bool) -> XCUIApplication {
@@ -129,6 +213,32 @@ final class TronManageSheetsThemeUITests: XCTestCase {
     }
 
     // MARK: Helpers
+
+    @MainActor private func navigationTitle(_ app: XCUIApplication, _ text: String) -> XCUIElement {
+        let titles = app.navigationBars.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text))
+        return titles.allElementsBoundByIndex.last ?? titles.firstMatch
+    }
+
+    /// The average saturated ink of `element` (its leading icon column when given).
+    @MainActor private func ink(_ app: XCUIApplication, _ element: XCUIElement, leading: CGFloat? = nil) -> [Double] {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
+        Thread.sleep(forTimeInterval: 0.4)
+        var area = element.frame
+        if let leading { area.size.width = leading }
+        guard let ink = sheetInk(XCUIScreen.main.screenshot().image, area, window: app.windows.firstMatch.frame.width) else {
+            XCTFail("No inked pixels in \(element)"); return [0, 0, 0]
+        }
+        return ink
+    }
+
+    /// Compares hue, not brightness: a thin glyph's antialiasing darkens its ink
+    /// toward the background, so each color is scaled to its brightest channel.
+    /// Emerald and the retired teal differ by about 0.3 on this scale.
+    private func assertInk(_ ink: [Double], _ theme: [Double], _ what: String, file: StaticString = #filePath, line: UInt = #line) {
+        let hue = { (color: [Double]) in color.map { $0 / max(color.max() ?? 1, 0.01) } }
+        let distance = zip(hue(ink), hue(theme)).map { abs($0 - $1) }.max() ?? 1
+        XCTAssertLessThan(distance, 0.15, "\(what) \(ink) is not the sheet theme \(theme)", file: file, line: line)
+    }
 
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any)[id].firstMatch

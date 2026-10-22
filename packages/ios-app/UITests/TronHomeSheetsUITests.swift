@@ -335,14 +335,14 @@ final class TronHomeSheetsUITests: XCTestCase {
         app.swipeDown()
 
         // Each sub-sheet's title takes the tint of the Manage Home row that opened it
-        // (#925), through the shared settings theme, not Manage Home's own green.
+        // (#925), through the shared settings theme: Manage Home's emerald (#1680).
         let rowTint = ink(app, element(app, "home-manage-memory-browser"), leading: 56)
         let manageTint = ink(app, app.navigationBars.staticTexts["Manage Home"].firstMatch)
 
         // Memory: the recent messages and the summaries Home sees, without raw kind prefixes.
         open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")
         expand(app, done: "home-sheet-done-memory")
-        assertTitleTint(app, "Memory", matches: rowTint, not: manageTint)
+        assertTitleTint(app, "Memory", matches: rowTint, and: manageTint)
         XCTAssertTrue(element(app, "home-memory-viewport").exists)
         XCTAssertTrue(element(app, "home-memory-range-top").exists)
         XCTAssertTrue(element(app, "home-memory-summary-32-2").exists)
@@ -362,7 +362,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         // Chapters: a chapter opens from the loaded row, and returning reads nothing again.
         open(app, element(app, "home-manage-chapters"), ready: "home-chapter-1", name: "chapters")
         expand(app, done: "home-sheet-done-chapters")
-        assertTitleTint(app, "Chapters", matches: rowTint, not: manageTint)
+        assertTitleTint(app, "Chapters", matches: rowTint, and: manageTint)
         // The title names the list; only the intro line sits above the rows.
         let listTitle = app.navigationBars.staticTexts["Chapters"].firstMatch.frame, firstRow = element(app, "home-chapter-2").frame
         let headers = app.staticTexts.matching(NSPredicate(format: "label == 'Chapters'")).allElementsBoundByIndex
@@ -391,7 +391,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertFalse(topic.label.contains("**"), topic.label)
         open(app, topic, ready: "home-reading-text", name: "topic")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'shared'")).firstMatch.exists, app.debugDescription)
-        assertTitleTint(app, "Topic", matches: rowTint, not: manageTint)
+        assertTitleTint(app, "Topic", matches: rowTint, and: manageTint)
         keep("06b-chapter-topic")
         closeTop(app)
         XCTAssertTrue(element(app, "home-chapter-detail").waitForExistence(timeout: 3))
@@ -422,7 +422,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         // Tasks: shared rows; the detail has no Stop, Steer or Reload, and opens the worker session.
         open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks")
         expand(app, done: "home-sheet-done-tasks")
-        assertTitleTint(app, "Tasks", matches: rowTint, not: manageTint)
+        assertTitleTint(app, "Tasks", matches: rowTint, and: manageTint)
         let tasksTitle = app.navigationBars.staticTexts["Tasks"].firstMatch.frame, firstTask = element(app, "home-task-active").frame
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == 'Tasks'")).allElementsBoundByIndex
             .filter { $0.frame.minY > tasksTitle.maxY && $0.frame.maxY <= firstTask.minY }.isEmpty, "No section header repeats the title")
@@ -449,7 +449,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("09-task-detail")
         open(app, element(app, "home-task-brief-view-all"), ready: "home-reading-text", name: "brief")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'settings model doc'")).firstMatch.exists, "View All shows the whole brief")
-        assertTitleTint(app, "Brief", matches: rowTint, not: manageTint)
+        assertTitleTint(app, "Brief", matches: rowTint, and: manageTint)
         keep("09b-task-brief")
         closeTop(app)
         XCTAssertTrue(element(app, "home-task-detail").waitForExistence(timeout: 3))
@@ -723,7 +723,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         let manageTint = ink(app, app.navigationBars.staticTexts["Manage Home"].firstMatch)
         open(app, profileRow, ready: "home-profile-group-preference", name: "profile")
         expand(app, done: "home-sheet-done-profile")
-        assertTitleTint(app, "Profile", matches: rowTint, not: manageTint)
+        assertTitleTint(app, "Profile", matches: rowTint, and: manageTint)
         for kind in ["standing-decision", "delegation-default", "fact"] { XCTAssertTrue(element(app, "home-profile-group-\(kind)").exists, kind) }
         let item = element(app, "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
         XCTAssertTrue(item.label.contains("screenshots") && !item.label.contains("**"), item.label)
@@ -988,11 +988,11 @@ final class TronHomeSheetsUITests: XCTestCase {
         done?.tap()
     }
 
-    @MainActor private func assertTitleTint(_ app: XCUIApplication, _ title: String, matches row: [Double], not other: [Double]) {
+    @MainActor private func assertTitleTint(_ app: XCUIApplication, _ title: String, matches row: [Double], and manage: [Double]) {
         let tint = ink(app, app.navigationBars.staticTexts[title].firstMatch)
         let distance = { (a: [Double], b: [Double]) in zip(a, b).map { abs($0 - $1) }.max() ?? 1 }
         XCTAssertLessThan(distance(tint, row), 0.12, "\(title)'s title takes its Manage Home row's tint: \(tint) vs \(row)")
-        XCTAssertGreaterThan(distance(tint, other), 0.12, "\(title)'s title is not Manage Home's own green: \(tint)")
+        XCTAssertLessThan(distance(tint, manage), 0.12, "\(title)'s title is Manage Home's emerald sheet theme: \(tint) vs \(manage)")
     }
 
     /// Every kept step also proves the sheet's rows come from the shared row
