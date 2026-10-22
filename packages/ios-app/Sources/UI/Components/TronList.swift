@@ -374,8 +374,18 @@ final class TronFeedPosition {
     static let hysteresis: CGFloat = 60
 }
 
+/// Room for the floating chip above the caption once the feed is long; it reads
+/// only `long`, which changes once, never the scrolling range.
+private struct TronFeedChipSpace: View {
+    let position: TronFeedPosition
+    var body: some View {
+        Color.clear.frame(height: position.long ? TronFeedPositionChip.height : 0).accessibilityHidden(true)
+    }
+}
+
 /// "6,689–6,714 of 6,733", newest first; tapping jumps to the newest entry.
 struct TronFeedPositionChip: View {
+    static let height: CGFloat = 38
     let position: TronFeedPosition
     let total: Int?
     let totalIsExact: Bool
@@ -443,6 +453,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
         ScrollViewReader { reader in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+                    TronFeedChipSpace(position: position)
                     header()
                     ForEach(items) { item in
                         row(item)
@@ -457,9 +468,10 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
             }
             // Name the scroll view itself; the floating chip keeps its own identifier.
             .accessibilityIdentifier(identifier)
-            // The chip floats above the feed rather than inside the lazy stack, so
-            // updating it never re-places rows (a pinned header did, without end).
-            .safeAreaInset(edge: .top, spacing: 0) {
+            // The chip is an overlay: updating it never lays out the scroll view or
+            // re-places rows (a pinned header and then an inset both fed back into the
+            // lazy layout). Its space is a fixed spacer at the top of the content.
+            .overlay(alignment: .top) {
                 TronFeedPositionChip(position: position, total: total, totalIsExact: totalIsExact) {
                     guard let first = items.first?.id else { return }
                     withAnimation(.snappy) { reader.scrollTo(first, anchor: .top) }

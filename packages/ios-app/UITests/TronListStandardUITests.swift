@@ -252,6 +252,38 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertEqual(app.buttons.matching(identifier: "home-task-paged-44").count, 1)
     }
 
+    /// Scrolling a loaded feed back up settles: the lazy feed must reach idle after
+    /// every swipe (a pinned chip once re-placed rows without end).
+    @MainActor func testLoadedFeedSettlesWhileScrollingBackUp() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-paging", "-home-browser-paging"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        ring.tap()
+        let memory = element(app, "home-manage-memory-browser")
+        XCTAssertTrue(memory.waitForExistence(timeout: 10), app.debugDescription)
+        // At its large detent Manage Home shows Memory without a scroll whose momentum can eat the tap (#1699).
+        expandSheet(app, title: "Manage Home")
+        memory.tap()
+        XCTAssertTrue(app.buttons["home-memory-row-39"].waitForExistence(timeout: 10), app.debugDescription)
+        expandSheet(app, title: "Memory")
+        let retry = app.buttons["feed-retry"]
+        for _ in 0..<8 where !retry.exists { app.swipeUp() }
+        if retry.waitForExistence(timeout: 5) { retry.tap() }
+        XCTAssertTrue(app.buttons["home-memory-summary-0-16"].waitForExistence(timeout: 5))
+        for round in 0..<4 {
+            for _ in 0..<4 {
+                let started = Date()
+                round % 2 == 0 ? app.swipeDown() : app.swipeUp()
+                XCTAssertLessThan(Date().timeIntervalSince(started), 15, "The feed settles after each swipe (round \(round))")
+            }
+        }
+    }
+
     @MainActor private func openLargeHistory() -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
