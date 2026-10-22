@@ -115,6 +115,8 @@ struct SettingsRendererRow: View {
         .accessibilityIdentifier(settingsRowIdentifier(setting))
     }
 
+    /// Always present, even empty: the shared row then keeps its value control a
+    /// separate accessibility element instead of combining it into the row.
     private var accessory: (@MainActor @Sendable () -> AnyView)? {
         if let source = setting.projectSetting {
             return { AnyView(
@@ -126,7 +128,7 @@ struct SettingsRendererRow: View {
                 .accessibilityIdentifier("\(settingsRowIdentifier(setting))-project")
             ) }
         }
-        guard canReset && editable && control != .readOnly else { return nil }
+        guard canReset && editable && control != .readOnly else { return { AnyView(EmptyView()) } }
         return { AnyView(HStack(spacing: 8) {
             // State words are never shortened; the row layout makes room or stacks.
             // The pill paints to its edge, so it keeps its own gap from the value.

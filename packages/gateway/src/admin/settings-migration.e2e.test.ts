@@ -134,6 +134,25 @@ describe("settings startup migration on copied state", () => {
     evidence.push({ case: "backup, pending preservation/rehash, Home fold, no-op", passed: true, inputs: completed.inputs.length });
   });
 
+  it.each([true, false])("moves the retired Home record model into Home's saved settings only when none is saved (saved: %s)", async saved => {
+    const f = await copiedState();
+    const directory = join(f.agentDir, "sessions"); await mkdir(directory, { recursive: true });
+    const manager = SessionManager.create(f.root, directory);
+    manager.appendMessage(fauxAssistantMessage("Home chapter without a model choice"));
+    const profile = JSON.parse(await readFile(f.profilePath, "utf8"));
+    if (!saved) { delete profile.model.chat; await writeFile(f.profilePath, JSON.stringify(profile)); }
+    const homePath = join(f.tronHome, "gateway", "home", "home.json");
+    await writeFile(homePath, JSON.stringify({ version: 2, homeId: "fixture-home", enabled: true, model: { provider: "fixture", id: "record" },
+      chapters: [{ sessionId: manager.getSessionId(), ordinal: 1, state: "active", createdAt: "2026-01-01T00:00:00.000Z", activationStarted: true }],
+      bindingRevision: 1, generation: 1, routeGeneration: 1, policyRevision: 3, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }));
+    await migrateSettings(f.options);
+    expect(JSON.parse(await readFile(f.profilePath, "utf8")).model.chat).toEqual({ provider: "fixture", id: saved ? "profile" : "record" });
+    const record = JSON.parse(await readFile(homePath, "utf8"));
+    expect(Object.hasOwn(record, "model")).toBe(false);
+    expect(record).toMatchObject({ homeId: "fixture-home", enabled: true, generation: 1 });
+    evidence.push({ case: `retired Home record model (saved ${saved})`, passed: true });
+  });
+
   it("resumes the same prepared transaction after a partial canonical publication without duplicating approvals or audit", async () => {
     const f = await copiedState(); await legacyApproval(f); await legacyHomeChapter(f);
     const transaction = await SettingsMigration.prepare(f.options);

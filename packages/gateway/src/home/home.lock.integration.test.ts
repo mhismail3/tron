@@ -195,7 +195,7 @@ describe("gateway/home scenario lock", () => {
     const designated = await phone.request("home.designate", { commandId: gateway.commandId(), model });
     expect(designated.ok, JSON.stringify(designated)).toBe(true);
     const queue = await phone.request("settings.change", { commandId: gateway.commandId(), target: { kind: "home" },
-      changes: [{ key: "model.queue[role=background]", layer: "profile", op: "set", value: [`${model.provider}/${model.id}`] }] });
+      changes: [{ key: "model.queue[role=background]", layer: "session", op: "set", value: [`${model.provider}/${model.id}`] }] });
     expect(queue.ok, JSON.stringify(queue)).toBe(true);
     const opened = await phone.request("home.open", {});
     expect(opened.ok, JSON.stringify(opened)).toBe(true);

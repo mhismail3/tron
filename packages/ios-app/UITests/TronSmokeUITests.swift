@@ -778,10 +778,10 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsRowInspectionAndActionsStayIndependent() {
+    func testSettingsRowEditorAndRevertStayIndependent() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-source-actions"]
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
         app.launch(); defer { app.terminate() }
         let applied = app.staticTexts["fixture.settings-renderer-applied"]
         openRendererSection(app, "model")
@@ -789,28 +789,18 @@ final class TronSmokeUITests: XCTestCase {
         // Measure logical target sizes at large; the other journeys operate at medium.
         expandSettingsSheet(app, title: "Models")
         let row = app.descendants(matching: .any)["settings-row-model.ref"]
-        let source = app.buttons["settings-row-model.ref-source"]
         let editor = settingEditor(row)
         let reset = app.buttons["settings-row-model.ref-reset"]
-        for target in [source, editor, reset] {
+        for target in [editor, reset] {
             // Sheet presentation briefly scales the underlying AX geometry.
             // Wait for the target's actual admitted 44-point frame, not a sleep.
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
                 predicate: NSPredicate { _, _ in target.isHittable && target.frame.height >= 44 && target.frame.width >= 44 },
                 object: target)], timeout: 5), .completed, "\(target.label): \(target.frame)")
         }
-        XCTAssertFalse(source.frame.intersects(editor.frame), "Inspection and editing must not share targets")
-        XCTAssertFalse(source.frame.intersects(reset.frame), "Inspection and mutation must not share targets")
         XCTAssertFalse(editor.frame.intersects(reset.frame), "Editing and Revert must not share targets")
-        source.tap()
-        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-        XCTAssertTrue(showsText("Future source", in: app))
-        XCTAssertEqual(applied.label, "applied:0", "Row inspection cannot mutate or reset")
-        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Lite")).firstMatch.exists)
-        closeTopSheet(app)
         editor.tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Lite")).firstMatch.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Edit cannot also activate inspection")
         closeTopSheet(app)
         XCTAssertEqual(applied.label, "applied:0", "Opening/dismissing an editor cannot submit its draft")
         // The leading strip is invisible hit area after painted-edge alignment.
@@ -818,46 +808,14 @@ final class TronSmokeUITests: XCTestCase {
         reset.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5)).tap()
         XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
         XCTAssertEqual(editor.value as? String, "Fixture Lite")
-        XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Revert cannot also activate inspection")
         closeTopSheet(app)
         openRendererSection(app, "context")
-        let toggleRow = app.descendants(matching: .any)["settings-row-context.images.block"]
-        let toggle = toggleRow.switches.firstMatch
+        let toggle = app.descendants(matching: .any)["settings-row-context.images.block"].switches.firstMatch
         let before = toggle.value as? String
-        app.buttons["settings-row-context.images.block-source"].tap()
-        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-        XCTAssertEqual(applied.label, "applied:1")
-        closeTopSheet(app)
-        XCTAssertEqual(toggle.value as? String, before, "Inspecting a toggle row cannot toggle it")
         toggle.tap()
         XCTAssertTrue(waitForLabel(applied, containing: "applied:2", timeout: 5))
         XCTAssertNotEqual(toggle.value as? String, before)
-        XCTAssertFalse(app.staticTexts["Value & Source"].exists)
         keepScreenshot(named: "1308-independent-row-actions")
-    }
-
-    /// Show the one provenance destination after source/qualifier pills have
-    /// been removed. This is capture navigation only; action isolation is a
-    /// separate post-approval behavioral journey.
-    @MainActor
-    func testCaptureValueAndSourceInLightAndDark() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance,
-                                   "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-            app.launch()
-            defer { app.terminate() }
-            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-            app.buttons["Stop session"].tap()
-            app.buttons["Release terminal settlement"].tap()
-            let body = app.buttons["settings-row-model.thinking_role_chat_-source"]
-            XCTAssertTrue(body.waitForExistence(timeout: 5))
-            body.tap()
-            expandSettingsSheet(app, title: "Value & Source")
-            keepScreenshot(named: "1308-value-source-\(appearance)")
-            app.terminate()
-        }
     }
 
     /// Measure the rendered shared-row glyph, not its fixed AX/layout frame:
@@ -1053,7 +1011,7 @@ final class TronSmokeUITests: XCTestCase {
                     XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-home-\(appearance)")
                     captureSettingsTools(app, scope: scope, appearance: appearance)
-                    captureConfiguration(app, scope: scope, appearance: appearance)
+                    captureModels(app, scope: scope, appearance: appearance)
                 } else if scope == "session" {
                     XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
                     app.buttons["Stop session"].tap()
@@ -1062,10 +1020,8 @@ final class TronSmokeUITests: XCTestCase {
                     openChatSettings(app)
                     expandSettingsSheet(app, title: "Session Settings")
                     keepScreenshot(named: "1325-session-\(appearance)")
-                    captureConfiguration(app, scope: scope, appearance: appearance)
+                    captureModels(app, scope: scope, appearance: appearance)
                     captureSettingsTools(app, scope: scope, appearance: appearance)
-                    XCTAssertFalse(app.buttons["Configuration"].exists)
-                    XCTAssertFalse(app.buttons["Available Tools"].exists)
                 } else if scope == "project" {
                     XCTAssertTrue(app.buttons["project-settings-link"].waitForExistence(timeout: 10))
                     app.buttons["project-settings-link"].tap()
@@ -1197,7 +1153,7 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    private func captureConfiguration(_ app: XCUIApplication, scope: String, appearance: String) {
+    private func captureModels(_ app: XCUIApplication, scope: String, appearance: String) {
         let models = app.buttons["settings-section-model-open"]
         reveal(models, in: app)
         XCTAssertTrue(models.isHittable, app.debugDescription)
@@ -1230,10 +1186,8 @@ final class TronSmokeUITests: XCTestCase {
                         "\(name) rendered \"\(text)\", expected \(pattern)", file: file, line: line)
     }
 
-    /// A row's Overridden pill must be separated from the control before it by
-    /// at least 6 points of the row's own background. The pill's accessibility
-    /// frame is its painted capsule; the background is sampled in the spacing
-    /// after it, before the Revert target.
+    /// At least 6 points of row background (sampled after the pill's painted
+    /// capsule, its accessibility frame) separate the pill from its control.
     @MainActor
     private func assertVisibleGapBeforePill(in row: XCUIElement, named name: String,
                                             file: StaticString = #filePath, line: UInt = #line) {
@@ -1295,7 +1249,6 @@ final class TronSmokeUITests: XCTestCase {
         let state = app.descendants(matching: .any)["home-manage-state"]
         XCTAssertEqual(state.label, "Ready")
         XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists, "The stats card comes from the Home chat's session")
-        XCTAssertFalse(app.descendants(matching: .any)["session-model-summary"].exists)
         XCTAssertFalse(app.buttons["Background models"].firstMatch.exists, "Model controls belong only to Home Settings")
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
@@ -1672,7 +1625,6 @@ final class TronSmokeUITests: XCTestCase {
         let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < mediumTop - 100 }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed, "Manage Home must drag to its large detent")
         keepScreenshot(named: "manage-home-large")
-        XCTAssertFalse(app.descendants(matching: .any)["session-model-summary"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
         for row in ["home-manage-memory-browser", "home-manage-tasks",
                     "home-manage-pause", "home-manage-disable"] {
@@ -2155,26 +2107,11 @@ final class TronSmokeUITests: XCTestCase {
         let editor = app.descendants(matching: .any)["home-settings-content"]
         XCTAssertFalse(editor.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "settings-row-model.contextWindow")).firstMatch.exists)
-        tapScrolling(app.buttons["Configuration"], in: app)
-        expandSettingsSheet(app, title: "Configuration")
-        let configuration = app.descendants(matching: .any)["settings-configuration"]
-        let row = configuration.descendants(matching: .other).matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "settings-row-model.contextWindow")).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertFalse(row.buttons["settings-number-control"].exists, "Chapter context is inspectable here, never editable")
-        XCTAssertFalse(row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch.exists)
-        let source = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-source'")).firstMatch
-        tapScrolling(source, in: app)
-        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-        XCTAssertTrue(showsText("200,000 tokens", in: app))
-        keepScreenshot(named: "1325-home-chapter-context-readonly")
-        closeTopSheet(app) // Value & Source
-        closeTopSheet(app) // Configuration
         closeTopSheet(app) // Home Settings
         app.buttons["home-sheet-done-manage"].tap()
         app.buttons["Back"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5),
-                      "Inspection cannot call settings.change or create a Chat override")
+                      "Opening Home Settings cannot call settings.change")
     }
 
     /// A model row in the shared ModelPicker, named by the model's display name.
@@ -2508,60 +2445,6 @@ final class TronSmokeUITests: XCTestCase {
         thinking.tap()
         XCTAssertTrue(app.descendants(matching: .any)["thinking-level-slider"].waitForExistence(timeout: 3))
         keepScreenshot(named: "post-stop-configuration-ready")
-    }
-
-    /// The real Manage Session route, not the renderer-only fixture: reset is
-    /// fenced to this chat, and reopening shows the authoritative new snapshot.
-    @MainActor
-    func testManageSessionUsesCurrentDefault() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-session-configuration-fixture"]
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-        app.buttons["Stop session"].tap()
-        XCTAssertTrue(app.buttons["Release terminal settlement"].waitForExistence(timeout: 5))
-        app.buttons["Release terminal settlement"].tap()
-        let models = app.descendants(matching: .any)["session-model-summary"]
-        let reset = models.buttons["settings-row-model.thinking_role_chat_-reset"]
-        tapScrolling(reset, in: app)
-        let thinking = app.buttons["thinking-level-control"]
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "High"), object: thinking)], timeout: 5), .completed)
-        let source = models.buttons["settings-row-model.thinking_role_chat_-source"]
-        XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Revert must not also open provenance")
-        source.tap()
-        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-        XCTAssertTrue(showsText("From Mac default at start", in: app))
-        closeTopSheet(app)
-        XCTAssertFalse(app.switches["Automatic compaction"].exists, "Manage Session must not repeat policy editing")
-        XCTAssertTrue(app.buttons["manage-session-compact"].exists, "Manual compaction remains a live action")
-        openChatSettings(app)
-        let settings = app.descendants(matching: .any)["session-settings-content"]
-        XCTAssertFalse(settings.buttons["Switch Model"].exists)
-        XCTAssertFalse(settings.buttons["settings-row-model.thinking_role_chat_-reset"].exists, "The canonical reset belongs with live Models")
-        tapScrolling(app.buttons["settings-section-context-open"], in: app)
-        let compaction = app.switches.matching(NSPredicate(format: "label == %@", "Automatic compaction"))
-        XCTAssertTrue(compaction.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertEqual(compaction.count, 1, "The policy has one editor in Session Settings")
-        closeTopSheet(app) // Compaction policy
-        closeTopSheet(app) // Session Settings
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
-        closeTopSheet(app) // Manage Session
-        XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
-        app.buttons["Stop session"].tap()
-        XCTAssertTrue(thinking.waitForExistence(timeout: 5))
-        XCTAssertEqual(thinking.value as? String, "High", "Reopening reads the accepted chat snapshot")
-        reveal(source, in: app)
-        XCTAssertTrue(source.isEnabled, app.debugDescription)
-        keepScreenshot(named: "1325-session-source-reopen-before")
-        source.tap()
-        keepScreenshot(named: "1325-session-source-reopen-after")
-        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(showsText("From Mac default at start", in: app), "The same accepted origin survives reopening")
-        closeTopSheet(app) // Value & Source; the root fixture marker is no longer covered.
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
     }
 
     @MainActor
@@ -2978,12 +2861,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fixture value rejected")).firstMatch.exists)
         XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2))
         keepScreenshot(named: "settings-renderer-invalid")
-        // The new subgroup, the unknown badge, the unknown control and the read-only secret.
+        // The new subgroup, the unknown control and the read-only secret.
         XCTAssertTrue(showsText("Experiments", in: app), "A subgroup the app never heard of")
-        tapScrolling(app.buttons["settings-row-lab.focusMode-source"], in: app)
-        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-        XCTAssertTrue(showsText("New", in: app), "Unknown evidence remains inspectable in Value & Source")
-        closeTopSheet(app)
         scrollTo(any["settings-row-lab.palette"], in: app)
         XCTAssertTrue(showsText("Teal", in: app), "An unknown control shows its display read-only")
         scrollTo(any["settings-row-lab.secretToken"], in: app)
@@ -3076,19 +2955,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(count, containing: "control-count:1", timeout: 5))
         openTools()
         XCTAssertEqual(app.switches["Ask User"].value as? String, "0", "Reopen reads the accepted profile change")
-        closeTopSheet(app)
-        tapScrolling(app.buttons["Configuration"], in: app)
-        expandSettingsSheet(app, title: "Configuration")
-        let configuration = app.descendants(matching: .any)["settings-configuration"]
-        XCTAssertFalse(configuration.buttons["settings-section-model-open"].exists)
-        XCTAssertTrue(showsText("Retained launch value", in: app))
-        let retained = app.descendants(matching: .any)["settings-configuration"].descendants(matching: .any)["settings-row-tools.active"]
-        tapScrolling(settingEditor(retained), in: app)
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ask User")).firstMatch.waitForExistence(timeout: 5),
-                      "Changing current profile tools cannot rewrite this chapter's retained launch selection")
-        XCTAssertEqual(app.scrollViews["settings-tools-editor"].switches.count, 0, "Configuration is strictly read-only")
-        XCTAssertFalse(app.buttons["tron-sheet-save"].exists)
-        closeTopSheet(app)
         closeTopSheet(app)
         let reset = app.buttons["settings-row-tools.active-reset"]
         tapScrolling(reset, in: app)
@@ -3185,14 +3051,13 @@ final class TronSmokeUITests: XCTestCase {
         done?.tap()
     }
 
-    /// Source actions are renderer primitives, not per-key code. The fixture
-    /// socket receives one unset via the existing dry-run/receipt path; unknown
-    /// actions stay display-only rather than dispatching arbitrary operations.
+    /// Revert is the renderer's receipt-backed unset: one change through the
+    /// dry-run/receipt path, read back on the key's row.
     @MainActor
-    func testSettingsRendererUsesCurrentDefaultSourceAction() {
+    func testSettingsRendererRevertUsesTheReceiptPath() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-source-actions"]
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10))
@@ -3201,18 +3066,12 @@ final class TronSmokeUITests: XCTestCase {
         let reset = app.buttons["settings-row-model.ref-reset"]
         XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
         assertCircularRevert(reset)
-        XCTAssertFalse(app.buttons["Unsupported action"].exists)
-        keepScreenshot(named: "settings-current-default-before")
+        keepScreenshot(named: "settings-revert-before")
         tapScrolling(reset, in: app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "value == %@", "Fixture Lite")).firstMatch
             .waitForExistence(timeout: 5), "The reset value reads back on the key's row")
-        XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Reset must not also inspect the row")
-        app.buttons["settings-row-model.ref-source"].tap()
-        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-        XCTAssertTrue(showsText("Future source", in: app), "Unknown source evidence is retained in the one provenance destination")
-        XCTAssertFalse(app.buttons["Unsupported action"].exists, "Unknown evidence must not become an arbitrary command")
-        keepScreenshot(named: "settings-current-default-after")
+        keepScreenshot(named: "settings-revert-after")
     }
 
     /// A served catalog remains complete beyond its first page, and browsing it

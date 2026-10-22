@@ -2,7 +2,7 @@
 import Foundation
 import TronMobileCore
 
-/// Global Extensions over the Gateway's real package shape: configured Mac
+/// Global Extensions over the Gateway's real package shape: configured Global
 /// packages plus the bundled managed provider `packages.list` appends, and the
 /// schema's Sources keys (labels/help mirror the Gateway declarations).
 enum HostedExtensionsReview {
@@ -34,24 +34,24 @@ enum HostedExtensionsReview {
         }
     }
 
-    /// #1491: Codemode starts off on the Mac while the scope saves `+codemode`;
+    /// #1491: Codemode starts off at Global while the scope saves `+codemode`;
     /// `-settings-ui-project-tools` renders a project's view-only Tools (as
-    /// Project Settings does) and serves its layers over the Mac's.
+    /// Project Settings does) and serves its layers over Global's.
     static var builtinOff: Bool { ProcessInfo.processInfo.arguments.contains("-settings-ui-builtin-off") }
     static var project: Bool { ProcessInfo.processInfo.arguments.contains("-settings-ui-project-tools") }
 
-    /// A key's layers: `own` at the fixture scope's layer, `mac` beneath a project.
-    static func layers(own: JSONValue?, mac: JSONValue? = nil) -> [JSONValue] {
+    /// A key's layers: `own` at the fixture scope's layer, Global beneath a project.
+    static func layers(own: JSONValue?, global: JSONValue? = nil) -> [JSONValue] {
         func layer(_ id: String, _ value: JSONValue?) -> JSONValue {
             // A layer holding a value also serves its display, as the Gateway does.
             .object(["layer": .string(id)].merging(value.flatMap { $0.arrayValue?.isEmpty == true ? nil : $0 }.map { ["value": $0,
                 "display": .string($0.arrayValue?.compactMap(\.stringValue).joined(separator: ", ") ?? "")] } ?? [:]) { $1 })
         }
-        return project ? [layer("project", own), layer("mac", mac)] : [layer("mac", own)]
+        return project ? [layer("project", own), layer("global", global)] : [layer("global", own)]
     }
 
-    /// The Sources rows in the renderer fixture's resolved-key shape, set on the
-    /// Mac; `extensions` is the Mac's stored `sources.extensions`.
+    /// The Sources rows in the renderer fixture's resolved-key shape, set at
+    /// Global; `extensions` is Global's stored `sources.extensions`.
     static func keys(extensions: [String]) -> [JSONValue] {
         guard enabled else { return [] }
         return sourceKeys.map { row in
@@ -59,11 +59,12 @@ enum HostedExtensionsReview {
             let isExtensions = row.id == "sources.extensions"
             var object: [String: JSONValue] = [
                 "key": .string(row.id), "group": .string("sources"), "display": .string(isExtensions && !extensions.isEmpty ? extensions.joined(separator: ", ") : row.display),
-                "layer": .string("mac"), "applied": .bool(true), "value": isExtensions ? saved : row.value,
-                "layers": .array(isExtensions ? (project ? layers(own: nil, mac: saved) : layers(own: saved)) : [.object(["layer": .string("mac")])]),
-                "badges": .array([.object(["kind": .string("layer"), "label": .string("Set on Mac")])]),
+                "layer": .string("global"), "applied": .bool(true), "value": isExtensions ? saved : row.value,
+                "layers": .array(isExtensions ? (project ? layers(own: nil, global: saved) : layers(own: saved)) : [.object(["layer": .string("global")])]),
+                "badges": .array([]),
                 "presentation": .object(["label": .string(row.label), "help": .string(row.help), "order": .number(Double(row.order)),
-                    "importance": .string(row.importance), "control": .string(row.control), "valueKind": .string("stringList")]),
+                    "importance": .string(row.importance), "control": .string(row.control), "valueKind": .string("stringList"),
+                    "sessionOverridable": .bool(false), "projectSettable": .bool(false), "editable": .bool(row.control != "readOnly")]),
             ]
             if let subgroup = row.subgroup { object["subgroup"] = .string(subgroup) }
             return .object(object)

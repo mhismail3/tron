@@ -18,10 +18,9 @@ final class TronNewSessionUITests: XCTestCase {
             let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
             XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertFalse(app.buttons["settings-row-model.ref_role_chat_-reset"].exists)
-            XCTAssertFalse(app.buttons["Edit at Mac"].exists)
             XCTAssertFalse(row.buttons["Model"].exists, "Project values have no model-picker mutation route")
-            app.buttons["settings-row-model.ref_role_chat_-source"].tap()
-            XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
+            row.buttons.matching(NSPredicate(format: "label == %@", "Set by Project settings")).firstMatch.tap()
+            XCTAssertTrue(app.navigationBars.staticTexts["Project setting"].waitForExistence(timeout: 5))
             evidence(app, "1325-project-\(appearance)-source")
             app.buttons["Done"].firstMatch.tap()
             app.buttons["Done"].firstMatch.tap()
@@ -51,7 +50,7 @@ final class TronNewSessionUITests: XCTestCase {
             XCTAssertTrue(pulse.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertTrue(app.staticTexts["Project Settings"].exists)
             XCTAssertTrue(app.buttons["Done"].firstMatch.isHittable, "Chrome stays usable while content loads")
-            let workspace = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "View-only repository configuration")).firstMatch
+            let workspace = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Read-only Project settings")).firstMatch
             XCTAssertFalse(workspace.exists, "No partial content under the pulse: \(app.debugDescription)")
             evidence(app, "1333-project-\(appearance)-pulse")
             let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]

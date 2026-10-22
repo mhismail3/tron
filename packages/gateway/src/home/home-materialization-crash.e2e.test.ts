@@ -114,7 +114,7 @@ async function fixture() {
   const sessions: HomeSessionPort = {
     createHomeSession: async () => sessionId,
     currentSessionModel: () => null,
-    applySessionModel: async () => {},
+    homeModel: async () => undefined, chooseHomeModel: async () => {},
     sessionPresent: async () => true,
     sessionFile: async () => expectedPath,
     hasLiveRuntime: () => false,

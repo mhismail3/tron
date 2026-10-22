@@ -494,7 +494,7 @@ private actor HostedHomeShellGateway {
         var entry = profileEntry(id: profileItems[index].id, before: [], after: profileItems, undoOf: nil).objectValue!
         entry["actor"] = .object(["kind": .string("home"), "sessionId": .string("home-session")])
         entry["presentation"] = .object(["label": .string("Profile item"), "section": .string("context"), "actor": .string("Home"),
-            "layer": .string("Home profile"), "display": .object(["before": .string("Not in the profile"),
+            "layer": .string("Session"), "display": .object(["before": .string("Not in the profile"),
                 "after": .string("Inferred preference: \(profileItems[index].text)")])])
         entry["reason"] = .string("You asked for screenshots before testing on every UI change")
         let changeID = entry["changeId"]!.stringValue!
@@ -664,12 +664,12 @@ private actor HostedHomeShellGateway {
         let old = before.first { $0.id == id }, new = after.first { $0.id == id }
         var entry: [String: JSONValue] = [
             "changeId": .string(UUID().uuidString.lowercased()), "at": .string(ISO8601DateFormatter().string(from: Date())),
-            "actor": .object(["kind": .string("ui")]), "target": .object(["kind": .string("home")]), "layer": .string("profile"),
+            "actor": .object(["kind": .string("ui")]), "target": .object(["kind": .string("home")]), "layer": .string("session"),
             "key": .string("home.profile.item"), "qualifiers": .object(["note": .string(id)]), "op": .string("set"),
             "before": old.map { try! JSONValue.encode($0) } ?? .null, "after": new.map { try! JSONValue.encode($0) } ?? .null,
             "tier": .string("quiet"), "status": .string("applied"),
             "presentation": .object(["label": .string("Profile item"), "section": .string("context"), "actor": .string("You"),
-                "layer": .string("Home profile"), "display": .object(["before": .string(display(old)), "after": .string(display(new))])]),
+                "layer": .string("Session"), "display": .object(["before": .string(display(old)), "after": .string(display(new))])]),
         ]
         if let undoOf { entry["undoOf"] = .string(undoOf) }
         return .object(entry)
@@ -735,10 +735,10 @@ private actor HostedHomeShellGateway {
             let entries: [JSONValue] = ProcessInfo.processInfo.arguments.contains("-home-settings-history") ? [
                 .object(["changeId": .string("worker-setting"), "at": .string("2026-10-11T12:00:00Z"),
                     "actor": .object(["kind": .string("worker"), "sessionId": .string("worker-session"), "taskId": .string("active")]),
-                    "target": .object(["kind": .string("home")]), "layer": .string("profile"), "key": .string("model.thinking[role=worker]"),
+                    "target": .object(["kind": .string("home")]), "layer": .string("session"), "key": .string("model.thinking[role=worker]"),
                     "op": .string("set"), "before": .string("off"), "after": .string("high"), "tier": .string("notify"),
                     "status": .string("applied"), "presentation": .object(["label": .string("Worker thinking"),
-                        "actor": .string("Worker"), "layer": .string("Home profile"), "section": .string("model"),
+                        "actor": .string("Worker"), "layer": .string("Session"), "section": .string("model"),
                         "display": .object(["before": .string("Off"), "after": .string("High")])])])
             ] : []
             // The feed's default filter is agents and outside, as the Gateway's is.
@@ -884,7 +884,7 @@ private actor HostedHomeShellGateway {
             return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
         case "settings.resolve":
             if sheetState == "delayed-status", !configuredModels.isEmpty { try? await Task.sleep(for: .seconds(4)) }
-            return (foreground.settings(homeSettingsResolution(session: params["target"]?.objectValue?["kind"]?.stringValue == "session")), nil)
+            return (foreground.settings(homeSettingsResolution()), nil)
         case "settings.options":
             return (homeSettingsOptions(params), nil)
         case "settings.approvals":
@@ -905,18 +905,18 @@ private actor HostedHomeShellGateway {
             controlCount += 1
             let memoryChange = params["changes"]?.arrayValue?.first?.objectValue
             if method == "settings.change", memoryChange?["key"]?.stringValue == "model.ref[role=chat]" {
-                guard memoryChange?["layer"]?.stringValue == "profile" else { return taskRefusal() }
+                guard memoryChange?["layer"]?.stringValue == "session" else { return taskRefusal() }
                 settingsModelOverridden = memoryChange?["op"]?.stringValue != "unset"
                 return (fixtureSettingsChangeResult(key: "model.ref[role=chat]"), nil)
             }
             if method == "settings.change", memoryChange?["key"]?.stringValue == "tools.active" {
-                guard memoryChange?["layer"]?.stringValue == "profile",
+                guard memoryChange?["layer"]?.stringValue == "session",
                       params["target"]?.objectValue?["kind"]?.stringValue == "home" else { return taskRefusal() }
                 homeTools = memoryChange?["value"]?.arrayValue?.compactMap(\.stringValue) ?? Self.defaultHomeTools
                 return (fixtureSettingsChangeResult(key: "tools.active"), nil)
             }
             if method == "settings.change", memoryChange?["key"]?.stringValue == "model.thinking[role=worker]" {
-                guard memoryChange?["layer"]?.stringValue == "profile" else { return taskRefusal() }
+                guard memoryChange?["layer"]?.stringValue == "session" else { return taskRefusal() }
                 workerThinking = memoryChange?["value"]?.stringValue ?? "sameAsHome"
                 return (fixtureSettingsChangeResult(key: "model.thinking[role=worker]"), nil)
             }
@@ -1025,7 +1025,7 @@ private actor HostedHomeShellGateway {
     ]
     private static let defaultHomeTools = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
                              "web_search", "web_fetch", "session_search", "session_read", "knowledge", "read_file", "settings"]
-    private func homeSettingsResolution(session: Bool) -> JSONValue {
+    private func homeSettingsResolution() -> JSONValue {
         let modelValue: JSONValue = .object(["provider": .string("anthropic"), "id": .string(settingsModelOverridden ? "claude-opus-5-5" : "claude-haiku-5-5")])
         let modelKey: JSONValue = .object([
             "key": .string("model.ref[role=chat]"), "group": .string("model"),
@@ -1094,23 +1094,7 @@ private actor HostedHomeShellGateway {
                 order: 20, essential: true, layer: "session", options: [.object(["value": .string("high"), "label": .string("High")])]),
             HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "session")
         ] + homeKeys
-        let keys = profileKeys.map { value -> JSONValue in
-            guard session, var row = value.objectValue,
-                  ["tools.active", "model.thinking[role=chat]"].contains(row["key"]?.stringValue ?? "") else { return value }
-            let tools = row["key"]?.stringValue == "tools.active"
-            let retained: JSONValue = tools ? .array(Self.defaultHomeTools.dropLast().map(JSONValue.string)) : .string("medium")
-            let display = tools ? "\(Self.defaultHomeTools.count - 1) tools" : "Medium"
-            row["layers"] = .array([
-                .object(["layer": .string("session"), "value": retained, "display": .string(display)]),
-                .object(["layer": .string("session"), "value": row["value"] ?? .null, "display": row["display"] ?? .null])
-            ])
-            row["value"] = retained; row["display"] = .string(display)
-            row["layer"] = .string("session"); row["origin"] = .string("launch")
-            row["badges"] = .array([.object(["kind": .string("source"), "label": .string("From Home profile at start"),
-                "detail": .string("Retained at chapter launch; the current profile can differ.")])])
-            return .object(row)
-        }
-        return .object(["keys": .array(keys), "sections": .array(HostedSettingsReviewSchema.sections)])
+        return .object(["keys": .array(profileKeys), "sections": .array(HostedSettingsReviewSchema.sections)])
     }
 
     private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {
@@ -1150,18 +1134,18 @@ private actor HostedHomeShellGateway {
             ])])])])
         }
         return .object(["dryRun": .bool(true), "status": .string("applied"), "tier": .string("notify"),
-            "changes": .array([.object(["key": change["key"] ?? .string(""), "layer": change["layer"] ?? .string("profile"),
+            "changes": .array([.object(["key": change["key"] ?? .string(""), "layer": change["layer"] ?? .string("session"),
                 "status": .string("applied"), "tier": .string("notify"), "before": .string(workerThinking), "after": value])])])
     }
 
-    /// One pending Mac-layer change as `settings.approvals` serves it (gateway approvalProjection).
+    /// One pending Global change as `settings.approvals` serves it (gateway approvalProjection).
     private static func settingsApprovalRequest(
         requestId: String, digest: String, actor: JSONValue, requester: String, key: String, label: String,
         qualifiers: [String: String]?, before: JSONValue, after: JSONValue, display: (String, String), confirm: String?
     ) -> JSONValue {
         var change: [String: JSONValue] = [
             "changeId": .string("change-\(requestId)"), "key": .string(key), "label": .string(label),
-            "layer": .string("mac"), "op": .string("set"), "tier": .string("approve"), "tierBasis": .object([:]),
+            "layer": .string("global"), "op": .string("set"), "tier": .string("approve"), "tierBasis": .object([:]),
             "before": before, "after": after,
             "display": .object(["before": .string(display.0), "after": .string(display.1)]),
         ]

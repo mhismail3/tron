@@ -220,8 +220,8 @@ describe("Mac Terminal", () => {
       // Enrollment is the maintainer's tap through settings.change: applied at
       // its approve tier and recorded.
       const enrolled = await service.invoke(client(phone), "settings.change", {
-        commandId: commandId(), target: { kind: "mac" },
-        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
+        commandId: commandId(), target: { kind: "global" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: key.publicKey }],
       }) as unknown as { status: string; changes: Array<{ tier: string; status: string }> };
       expect(enrolled).toMatchObject({ status: "applied", changes: [{ status: "applied", tier: "approve" }] });
       const bytes = await readFile(authorizedKeys);
@@ -262,8 +262,8 @@ describe("Mac Terminal", () => {
       // Revocation from the iPhone: the key unset through the same path.
       ({ service } = await gateway(tronHome, sshDirectory, hostDirectory, port));
       const revoked = await service.invoke(client(phone), "settings.change", {
-        commandId: commandId(), target: { kind: "mac" },
-        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "unset" }],
+        commandId: commandId(), target: { kind: "global" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "unset" }],
       }) as unknown as { status: string; changes: Array<{ tier: string }> };
       expect(revoked).toMatchObject({ status: "applied", changes: [{ tier: "notify" }] });
       expect((await readFile(authorizedKeys)).equals(handWritten)).toBe(true);
@@ -274,15 +274,15 @@ describe("Mac Terminal", () => {
       // Revoking the paired device removes its key as a logged change.
       ({ service, devices } = await gateway(tronHome, sshDirectory, hostDirectory, port));
       await service.invoke(client(phone), "settings.change", {
-        commandId: commandId(), target: { kind: "mac" },
-        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
+        commandId: commandId(), target: { kind: "global" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: key.publicKey }],
       });
       expect((await connect(endpoint, key.privateKeyPEM)).outcome).toBe("ok");
       const otherPhone = await pair("Second iPhone");
       // An iPhone enrolls only its own key, so a device revoke always finds it.
       await expect(service.invoke(client(otherPhone), "settings.change", {
-        commandId: commandId(), target: { kind: "mac" },
-        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
+        commandId: commandId(), target: { kind: "global" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: key.publicKey }],
       })).rejects.toMatchObject({ code: "invalid_request" });
       // A key that cannot be removed (authorized_keys made a symlink) fails the
       // revoke and leaves the device paired, so it can be retried; a revoked
@@ -341,8 +341,8 @@ describe("Mac Terminal", () => {
       const phone = await pair("Fixture iPhone");
       const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
       await service.invoke(client(phone), "settings.change", {
-        commandId: commandId(), target: { kind: "mac" },
-        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
+        commandId: commandId(), target: { kind: "global" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: key.publicKey }],
       });
       const status = await service.invoke(client(phone), "macTerminal.status", {}) as unknown as MacTerminalStatus;
       expect(status.hostCommand).toEqual(hostCommand);

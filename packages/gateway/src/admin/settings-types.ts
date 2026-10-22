@@ -6,7 +6,7 @@ import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from ".
 
 
 /** Private persistence metadata, never an outward settings scope or grant. */
-export type StoreLayer = "chat" | "profile" | "project" | "mac" | "builtin";
+export type StoreLayer = "session" | "home" | "project" | "global" | "default";
 
 export const LAYER_LABELS: Record<LayerId, string> = {
   project: "Project", session: "Session", global: "Global",

@@ -125,7 +125,7 @@ final class TronProjectTrustUITests: XCTestCase {
         XCTAssertTrue(counts(app, contain: "floor:approve previews:0 applies:0"), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Project trust: loosening"].exists
                       && row.staticTexts["Lowering this floor requires your confirmation."].exists, app.debugDescription)
-        assertEffectiveSource(app, row: row, "Tron default")
+        assertOverridden(app, row: row, false)
 
         // Lowering: the dry run carries confirm text, and nothing is applied until confirmed.
         choose(app, row: row, option: "Quiet")
@@ -141,21 +141,21 @@ final class TronProjectTrustUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         confirm.tap()
         XCTAssertTrue(counts(app, contain: "floor:quiet previews:2 applies:1"), app.debugDescription)
-        XCTAssertTrue(waitForValue(row.buttons["settings-choice-control"], "Quiet"), app.debugDescription)
-        // The override is now the Mac layer's.
-        assertEffectiveSource(app, row: row, "Set on Mac")
+        XCTAssertTrue(waitForValue(row.buttons["settings-choice-control"].firstMatch, "Quiet"), app.debugDescription)
+        // The override is now Global's.
+        assertOverridden(app, row: row, true)
 
         // Raising: the dry run needs no confirm, so the choice applies directly.
         choose(app, row: row, option: "Approve")
         XCTAssertTrue(counts(app, contain: "floor:approve previews:3 applies:2"), app.debugDescription)
         XCTAssertFalse(app.buttons["Change setting"].firstMatch.exists)
-        XCTAssertTrue(waitForValue(row.buttons["settings-choice-control"], "Approve"), app.debugDescription)
+        XCTAssertTrue(waitForValue(row.buttons["settings-choice-control"].firstMatch, "Approve"), app.debugDescription)
         keepScreenshot(app, name: "758-permission-floor-raise-applied")
     }
 
     @MainActor
     private func choose(_ app: XCUIApplication, row: XCUIElement, option: String) {
-        let control = row.buttons["settings-choice-control"] // beside the row's Value & Source button
+        let control = row.buttons["settings-choice-control"].firstMatch
         XCTAssertTrue(control.waitForExistence(timeout: 5), app.debugDescription)
         control.tap()
         let slider = app.descendants(matching: .any)["settings-choice-slider"]
@@ -169,17 +169,12 @@ final class TronProjectTrustUITests: XCTestCase {
         XCTAssertTrue(slider.waitForNonExistence(timeout: 5), app.debugDescription)
     }
 
-    /// An editable row shows its help; its Value & Source names the effective layer (#1325).
+    /// The shared row offers its reset only for a value set at this scope (#1634).
     @MainActor
-    private func assertEffectiveSource(_ app: XCUIApplication, row: XCUIElement, _ source: String) {
-        row.buttons["\(row.identifier)-source"].tap()
-        let effective = app.descendants(matching: .any)["settings-provenance-effective"]
-        XCTAssertTrue(effective.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(effective.staticTexts[source].exists, effective.debugDescription)
-        let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last { $0.isHittable }
-        XCTAssertNotNil(done, app.debugDescription)
-        done?.tap()
-        XCTAssertTrue(effective.waitForNonExistence(timeout: 5), app.debugDescription)
+    private func assertOverridden(_ app: XCUIApplication, row: XCUIElement, _ overridden: Bool) {
+        let reset = app.buttons["\(row.identifier)-reset"]
+        if overridden { XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription) }
+        else { XCTAssertFalse(reset.exists, app.debugDescription) }
     }
 
     @MainActor

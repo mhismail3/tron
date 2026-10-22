@@ -209,8 +209,7 @@ const settingsModel = new SettingsModel({
     : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
 });
 const settingsRecord = new SettingsChangeRecord(config.tronHome);
-// Outside changes (docs/settings-model.md 5.6): every settings read compares the
-// Mac and Project stores with what Tron last observed; file events only prompt.
+// Outside changes (settings-model.md 5.6): reads compare Global/Project with what Tron last saw.
 const outsideSettings = new OutsideChanges(config.tronHome, config.agentDir, settingsRecord, settingsModel.observedReaders);
 settingsModel.observeOutside(outsideSettings);
 const modelConfig = new ModelConfigService(config.agentDir);
@@ -510,7 +509,7 @@ const terminal = new TerminalService(
   config.terminalReplayBytes,
   (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
   {
-    // The Mac-layer setting is read at every idle pass, so a change applies
+    // The Global setting is read at every idle pass, so a change applies
     // without a restart (#479, docs/settings-model.md).
     idle: {
       idleLimitMs: () => terminalIdleLimitMs(settingsModel),
@@ -795,8 +794,7 @@ async function runStopDrain(): Promise<void> {
   }
 }
 
-// The one settings change path (docs/settings-model.md 5). Agents reach it
-// through the `settings` tool; the slots read it late-bound from the registry.
+// The one settings change path (settings-model.md 5), for agents' tool and the slots alike.
 const settingsRisk = new SettingsRiskEvaluator(jevClient);
 const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
   assessRisk: async (input, signal) => {

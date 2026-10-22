@@ -1,22 +1,22 @@
-/** Builds a `settings.change` request for one Chat-layer key of a session, the
+/** Builds a `settings.change` request for one Session-scope key of a session, the
  * way the iPhone sends it: the key, its value and the fence the client read
  * (docs/settings-model.md 5.2). */
-export type ChatSetting = "model" | "thinking" | "contextWindow" | "tools";
+export type SessionSetting = "model" | "thinking" | "contextWindow" | "tools";
 
-export function chatSettingChange(setting: ChatSetting, params: Record<string, unknown>): Record<string, unknown> {
+export function sessionSettingChange(setting: SessionSetting, params: Record<string, unknown>): Record<string, unknown> {
   const fence = {
     ...(params.expectedRuntimeGeneration === undefined ? {} : { runtimeGeneration: params.expectedRuntimeGeneration }),
     ...(params.expectedModel === undefined ? {} : { model: params.expectedModel }),
     ...(params.expectedRevision === undefined ? {} : { revision: params.expectedRevision }),
   };
   const change = setting === "model"
-    ? { key: "model.ref[role=chat]", layer: "chat", op: "set", value: { provider: params.provider, id: params.modelId } }
+    ? { key: "model.ref[role=chat]", layer: "session", op: "set", value: { provider: params.provider, id: params.modelId } }
     : setting === "thinking"
-      ? { key: "model.thinking[role=chat]", layer: "chat", op: "set", value: params.level }
+      ? { key: "model.thinking[role=chat]", layer: "session", op: "set", value: params.level }
       : setting === "tools"
-        ? { key: "tools.active", layer: "chat", op: "set", value: params.tools }
+        ? { key: "tools.active", layer: "session", op: "set", value: params.tools }
         : {
-            key: "model.contextWindow", layer: "chat", qualifiers: { model: `${params.provider}/${params.modelId}` },
+            key: "model.contextWindow", layer: "session", qualifiers: { model: `${params.provider}/${params.modelId}` },
             ...(params.contextWindow === null || params.contextWindow === undefined ? { op: "unset" } : { op: "set", value: params.contextWindow }),
           };
   return {
@@ -27,7 +27,7 @@ export function chatSettingChange(setting: ChatSetting, params: Record<string, u
   };
 }
 
-/** The applied revision a Chat-layer `settings.change` returned. */
+/** The applied revision a Session-scope `settings.change` returned. */
 export function changedRevision(result: unknown): number | undefined {
   return (result as { changes?: Array<{ revision?: number }> } | undefined)?.changes?.[0]?.revision;
 }
@@ -40,7 +40,7 @@ export function homeMemoryChange(params: Record<string, unknown>): Record<string
   const ref = model as { provider: string; id: string } | undefined;
   return {
     commandId, target: { kind: "home" },
-    changes: [{ key: "model.queue[role=background]", layer: "profile", op: "set", ...(ref === undefined ? {} : { value: [`${ref.provider}/${ref.id}`] }) }],
+    changes: [{ key: "model.queue[role=background]", layer: "session", op: "set", ...(ref === undefined ? {} : { value: [`${ref.provider}/${ref.id}`] }) }],
     ...rest,
   };
 }

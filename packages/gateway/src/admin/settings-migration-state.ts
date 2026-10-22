@@ -81,9 +81,9 @@ export function migrationSetPath(document: Document, path: readonly string[], va
   }
   Object.defineProperty(current, path.at(-1)!, { value: structuredClone(value), writable: true, enumerable: true, configurable: true });
 }
-export interface MigrationDefaults { mac: Document; gateway: Document; floors: SettingsStores["floors"] }
+export interface MigrationDefaults { global: Document; gateway: Document; floors: SettingsStores["floors"] }
 function currentGlobal(key: KeyDeclaration, qualifiers: Record<string, string>, defaults: MigrationDefaults): unknown {
-  const stores: SettingsStores = { layers: ["mac", "builtin"], ...defaults, trust: {}, macTerminal: {} };
+  const stores: SettingsStores = { layers: ["global", "default"], ...defaults, trust: {}, macTerminal: {} };
   return resolveInstance(key, qualifiers, stores, { format: { modelName: () => undefined }, options: { clamp: (_source, _dependency, value) => value } }, () => undefined).value;
 }
 
@@ -114,8 +114,8 @@ export function migrateSessionSettings(value: Document, file: string, defaults: 
       if (["mac", "builtin", "profile"].includes(String(old.from)) && key.sessionOverridable
         && JSON.stringify(old.value) !== JSON.stringify(global)) {
         converted.from = "session";
-        const binding = key.layers.chat;
-        if (binding?.store === "chat-settings") migrationSetPath(data.settings, binding.path, old.value);
+        const binding = key.layers.session;
+        if (binding?.store === "session-settings") migrationSetPath(data.settings, binding.path, old.value);
         notes.push({ file, key: id, reason: "preserved differing inherited snapshot as override" });
       }
       snapshots[id] = converted;
@@ -133,13 +133,13 @@ export function foldHomeChapter(profile: Document, settings: Document | undefine
   const fixed = settings?.fixed === undefined ? {} : migrationObject(settings.fixed, file);
   for (const declared of KEYS) {
     const key = keyForHome(declared, true);
-    const destination = key.layers.profile;
-    const source = key.layers.chat;
-    if (!key.sessionOverridable || destination?.store !== "profile" || !source) continue;
+    const destination = key.layers.home;
+    const source = key.layers.session;
+    if (!key.sessionOverridable || destination?.store !== "home" || !source) continue;
     let value: unknown;
-    if (source.store === "chat-settings" && settings?.settings !== undefined) {
+    if (source.store === "session-settings" && settings?.settings !== undefined) {
       value = source.path.reduce<unknown>((current, field) => current && typeof current === "object" && Object.hasOwn(current, field) ? (current as Document)[field] : undefined, settings.settings);
-    } else if (source.store === "chat") {
+    } else if (source.store === "session") {
       const snapshot = fixed[key.id] === undefined ? undefined : migrationObject(fixed[key.id], file);
       // A recorded inherited frame is not a user choice. Without provenance,
       // the existing reader treats SDK model/thinking records as legacy choices.

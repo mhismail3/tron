@@ -68,7 +68,7 @@ async function fixture() {
     return runtime;
   };
   const modelRuntime = await runtimeFactory();
-  // Mac layer.
+  // Global scope.
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
     sessionDir,
     defaultProvider: model.provider,

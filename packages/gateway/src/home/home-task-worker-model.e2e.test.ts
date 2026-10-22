@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { setModelQueue, settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Model, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
-import { CHAT_SETTINGS_ENTRY, readChatFixedSettings } from "../sessions/chat-settings.js";
+import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../sessions/session-settings.js";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
@@ -99,7 +99,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const mac = `${f.model.provider}/${f.model.id}`;
     const home = `${f.model.provider}/${TASK_REASONING_MODEL_ID}`;
     for (const role of ["subagent", "background"] as const) {
-      await owners.settingsChanges.change({ kind: "mac" }, [{ key: `model.queue[role=${role}]`, layer: "mac", op: "set", value: [mac] }],
+      await owners.settingsChanges.change({ kind: "global" }, [{ key: `model.queue[role=${role}]`, layer: "global", op: "set", value: [mac] }],
         { actor: { kind: "ui", id: "fixture" }, commandId: `mac-${role}` });
       await setModelQueue(queueOwners(f), role, [home]);
       expect(await f.registry.modelQueue!.queue(role), `ordinary ${role} queue must not inherit Home`).toEqual([mac]);
@@ -158,7 +158,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
       model: `${f.model.provider}/${TASK_REASONING_MODEL_ID}`, thinking: "high", modelSource: "worker queue", thinkingSource: "Home profile",
       note: "max clamped to high", queue: [{ model: `${f.model.provider}/${TASK_REASONING_MODEL_ID}`, available: true }] } });
     const entries = await f.registry.readTaskEvidence(task.sessionId!);
-    const settingsEntry = entries.findLast(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY);
+    const settingsEntry = entries.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY);
     expect(settingsEntry?.type === "custom" ? settingsEntry.data : undefined).toMatchObject({ fixed: {
       "model.ref[role=chat]": { from: "delegate", value: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID } },
       "model.thinking[role=chat]": { from: "delegate", value: "high" },
@@ -177,6 +177,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
 
   it("starts an explicit model that lacks Home's thinking at the closest supported level, and the brief says so (Q23)", async () => {
     const f = await fixture();
+    installSettings(f);
     const home = await f.registry.acquire(f.home.sessionId);
     await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
     await home.setThinking("high");
@@ -189,7 +190,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const task = await f.registry.homeOwner().taskStatus("explicit-clamp");
     expect(task.intent.text).toContain("Worker choice: model");
     expect(task.intent.text).toContain("high clamped to off");
-    expect(readChatFixedSettings(await f.registry.readTaskEvidence(task.sessionId!))["model.thinking[role=chat]"]).toMatchObject({ from: "delegate", value: "off" });
+    expect(readSessionFixedSettings(await f.registry.readTaskEvidence(task.sessionId!))["model.thinking[role=chat]"]).toMatchObject({ from: "delegate", value: "off" });
   });
 
   it("skips an unregistered model and a provider at 95% usage in the worker queue, and tells Home and the worker why", async () => {
@@ -264,7 +265,8 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
     const { observed } = await delegateThroughHome(f, { taskId: "live-home-model", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "live-home-model");
-    expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: undefined }]);
+    // The worker runs Home's own live thinking, which Home's saved settings resolve.
+    expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: home.snapshot().thinkingLevel }]);
     const direct = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "ordinary-default-control", intent: "Finite work", target: f.cwd });
     await direct.completion;
     const worker = await f.registry.acquire(direct.sessionId);
@@ -275,6 +277,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
 
   it("defaults a worker to Home's live model and thinking, and tells Home that identity", async () => {
     const f = await fixture();
+    installSettings(f);
     const home = await f.registry.acquire(f.home.sessionId);
     await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
     await home.setThinking("high");
@@ -289,6 +292,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
 
   it("accepts thinking alone for Home's current model", async () => {
     const f = await fixture();
+    installSettings(f);
     const home = await f.registry.acquire(f.home.sessionId);
     await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
     await home.setThinking("high");
@@ -422,26 +426,26 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const owners = (cold as unknown as { settingsOwners: {
       model: ReturnType<typeof settingsDependencies>["settingsModel"];
     } }).settingsOwners;
-    const source = { cwd: f.cwd, home: false, chat: worker.settingsChatLayer(), modelRuntime: worker.modelRuntime };
+    const source = { cwd: f.cwd, home: false, session: worker.settingsSessionLayer(), modelRuntime: worker.modelRuntime };
     const keys = ["model.queue[role=worker]", "model.queue[role=subagent]"];
     const retained = await owners.model.resolve({ kind: "session", sessionId: worker.id }, source, keys);
     expect(retained.keys).toHaveLength(2);
     for (const row of retained.keys) expect(row).toMatchObject({
-      value: captured, origin: "launch", layer: "chat", fixedAt: { from: "delegate", via: "home-profile" },
+      value: captured, layer: "session", fixedAt: { from: "delegate", via: "home-profile" },
     });
     // A pre-snapshot worker has no queue launch evidence. Build those actual
     // persisted bytes only after its owner has shut down, then cold-open them.
     const path = worker.sessionFile!;
     await cold.dispose();
     const entries = (await readFile(path, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
-    for (const entry of entries) if (entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY && entry.data?.fixed) {
+    for (const entry of entries) if (entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY && entry.data?.fixed) {
       for (const key of keys) delete entry.data.fixed[key];
     }
     await writeFile(path, entries.map(entry => JSON.stringify(entry)).join("\n") + "\n");
     const legacy = await f.restart();
     const legacyWorker = await legacy.acquire(task.sessionId!);
     expect(legacyWorker.snapshot().model).toMatchObject({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
-    for (const key of keys) expect(legacyWorker.settingsChatLayer().fixed?.[key]).toBeUndefined();
+    for (const key of keys) expect(legacyWorker.settingsSessionLayer().fixed?.[key]).toBeUndefined();
     // No task-specific module may be bound to a nonexistent launch snapshot.
     expect(await readdir(join(f.tronHome, "gateway", "model-queue-sessions"))).toEqual([]);
   }, 60_000); // Managed extension startup plus two cold reopens; not a 15 s latency contract.
@@ -489,7 +493,7 @@ describe("Home task budget", () => {
   const install = (f: Awaited<ReturnType<typeof fixture>>) =>
     settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => f.registry.homeOwner(), registry: f.registry }).settingsChanges;
   const setBudget = (changes: ReturnType<typeof install>, value: Record<string, number> | undefined, context: Parameters<ReturnType<typeof install>["change"]>[2] = ui) =>
-    changes.change({ kind: "home" }, [{ key: "permissions.budget.task", layer: "profile", op: value ? "set" : "unset", ...(value ? { value } : {}) }], context);
+    changes.change({ kind: "home" }, [{ key: "permissions.budget.task", layer: "session", op: value ? "set" : "unset", ...(value ? { value } : {}) }], context);
 
   it("stops a task at the turn boundary that reaches its budget: limited, budget, no further model request", async () => {
     const f = await fixture();

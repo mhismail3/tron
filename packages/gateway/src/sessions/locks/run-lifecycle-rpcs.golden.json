@@ -136,10 +136,10 @@
                 "reserveTokens": 2048,
                 "source": {
                   "enabled": "global",
-                  "instructions": "default",
+                  "instructions": "global",
                   "keepRecentTokens": "global",
                   "reserveTokens": "global",
-                  "thinkingLevel": "default"
+                  "thinkingLevel": "global"
                 },
                 "thinkingLevel": "inherit"
               }
@@ -664,13 +664,13 @@
         "fixed": {
           "context.images.autoResize": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "ref": "<id>",
             "value": true
           },
           "model.contextWindow": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "qualifiers": {
               "model": "tron-lock-run-lifecycle-rpcs/faux-1"
             },
@@ -679,7 +679,7 @@
           },
           "model.ref[role=chat]": {
             "at": "<timestamp>",
-            "from": "mac",
+            "from": "global",
             "qualifiers": {
               "role": "chat"
             },
@@ -691,7 +691,7 @@
           },
           "model.thinking[role=chat]": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "qualifiers": {
               "model": "tron-lock-run-lifecycle-rpcs/faux-1",
               "role": "chat"
@@ -701,7 +701,7 @@
           },
           "tools.active": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "ref": "<id>",
             "value": [
               "read",
@@ -732,13 +732,13 @@
         "fixed": {
           "context.images.autoResize": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "ref": "<id>",
             "value": true
           },
           "model.contextWindow": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "qualifiers": {
               "model": "tron-lock-run-lifecycle-rpcs/faux-1"
             },
@@ -747,7 +747,7 @@
           },
           "model.ref[role=chat]": {
             "at": "<timestamp>",
-            "from": "mac",
+            "from": "global",
             "qualifiers": {
               "role": "chat"
             },
@@ -759,7 +759,7 @@
           },
           "model.thinking[role=chat]": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "qualifiers": {
               "model": "tron-lock-run-lifecycle-rpcs/faux-1",
               "role": "chat"
@@ -769,7 +769,7 @@
           },
           "tools.active": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "ref": "<id>",
             "value": [
               "read",
@@ -789,7 +789,7 @@
         "requestPins": {
           "context.images.block": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "ref": "<id>",
             "value": false
           }
@@ -1046,22 +1046,15 @@
                       "layer": {
                         "anyOf": [
                           {
-                            "const": "chat",
+                            "const": "session",
                             "type": "string"
                           },
                           {
-                            "const": "profile",
-                            "type": "string"
-                          },
-                          {
-                            "const": "project",
-                            "type": "string"
-                          },
-                          {
-                            "const": "mac",
+                            "const": "global",
                             "type": "string"
                           }
-                        ]
+                        ],
+                        "description": "Session/Home override or Global. Project is read-only."
                       },
                       "op": {
                         "anyOf": [

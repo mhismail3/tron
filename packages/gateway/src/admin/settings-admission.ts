@@ -9,15 +9,15 @@ import { assertNewModelChoice } from "../providers/openai-model-eligibility.js";
 
 /** The compaction owner supplies its boundary snapshot; settings owns all
  * precedence/qualification, including the operation's model instance. */
-export function compactionAdmission(settings: SettingsManager, chat: Record<string, unknown>, model?: string): CompactionConfiguration {
+export function compactionAdmission(settings: SettingsManager, session: Record<string, unknown>, model?: string): CompactionConfiguration {
   const slash = model?.indexOf("/") ?? -1;
   const ref = model && slash > 0 ? { provider: model.slice(0, slash), id: model.slice(slash + 1) } : undefined;
   const fields = { enabled: "context.compaction.enabled", reserveTokens: "context.compaction.reserveTokens",
     keepRecentTokens: "context.compaction.keepRecentTokens", instructions: "context.compaction.instructions", thinkingLevel: "model.thinking[role=summarizer]" } as const;
   const result = resolveSettings({ kind: "session", sessionId: "compaction" }, {
-    layers: ["project", "chat", "mac", "builtin"], chat: { settings: chat, ...(ref ? { model: ref } : {}) },
+    layers: ["project", "session", "global", "default"], session: { settings: session, ...(ref ? { model: ref } : {}) },
     project: { root: "", document: settings.getProjectSettings() as Record<string, unknown>, applied: settings.isProjectTrusted() },
-    mac: settings.getGlobalSettings() as Record<string, unknown>, gateway: {}, floors: {}, trust: {}, macTerminal: {},
+    global: settings.getGlobalSettings() as Record<string, unknown>, gateway: {}, floors: {}, trust: {}, macTerminal: {},
   }, { keys: Object.values(fields), format: { modelName: () => undefined }, options: { clamp: (_source, _dependency, value) => value } });
   const configuration: Record<string, unknown> = {}, source: Record<string, string> = {};
   for (const [field, key] of Object.entries(fields)) {
@@ -37,12 +37,16 @@ export function compactionAdmission(settings: SettingsManager, chat: Record<stri
 /** An admitted effective selection is not an edit to the stored override. The
  * SDK records the operational model; canonical fixed choice evidence continues
  * to own the inactive Session/delegated choice while Project masks it. */
-export async function applyModelAdmission(session: AgentSession, rows: Resolution["keys"], worker: boolean): Promise<void> {
+export async function applyModelAdmission(session: AgentSession, rows: Resolution["keys"], physical: boolean): Promise<void> {
   const row = rows.find(row => row.key === "model.ref[role=chat]");
   const ref = row?.value as { provider: string; id: string } | undefined;
-  if (ref) {
-    const model = worker ? session.modelRuntime.getPhysicalModel(ref.provider, ref.id) : session.modelRuntime.getModel(ref.provider, ref.id);
-    if (!model) throw new GatewayError("conflict", `${row?.layer === "project" ? "Project" : "Selected"} model ${ref.provider}/${ref.id} is unavailable for this session`);
+  const model = ref && (physical ? session.modelRuntime.getPhysicalModel(ref.provider, ref.id) : session.modelRuntime.getModel(ref.provider, ref.id));
+  // A Session choice this runtime cannot serve stays the SDK's; a required
+  // physical (Home, worker) or Project selection refuses rather than substitute.
+  if (ref && !model && (physical || row?.layer === "project")) {
+    throw new GatewayError("conflict", `${row?.layer === "project" ? "Project" : "Selected"} model ${ref.provider}/${ref.id} is unavailable for this session`);
+  }
+  if (ref && model) {
     if (row?.layer === "project") {
       await assertNewModelChoice(session.modelRuntime, ref.provider, ref.id);
       if (!(await session.modelRuntime.getAvailable()).some(candidate => candidate.provider === ref.provider && candidate.id === ref.id)) {

@@ -190,7 +190,9 @@ struct SettingsRendererView: View {
                                 TronGlassCard { instancesLink(many, count: group.keys.count) }
                             }
                         } else {
-                            TronSettingsGroup(group.title, detail: group.detail ?? (index == 0 ? section.note : nil)) {
+                            // Session and Home Settings keep #1478/#1510: a group its rows already name has no heading.
+                            TronSettingsGroup(selection == .sessionOverrides && Self.rowsNameGroup(group) ? nil : group.title,
+                                              detail: group.detail ?? (index == 0 ? section.note : nil)) {
                                 VStack(spacing: 0) {
                                     rows(group.keys, resolution: resolution, options: options, detailed: true, instanced: group.instanced)
                                 }

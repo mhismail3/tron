@@ -21,7 +21,7 @@ import {
   trustedDelegatedController,
 } from "./delegated-provider.js";
 import type { AgentMessage, AgentTurnDecision, ThinkingLevel } from "../kernel/pi/agent-core.js";
-import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins, readChatFixedSettings, readChatToolChoice } from "./chat-settings.js";
+import { SESSION_SETTINGS_ENTRY, changeSessionSetting, readSessionSettings, readSessionRequestPins, readSessionFixedSettings, readSessionToolChoice } from "./session-settings.js";
 import { constants, existsSync, lstatSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
@@ -64,7 +64,7 @@ import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../kernel/host/session-profile.js";
-import type { ChangeContext, ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
+import type { ChangeContext, SessionAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
 import type { Actor } from "../admin/settings-record.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -168,7 +168,7 @@ import { resourceDistribution } from "./resource-distribution.js";
 import { skillTitle } from "./skill-title.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
-import type { ChatStore } from "../admin/settings-resolver.js";
+import type { SessionStore } from "../admin/settings-resolver.js";
 import { KEYS, hasCompactionApplier, schemaKey } from "../admin/settings-schema.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
@@ -508,7 +508,6 @@ export interface RuntimeSlotDependencies {
    * answers it from the Home chapter ledger; any other session is unsealed. */
   homeChapterState: (sessionId: string) => HomeChapterState;
 }
-
 
 type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
@@ -1224,34 +1223,28 @@ export class RuntimeSlot {
     return this.runtime.session.modelRuntime;
   }
 
-  /** A Home chapter has the Profile layer and no Project layer (settings-model.md 3.3). */
+  /** A Home chapter has the Home recipe and no Project layer (settings-model.md 3.3). */
   get isHomeChapter(): boolean {
     // Creation-time Home is already isolated before its designation record is
     // committed. Settings/provenance must use that same runtime scope.
     return this.liveProfile().chapter || this.dependencies.homeChapterState(this.id).homeId !== undefined;
   }
 
-  /**
-   * The `settings` tool's view of this chat (docs/settings-model.md 5.1): its
-   * own session target, recorded as Home, a task worker or an agent. The tool
-   * runs inside this chat's run, and a Chat-layer value changes only while the
-   * chat is idle, so its own Chat layer is refused here rather than waiting on
-   * the lane the run holds; an approved pending change applies it later.
-   *
-   * Home may name a delegated worker with `taskId` (#1336): the target is then
-   * that worker's session, read and changed through the worker slot's own
-   * appliers (`taskWorkerSettingsSession`), and recorded as Home with the task.
-   */
+  /** Home's saved settings govern only a runtime running the Home profile; a
+   * disabled Home's session is an ordinary session with its own Session scope. */
+  get usesHomeSettings(): boolean {
+    return this.liveProfile().chapter;
+  }
+
+  /** The `settings` tool's view of this chat (settings-model.md 5.1). It runs inside the run that
+   * holds the lane, so lane setters refuse rather than wait; Home's `taskId` targets that worker (#1336). */
   private settingsToolAccess(): SettingsToolAccess | undefined {
     const owners = this.dependencies.settings();
     if (!owners) return undefined;
     const target = { kind: "session" as const, sessionId: this.id };
-    const busy = (): never => { throw new GatewayError("busy", "This chat's own Chat-layer settings change between runs, not during one"); };
+    const busy = (): never => { throw new GatewayError("busy", "This chat's own Session-scope settings change between runs, not during one"); };
     const source = () => ({
-      cwd: this.cwd,
-      home: this.isHomeChapter,
-      chat: this.settingsChatLayer(),
-      modelRuntime: this.modelRuntime,
+      ...this.settingsSource(),
       appliers: {
         setModel: busy, setThinking: busy, setContextWindow: busy, setTools: busy,
         // This tool already owns the running lane. It records the override;
@@ -1282,7 +1275,9 @@ export class RuntimeSlot {
         if (input.taskId === undefined) {
           return owners.changes.change(target, changes, {
             actor: actor(input.toolCallId), reason: input.reason, web: input.web, session: source(),
-            ...(this.isHomeChapter ? { homeChapter: this.homeSettingsChapter() } : {}),
+            // Home's own tool already owns its running lane: the saved change takes
+            // effect through the same in-turn appliers as an ordinary chat's.
+            ...(this.usesHomeSettings ? { homeChapter: { ...this.settingsSource(), sessionId: this.id, mutate: operation => operation({ appliers: source().appliers }) } } : {}),
             ...(input.dryRun ? { dryRun: true } : {}),
           });
         }
@@ -1299,20 +1294,11 @@ export class RuntimeSlot {
     };
   }
 
-  /**
-   * This chat's Chat layer and slot-lane appliers for a direct Gateway owner
-   * (Home's `settings` tool naming this worker, #1336). Unlike the iPhone's
-   * `settings.change`, no client fence is read: the caller resolved this slot
-   * itself, and the lane guards still apply. A running Home task worker accepts
-   * model, thinking and Run settings between provider requests
-   * (`liveTaskConfiguration`) and is told through `announce`.
-   */
-  taskWorkerSettingsSession(): SessionSettingsSource & { appliers: ChatAppliers } {
+  /** This worker's Session scope and lane appliers for Home's `settings` tool (#1336): no client
+   * fence (the caller resolved this slot); a running worker hears changes through `announce`. */
+  taskWorkerSettingsSession(): SessionSettingsSource & { appliers: SessionAppliers } {
     return {
-      cwd: this.cwd,
-      home: this.isHomeChapter,
-      chat: this.settingsChatLayer(),
-      modelRuntime: this.modelRuntime,
+      ...this.settingsSource(),
       appliers: {
         setModel: (ref, fixedAt) => this.setModel(ref.provider, ref.id, undefined, undefined, fixedAt),
         setThinking: (level, fixedAt) => this.setThinking(level as ThinkingLevel, undefined, undefined, fixedAt),
@@ -1324,13 +1310,8 @@ export class RuntimeSlot {
     };
   }
 
-  /**
-   * What Home reads about a worker's settings beside the resolved keys (#1336):
-   * `selected` is the model and thinking the next provider request uses;
-   * `lastResponse` is what the worker's latest assistant response actually ran
-   * on, the acknowledgment that a change took effect. While `running`, a
-   * selection that differs from `lastResponse` applies from the next request.
-   */
+  /** Home's view of a worker (#1336): `selected` drives the next request; `lastResponse` is what
+   * the latest reply ran on, so a difference while `running` applies from the next request. */
   taskWorkerSettingsState(): TaskWorkerSettingsState {
     const session = this.runtime.session;
     const last = session.messages.findLast(message => message.role === "assistant");
@@ -1343,14 +1324,8 @@ export class RuntimeSlot {
     };
   }
 
-  /**
-   * Whether this Home task worker's live task operation accepts configuration
-   * between provider requests (#1336): its task turn is streaming, or the task
-   * is held open between turns. Pi reads the selected model and thinking level
-   * at each next turn and request (`prepareNextTurn`, `prepareRequest`), so a
-   * change here never alters the request already in flight. Compaction and an
-   * unusable or stopping runtime still refuse.
-   */
+  /** A running task worker takes configuration between provider requests (#1336): Pi reads model
+   * and thinking per turn and request, so the in-flight request never changes. Compaction refuses. */
   private liveTaskConfiguration(): boolean {
     const worker = this.taskWorker;
     if (!worker?.acceptsSteering || this.disposed || this.shuttingDown || this.trustReloadPending || this.runPersistence.hasBlockedOwnershipWrite) return false;
@@ -1378,14 +1353,8 @@ export class RuntimeSlot {
     this.assertConfigurationIdle(initiatingWorkToken);
   }
 
-  /**
-   * One Gateway steer in the worker's ordered steering lane (#1336), shared with
-   * Home's and the maintainer's steering, so it is ordered with them and Stop
-   * recovery redelivers it like them. A streaming turn reads it at its next turn
-   * boundary, the same boundary whose request first uses the change; a task held
-   * between turns continues with it, as with any steer. Never throws: the change
-   * is already stored, so a refused steer is reported, not raised.
-   */
+  /** One steer in the worker's ordered steering lane (#1336), read at the boundary whose request
+   * first uses the change. Never throws: the change is stored, so a refused steer is reported. */
   async announceSettingsChange(notice: SettingsNotice): Promise<SettingsSignal | undefined> {
     const worker = this.taskWorker;
     if (!worker) return undefined;
@@ -1412,7 +1381,6 @@ export class RuntimeSlot {
     }
   }
 
-
   /** The tools this chat's selection may name: its registry, less hidden tools
    * (`setTools` refuses those). */
   settingsToolCatalog(): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
@@ -1436,21 +1404,23 @@ export class RuntimeSlot {
       });
   }
 
+  /** This chat's resolver input, with `session` standing in for its Session scope. */
+  settingsSource(session: SessionStore = this.settingsSessionLayer()): SessionSettingsSource {
+    return { cwd: this.cwd, home: this.usesHomeSettings, session, modelRuntime: this.runtime.session.modelRuntime };
+  }
+
   /** Requested choices come from canonical explicit/delegated evidence, not
    * an operational Project selection that currently masks those choices. */
-  settingsChatLayer(): ChatStore {
+  settingsSessionLayer(): SessionStore {
     this.assertNoTrustReload();
     const session = this.runtime.session;
     const policy = this.contextPolicies.get(session)?.snapshot();
     const branch = session.sessionManager.getBranch();
-    const fixed = readChatFixedSettings(branch);
+    const fixed = readSessionFixedSettings(branch);
     const modelChoice = fixed["model.ref[role=chat]"];
-    const choiceIndex = modelChoice ? branch.findIndex(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY
+    const choiceIndex = modelChoice ? branch.findIndex(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY
       && (entry.data as { fixed?: Record<string, { ref: string }> } | null)?.fixed?.["model.ref[role=chat]"]?.ref === modelChoice.ref) : -1;
-    const choice = (key: string, legacy: unknown) => {
-      const recorded = fixed[key];
-      return recorded ? recorded.from === "session" || recorded.from === "delegate" ? recorded.value : undefined : legacy;
-    };
+    const choice = (key: string, runtime: unknown) => !fixed[key] ? runtime : fixed[key].from === "session" || fixed[key].from === "delegate" ? fixed[key].value : undefined;
     const model = readWorkerQueueSelection(branch, choiceIndex) ?? choice("model.ref[role=chat]",
       session.model && { provider: session.model.provider, id: session.model.id }) as { provider: string; id: string } | undefined;
     const thinking = choice("model.thinking[role=chat]", session.thinkingLevel) as string | undefined;
@@ -1459,8 +1429,8 @@ export class RuntimeSlot {
       ...(thinking ? { thinking } : {}),
       ...(policy && policy.override !== null ? { contextWindow: { model: `${policy.model.provider}/${policy.model.id}`, value: policy.override } } : {}),
       tools: session.getActiveToolNames(),
-      settings: readChatSettings(session.sessionManager.getBranch()),
-      requestPins: readChatRequestPins(session.sessionManager.getBranch()),
+      settings: readSessionSettings(branch),
+      requestPins: readSessionRequestPins(branch),
       fixed,
     };
   }
@@ -1470,19 +1440,15 @@ export class RuntimeSlot {
     if (!owners) return;
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed before settings application");
     const branch = session.sessionManager.getBranch();
-    const previousPins = readChatRequestPins(branch);
-    const explicitSettings = readChatSettings(branch);
-    const { requestPins: _pins, ...chat } = this.settingsChatLayer();
-    const { settings, requestPins, admission } = await owners.model.requestSettings(this.id, {
-      cwd: this.cwd, home: this.isHomeChapter,
-      chat: { ...chat, settings: explicitSettings }, modelRuntime: session.modelRuntime,
-    }, previousPins);
+    const previousPins = readSessionRequestPins(branch);
+    const explicitSettings = readSessionSettings(branch);
+    const { requestPins: _pins, ...chat } = this.settingsSessionLayer();
+    const { settings, requestPins, admission } = await owners.model.requestSettings(this.id, this.settingsSource({ ...chat, settings: explicitSettings }), previousPins);
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during settings resolution");
     if (JSON.stringify(previousPins) !== JSON.stringify(requestPins)) {
-      const receiptId = randomUUID();
-      await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings: explicitSettings, requestPins, fixed: readChatFixedSettings(branch) }), receiptId);
+      await this.persistSessionSettings({ settings: explicitSettings, requestPins });
     }
-    await applyModelAdmission(session, admission, Boolean(this.taskWorker));
+    await applyModelAdmission(session, admission, Boolean(this.taskWorker) || this.liveProfile().physicalModelsOnly === true);
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during model admission");
     session.settingsManager.applyOverrides(settings);
     // These SDK controls are copied when Agent is created, not read from its
@@ -1497,29 +1463,26 @@ export class RuntimeSlot {
   private async persistChatRunSetting(key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting): Promise<number> {
     this.assertChapterWritable();
     const branch = this.sessionManager.getBranch();
-    const settings = changeChatSetting(readChatSettings(branch), key, value);
-    const fixed = readChatFixedSettings(branch);
+    const settings = changeSessionSetting(readSessionSettings(branch), key, value);
+    const fixed = readSessionFixedSettings(branch);
     if (schemaKey(key).timing === "fixed") {
       fixed[key] = { ...(fixedAt ?? { from: "session", at: new Date().toISOString(), ref: randomUUID() }), value };
     }
-    const requestPins = readChatRequestPins(branch);
+    const requestPins = readSessionRequestPins(branch);
     // Tier admission and timing are separate: lowering a floor must not make
     // an unapproved widening live. Only an approval or the maintainer's tap
     // releases the fixed-direction snapshot (including Follow the default).
     if (typeof schemaKey(key).timing !== "string" && allowFixedDirection) {
       const owners = this.dependencies.settings();
       if (!owners) throw new GatewayError("conflict", "Settings owner is unavailable");
-      const { requestPins: _pins, ...chat } = this.settingsChatLayer();
-      const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, {
-        cwd: this.cwd, home: this.isHomeChapter, chat: { ...chat, settings }, modelRuntime: this.runtime.session.modelRuntime,
-      }, [key]);
+      const { requestPins: _pins, ...chat } = this.settingsSessionLayer();
+      const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, this.settingsSource({ ...chat, settings }), [key]);
       const row = resolved.keys[0];
       if (!row) throw new GatewayError("conflict", "Settings default is unavailable");
       requestPins[key] = { value: row.value, from: row.layer, at: new Date().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) };
     }
-    const receiptId = randomUUID();
-    await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings, requestPins, fixed }), receiptId);
-    // The compaction projection follows the Chat value at once; its budgets
+    await this.persistSessionSettings({ settings, requestPins, fixed });
+    // The compaction projection follows the Session value at once; its budgets
     // reach the SDK at the next idle admission (refreshCompactionPolicy).
     if (hasCompactionApplier(schemaKey(key))) {
       try { this.compactionPolicies.get(this.runtime.session)?.refresh(); } catch { /* Published warning is authoritative. */ }
@@ -1531,37 +1494,34 @@ export class RuntimeSlot {
 
   /** Drop a fixed widening pin only after an approved/tapped default change.
    * The canonical chat entry makes the release survive a cold resume; explicit
-   * Chat values remain the source of truth and are never touched. */
-  async releaseInheritedImageBlock(layer: "mac" | "project"): Promise<void> {
+   * Session values remain the source of truth and are never touched. */
+  async releaseInheritedImageBlock(layer: "global" | "project"): Promise<void> {
     await this.lane.run(async () => {
       if (this.isDisposed) return;
       const branch = this.sessionManager.getBranch();
-      const pins = readChatRequestPins(branch);
+      const pins = readSessionRequestPins(branch);
       const pin = pins["context.images.block"];
       if (!pin || pin.value !== true) return;
-      const explicit = readChatSettings(branch);
+      const explicit = readSessionSettings(branch);
       const images = explicit.images;
       if (images && typeof images === "object" && Object.prototype.hasOwnProperty.call(images, "blockImages")) return;
       const owners = this.dependencies.settings();
       if (!owners) return;
-      const { requestPins: _pins, ...chat } = this.settingsChatLayer();
-      const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, {
-        cwd: this.cwd, home: this.isHomeChapter, chat, modelRuntime: this.runtime.session.modelRuntime,
-      }, ["context.images.block"]);
+      const { requestPins: _pins, ...chat } = this.settingsSessionLayer();
+      const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, this.settingsSource(chat), ["context.images.block"]);
       const row = resolved.keys[0];
       // Approval of a lower layer is not approval to release a higher layer's
       // fixed policy, even if that higher store is subsequently edited outside Tron.
       if (row?.value !== false || row.layer === "session"
-        || (layer === "mac" && row.layer === "project")) return;
+        || (layer === "global" && row.layer === "project")) return;
       delete pins["context.images.block"];
-      const receiptId = randomUUID();
-      await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId,
-        settings: explicit, requestPins: pins, fixed: readChatFixedSettings(branch) }), receiptId);
+      await this.persistSessionSettings({ settings: explicit, requestPins: pins });
     });
   }
 
   async setChatRunSetting(key: string, value: unknown, initiatingWorkToken?: string,
     expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, allowFixedDirection = false, fixedAt?: FixedSetting): Promise<number> {
+    if (this.usesHomeSettings && this.dependencies.settings()) return this.changeHomeRecipe(key, value, initiatingWorkToken);
     return this.lane.run(async () => {
       this.assertConfigurationAdmissible(initiatingWorkToken);
       if (expectation) this.assertConfigurationExpectation(expectation);
@@ -1960,11 +1920,6 @@ export class RuntimeSlot {
     return this.runtime.session.sessionManager.getEntries().length;
   }
 
-  get hasConversationMessage(): boolean {
-    return this.runtime.session.sessionManager.getEntries().some(entry => entry.type === "message"
-      && (entry.message.role === "user" || entry.message.role === "assistant"));
-  }
-
   /** Pi may reserve a future JSONL path before writing its first user or
    * assistant message. Catalog membership treats only an existing file as persisted. */
   get persistedSessionFile(): string | undefined {
@@ -2183,15 +2138,8 @@ export class RuntimeSlot {
       }
       const directBashProcesses = profile.directBash ? new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId()) : undefined;
       this.directBashProcesses = directBashProcesses;
-      const recordedProfileModel = profile.model?.recorded(sessionManager.getSessionId());
-      let selectedProfileModel = recordedProfileModel
-        ? modelRuntime.getPhysicalModel(recordedProfileModel.provider, recordedProfileModel.id)
-        : undefined;
-      if (recordedProfileModel && !selectedProfileModel) {
-        throw new GatewayError("conflict", "Tron Home's recorded model is unavailable or virtual");
-      }
       let initialModel: Model<never> | undefined;
-      if (!selectedProfileModel && sessionManager.getEntryCount() === 0) {
+      if (sessionManager.getEntryCount() === 0) {
         const eligibility = openAIModelEligibility(modelRuntime);
         await eligibility?.refresh();
         const defaultProvider = services.settingsManager.getDefaultProvider();
@@ -2213,22 +2161,20 @@ export class RuntimeSlot {
       }
       const startsNewChat = sessionManager.getEntryCount() === 0;
       // Pi treats a metadata-only chapter as new because it has no messages.
-      // Canonical thinking is nevertheless an existing Chat choice, not a default.
+      // Canonical thinking is nevertheless an existing Session choice, not a default.
       const recordedThinking = sessionManager.getBranch().some(entry => entry.type === "thinking_level_change");
       const settingsOwner = this.dependencies.settings();
       const launchDefaults = startsNewChat && settingsOwner ? await settingsOwner.model.resolve(
         { kind: "session", sessionId: sessionManager.getSessionId() },
-        { cwd: trust.cwd, home: profile.launchDefaults === "settings-profile-layer", chat: { settings: {} }, modelRuntime },
+        { cwd: trust.cwd, home: profile.launchDefaults === "settings-home-recipe", session: { settings: {} }, modelRuntime },
         ["model.ref[role=chat]", "model.thinking[role=chat]", "tools.active"], { storeState: false },
       ) : undefined;
       const profileModel = launchDefaults?.keys.find(row => row.key === "model.ref[role=chat]" && row.layer === "session")?.value as { provider: string; id: string } | undefined;
-      if (profile.launchDefaults === "settings-profile-layer" && profileModel) {
-        const configured = modelRuntime.getPhysicalModel(profileModel.provider, profileModel.id);
-        if (!configured) throw new GatewayError("conflict", "Home's configured profile model is unavailable or virtual");
-        selectedProfileModel = configured;
-      }
+      const selectedProfileModel = profile.launchDefaults === "settings-home-recipe" && profileModel
+        ? modelRuntime.getPhysicalModel(profileModel.provider, profileModel.id) : undefined;
+      if (profileModel && profile.launchDefaults === "settings-home-recipe" && !selectedProfileModel) throw new GatewayError("conflict", "Home's configured profile model is unavailable or virtual");
       // Pass the scope-resolved launch thinking explicitly: the SDK's merged
-      // per-model map otherwise lets a Mac value outrank a Project plain value.
+      // per-model map otherwise lets a Global value outrank a Project plain value.
       const launchThinking = launchDefaults?.keys.find(row => row.key === "model.thinking[role=chat]")?.value as ThinkingLevel | undefined;
       const created = await createAgentSessionFromServices({
         services,
@@ -2267,14 +2213,11 @@ export class RuntimeSlot {
       // restore, so a resumed, forked or reloaded chat would silently fall back
       // to the defaults and the next prompt would persist that (#327). Apply the
       // declared loadout here; a session without one keeps the defaults.
-      const toolChoice = readChatToolChoice(sessionManager.getBranch());
+      const toolChoice = readSessionToolChoice(sessionManager.getBranch());
       if (toolChoice && toolChoice.fixed?.from !== "project") created.session.setActiveToolsByName(toolChoice.tools);
-      else if (profile.launchDefaults === "settings-profile-layer") {
+      else if (profile.launchDefaults === "settings-home-recipe") {
         const tools = launchDefaults?.keys.find(row => row.key === "tools.active" && row.layer === "session")?.value;
         if (Array.isArray(tools)) created.session.setActiveToolsByName(tools.filter((name): name is string => typeof name === "string" && profile.tools?.includes(name) === true));
-      }
-      if (profile.model && startsNewChat && created.session.model) {
-        await profile.model.changed(sessionManager.getSessionId(), { provider: created.session.model.provider, id: created.session.model.id });
       }
       this.runtimeProfiles.set(created.session, profile);
       this.homeRequestPolicy = profile.requestPolicy
@@ -2283,7 +2226,7 @@ export class RuntimeSlot {
       const homeRequestPolicy = this.homeRequestPolicy;
       const compactionSession = created.session;
       compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir, compactionAdmission,
-        profile.compaction === "disabled" ? { disabled: true } : { chat: () => readChatSettings(compactionSession.sessionManager.getBranch()) });
+        profile.compaction === "disabled" ? { disabled: true } : { session: () => readSessionSettings(compactionSession.sessionManager.getBranch()) });
       const taskWorker = this.taskWorker;
       requestPipeline.install(created.session, {
         applySettings: () => this.applyLiveRunSettings(created.session),
@@ -2371,35 +2314,33 @@ export class RuntimeSlot {
     const owners = this.dependencies.settings();
     if (!owners) return;
     const session = this.runtime.session;
-    const keys = KEYS.filter(key => key.timing === "fixed" && (key.layers.chat?.store === "chat" || key.layers.chat?.store === "chat-settings"));
-    const defaults = await owners.model.resolve({ kind: "session", sessionId: this.id }, {
-      cwd: this.cwd, home: this.isHomeChapter, chat: { settings: {} }, modelRuntime: session.modelRuntime,
-    }, keys.map(key => key.id));
-    const actual = this.settingsChatLayer();
+    const keys = KEYS.filter(key => key.timing === "fixed" && (key.layers.session?.store === "session" || key.layers.session?.store === "session-settings"));
+    const defaults = await owners.model.resolve({ kind: "session", sessionId: this.id }, this.settingsSource({ settings: {} }), keys.map(key => key.id));
+    const actual = this.settingsSessionLayer();
     const policy = this.contextPolicies.get(session);
     const context = policy?.snapshot();
     const fixed: Record<string, FixedSetting> = {};
     for (const row of defaults.keys) {
-      const binding = schemaKey(row.key).layers.chat;
-      if (binding?.store !== "chat" && binding?.store !== "chat-settings") continue;
-      const value = binding.store === "chat-settings" ? row.value
+      const binding = schemaKey(row.key).layers.session;
+      if (binding?.store !== "session" && binding?.store !== "session-settings") continue;
+      const value = binding.store === "session-settings" ? row.value
         : binding.field === "contextWindow" ? context?.effective : actual[binding.field];
       if (value === undefined) continue;
       // Startup fallback/explicit Home choices are not attributed to a default
       // that did not supply them. Existing chats never acquire invented history.
-      const from = binding.store === "chat" && binding.field === "model" && row.value !== undefined && JSON.stringify(value) !== JSON.stringify(row.value)
+      const from = binding.store === "session" && binding.field === "model" && row.value !== undefined && JSON.stringify(value) !== JSON.stringify(row.value)
         ? "session" : row.layer;
       fixed[row.key] = { value, from, at: new Date().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) };
     }
     if (context && session.model) policy!.set({ provider: session.model.provider, id: session.model.id }, context.effective);
-    await this.persistFixedSettings(fixed);
+    await this.persistSessionSettings({ fixed });
   }
 
-  private async persistFixedSettings(fixed: Record<string, FixedSetting>): Promise<void> {
-    const branch = this.sessionManager.getBranch();
-    const receiptId = randomUUID();
-    await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId,
-      settings: readChatSettings(branch), requestPins: readChatRequestPins(branch), fixed }), receiptId);
+  /** One canonical Session settings entry; a part not given keeps the branch's current value. */
+  private async persistSessionSettings(entry: { settings?: Record<string, unknown>; requestPins?: Record<string, FixedSetting>; fixed?: Record<string, FixedSetting> }): Promise<void> {
+    const branch = this.sessionManager.getBranch(), receiptId = randomUUID();
+    await this.persistCanonicalCustomEntry(SESSION_SETTINGS_ENTRY, safeJson({ receiptId, settings: entry.settings ?? readSessionSettings(branch),
+      requestPins: entry.requestPins ?? readSessionRequestPins(branch), fixed: entry.fixed ?? readSessionFixedSettings(branch) }), receiptId);
   }
 
   /** Home’s explicit launch policy is canonical worker state, not a live Home
@@ -2408,14 +2349,14 @@ export class RuntimeSlot {
     return this.lane.run(async () => {
       this.assertConfigurationIdle();
       if (!this.taskWorker) throw new GatewayError("invalid_request", "Only an admitted Home task owns task queue launch inputs");
-      const fixed = readChatFixedSettings(this.sessionManager.getBranch());
+      const fixed = readSessionFixedSettings(this.sessionManager.getBranch());
       for (const role of ["worker", "subagent"] as const) {
         const key = `model.queue[role=${role}]`;
         const value = await schemaKey(key).type.validate(queues[role], key);
         fixed[key] = { value, from: "delegate", at: new Date().toISOString(), ref: randomUUID(),
           via: "home-profile", reason: "Resolved at task launch; later Home profile changes do not retarget this worker" };
       }
-      await this.persistFixedSettings(fixed);
+      await this.persistSessionSettings({ fixed });
     });
   }
 
@@ -2423,16 +2364,16 @@ export class RuntimeSlot {
     // Canonical launch inputs outlive the active task runtime. A cold-opened
     // completed worker still owns its recorded child policy; no marker flag or
     // current Home profile may replace that evidence.
-    const value = readChatFixedSettings(this.sessionManager.getBranch())[`model.queue[role=${role}]`]?.value;
+    const value = readSessionFixedSettings(this.sessionManager.getBranch())[`model.queue[role=${role}]`]?.value;
     if (value === undefined) return undefined;
     if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw new GatewayError("conflict", "Invalid canonical task queue");
     return value;
   }
 
   private async recordFixedSetting(key: string, value: unknown, origin?: FixedSetting): Promise<void> {
-    const fixed = readChatFixedSettings(this.sessionManager.getBranch());
+    const fixed = readSessionFixedSettings(this.sessionManager.getBranch());
     fixed[key] = { ...(origin ?? { from: "session", at: new Date().toISOString(), ref: randomUUID() }), value };
-    await this.persistFixedSettings(fixed);
+    await this.persistSessionSettings({ fixed });
   }
 
   private effectiveResourceReloadOptions(): { resolveProjectTrust: () => Promise<boolean> } | undefined {
@@ -7235,10 +7176,6 @@ export class RuntimeSlot {
       : undefined;
   }
 
-  processChildSessionRef(processId: string): string | undefined {
-    return this.processChildSessionBinding(processId)?.ref;
-  }
-
   processChildSessionPath(processId: string): { ref: string; producerId: string; path: string; runId?: string } | undefined {
     const binding = this.processChildSessionBinding(processId);
     const path = binding ? this.childSessionAdmission.path(binding.ref, binding.producerId) : undefined;
@@ -8808,20 +8745,18 @@ export class RuntimeSlot {
     });
   }
 
-  /** Direct runtime owners may omit expectations; every remote RPC requires
-   * the originating runtime/model cut before entering this serialized lane. */
   /** The settings receipt coordinator publishes Home's recipe and adopts it
    * without releasing this runtime's lane or recursively entering its setters. */
   homeSettingsChapter(initiatingWorkToken?: string): NonNullable<ChangeContext["homeChapter"]> {
     const session = this.runtime.session;
     const revision = this.revision;
     return {
-      sessionId: this.id, cwd: this.cwd, home: this.isHomeChapter, chat: this.settingsChatLayer(), modelRuntime: this.modelRuntime,
+      ...this.settingsSource(), sessionId: this.id,
       mutate: operation => this.lane.run(async () => {
         try {
           this.assertConfigurationIdle(initiatingWorkToken);
           this.assertChapterWritable();
-          if (!this.isHomeChapter || this.runtime.session !== session || this.revision !== revision) {
+          if (!this.usesHomeSettings || this.runtime.session !== session || this.revision !== revision) {
             throw new GatewayError("conflict", "Home runtime changed before settings publication");
           }
         } catch (error) {
@@ -8832,13 +8767,15 @@ export class RuntimeSlot {
           setThinking: (level, fixedAt) => this.applyThinkingConfiguration(level as ThinkingLevel, initiatingWorkToken, undefined, fixedAt),
           setTools: (tools, fixedAt) => this.applyToolsConfiguration(tools, initiatingWorkToken, fixedAt),
           setContextWindow: () => { throw new GatewayError("invalid_request", "Home has no context window override"); },
-          setSetting: () => { throw new GatewayError("invalid_request", "Home adopts only model, thinking and tools"); },
+          // The saved change is already authorized: its Session-scope pin follows it.
+          setSetting: (key, value, _allowFixedDirection, fixedAt) => this.persistChatRunSetting(key, value, true, fixedAt),
         } });
       }),
     };
   }
 
   async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
+    if (this.usesHomeSettings && this.dependencies.settings()) return this.changeHomeRecipe("model.ref[role=chat]", { provider, id: modelId }, initiatingWorkToken);
     return this.lane.run(() => this.applyModelConfiguration(provider, modelId, initiatingWorkToken, expectation, fixedAt));
   }
 
@@ -8851,19 +8788,13 @@ export class RuntimeSlot {
     // Home must stay on a fixed physical model: a virtual model routes on the
     // canonical transcript, which Home's profile does not own. The live
     // runtime's profile decides, so an ordinary session keeps the choice.
-    if (this.liveProfile().model?.physicalOnly && model.api === VIRTUAL_MODEL_API) {
+    if (this.liveProfile().physicalModelsOnly && model.api === VIRTUAL_MODEL_API) {
       throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
     }
     const previousThinking = this.runtime.session.thinkingLevel;
     await this.runtime.session.setModel(model as Model<never>);
     await this.recordFixedSetting("model.ref[role=chat]", { provider, id: modelId }, fixedAt);
     if (this.runtime.session.thinkingLevel !== previousThinking) await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel);
-    // The Home record is the single source of truth for the model a re-enable
-    // restores, and only an enabled Home's change belongs to it.
-    const modelPolicy = this.liveProfile().model;
-    if (modelPolicy) {
-      await modelPolicy.changed(this.id, { provider, id: modelId });
-    }
     this.revision += 1;
     this.publishSnapshot();
     return this.revision;
@@ -8894,6 +8825,7 @@ export class RuntimeSlot {
   }
 
   async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
+    if (this.usesHomeSettings && this.dependencies.settings()) return this.changeHomeRecipe("model.thinking[role=chat]", level, initiatingWorkToken);
     return this.lane.run(() => this.applyThinkingConfiguration(level, initiatingWorkToken, expectation, fixedAt));
   }
 
@@ -8909,7 +8841,16 @@ export class RuntimeSlot {
   }
 
   async setTools(toolNames: string[], initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<void> {
+    if (this.usesHomeSettings && this.dependencies.settings()) { await this.changeHomeRecipe("tools.active", toolNames, initiatingWorkToken); return; }
     return this.lane.run(() => this.applyToolsConfiguration(toolNames, initiatingWorkToken, fixedAt));
+  }
+
+  /** Home's saved settings own its model, thinking and tools: a direct choice is
+   * that change, adopted under this lane like any other. */
+  private async changeHomeRecipe(key: string, value: unknown, initiatingWorkToken?: string): Promise<number> {
+    await this.dependencies.settings()!.changes.change({ kind: "home" }, [{ key, layer: "session", op: "set", value }],
+      { actor: { kind: "ui", id: "tron-home" }, commandId: randomUUID(), homeChapter: this.homeSettingsChapter(initiatingWorkToken) });
+    return this.revision;
   }
 
   private async applyToolsConfiguration(toolNames: string[], initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<void> {

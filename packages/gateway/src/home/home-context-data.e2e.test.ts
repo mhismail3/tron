@@ -301,16 +301,19 @@ describe("Home task counts", () => {
 });
 
 describe("Home session controls", () => {
-  it("applies the Home session's model, thinking and context window, and status reports the model in use", async () => {
+  it("applies the Home session's model, thinking and context window through Home's saved settings", async () => {
     const f = await fixture();
     await configure(f);
     const owner = f.registry.homeOwner();
     const home = await f.registry.acquire(f.home.sessionId);
-    expect((await owner.status()).model).toEqual({ provider: f.model.provider, id: f.model.id });
+    expect(home.snapshot().model).toEqual({ provider: f.model.provider, id: f.model.id });
 
     await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
-    // The record is the model a re-enable restores, so status must follow a session.setModel.
-    expect((await owner.status()).model).toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
+    // Home's saved settings own its model: the live runtime adopts the saved choice.
+    expect(home.snapshot().model).toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
+    const saved = await (f.registry as unknown as { settingsOwners: { model: { resolve(target: unknown, session: undefined, keys: string[]): Promise<{ keys: Array<{ value: unknown }> }> } } })
+      .settingsOwners.model.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"]);
+    expect(saved.keys[0]?.value).toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
 
     await home.setThinking("low");
     expect(home.snapshot().thinkingLevel).toBe("low");

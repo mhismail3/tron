@@ -90,7 +90,7 @@ import {
   type CatalogMetadataIndexSummary,
 } from "./catalog-metadata-index.js";
 import { branchFromParsedSession, branchFromSessionEntries } from "./session-branch.js";
-import { appendChatSettingsSnapshot } from "./chat-settings.js";
+import { appendChatSettingsSnapshot } from "./session-settings.js";
 import { appendContextWindowSnapshot } from "../providers/context-window-policy.js";
 import {
   SessionCatalog,
@@ -799,10 +799,14 @@ export class RuntimeRegistry {
       sessions: {
         createHomeSession: async (cwd) => (await this.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
         currentSessionModel: sessionId => this.slots.get(sessionId)?.snapshot().model ?? null,
-        applySessionModel: async (sessionId, model) => {
+        homeModel: async () => (await this.settingsOwners?.model.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"], { storeState: false }))
+          ?.keys[0]?.value as { provider: string; id: string } | undefined,
+        chooseHomeModel: async (sessionId, model) => {
+          // A host without a settings owner has only the session's own choice.
+          if (!this.settingsOwners) return void await this.slots.get(sessionId)?.setModel(model.provider, model.id);
           const slot = this.slots.get(sessionId);
-          if (!slot) throw new GatewayError("internal", "Tron Home's session is not live");
-          await slot.setModel(model.provider, model.id);
+          await this.settingsOwners.changes.change({ kind: "home" }, [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: model }],
+            { actor: { kind: "ui", id: "home-designation" }, commandId: randomUUID(), ...(slot?.usesHomeSettings ? { homeChapter: slot.homeSettingsChapter() } : {}) });
         },
         sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
         homeChaptersChanged: () => {
@@ -3674,7 +3678,7 @@ export class RuntimeRegistry {
    * its canonical Project root, which every chat of that root shares. */
   async releaseInheritedImageBlock(projectDir?: string): Promise<void> {
     const slots = [...this.slots.values()].filter(slot => !slot.isDisposed && (projectDir === undefined || slot.projectDir === projectDir));
-    await Promise.all(slots.map(slot => slot.releaseInheritedImageBlock(projectDir === undefined ? "mac" : "project")));
+    await Promise.all(slots.map(slot => slot.releaseInheritedImageBlock(projectDir === undefined ? "global" : "project")));
   }
 
   async commitProjectReload(projectDirInput: string): Promise<void> {

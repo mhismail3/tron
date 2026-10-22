@@ -51,7 +51,7 @@ async function gateway() {
 }
 
 describe("settings approval decisions", () => {
-  it("the maintainer approves Home's change to a settled worker's Chat layer without having opened that worker", async () => {
+  it("the maintainer approves Home's change to a settled worker's Session scope without having opened that worker", async () => {
     const f = await gateway();
     const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
     let homeCall: { prompt: string; name: string; args: Record<string, unknown> } | undefined;
@@ -99,7 +99,7 @@ describe("settings approval decisions", () => {
     transcript.push({ case: "decide without a client fence", steps: [{ pending: pending.details, approved }] });
   }, 90_000);
 
-  it("a Chat-layer change without the fence it read is refused at submission, dry run included", async () => {
+  it("a Session-scope change without the fence it read is refused at submission, dry run included", async () => {
     const f = await gateway();
     const slot = await f.registry.create(f.cwd);
     await slot.setModel(f.model.provider, f.model.id);

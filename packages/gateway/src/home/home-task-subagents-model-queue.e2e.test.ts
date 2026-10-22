@@ -70,7 +70,7 @@ describe("Home task subagents: the subagent model queue", () => {
     const settings = settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => f.registry.homeOwner() });
     await setModelQueue({ registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway },
       "subagent", ["queue-child/limited", "queue-child/fallback"]);
-    await settings.settingsChanges.change({ kind: "mac" }, [{ key: "model.queue[role=subagent]", layer: "mac", op: "set", value: ["queue-child/mac"] }],
+    await settings.settingsChanges.change({ kind: "global" }, [{ key: "model.queue[role=subagent]", layer: "global", op: "set", value: ["queue-child/mac"] }],
       { actor: { kind: "ui", id: "fixture" }, commandId: "mac-subagent-queue" });
     let blockedProjection: string | undefined;
     const projectionDirectory = join(f.tronHome, "gateway", "model-queue-sessions");
@@ -119,9 +119,9 @@ describe("Home task subagents: the subagent model queue", () => {
     expect(provider.requests).toEqual(explicit ? { fallback: 1 } : { limited: 1, fallback: 1 });
     const worker = await f.registry.acquire(run.sessionId);
     const resolution = await settings.settingsModel.resolve({ kind: "session", sessionId: run.sessionId }, {
-      cwd: f.cwd, home: false, chat: worker.settingsChatLayer(), modelRuntime: worker.modelRuntime,
+      cwd: f.cwd, home: false, session: worker.settingsSessionLayer(), modelRuntime: worker.modelRuntime,
     }, ["model.queue[role=subagent]"]);
-    expect(resolution.keys[0]).toMatchObject({ value: ["queue-child/limited", "queue-child/fallback"], origin: "launch", layer: "chat" });
+    expect(resolution.keys[0]).toMatchObject({ value: ["queue-child/limited", "queue-child/fallback"], origin: "launch", layer: "session" });
     expect(f.queueDiagnostics).toContainEqual({ event: "model-queue.projection", role: "subagent",
       scope: "task-launch", sessionId: run.sessionId, status: "published", models: ["queue-child/limited", "queue-child/fallback"] });
     // A generic import must not transfer Home task identity into a different
@@ -168,7 +168,7 @@ describe("Home task subagents: the subagent model queue", () => {
     expect(JSON.stringify(ordinaryLaunch)).toContain("CHILD-DONE");
     expect(provider.requests).toEqual({ ...beforeOrdinary, mac: 1 });
     expect(f.queueDiagnostics).toContainEqual({ event: "model-queue.projection", role: "subagent",
-      scope: "mac", status: "published", models: ["queue-child/mac"] });
+      scope: "global", status: "published", models: ["queue-child/mac"] });
     await activeRegistry.dispose();
     expect(await readdir(join(f.tronHome, "gateway", "model-queue-sessions"))).toEqual([]);
   }, 120_000);

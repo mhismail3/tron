@@ -10,7 +10,7 @@ services, paired Macs and devices, notifications and logs.
 
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
-  `SettingsChoiceSlider`, `SettingsNumberSlider`, `SettingsConfigurationValueRow`, `SettingsAutosave`.
+  `SettingsChoiceSlider`, `SettingsNumberSlider`, `SettingsAutosave`.
 - Audit and approvals: `SettingsChangesView`, `SettingsChangeRow`, `SettingsApprovalsSection`.
 - Agent configuration: `AgentConfigurationControls`, `ConfigurationSlider(Surface)`,
   `CustomModelsSettingsView` with `CustomModelDraftTransformation`, `DefaultToolsSettingsSection`.
@@ -51,17 +51,14 @@ services, paired Macs and devices, notifications and logs.
   numeric-map drafts write only on Save; unknown fields stay read-only. Outside-change recovery
   remains an explicit Apply again action. The Gateway supplies override presence and permissions;
   rows never infer ownership from value equality.
-- **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView`: Home
-  resolves a `home` target and writes the Session scope in Home's durable recipe; ordinary chats
-  write their own Session scope. Public scope names are Project, Session and Global; SDK defaults
-  belong to Global, while physical store bindings stay Gateway-private.
+- **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView` (scopes:
+  Project, Session, Global); Home writes its saved settings, a chat its own Session scope.
   Both reuse Global's renderer and editors, including models and tools. Project-owned controls are
   read-only with a shared Project info pill; explicit overrides have Overridden and circular Revert.
   `SettingsProjectGroups` shows applied Project values only; `SettingsProjectNotices` shares bounded
   file/key/reason diagnostics. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
-- **Changes.** Only Global has a Changes entry. `SettingsChangesView` pages `settings.history`, intersects filters with the
-  selected Project/Session/Global filters, pins approvals above history, and keeps last-look per Mac
-  and entry context. Undo and
+- **Changes.** Only Global has a Changes entry. `SettingsChangesView` pages `settings.history` by
+  Project/Session/Global, pins approvals above history and keeps last-look per Mac. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
   entries never show their definition.
 - **Approvals.** `SettingsApprovalsSection` re-reads `settings.approvals` on its revision and
@@ -77,7 +74,7 @@ services, paired Macs and devices, notifications and logs.
   `compaction-policy.v1` adds per-field thinking and focus inheritance.
 - **Default Tools.** Global Tools' Always include switches edit `tools.active`. While
   `sources.extensions` keeps the built-in from loading at that scope (Pi's rule: a Project entry
-  overrides the Mac list), the switch is dimmed, shows Off and says why; the saved entry is kept,
+  overrides the Global list), the switch is dimmed, shows Off and says why; the saved entry is kept,
   and the row explains why.
 - **Extensions.** Inventory counts, installed packages (Tron's bundled subagents provider without
   Update/Remove), Install Package, read-only Tron Modules and search paths. A package's detail lists

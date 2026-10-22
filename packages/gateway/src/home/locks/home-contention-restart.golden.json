@@ -53,13 +53,13 @@
           "fixed": {
             "context.images.autoResize": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "ref": "<id>",
               "value": true
             },
             "model.contextWindow": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "qualifiers": {
                 "model": "tron-lock-home-contention-restart/faux-1"
               },
@@ -68,7 +68,7 @@
             },
             "model.ref[role=chat]": {
               "at": "<timestamp>",
-              "from": "mac",
+              "from": "global",
               "qualifiers": {
                 "role": "chat"
               },
@@ -80,7 +80,7 @@
             },
             "model.thinking[role=chat]": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "qualifiers": {
                 "model": "tron-lock-home-contention-restart/faux-1",
                 "role": "chat"
@@ -90,7 +90,7 @@
             },
             "tools.active": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "ref": "<id>",
               "value": [
                 "ask_user",
@@ -126,13 +126,13 @@
           "fixed": {
             "context.images.autoResize": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "ref": "<id>",
               "value": true
             },
             "model.contextWindow": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "qualifiers": {
                 "model": "tron-lock-home-contention-restart/faux-1"
               },
@@ -141,7 +141,7 @@
             },
             "model.ref[role=chat]": {
               "at": "<timestamp>",
-              "from": "mac",
+              "from": "global",
               "qualifiers": {
                 "role": "chat"
               },
@@ -153,7 +153,7 @@
             },
             "model.thinking[role=chat]": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "qualifiers": {
                 "model": "tron-lock-home-contention-restart/faux-1",
                 "role": "chat"
@@ -163,7 +163,7 @@
             },
             "tools.active": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "ref": "<id>",
               "value": [
                 "ask_user",
@@ -188,7 +188,7 @@
           "requestPins": {
             "context.images.block": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "ref": "<id>",
               "value": false
             }
@@ -214,13 +214,13 @@
           "fixed": {
             "context.images.autoResize": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "ref": "<id>",
               "value": true
             },
             "model.contextWindow": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "qualifiers": {
                 "model": "tron-lock-home-contention-restart/faux-1"
               },
@@ -229,7 +229,10 @@
             },
             "model.ref[role=chat]": {
               "at": "<timestamp>",
-              "from": "chat",
+              "from": "session",
+              "qualifiers": {
+                "role": "chat"
+              },
               "ref": "<id>",
               "value": {
                 "id": "<id>",
@@ -238,7 +241,7 @@
             },
             "model.thinking[role=chat]": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "qualifiers": {
                 "model": "tron-lock-home-contention-restart/faux-1",
                 "role": "chat"
@@ -248,7 +251,7 @@
             },
             "tools.active": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "ref": "<id>",
               "value": [
                 "ask_user",
@@ -273,7 +276,7 @@
           "requestPins": {
             "context.images.block": {
               "at": "<timestamp>",
-              "from": "builtin",
+              "from": "global",
               "ref": "<id>",
               "value": false
             }
@@ -1136,22 +1139,15 @@
                         "layer": {
                           "anyOf": [
                             {
-                              "const": "chat",
+                              "const": "session",
                               "type": "string"
                             },
                             {
-                              "const": "profile",
-                              "type": "string"
-                            },
-                            {
-                              "const": "project",
-                              "type": "string"
-                            },
-                            {
-                              "const": "mac",
+                              "const": "global",
                               "type": "string"
                             }
-                          ]
+                          ],
+                          "description": "Session/Home override or Global. Project is read-only."
                         },
                         "op": {
                           "anyOf": [
@@ -1742,7 +1738,7 @@
           "changes": [
             {
               "key": "model.queue[role=background]",
-              "layer": "profile",
+              "layer": "session",
               "op": "set",
               "value": [
                 "tron-lock-home-contention-restart/faux-1"
@@ -1766,7 +1762,7 @@
                 "before": null,
                 "changeId": "<id>",
                 "key": "model.queue[role=background]",
-                "layer": "profile",
+                "layer": "session",
                 "qualifiers": {
                   "role": "background"
                 },
@@ -1833,10 +1829,10 @@
                   "reserveTokens": 2048,
                   "source": {
                     "enabled": "global",
-                    "instructions": "default",
+                    "instructions": "global",
                     "keepRecentTokens": "global",
                     "reserveTokens": "global",
-                    "thinkingLevel": "default"
+                    "thinkingLevel": "global"
                   },
                   "thinkingLevel": "inherit"
                 }
@@ -2226,10 +2222,6 @@
               "paused": false,
               "spentTokens": 0
             },
-            "model": {
-              "id": "<id>",
-              "provider": "tron-lock-home-contention-restart"
-            },
             "openSessionId": "<id>",
             "phase": "ready",
             "readiness": {
@@ -2456,10 +2448,6 @@
       "generation": 1,
       "homeId": "<id>",
       "memory": {},
-      "model": {
-        "id": "<id>",
-        "provider": "tron-lock-home-contention-restart"
-      },
       "policyRevision": 3,
       "routeGeneration": 1,
       "updatedAt": "<timestamp>",
@@ -2643,10 +2631,6 @@
               "paused": false,
               "spentTokens": 0
             },
-            "model": {
-              "id": "<id>",
-              "provider": "tron-lock-home-contention-restart"
-            },
             "openSessionId": "<id>",
             "phase": "ready",
             "readiness": {
@@ -2723,10 +2707,10 @@
                   "reserveTokens": 2048,
                   "source": {
                     "enabled": "global",
-                    "instructions": "default",
+                    "instructions": "global",
                     "keepRecentTokens": "global",
                     "reserveTokens": "global",
-                    "thinkingLevel": "default"
+                    "thinkingLevel": "global"
                   },
                   "thinkingLevel": "inherit"
                 }

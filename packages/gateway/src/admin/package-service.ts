@@ -218,7 +218,7 @@ export class PackageService {
           this.broadcast("packages.progress", { operationId, event } as unknown as JsonValue);
         });
         const { settings } = managed;
-        const writes: PlannedWrite[] = [{ store: local ? { kind: "project", root: managed.project.projectDir } : { kind: "mac" },
+        const writes: PlannedWrite[] = [{ store: local ? { kind: "project", root: managed.project.projectDir } : { kind: "global" },
           instance: instanceId("sources.packages", {}), changeId: operationId, value: undefined }];
         await this.outside?.begin(writes);
         try {

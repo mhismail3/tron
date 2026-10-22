@@ -15,10 +15,6 @@
   "routeGeneration": 1,
   "policyRevision": 3,
   "enabled": true,
-  "model": {
-    "provider": "corpus-provider",
-    "id": "corpus-model"
-  },
   "createdAt": "2026-10-19T22:24:08.476Z",
   "updatedAt": "2026-10-19T22:24:08.476Z"
 }

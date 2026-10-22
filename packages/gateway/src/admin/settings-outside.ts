@@ -10,7 +10,7 @@ import { gitHeadState, projectSettingsPath, stagedBlob, type GitHeadState } from
 import type { ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
 import { type GitResult, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
 import type { OutsideMark } from "./settings-resolver.js";
-import { KEYS, builtinValue, floorFor, recordSubject, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, keyDefault, floorFor, recordSubject, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { formatStoredSetting } from "./settings-types.js";
 /**
  * Outside changes (docs/settings-model.md 5.6, foundation F2).
@@ -35,7 +35,7 @@ import { formatStoredSetting } from "./settings-types.js";
  * stores (F2), and the record stays audit only.
  */
 
-export type ObservedStore = { kind: "mac" } | { kind: "trust" } | { kind: "mcp" } | { kind: "models" }
+export type ObservedStore = { kind: "global" } | { kind: "trust" } | { kind: "mcp" } | { kind: "models" }
   | { kind: "project"; root: string } | { kind: "project-mcp"; root: string };
 type ProjectObservedStore = Extract<ObservedStore, { root: string }>;
 const isProjectStore = (store: ObservedStore): store is ProjectObservedStore => store.kind === "project" || store.kind === "project-mcp";
@@ -69,7 +69,7 @@ export interface OutsideObserver {
 
 export interface ObservedReaders {
   /** pi's own reader for the Mac `settings.json`, so parse rules match the runtime. */
-  mac(): Promise<Record<string, unknown>>;
+  global(): Promise<Record<string, unknown>>;
   project(root: string): Promise<Record<string, unknown> | undefined>;
   floors(): Promise<FloorOverrides>;
 }
@@ -89,7 +89,7 @@ export function projectStores(root: string): ObservedStore[] {
 /** The observed file of a store. */
 function observedFile(store: ObservedStore, agentDir: string): string {
   switch (store.kind) {
-    case "mac": return join(agentDir, "settings.json");
+    case "global": return join(agentDir, "settings.json");
     case "trust": return join(agentDir, "trust.json");
     case "mcp": return join(agentDir, "mcp.json");
     case "models": return join(agentDir, "models.json");
@@ -111,7 +111,7 @@ export function observedInstance(key: KeyDeclaration, layer: string, binding: Bi
     return qualifiers.project === undefined ? undefined : { store: { kind: "trust" }, instance: instanceId(key.id, { ...fixed, project: qualifiers.project }) };
   }
   if (binding.store !== "pi" && binding.store !== "pi-model-ref") return undefined;
-  const store: ObservedStore | undefined = layer === "global" ? { kind: "mac" } : layer === "project" && projectRoot ? { kind: "project", root: projectRoot } : undefined;
+  const store: ObservedStore | undefined = layer === "global" ? { kind: "global" } : layer === "project" && projectRoot ? { kind: "project", root: projectRoot } : undefined;
   if (!store) return undefined;
   const modelQualified = binding.store === "pi" && qualifiers.model !== undefined
     && (binding.qualified !== undefined || binding.path.includes("{model}"));
@@ -134,7 +134,7 @@ function modelsAt(document: Record<string, unknown>, path: readonly string[]): s
 }
 
 /** Every key instance a pi settings document holds at a layer, from the schema. */
-function piInstances(document: Record<string, unknown>, layer: "mac" | "project"): Map<string, ObservedValue> {
+function piInstances(document: Record<string, unknown>, layer: "global" | "project"): Map<string, ObservedValue> {
   const values = new Map<string, ObservedValue>();
   const add = (key: KeyDeclaration, qualifiers: Qualifiers, value: unknown) => {
     if (value === undefined) return;
@@ -260,7 +260,7 @@ export class OutsideChanges {
     if (this.disposal) throw new Error("Outside settings comparison is disposed");
     this.watching = true;
     this.failed = failed;
-    this.watchDirectory("agent", this.agentDir, name => AGENT_FILES.has(name), [{ kind: "mac" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }]);
+    this.watchDirectory("agent", this.agentDir, name => AGENT_FILES.has(name), [{ kind: "global" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }]);
   }
 
   dispose(): Promise<void> {
@@ -466,8 +466,8 @@ export class OutsideChanges {
         return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? trustInstances(parsed as Record<string, unknown>) : undefined;
       } catch { return undefined; }
     }
-    if (store.kind === "mac") {
-      try { return piInstances(await this.readers.mac(), "mac"); } catch { return undefined; }
+    if (store.kind === "global") {
+      try { return piInstances(await this.readers.global(), "global"); } catch { return undefined; }
     }
     // An unparseable project file (merge markers) has unknown values: keep the
     // last observed ones until it parses again, rather than reporting removals.
@@ -550,9 +550,9 @@ export class OutsideChanges {
     const key = schemaKeyOrUndefined(value.key);
     const subject = recordSubject(value.key);
     const qualifiers = value.qualifiers ?? {};
-    const builtin = key ? builtinValue(key, qualifiers) : undefined;
+    const defaultValue = key ? keyDefault(key, qualifiers) : undefined;
     const redacted = key?.redacted === true || subject !== undefined;
-    const direction = key?.direction && !redacted ? key.direction(before?.value ?? builtin, after?.value ?? builtin) : "widen";
+    const direction = key?.direction && !redacted ? key.direction(before?.value ?? defaultValue, after?.value ?? defaultValue) : "widen";
     // An outside change cannot be gated: its tier, the key's (or record
     // subject's) floor for its direction, decides only whether it pushes (doc 5.6).
     const { floor, source } = key ? floorFor(key, direction, floors) : { floor: subject?.floor ?? "notify" as Tier, source: "code" as const };

@@ -1,6 +1,6 @@
 import { type SettingsTarget, type FixedSetting, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import { dirname, join } from "node:path";
-import { KEYS, keyForHome, builtinValue, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, keyForHome, keyDefault, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, type FormatContext, type StoreLayer } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, scopeForStore } from "./settings-registry.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
@@ -11,14 +11,14 @@ import { projectSettingPath, projectSettingsDiagnostics } from "./settings-proje
 
 
 
-/** The Chat layer as the session record holds it (doc 3.2). */
-export interface ChatStore {
+/** The Session scope as the session record holds it (doc 3.2). */
+export interface SessionStore {
   model?: { provider: string; id: string };
   thinking?: string;
   /** `tron.context-window.v1`: the chat's explicit window for its model. */
   contextWindow?: { model: string; value: number };
   tools?: string[];
-  /** `tron.settings.v1`: explicit Chat-layer values for the other keys. */
+  /** `tron.settings.v1`: explicit Session-scope values for the other keys. */
   settings: Record<string, unknown>;
   /** Effective directional request values retained at this branch's boundary. */
   requestPins?: Record<string, FixedSetting>;
@@ -43,20 +43,20 @@ export interface OutsideMark { changeId: string; applyAgain: boolean; before: st
 export interface SettingsStores {
   /** The layers this target has (doc 3.3). Built-in is always last. */
   layers: readonly StoreLayer[];
-  chat?: ChatStore;
-  profile?: Record<string, unknown>;
+  session?: SessionStore;
+  home?: Record<string, unknown>;
   project?: ProjectStore;
-  mac: Record<string, unknown>;
+  global: Record<string, unknown>;
   /** Saved trust decisions by canonical project path. */
   trust: Record<string, boolean>;
   /** Mac Terminal keys in ~/.ssh/authorized_keys, by paired device id. */
   macTerminal: Record<string, string>;
-  /** The maintainer's floor overrides (Mac policy, doc 5.4). */
+  /** The maintainer's floor overrides (Global policy, doc 5.4). */
   floors: FloorOverrides;
   /** The Gateway-owned settings document (`gateway/settings/gateway.json`). */
   gateway: Record<string, unknown>;
   /** Outside-change marks by layer and key instance (doc 5.6). */
-  outside?: Partial<Record<"mac" | "project", Record<string, OutsideMark>>>;
+  outside?: Partial<Record<"global" | "project", Record<string, OutsideMark>>>;
 }
 
 /** Capability-constrained option sources (doc 3.6, 7.5). */
@@ -75,7 +75,7 @@ export interface OptionSources {
 
 
 
-const BOTTOM_UP: readonly StoreLayer[] = ["builtin", "mac", "profile", "chat", "project"];
+const BOTTOM_UP: readonly StoreLayer[] = ["default", "global", "home", "session", "project"];
 
 function readPath(document: Record<string, unknown> | undefined, path: readonly string[]): unknown {
   let current: unknown = document;
@@ -93,7 +93,7 @@ function fill(path: readonly string[], qualifiers: Qualifiers): readonly string[
 }
 
 function piDocument(stores: SettingsStores, layer: StoreLayer): Record<string, unknown> | undefined {
-  return layer === "mac" ? stores.mac : layer === "project" ? stores.project?.document : undefined;
+  return layer === "global" ? stores.global : layer === "project" ? stores.project?.document : undefined;
 }
 
 /** Read one layer's raw value for a key instance from that layer's store. */
@@ -112,27 +112,27 @@ export function readBinding(stores: SettingsStores, layer: StoreLayer, binding: 
       const id = document?.defaultModel;
       return typeof provider === "string" && typeof id === "string" ? { provider, id } : undefined;
     }
-    case "chat": {
-      const chat = stores.chat;
+    case "session": {
+      const chat = stores.session;
       if (!chat) return undefined;
       if (binding.field === "model") return qualifiedOnly ? undefined : chat.model;
       if (binding.field === "thinking") return chat.thinking;
       if (binding.field === "tools") return qualifiedOnly ? undefined : chat.tools;
       return chat.contextWindow && chat.contextWindow.model === qualifiers.model ? chat.contextWindow.value : undefined;
     }
-    case "chat-settings":
-      return qualifiedOnly ? undefined : (keyId && stores.chat?.requestPins?.[keyId] !== undefined
-        ? stores.chat.requestPins[keyId].value : keyId && stores.chat?.fixed?.[keyId] ? stores.chat.fixed[keyId].value : readPath(stores.chat?.settings, binding.path));
-    case "chat-launch":
-      return qualifiedOnly || !keyId ? undefined : stores.chat?.fixed?.[keyId]?.value;
-    case "profile":
-      return qualifiedOnly ? undefined : readPath(stores.profile, binding.path);
+    case "session-settings":
+      return qualifiedOnly ? undefined : (keyId && stores.session?.requestPins?.[keyId] !== undefined
+        ? stores.session.requestPins[keyId].value : keyId && stores.session?.fixed?.[keyId] ? stores.session.fixed[keyId].value : readPath(stores.session?.settings, binding.path));
+    case "session-launch":
+      return qualifiedOnly || !keyId ? undefined : stores.session?.fixed?.[keyId]?.value;
+    case "home":
+      return qualifiedOnly ? undefined : readPath(stores.home, binding.path);
     case "trust":
       return qualifiers.project === undefined ? undefined : nearestTrustDecision(stores.trust, qualifiers.project);
     case "mac-terminal":
       return qualifiers.device === undefined ? undefined : stores.macTerminal[qualifiers.device];
     case "gateway":
-      return qualifiedOnly || layer !== "mac" ? undefined : readPath(stores.gateway, binding.path);
+      return qualifiedOnly || layer !== "global" ? undefined : readPath(stores.gateway, binding.path);
     case "floors":
       // A key with one floor keeps both directions equal, so widen reads it.
       return qualifiers.key === undefined ? undefined
@@ -152,9 +152,9 @@ function nearestTrustDecision(decisions: Record<string, boolean>, project: strin
 /** A composing key's value from the layers below `layer`: what that layer's
  * entries are relative to. */
 export function composedBelow(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers, layer: StoreLayer): unknown {
-  let value = builtinValue(key, qualifiers);
+  let value = keyDefault(key, qualifiers);
   for (const below of BOTTOM_UP.slice(1, BOTTOM_UP.indexOf(layer))) {
-    const binding = key.layers[below as Exclude<StoreLayer, "builtin">];
+    const binding = key.layers[below as Exclude<StoreLayer, "default">];
     if (!binding || !scopeAdmitted(key, below) || !stores.layers.includes(below) || !layerApplied(stores, below).applied) continue;
     const entry = readBinding(stores, below, binding, qualifiers, false, key.id);
     if (entry !== undefined) value = key.type.compose ? key.type.compose(value, entry) : entry;
@@ -177,7 +177,7 @@ export interface ResolveOptions {
 export function resolveSettings(target: SettingsTarget, stores: SettingsStores, options: ResolveOptions): Resolution {
   const diagnostics = stores.project
     ? projectSettingsDiagnostics(stores.project.document, join(stores.project.root, ".pi", "settings.json")) : { diagnostics: [] };
-  const applicable = KEYS.map(key => keyForHome(key, stores.layers.includes("profile")));
+  const applicable = KEYS.map(key => keyForHome(key, stores.layers.includes("home")));
   const keys = options.keys ? applicable.filter(key => options.keys!.includes(key.id)) : applicable;
   const resolved: ResolvedKey[] = [];
   // Model-qualified keys resolve for the target's effective chat model, which
@@ -187,13 +187,13 @@ export function resolveSettings(target: SettingsTarget, stores: SettingsStores, 
   const chatModel = resolveInstance(chatModelKey, chatModelKey.fixed ?? {}, stores, options, noDependencies).value as { provider: string; id: string } | undefined;
   // Dependencies are ordinary keys resolved for the same target (doc 7.5).
   const dependencyValue = (id: string) => id === chatModelKey.id ? chatModel
-    : resolveInstance(keyForHome(schemaKey(id), stores.layers.includes("profile")), schemaKey(id).fixed ?? {}, stores, options, noDependencies).value;
+    : resolveInstance(keyForHome(schemaKey(id), stores.layers.includes("home")), schemaKey(id).fixed ?? {}, stores, options, noDependencies).value;
   const modelQualifier = chatModel ? `${chatModel.provider}/${chatModel.id}` : undefined;
 
   for (const key of keys) {
     // A key belongs to a target that has at least one of its allowed layers
     // (doc 3.3): Home-only profile keys never appear on an ordinary chat.
-    if (target.kind === "session" && !stores.layers.includes("profile") && key.layers.profile && !key.layers.chat) continue;
+    if (target.kind === "session" && !stores.layers.includes("home") && key.layers.home && !key.layers.session) continue;
     if (!Object.keys(key.layers).some(layer => stores.layers.includes(layer as StoreLayer) && scopeAdmitted(key, layer as StoreLayer))) continue;
     for (const qualifiers of instances(key, target, stores, modelQualifier)) {
       resolved.push(resolveInstance(key, qualifiers, stores, options, dependencyValue));
@@ -202,7 +202,7 @@ export function resolveSettings(target: SettingsTarget, stores: SettingsStores, 
   const projectNotice = stores.project && (stores.project.unreadable || (!stores.project.applied && Object.keys(stores.project.document).length))
     ? { file: join(stores.project.root, ".pi", "settings.json"), message: stores.project.unreadable
       ? "Project settings couldn't be read" : "Project settings aren't applied until this project is trusted" } : undefined;
-  return { target: canonicalSettingsTarget(target, stores.layers.includes("profile")), layers: [...new Set(stores.layers.map(scopeForStore))], ...(stores.project?.unreadable ? { projectUnreadable: true as const } : {}),
+  return { target: canonicalSettingsTarget(target, stores.layers.includes("home")), layers: [...new Set(stores.layers.map(scopeForStore))], ...(stores.project?.unreadable ? { projectUnreadable: true as const } : {}),
     ...(projectNotice ? { projectNotice } : {}), keys: resolved, ...diagnostics };
 }
 
@@ -214,7 +214,7 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
       // Repository inspection includes non-default models, not an inherited snapshot.
       const models = new Set<string>();
       if (target.kind === "global" && model) models.add(model);
-      const layer = target.kind === "project" ? "project" : "mac";
+      const layer = target.kind === "project" ? "project" : "global";
       const binding = key.layers[layer];
       if (binding?.store === "pi") {
         const path = binding.qualified ?? binding.path;
@@ -229,11 +229,11 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
     return model ? [{ ...fixed, model }] : onlyQualified ? [] : [fixed];
   }
   if (key.qualifier === "key") {
-    // Floors are Mac policy only the maintainer's tap writes; they appear on the Mac target.
+    // Floors are Global policy only the maintainer's tap writes; they appear on the Mac target.
     return target.kind === "global" ? floorInstances().map(instance => ({ ...fixed, ...instance })) : [];
   }
   if (key.qualifier === "device") {
-    // Mac policy: the enrolled iPhones appear on the Mac target only.
+    // Global policy: the enrolled iPhones appear on the Mac target only.
     return target.kind === "global" ? Object.keys(stores.macTerminal).sort().map(device => ({ ...fixed, device })) : [];
   }
   if (key.qualifier === "project") {
@@ -256,8 +256,8 @@ export function resolveInstance(
   const read = (qualifiedOnly: boolean) => {
     const found: Array<{ layer: StoreLayer; value: unknown; applied: boolean; reason?: "untrusted" }> = [];
     for (const layer of BOTTOM_UP) {
-      if (layer === "builtin" || !stores.layers.includes(layer)) continue;
-      const binding = key.layers[layer as Exclude<StoreLayer, "builtin">];
+      if (layer === "default" || !stores.layers.includes(layer)) continue;
+      const binding = key.layers[layer as Exclude<StoreLayer, "default">];
       if (!binding || !scopeAdmitted(key, layer)) continue;
       const value = readBinding(stores, layer, binding, qualifiers, qualifiedOnly, key.id);
       if (value === undefined) continue;
@@ -275,9 +275,9 @@ export function resolveInstance(
   });
   const present = shown;
 
-  const builtin = builtinValue(key, qualifiers);
-  let value: unknown = builtin;
-  let layer: StoreLayer = "builtin";
+  const defaultValue = keyDefault(key, qualifiers);
+  let value: unknown = defaultValue;
+  let layer: StoreLayer = "default";
   for (const entry of present) {
     if (!entry.applied) continue;
     value = key.type.compose ? key.type.compose(value, entry.value) : entry.value;
@@ -287,10 +287,10 @@ export function resolveInstance(
   const notApplied = top && !top.applied ? top : undefined;
 
   for (const layerId of [...BOTTOM_UP].reverse()) {
-    if (!stores.layers.includes(layerId) && layerId !== "builtin") continue;
-    if (layerId === "builtin") continue;
+    if (!stores.layers.includes(layerId) && layerId !== "default") continue;
+    if (layerId === "default") continue;
     if (!key.layers[layerId] || !scopeAdmitted(key, layerId)) continue;
-    // Only the Home chat has the Profile layer (doc 3.3); it has no Chat compaction layer.
+    // Only the Home chat has the Home recipe (doc 3.3); it has no Chat compaction layer.
     const entry = shown.find(candidate => candidate.layer === layerId);
     layerValues.push(entry
       ? { layer: scopeForStore(layerId), value: entry.value, display: format(entry.value), applied: entry.applied, ...(entry.reason ? { reason: entry.reason } : {}) }
@@ -313,7 +313,7 @@ export function resolveInstance(
   badges.push(...storeStateBadges(key, qualifiers, stores, format));
   // Capability clamping (doc 3.6): a value its dependency does not support
   // resolves to the closest supported one, named by a Clamped badge.
-  if (key.optionsSource && value !== undefined && layer !== "chat") {
+  if (key.optionsSource && value !== undefined && layer !== "session") {
     const dependency = key.optionsSource.dependsOn.length ? dependencyValue(key.optionsSource.dependsOn[0]!) : undefined;
     if (dependency !== undefined) {
       const selectedDependency = qualifiers.model && key.optionsSource.dependsOn[0] === "model.ref[role=chat]"
@@ -326,20 +326,20 @@ export function resolveInstance(
     }
   }
   if (key.redacted) badges.push({ kind: "state", label: "Not undoable" });
-  const candidate = stores.chat?.fixed?.[key.id] ?? stores.chat?.requestPins?.[key.id];
-  const fixedAt = layer === "chat" && candidate && JSON.stringify(candidate.value) === JSON.stringify(value)
+  const candidate = stores.session?.fixed?.[key.id] ?? stores.session?.requestPins?.[key.id];
+  const fixedAt = layer === "session" && candidate && JSON.stringify(candidate.value) === JSON.stringify(value)
     && (!candidate.qualifiers?.model || candidate.qualifiers.model === qualifiers.model) ? candidate : undefined;
   if (fixedAt) {
-    const binding = key.layers.chat;
-    const requested = binding?.store === "chat-settings" ? readPath(stores.chat?.settings, binding.path) : undefined;
+    const binding = key.layers.session;
+    const requested = binding?.store === "session-settings" ? readPath(stores.session?.settings, binding.path) : undefined;
     if (requested !== undefined && JSON.stringify(requested) !== JSON.stringify(value)) {
       badges.push({ kind: "state", label: "Applies to a new chat", detail: `Requested: ${format(requested)}` });
     }
   }
 
-  const localLayer = stores.layers.includes("profile") ? "profile" : stores.layers.includes("chat") ? "chat" : "mac";
+  const localLayer = stores.layers.includes("home") ? "home" : stores.layers.includes("session") ? "session" : "global";
   const localBinding = key.layers[localLayer];
-  const localValue = !scopeAdmitted(key, localLayer) ? undefined : localBinding?.store === "chat-settings" ? readPath(stores.chat?.settings, localBinding.path)
+  const localValue = !scopeAdmitted(key, localLayer) ? undefined : localBinding?.store === "session-settings" ? readPath(stores.session?.settings, localBinding.path)
     : localBinding ? readBinding(stores, localLayer, localBinding, qualifiers, localBinding.store === "pi" && !!localBinding.qualified && !!qualifiers.model, key.id) : undefined;
   const projectValue = shown.find(entry => entry.layer === "project" && entry.applied);
   const binding = key.layers.project;
@@ -392,7 +392,7 @@ function storeStateBadges(key: KeyDeclaration, qualifiers: Qualifiers, stores: S
       }
     }
   }
-  for (const layer of ["project", "mac"] as const) {
+  for (const layer of ["project", "global"] as const) {
     if (!stores.layers.includes(layer) || !key.layers[layer]) continue;
     const marks = stores.outside?.[layer];
     const mark = marks?.[instanceId(key.id, qualifiers)] ?? marks?.[instanceId(key.id, key.fixed ?? {})];
@@ -406,11 +406,11 @@ function storeStateBadges(key: KeyDeclaration, qualifiers: Qualifiers, stores: S
 /** The layers a target has (doc 3.3): a target has a layer when it has its store. */
 export function targetLayers(target: SettingsTarget, options: { home?: boolean; project?: boolean }): readonly StoreLayer[] {
   switch (target.kind) {
-    case "global": return ["mac", "builtin"];
-    case "project": return ["project", "mac", "builtin"];
-    case "home": return ["profile", "mac", "builtin"];
+    case "global": return ["global", "default"];
+    case "project": return ["project", "global", "default"];
+    case "home": return ["home", "global", "default"];
     case "session": return options.home
-      ? ["profile", "mac", "builtin"]
-      : options.project === false ? ["chat", "mac", "builtin"] : ["project", "chat", "mac", "builtin"];
+      ? ["home", "global", "default"]
+      : options.project === false ? ["session", "global", "default"] : ["project", "session", "global", "default"];
   }
 }

@@ -126,7 +126,7 @@ describe("gateway/home contention, publication and restart lock", () => {
     const command = (method: string, params: Record<string, unknown> = {}) => phone.request(method, { commandId: first.commandId(), ...params });
     expect((await command("home.designate", { model })).ok).toBe(true);
     expect((await command("settings.change", { target: { kind: "home" },
-      changes: [{ key: "model.queue[role=background]", layer: "profile", op: "set", value: [`${model.provider}/${model.id}`] }] })).ok).toBe(true);
+      changes: [{ key: "model.queue[role=background]", layer: "session", op: "set", value: [`${model.provider}/${model.id}`] }] })).ok).toBe(true);
     const opened = await phone.request("home.open", {});
     const homeSessionId = opened.result.sessionId as string;
     const session = await phone.request("session.open", { sessionId: homeSessionId });

@@ -38,15 +38,14 @@ export interface HomeModuleServices {
 /** Home owns its extension closures; registry supplies only the kernel-side
  * operations and reads of owners installed after registry construction. */
 export function homeModuleServices(owner: HomeOwner,
-  platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport; homeDiagnostic?: HomeDiagnostic; homeTaskDiagnostic?: (record: HomeTaskDiagnostic) => void; persistenceDiagnostic?: (sessionId: string, code: "home-model-record-failed") => void },
+  platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport; homeDiagnostic?: HomeDiagnostic; homeTaskDiagnostic?: (record: HomeTaskDiagnostic) => void; },
   ports: Pick<HomeModuleServices, "knowledge" | "search" | "read" | "delegate"> & { changes(): SettingsChangePath | undefined; resourcesIdle(sessionId: string): void; runtime: HomeSessionProfileServices["runtime"] },
 ): HomeModuleServices {
   return {
     knowledge: ports.knowledge, search: ports.search, read: ports.read, delegate: ports.delegate,
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
     profile: {
-      decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), model: sessionId => owner.modelFor(sessionId), runtime: ports.runtime,
-      changed: (sessionId, model) => owner.noteModelApplied(sessionId, model).catch(() => { platform.persistenceDiagnostic?.(sessionId, "home-model-record-failed"); }),
+      decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), runtime: ports.runtime,
     },
     appendGuard: {
       state: sessionId => owner.chapterStateFor(sessionId),

@@ -48,7 +48,7 @@ export interface KeyPresentation {
   effect: KeyDeclaration["effect"];
 }
 
-function presentKey(key: KeyDeclaration, clientControls: readonly string[] | undefined, layer: "mac" | "chat" | "profile" | "project"): KeyPresentation {
+function presentKey(key: KeyDeclaration, clientControls: readonly string[] | undefined, layer: "global" | "session" | "home" | "project"): KeyPresentation {
   const binding = key.layers[layer];
   const { control, note } = negotiateControl(key, clientControls);
   return {
@@ -62,7 +62,7 @@ function presentKey(key: KeyDeclaration, clientControls: readonly string[] | und
     // Project files remain repository-owned; the app is an inspector there.
     sessionOverridable: key.sessionOverridable,
     projectSettable: key.projectSettable,
-    editable: layer !== "project" && scopeAdmitted(key, layer) && key.writers.includes("ui") && binding !== undefined && binding.store !== "chat-launch",
+    editable: layer !== "project" && scopeAdmitted(key, layer) && key.writers.includes("ui") && binding !== undefined && binding.store !== "session-launch",
     timing: key.timing,
     effect: key.effect,
     ...(key.type.options ? { options: key.type.options } : {}),
@@ -145,8 +145,8 @@ export function presentHistoryEntry(entry: ChangeEntry) {
 }
 
 export function presentResolution(resolution: Resolution, input: PresentationInput): PresentedResolution {
-  const layer = resolution.target.kind === "global" ? "mac" : resolution.target.kind === "project" ? "project"
-    : resolution.target.kind === "home" ? "profile" : "chat";
+  const layer = resolution.target.kind === "global" ? "global" : resolution.target.kind === "project" ? "project"
+    : resolution.target.kind === "home" ? "home" : "session";
   const keys: PresentedKey[] = resolution.keys.filter(key => input.controls === undefined || schemaKey(key.key).writers.length > 0).map(key => ({
     ...key,
     presentation: presentKey(keyForHome(schemaKey(key.key), resolution.target.kind === "home"), input.controls, layer),

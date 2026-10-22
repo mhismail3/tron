@@ -27,10 +27,6 @@
       "bindingRevision": 1,
       "generation": 1,
       "routeGeneration": 1,
-      "model": {
-        "provider": "corpus-provider",
-        "id": "corpus-model"
-      },
       "live": false,
       "sessionPresent": true,
       "waitingForUser": false,
@@ -71,14 +67,9 @@
     },
     "designation": {
       "01a00000-0000-7000-8000-00000000c0a1": {
-        "model": {
-          "provider": "corpus-provider",
-          "id": "corpus-model"
-        },
         "homeChapter": true
       },
       "01a00000-0000-7000-8000-00000000c0a2": {
-        "model": null,
         "homeChapter": false
       }
     }

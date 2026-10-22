@@ -3,7 +3,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { MacTerminalKeys } from "../security/mac-terminal.js";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -258,21 +258,21 @@ describe("outside settings retirement", () => {
     const errors: unknown[] = [];
     const outside = new OutsideChanges(f.tronHome, f.agentDir, f.record, {
       ...f.settingsModel.observedReaders,
-      mac: async () => {
-        const values = await f.settingsModel.observedReaders.mac();
+      global: async () => {
+        const values = await f.settingsModel.observedReaders.global();
         if (hold) { reading.release(); await reader.promise; }
         return values;
       },
     });
     owner.outsides.push(outside);
-    await outside.reconcile([{ kind: "mac" }]);
+    await outside.reconcile([{ kind: "global" }]);
     outside.observe({ outside: async () => {
       publishing.release();
       try {
         await observer.promise;
         // Production after-apply effects can resolve settings again. Closing
         // the watcher must not revoke a read needed by an accepted observer.
-        await outside.reconcile([{ kind: "mac" }]);
+        await outside.reconcile([{ kind: "global" }]);
         await writeFile(join(f.root, "published"), "settled\n");
       }
       finally { finished.release(); }
@@ -295,7 +295,7 @@ describe("outside settings retirement", () => {
       const observed = await readFile(outside.path, "utf8");
       const history = await f.history();
       expect(history.some(entry => entry.status === "outside" && entry.key === "run.retry.maxRetries")).toBe(true);
-      await expect(outside.reconcile([{ kind: "mac" }])).rejects.toThrow(/disposed/);
+      await expect(outside.reconcile([{ kind: "global" }])).rejects.toThrow(/disposed/);
       expect(await readFile(outside.path, "utf8")).toBe(observed);
       expect(errors).toEqual([]);
       transcript.push({ case: "outside retirement", detail: { fileWatch: true, readerJoined: true, observerJoined: true, lateAdmissionRefused: true } });
@@ -312,7 +312,7 @@ describe("outside settings retirement", () => {
     let calls = 0, disposed = false;
     const outside = new OutsideChanges(f.tronHome, f.agentDir, f.record, f.settingsModel.observedReaders);
     owner.outsides.push(outside);
-    await outside.reconcile([{ kind: "mac" }]);
+    await outside.reconcile([{ kind: "global" }]);
     const destination = join(f.root, "observer-destination");
     await mkdir(destination);
     outside.observe({ outside: async () => {
@@ -325,11 +325,11 @@ describe("outside settings retirement", () => {
       }
     } });
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 8 } }));
-    const work = outside.reconcile([{ kind: "mac" }]);
+    const work = outside.reconcile([{ kind: "global" }]);
     const operation = work.then(() => undefined, (error: unknown) => error);
     await publishing.promise;
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 9 } }));
-    const secondWork = outside.reconcile([{ kind: "mac" }]);
+    const secondWork = outside.reconcile([{ kind: "global" }]);
     await publishingSecond.promise;
     const closing = Promise.resolve(outside.dispose()).then(() => { disposed = true; }, (error: unknown) => { disposed = true; return error; });
     try {
@@ -462,13 +462,13 @@ async function gitProject(root: string, name: string) {
 describe("settings.change", () => {
   caseIt("persists a schema numeric map and rejects unoffered fields without erasing the current store", async owner => {
     const f = await fixture(owner);
-    await f.change({ kind: "mac" }, [{ key: "model.thinkingBudgets", layer: "mac", op: "set", value: { low: 1_234 } }]);
+    await f.change({ kind: "global" }, [{ key: "model.thinkingBudgets", layer: "global", op: "set", value: { low: 1_234 } }]);
     expect((await f.macDocument()).thinkingBudgets).toEqual({ low: 1_234 });
-    await expect(f.change({ kind: "mac" }, [{ key: "model.thinkingBudgets", layer: "mac", op: "set", value: { unoffered: 3 } }]))
+    await expect(f.change({ kind: "global" }, [{ key: "model.thinkingBudgets", layer: "global", op: "set", value: { unoffered: 3 } }]))
       .rejects.toMatchObject({ code: "invalid_request" });
     expect((await f.macDocument()).thinkingBudgets).toEqual({ low: 1_234 });
     const resolution = await f.service.invoke(client(), "settings.resolve", {
-      target: { kind: "mac" }, keys: ["model.thinkingBudgets"], renderer: { version: 1, controls: ["list", "readOnly"] },
+      target: { kind: "global" }, keys: ["model.thinkingBudgets"], renderer: { version: 1, controls: ["list", "readOnly"] },
     }) as unknown as PresentedResolution;
     expect(resolution.keys[0]).toMatchObject({ value: { low: 1_234 }, presentation: {
       control: "list", valueKind: "numberMap", options: expect.arrayContaining([{ value: "low", label: "Low" }]),
@@ -479,8 +479,8 @@ describe("settings.change", () => {
 
   caseIt("holds a non-UI change when the bounded risk model raises its tier", async owner => {
     const f = await fixture(owner, { assessRisk: async () => ({ tier: "approve", rationale: "unexpected scope" }) });
-    const result = await f.settingsChanges.change({ kind: "mac" }, [
-      { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 },
+    const result = await f.settingsChanges.change({ kind: "global" }, [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 },
     ], { actor: { kind: "home", id: "home-fixture" }, reason: "Retry a bounded failure" });
     expect(result.status).toBe("pending");
     // A held change still names its values, so the agent's settings tool detail shows old → new (#957).
@@ -507,39 +507,39 @@ describe("settings.change", () => {
     } });
     const f = await fixture(owner, { assessRisk: evaluator.assess.bind(evaluator) });
     const agent = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
-    await f.change({ kind: "mac" }, [{ key: "context.images.block", layer: "mac", op: "set", value: true }]);
-    await f.change({ kind: "mac" }, [{ key: "permissions.floor", layer: "mac", op: "set", value: "notify",
+    await f.change({ kind: "global" }, [{ key: "context.images.block", layer: "global", op: "set", value: true }]);
+    await f.change({ kind: "global" }, [{ key: "permissions.floor", layer: "global", op: "set", value: "notify",
       qualifiers: { key: "context.images.block", direction: "widen" } }]);
     expect(calls).toHaveLength(0); // UI taps never spend on risk classification.
-    const lowered = await f.settingsChanges.change({ kind: "mac" }, [
-      { key: "context.images.block", layer: "mac", op: "set", value: false },
+    const lowered = await f.settingsChanges.change({ kind: "global" }, [
+      { key: "context.images.block", layer: "global", op: "set", value: false },
     ], agent);
     expect(lowered).toMatchObject({ status: "applied", tier: "notify" });
     expect((await f.history({ key: "context.images.block" })).find(e => e.changeId === lowered.changes[0]!.changeId))
       .toMatchObject({ tierBasis: { floor: "notify", floorSource: "override", risk: "quiet", riskEvaluation: { status: "assessed" } } });
-    const web = await f.settingsChanges.change({ kind: "mac" }, [
-      { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 5 },
+    const web = await f.settingsChanges.change({ kind: "global" }, [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 5 },
     ], { ...agent, web: true });
     expect(web).toMatchObject({ status: "applied", tier: "notify" });
     mode = "fail";
-    const failed = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 }], agent);
+    const failed = await f.settingsChanges.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }], agent);
     expect(failed).toMatchObject({ status: "applied", tier: "quiet" });
     expect((await f.history()).find(e => e.changeId === failed.changes[0]!.changeId))
       .toMatchObject({ tierBasis: { risk: null, riskEvaluation: { status: "failed" } } });
     mode = "timeout";
-    const timedOut = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 7 }], agent);
+    const timedOut = await f.settingsChanges.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 7 }], agent);
     expect(timedOut).toMatchObject({ status: "applied", tier: "quiet" });
     expect((await f.history()).find(e => e.changeId === timedOut.changes[0]!.changeId))
       .toMatchObject({ tierBasis: { risk: null, riskEvaluation: { status: "timeout" } } });
     mode = "quiet";
     const beforeRefusal = calls.length;
-    await expect(f.settingsChanges.change({ kind: "mac" }, [
-      { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 8 },
-      { key: "run.httpProxy", layer: "mac", op: "set", value: "http://private-fixture.invalid:3128" },
+    await expect(f.settingsChanges.change({ kind: "global" }, [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 },
+      { key: "run.httpProxy", layer: "global", op: "set", value: "http://private-fixture.invalid:3128" },
     ], agent))
       .rejects.toMatchObject({ code: "invalid_request", message: "HTTP proxy cannot be changed by home" });
     expect(calls).toHaveLength(beforeRefusal); // Authorization precedes disclosure.
-    await f.settingsChanges.change({ kind: "mac" }, [{ key: "tools.shell.commandPrefix", layer: "mac", op: "set", value: "API_TOKEN=private-fixture.invalid" }],
+    await f.settingsChanges.change({ kind: "global" }, [{ key: "tools.shell.commandPrefix", layer: "global", op: "set", value: "API_TOKEN=private-fixture.invalid" }],
       { ...agent, reason: "Use Bearer fixture-secret-token-123456789" });
     expect(JSON.stringify(calls)).not.toContain("private-fixture.invalid");
     expect(JSON.stringify(calls)).not.toContain("fixture-secret-token");
@@ -550,18 +550,18 @@ describe("settings.change", () => {
 
   caseIt("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async owner => {
     const f = await fixture(owner);
-    const applied = await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6, expected: 4 }]);
+    const applied = await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6, expected: 4 }]);
     expect(applied.status).toBe("applied");
     expect(applied.changes[0]).toMatchObject({ before: 4, after: 6 });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
-    expect(f.broadcasts).toContainEqual({ topic: "settings.changed", payload: expect.objectContaining({ keys: ["run.retry.maxRetries"], layer: "mac" }) });
+    expect(f.broadcasts).toContainEqual({ topic: "settings.changed", payload: expect.objectContaining({ keys: ["run.retry.maxRetries"], layer: "global" }) });
     const [entry] = await f.history({ key: "run.retry.maxRetries" });
-    expect(entry).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, layer: "mac", before: 4, after: 6, status: "applied", tier: "quiet",
+    expect(entry).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, layer: "global", before: 4, after: 6, status: "applied", tier: "quiet",
       tierBasis: { floor: "quiet", floorSource: "code", web: false, risk: null },
-      presentation: { label: "Retries", section: "run", actor: "You", layer: "Mac", display: { before: "4 retries", after: "6 retries" } } });
+      presentation: { label: "Retries", section: "run", actor: "You", layer: "Global", display: { before: "4 retries", after: "6 retries" } } });
 
     // A stale `expected` is refused and changes nothing.
-    await expect(f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 9, expected: 4 }])).rejects.toMatchObject({ code: "conflict" });
+    await expect(f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 9, expected: 4 }])).rejects.toMatchObject({ code: "conflict" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
 
     // Undo writes `before` back as an ordinary change that names what it undid.
@@ -571,15 +571,15 @@ describe("settings.change", () => {
     expect(undoEntry).toMatchObject({ undoOf: applied.changes[0]!.changeId, before: 6, after: 4 });
 
     // Undo after a later conflicting change is refused with the current value.
-    const second = await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 8 }]);
-    await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 10 }]);
+    const second = await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 }]);
+    await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 10 }]);
     await expect(f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: second.changes[0]!.changeId }))
       .rejects.toMatchObject({ code: "conflict", details: { current: 10, after: 8,
         display: { current: "10 retries", after: "8 retries" } } });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 10 });
 
     // A redacted key records only "changed", and its change is not undoable.
-    const proxy = await f.change({ kind: "mac" }, [{ key: "run.httpProxy", layer: "mac", op: "set", value: "http://proxy.invalid:3128" }]);
+    const proxy = await f.change({ kind: "global" }, [{ key: "run.httpProxy", layer: "global", op: "set", value: "http://proxy.invalid:3128" }]);
     // A redacted key's outcome withholds both values, as its record does.
     expect(proxy.changes[0]).toMatchObject({ redacted: true });
     expect(proxy.changes[0]).not.toHaveProperty("after");
@@ -592,7 +592,7 @@ describe("settings.change", () => {
       .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("not undoable") });
 
     // A layer the key does not allow, and a key with no writer, are refused.
-    await expect(f.change({ kind: "mac" }, [{ key: "setup.sessionDir", layer: "mac", op: "set", value: "/elsewhere" }])).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(f.change({ kind: "global" }, [{ key: "setup.sessionDir", layer: "global", op: "set", value: "/elsewhere" }])).rejects.toMatchObject({ code: "invalid_request" });
     // Permanent history remains readable after a schema key retires. The outside
     // actor must not be mislabeled as a UI change, and projection never rewrites audit.
     await f.record.append([{ ...entry!, changeId: "retired-key-entry", key: "retired.setting", actor: { kind: "outside", id: "fixture" }, before: "old", after: "new" }]);
@@ -603,7 +603,7 @@ describe("settings.change", () => {
     transcript.push({ case: "record, undo and redaction", detail: await f.history() });
   });
 
-  caseIt("changes a live chat's Chat layer through its slot lane and records it", async owner => {
+  caseIt("changes a live chat's Session scope through its slot lane and records it", async owner => {
     const f = await fixture(owner);
     const cwd = join(f.root, "chat");
     await mkdir(cwd);
@@ -614,113 +614,80 @@ describe("settings.change", () => {
     await slot.setModel(first.provider, first.id);
     const before = slot.snapshot();
     const result = await f.change({ kind: "session", sessionId: slot.id },
-      [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: { provider: second.provider, id: second.id } }],
+      [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: { provider: second.provider, id: second.id } }],
       { fence: { runtimeGeneration: before.runtimeGeneration, model: before.model } }, client([slot.id]));
     expect(slot.snapshot().model).toEqual({ provider: second.provider, id: second.id });
     expect(result.changes[0]!.revision).toBe(slot.snapshot().revision);
     // A stale fence is refused by the lane guard and changes nothing.
     await expect(f.change({ kind: "session", sessionId: slot.id },
-      [{ key: "model.thinking[role=chat]", layer: "chat", op: "set", value: "low" }],
+      [{ key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" }],
       { fence: { runtimeGeneration: "retired", model: before.model } }, client([slot.id]))).rejects.toMatchObject({ code: "conflict" });
     const entry = (await f.history({ key: "model.ref[role=chat]" }))[0]!;
-    expect(entry).toMatchObject({ layer: "chat", target: { kind: "session", sessionId: slot.id }, before: { provider: first.provider, id: first.id }, after: { provider: second.provider, id: second.id } });
+    expect(entry).toMatchObject({ layer: "session", target: { kind: "session", sessionId: slot.id }, before: { provider: first.provider, id: first.id }, after: { provider: second.provider, id: second.id } });
     const failed = (await f.history({ status: "failed" }))[0]!;
     expect(failed).toMatchObject({ key: "model.thinking[role=chat]", status: "failed" });
-    transcript.push({ case: "chat layer", detail: { entry, failed } });
+    transcript.push({ case: "session scope", detail: { entry, failed } });
   });
 
   caseIt("rolls back every store when a change in the same request fails, leaving both unchanged", async owner => {
     const f = await fixture(owner);
-    const project = join(f.root, "conflicted");
-    await mkdir(join(project, ".pi"), { recursive: true });
-    const conflicted = "{\n<<<<<<< HEAD\n  \"transport\": \"sse\"\n=======\n  \"transport\": \"websocket\"\n>>>>>>> theirs\n}\n";
-    await writeFile(join(project, ".pi", "settings.json"), conflicted);
-    await f.trust.set(project, true);
-    const resolved = await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: project } }) as unknown as Resolution;
-    expect(resolved.projectUnreadable).toBe(true);
-    await expect(f.agentChange({ kind: "project", cwd: project }, [
-      { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 7 },
-      { key: "run.transport", layer: "project", op: "set", value: "auto" },
-    ])).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("cannot be parsed") });
+    const homeDirectory = join(f.tronHome, "gateway", "home");
+    await mkdir(homeDirectory, { recursive: true });
+    await writeFile(join(homeDirectory, "profile.json"), "{}\n");
+    // Home's saved-settings directory refuses the replacement write; the Global write lands first.
+    await chmod(homeDirectory, 0o500);
+    try {
+      await expect(f.change({ kind: "home" }, [
+        { key: "run.retry.maxRetries", layer: "global", op: "set", value: 7 },
+        { key: "model.thinking[role=worker]", layer: "session", op: "set", value: "low" },
+      ])).rejects.toBeDefined();
+    } finally { await chmod(homeDirectory, 0o700); }
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
-    expect(await readFile(join(project, ".pi", "settings.json"), "utf8")).toBe(conflicted);
+    expect(await readFile(join(homeDirectory, "profile.json"), "utf8")).toBe("{}\n");
     const failed = await f.history({ status: "failed" });
-    expect(failed.map(entry => entry.key).sort()).toEqual(["run.retry.maxRetries", "run.transport"]);
-    expect(failed.find(entry => entry.key === "run.transport")!.failure).toContain("cannot be parsed");
+    expect(failed.map(entry => entry.key).sort()).toEqual(["model.thinking[role=worker]", "run.retry.maxRetries"]);
     expect(failed.find(entry => entry.key === "run.retry.maxRetries")!.failure).toContain("Rolled back");
     transcript.push({ case: "cross-store rollback", detail: failed });
   });
 
-  caseIt("writes and stages Project changes, never commits, and records why a write was not staged", async owner => {
+  caseIt("refuses every Project write without touching the repository, and badges its git state", async owner => {
     const f = await fixture(owner);
-    const transport = (value: string) => [{ key: "run.transport", layer: "project", op: "set", value }];
-
-    // A clean repository: written, staged, never committed.
+    const transport = (value: string) => [{ key: "run.transport", layer: "project", op: "set", value }] as Parameters<SettingsChangePath["change"]>[1];
     const clean = await gitProject(f.root, "clean");
     await f.trust.set(clean, true);
-    const staged = await f.agentChange({ kind: "project", cwd: clean }, transport("websocket") as Parameters<SettingsChangePath["change"]>[1]);
-    expect(git(clean, "diff", "--cached", "--name-only").trim()).toBe(".pi/settings.json");
-    expect(git(clean, "log", "--oneline").trim().split("\n")).toHaveLength(1);
-    expect(staged.changes[0]!.git).toMatchObject({ staged: true, path: ".pi/settings.json", blob: expect.stringMatching(/^[0-9a-f]{40}$/u) });
-    expect(staged.changes[0]!.git!.warning).toBeUndefined();
-    // Every other key and the file's indentation are kept.
-    expect(await readFile(join(clean, ".pi", "settings.json"), "utf8")).toBe(`${JSON.stringify({ transport: "websocket" }, null, 4)}\n`);
-
-    // Other staged work and the maintainer's own unstaged edits: staged anyway, with a warning.
-    const busy = await gitProject(f.root, "busy");
-    await f.trust.set(busy, true);
-    await writeFile(join(busy, "README.md"), "other work\n");
-    git(busy, "add", "README.md");
-    await writeFile(join(busy, ".pi", "settings.json"), `${JSON.stringify({ transport: "sse", steeringMode: "all" }, null, 4)}\n`);
-    const warned = await f.agentChange({ kind: "project", cwd: busy }, transport("auto") as Parameters<SettingsChangePath["change"]>[1]);
-    expect(warned.changes[0]!.git).toMatchObject({ staged: true, warning: expect.stringContaining("Other staged work: README.md") });
-    expect(warned.changes[0]!.git!.warning).toContain("unstaged edits");
-    expect(git(busy, "diff", "--cached", "--name-only").trim().split("\n").sort()).toEqual([".pi/settings.json", "README.md"]);
+    const before = await readFile(join(clean, ".pi", "settings.json"), "utf8");
+    for (const actor of ["agent", "ui"] as const) {
+      const change = actor === "agent" ? f.agentChange({ kind: "project", cwd: clean }, transport("websocket"))
+        : f.change({ kind: "project", cwd: clean }, transport("websocket"));
+      await expect(change).rejects.toThrow("Project settings are read-only");
+    }
+    expect(await readFile(join(clean, ".pi", "settings.json"), "utf8")).toBe(before);
+    expect(git(clean, "status", "--porcelain").trim()).toBe("");
+    expect(await f.history({ key: "run.transport" })).toEqual([]);
 
     const localBadge = async (cwd: string) => ((await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd }, keys: ["run.transport"] })) as unknown as
       { keys: Array<{ badges: Array<{ label: string; detail?: string }> }> }).keys[0]!.badges.find(badge => badge.label === "Local only");
-    // An ignored .pi: written, not staged, with the reason; its row says Local only.
+    // The repository's own file in an ignored .pi, or outside any repository, says Local only.
     const ignored = await gitProject(f.root, "ignored");
     await f.trust.set(ignored, true);
     git(ignored, "rm", "-q", "--cached", ".pi/settings.json");
     await writeFile(join(ignored, ".gitignore"), ".pi/\n");
     git(ignored, "add", ".gitignore");
     git(ignored, "commit", "-q", "-m", "ignore .pi");
-    const local = await f.agentChange({ kind: "project", cwd: ignored }, transport("websocket") as Parameters<SettingsChangePath["change"]>[1]);
-    expect(local.changes[0]!.git).toMatchObject({ staged: false, reason: ".pi is ignored by git" });
-    expect(JSON.parse(await readFile(join(ignored, ".pi", "settings.json"), "utf8"))).toEqual({ transport: "websocket" });
     expect(await localBadge(ignored)).toMatchObject({ detail: "Project: .pi is ignored by git" });
-
-    // No repository: written, not staged.
     const plain = join(f.root, "plain");
-    await mkdir(plain);
+    await mkdir(join(plain, ".pi"), { recursive: true });
+    await writeFile(join(plain, ".pi", "settings.json"), `${JSON.stringify({ transport: "sse" })}\n`);
     await f.trust.set(plain, true);
-    const unstaged = await f.agentChange({ kind: "project", cwd: plain }, transport("sse") as Parameters<SettingsChangePath["change"]>[1]);
-    expect(unstaged.changes[0]!.git).toMatchObject({ staged: false, reason: "not in a git repository" });
-    expect(JSON.parse(await readFile(join(plain, ".pi", "settings.json"), "utf8"))).toEqual({ transport: "sse" });
     expect(await localBadge(plain)).toMatchObject({ detail: "Project: not in a git repository" });
-
-    // An untrusted project is never written.
-    const untrusted = await gitProject(f.root, "untrusted");
-    await f.trust.set(untrusted, false);
-    await expect(f.agentChange({ kind: "project", cwd: untrusted }, transport("auto") as Parameters<SettingsChangePath["change"]>[1])).rejects.toMatchObject({ code: "trust_required" });
-    expect(git(untrusted, "diff", "--cached", "--name-only").trim()).toBe("");
-
-    // A conflicted file: a failed entry, the file untouched.
-    const conflictedRepo = await gitProject(f.root, "conflicted-repo");
-    await f.trust.set(conflictedRepo, true);
-    await writeFile(join(conflictedRepo, ".pi", "settings.json"), "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> other\n");
-    await expect(f.agentChange({ kind: "project", cwd: conflictedRepo }, transport("auto") as Parameters<SettingsChangePath["change"]>[1])).rejects.toMatchObject({ code: "conflict" });
-    expect(await readFile(join(conflictedRepo, ".pi", "settings.json"), "utf8")).toContain("<<<<<<<");
-    expect((await f.history({ status: "failed" })).find(entry => entry.target.kind === "project" && entry.target.cwd.endsWith("conflicted-repo"))).toMatchObject({ key: "run.transport", status: "failed" });
-    transcript.push({ case: "project writes", detail: await f.history({ key: "run.transport" }) });
+    transcript.push({ case: "project writes refused", detail: await f.history({ key: "run.transport" }) });
   });
 
   caseIt("changes trust through the change path and undoes it", async owner => {
     const f = await fixture(owner);
     const project = join(f.root, "trusted");
     await mkdir(project);
-    const granted = await f.change({ kind: "project", cwd: project }, [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: true }]);
+    const granted = await f.change({ kind: "project", cwd: project }, [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true }]);
     expect((await f.trust.inspect(project)).savedDecision).toBe(true);
     expect(f.broadcasts.some(event => event.topic === "trust.changed")).toBe(true);
     expect((await f.history({ key: "permissions.projectTrust" }))[0]).toMatchObject({ after: true, tier: "approve", tierBasis: { direction: "widen" } });
@@ -733,7 +700,7 @@ describe("settings.change", () => {
     const repository = await realpath(await gitProject(f.root, "rooted"));
     const subdirectory = join(repository, "packages", "app");
     await mkdir(subdirectory, { recursive: true });
-    const rooted = await f.change({ kind: "mac" }, [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: true, qualifiers: { project: subdirectory } }]);
+    const rooted = await f.change({ kind: "global" }, [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project: subdirectory } }]);
     expect(rooted.changes[0]).toMatchObject({ qualifiers: { project: repository } });
     expect(await f.trust.inspect(subdirectory)).toMatchObject({ projectDir: repository, savedDecision: true });
     expect((await f.history({ key: "permissions.projectTrust" })).some(entry => entry.actor?.kind === "outside")).toBe(false);
@@ -747,8 +714,8 @@ describe("settings.change", () => {
     await f.trust.set(parent, true);
     const trustRow = async () => (await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: child }, keys: ["permissions.projectTrust"] }) as unknown as Resolution).keys[0]!;
     expect(await f.trust.inspect(child)).toMatchObject({ effectiveDecision: true });
-    expect(await trustRow()).toMatchObject({ value: true, layer: "mac" });
-    const blocked = await f.change({ kind: "project", cwd: child }, [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: false }]);
+    expect(await trustRow()).toMatchObject({ value: true, layer: "global" });
+    const blocked = await f.change({ kind: "project", cwd: child }, [{ key: "permissions.projectTrust", layer: "global", op: "set", value: false }]);
     expect(await trustRow()).toMatchObject({ value: false });
     await f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: blocked.changes[0]!.changeId });
     expect((await f.trust.inspect(child)).savedDecision).toBe(true);
@@ -757,23 +724,23 @@ describe("settings.change", () => {
 
   caseIt("filters paged Changes by actor, layer and section without dropping older matches", async owner => {
     const f = await fixture(owner, { segmentEntries: 2 });
-    const homeRun = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 2 }], {
+    const homeRun = await f.settingsChanges.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 2 }], {
       actor: { kind: "home", id: "home" }, reason: "Reduce retries",
     });
-    await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 3 }]);
-    const worker = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.transport", layer: "mac", op: "set", value: "sse" }], {
+    await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 }]);
+    const worker = await f.settingsChanges.change({ kind: "global" }, [{ key: "run.transport", layer: "global", op: "set", value: "sse" }], {
       actor: { kind: "worker", id: "worker", taskId: "task" }, reason: "Use streaming HTTP",
     });
-    const profile = await f.settingsChanges.change({ kind: "home" }, [{ key: "model.thinking[role=worker]", layer: "profile", op: "set", value: "low" }], {
+    const profile = await f.settingsChanges.change({ kind: "home" }, [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "low" }], {
       actor: { kind: "home", id: "home" }, reason: "Use less thinking for workers",
     });
     const ids = async (filter: Record<string, unknown>) => (await f.history(filter)).map(entry => entry.changeId);
     expect(await ids({ actor: "agents", section: "run" })).toEqual([worker.changes[0]!.changeId, homeRun.changes[0]!.changeId]);
-    expect(await ids({ actor: "home", layer: "profile", section: "workers" })).toEqual([profile.changes[0]!.changeId]);
-    expect(await ids({ actor: "home", layer: "mac", key: "run.retry.maxRetries", status: "applied" })).toEqual([homeRun.changes[0]!.changeId]);
+    expect(await ids({ actor: "home", layer: "session", section: "workers" })).toEqual([profile.changes[0]!.changeId]);
+    expect(await ids({ actor: "home", layer: "global", key: "run.retry.maxRetries", status: "applied" })).toEqual([homeRun.changes[0]!.changeId]);
     expect(await ids({ actor: "ui" })).toHaveLength(1);
     expect(await ids({})).toHaveLength(4);
-    for (const filter of [{ actor: "unknown" }, { layer: "builtin" }, { section: "unknown" }, { section: "advanced" }]) {
+    for (const filter of [{ actor: "unknown" }, { layer: "everywhere" }, { section: "unknown" }, { section: "advanced" }]) {
       await expect(f.service.invoke(client(), "settings.history", filter)).rejects.toMatchObject({ code: "invalid_request" });
     }
     transcript.push({ case: "Changes filters", detail: await f.history({ actor: "agents" }) });
@@ -781,11 +748,11 @@ describe("settings.change", () => {
 
   caseIt("bounds a sparse filtered history page to one segment and resumes without losing older matches", async owner => {
     const f = await fixture(owner, { segmentEntries: 2 });
-    const first = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.transport", layer: "mac", op: "set", value: "sse" }], {
+    const first = await f.settingsChanges.change({ kind: "global" }, [{ key: "run.transport", layer: "global", op: "set", value: "sse" }], {
       actor: { kind: "home", id: "home" }, reason: "Prefer streaming HTTP",
     });
     for (let value = 0; value < 5; value += 1) {
-      await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value }]);
+      await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value }]);
     }
     const query = { key: "run.transport", limit: 50 };
     const newest = await f.service.invoke(client(), "settings.history", query) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
@@ -805,7 +772,7 @@ describe("settings.change", () => {
   caseIt("keeps every entry forever in bounded segments and pages through them", async owner => {
     const f = await fixture(owner, { segmentEntries: 5 });
     for (let value = 0; value < 23; value += 1) {
-      await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: value % 20 }]);
+      await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: value % 20 }]);
     }
     const pages: number[] = [];
     const seen: string[] = [];
@@ -844,20 +811,20 @@ describe("outside changes", () => {
   const outsideEntries = async (f: Awaited<ReturnType<typeof fixture>>) => (await f.history()).filter(entry => entry.status === "outside");
   const label = (r: Row, text: string) => r.badges.find(badge => badge.label === text);
 
-  caseIt("records one outside entry per hand-edited Mac key, never Tron's own write, and catches rename-replace", async owner => {
+  caseIt("records one outside entry per hand-edited Global key, never Tron's own write, and catches rename-replace", async owner => {
     const f = await fixture(owner);
-    await row(f, { kind: "mac" }, "run.retry.maxRetries"); // the first read is the baseline
+    await row(f, { kind: "global" }, "run.retry.maxRetries"); // the first read is the baseline
 
     // A Tron write: no outside entry (negative control), on this read and the next.
-    await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 }]);
+    await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }]);
     expect(await outsideEntries(f)).toEqual([]);
-    expect(label(await row(f, { kind: "mac" }, "run.retry.maxRetries"), "Changed outside Tron")).toBeUndefined();
+    expect(label(await row(f, { kind: "global" }, "run.retry.maxRetries"), "Changed outside Tron")).toBeUndefined();
 
     // A hand edit of two keys: exactly one entry per key, the live value follows the file.
     const document = await f.macDocument();
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...document, retry: { maxRetries: 9 }, transport: "sse" }));
-    const edited = await row(f, { kind: "mac" }, "run.retry.maxRetries");
-    await row(f, { kind: "mac" }, "run.retry.maxRetries"); // a second read records nothing more
+    const edited = await row(f, { kind: "global" }, "run.retry.maxRetries");
+    await row(f, { kind: "global" }, "run.retry.maxRetries"); // a second read records nothing more
     const first = await outsideEntries(f);
     expect(first.map(entry => [entry.key, entry.before, entry.after, entry.actor.kind]).sort()).toEqual([
       ["run.retry.maxRetries", 6, 9, "outside"], ["run.transport", undefined, "sse", "outside"],
@@ -865,17 +832,17 @@ describe("outside changes", () => {
     expect(edited.value).toBe(9);
     // It replaced Tron's value, so the row offers Apply again with the diff.
     const changed = label(edited, "Changed outside Tron")!;
-    expect(changed.detail).toBe("Mac: 6 retries → 9 retries");
+    expect(changed.detail).toBe("Global: 6 retries → 9 retries");
     expect(changed.action).toMatchObject({ kind: "applyAgain", changeId: first.find(entry => entry.key === "run.retry.maxRetries")!.changeId });
     // A value Tron never wrote shows the change without Apply again.
-    expect(label(await row(f, { kind: "mac" }, "run.transport"), "Changed outside Tron")!.action).toBeUndefined();
+    expect(label(await row(f, { kind: "global" }, "run.transport"), "Changed outside Tron")!.action).toBeUndefined();
 
     // Apply again is an ordinary audited change; the row clears.
     const again = await f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: changed.action!.changeId }) as unknown as { status: string; changes: Array<{ changeId: string }> };
     expect(again.status).toBe("applied");
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
     expect((await f.history())[0]).toMatchObject({ applyAgainOf: changed.action!.changeId, after: 6, actor: { kind: "ui" } });
-    expect(label(await row(f, { kind: "mac" }, "run.retry.maxRetries"), "Changed outside Tron")).toBeUndefined();
+    expect(label(await row(f, { kind: "global" }, "run.retry.maxRetries"), "Changed outside Tron")).toBeUndefined();
     // A stale Apply again (the store moved on) is refused, not applied.
     await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: changed.action!.changeId })).rejects.toMatchObject({ code: "conflict" });
 
@@ -883,12 +850,12 @@ describe("outside changes", () => {
     const temporary = join(f.agentDir, "settings.json.swp");
     await writeFile(temporary, JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 2 } }));
     await rename(temporary, join(f.agentDir, "settings.json"));
-    expect((await row(f, { kind: "mac" }, "run.retry.maxRetries")).value).toBe(2);
+    expect((await row(f, { kind: "global" }, "run.retry.maxRetries")).value).toBe(2);
     expect((await outsideEntries(f)).filter(entry => entry.key === "run.retry.maxRetries").map(entry => entry.after)).toEqual([2, 9]);
 
     // A redacted key is recorded as changed, never with its value.
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), httpProxy: "http://user:secret@proxy.invalid" }));
-    await row(f, { kind: "mac" }, "run.httpProxy");
+    await row(f, { kind: "global" }, "run.httpProxy");
     const proxy = (await outsideEntries(f)).find(entry => entry.key === "run.httpProxy")!;
     expect(proxy).toMatchObject({ redacted: true, changed: true });
     expect(JSON.stringify(proxy)).not.toContain("secret");
@@ -899,7 +866,7 @@ describe("outside changes", () => {
   caseIt("a file event alone records the change and pushes by floor: quiet keys never push", async owner => {
     const f = await fixture(owner);
     f.outside.startWatching(() => {});
-    await row(f, { kind: "mac" }, "run.retry.maxRetries");
+    await row(f, { kind: "global" }, "run.retry.maxRetries");
     const until = async (done: () => boolean | Promise<boolean>) => {
       for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
     };
@@ -914,71 +881,36 @@ describe("outside changes", () => {
     expect(f.pushes).toEqual([expect.objectContaining({ title: "Changed outside Tron", message: expect.stringContaining("Packages") })]);
   });
 
-  caseIt("a git project: staged, committed, unstaged, stash, restore, branch switches and a pull", async owner => {
+  caseIt("a git project: owner edits, commits, a stash and a pull are outside changes Tron never offers to re-apply", async owner => {
     const f = await fixture(owner);
     const project = await gitProject(f.root, "repo");
     await f.trust.set(project, true);
     const target = { kind: "project" as const, cwd: project };
     const transport = async () => row(f, target, "run.transport");
-    const read = async () => JSON.parse(await readFile(join(project, ".pi", "settings.json"), "utf8")) as Record<string, unknown>;
+    const write = (value: Record<string, unknown>) => writeFile(join(project, ".pi", "settings.json"), `${JSON.stringify(value, null, 4)}\n`);
     await transport();
     const baseline = (await outsideEntries(f)).length; // trust was set by hand before the first read
 
-    // A staged Tron edit: Staged, then a commit appends `committed` and the badge drops to Project.
-    const written = await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "websocket" }]);
-    expect(label(await transport(), "Staged")).toBeDefined();
-    git(project, "commit", "-q", "-m", "transport");
-    const committedRow = await transport();
-    expect(committedRow.badges.map(badge => badge.label)).toEqual(["Repository"]);
-    const committed = (await f.history()).find(entry => entry.status === "committed")!;
-    expect(committed).toMatchObject({ refersTo: written.changes[0]!.changeId, git: { head: git(project, "rev-parse", "HEAD").trim() } });
-
-    // Unstaging keeps the value: Uncommitted, and no outside entry.
-    await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "auto" }]);
-    git(project, "restore", "--staged", ".pi/settings.json");
-    const unstaged = await transport();
-    expect(unstaged.value).toBe("auto");
-    expect(label(unstaged, "Uncommitted")).toBeDefined();
-    expect((await outsideEntries(f)).length).toBe(baseline);
-
-    // A stash drops Tron's value: one outside entry with Apply again; the live value follows the working tree.
+    // The owner's uncommitted edit: one outside entry, Uncommitted, never Apply again.
+    await write({ transport: "websocket" });
+    const edited = await transport();
+    expect(edited.value).toBe("websocket");
+    expect(label(edited, "Uncommitted")).toBeDefined();
+    expect(label(edited, "Changed outside Tron")?.action).toBeUndefined();
+    expect((await outsideEntries(f)).length).toBe(baseline + 1);
+    // Committing it changes no value: nothing recorded, and it is no longer uncommitted.
+    git(project, "commit", "-q", "-am", "transport");
+    const committed = await transport();
+    expect(committed.value).toBe("websocket");
+    expect(label(committed, "Uncommitted")).toBeUndefined();
+    expect((await outsideEntries(f)).length).toBe(baseline + 1);
+    // A stash drops an uncommitted edit: one more outside entry with the repository state.
+    await write({ transport: "auto" });
+    await transport();
     git(project, "stash", "-q");
-    const stashed = await transport();
-    expect(stashed.value).toBe("websocket");
-    const stash = (await outsideEntries(f)).slice(0, (await outsideEntries(f)).length - baseline);
-    expect(stash.map(entry => [entry.key, entry.before, entry.after])).toEqual([["run.transport", "auto", "websocket"]]);
-    expect(stash[0]!.git).toMatchObject({ head: git(project, "rev-parse", "HEAD").trim(), branch: "main" });
-    const apply = label(stashed, "Changed outside Tron")!.action!;
-    expect(apply.kind).toBe("applyAgain");
-    // Audit actions cannot give the app a repository mutation escape route.
-    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: apply.changeId }))
-      .rejects.toMatchObject({ code: "invalid_request" });
-    expect((await read()).transport).toBe("websocket");
-    const reapplied = await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "auto" }]);
-    expect(reapplied.changes[0]!.git).toMatchObject({ staged: true });
-    expect((await read()).transport).toBe("auto");
-    expect(git(project, "diff", "--cached", "--name-only").trim()).toBe(".pi/settings.json");
+    expect((await transport()).value).toBe("websocket");
+    expect((await outsideEntries(f))[0]).toMatchObject({ key: "run.transport", before: "auto", after: "websocket", git: { branch: "main" } });
     git(project, "stash", "drop", "-q");
-
-    // `git restore --staged --worktree` drops it again: one more outside entry with Apply again.
-    git(project, "restore", "--staged", "--worktree", ".pi/settings.json");
-    const restored = await transport();
-    expect(restored.value).toBe("websocket");
-    expect(label(restored, "Changed outside Tron")!.action!.kind).toBe("applyAgain");
-    expect((await outsideEntries(f)).length).toBe(baseline + 2);
-
-    // A branch switch that carries an uncommitted edit changes no value: nothing recorded.
-    await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "sse" }]);
-    git(project, "switch", "-q", "-c", "carry");
-    expect((await transport()).value).toBe("sse");
-    expect((await outsideEntries(f)).length).toBe(baseline + 2);
-    // A branch switch that drops it (committed on one branch only): one outside entry with Apply again.
-    git(project, "commit", "-q", "-am", "sse on carry");
-    git(project, "switch", "-q", "main");
-    const switched = await transport();
-    expect(switched.value).toBe("websocket");
-    expect(label(switched, "Changed outside Tron")!.action!.kind).toBe("applyAgain");
-    expect((await outsideEntries(f))[0]).toMatchObject({ key: "run.transport", before: "sse", after: "websocket", git: { branch: "main" } });
 
     // A pull (fast-forward from a clone): the change lists its commit; a quiet key does not push,
     // a new package (notify on widening) does.
@@ -1032,13 +964,13 @@ describe("outside changes to MCP servers and custom models", () => {
 
   caseIt("records global Mac mcp.json edits per server by digest, pushes, refreshes the MCP owner, and never records Tron's own writes", async owner => {
     const f = await stagedFixture(owner);
-    await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] }); // baselines
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] }); // baselines
     const baseline = (await outsideEntries(f)).length;
 
     // Tron's own MCP write (through the bundled CLI) is not an outside change, and refreshes the MCP surface.
     await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "tron-added", transport: "http", url: "http://127.0.0.1:1/tron" });
     expect(f.broadcasts).toContainEqual({ topic: "mcp.changed", payload: { scope: "global" } });
-    await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] });
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] });
     expect((await outsideEntries(f)).length).toBe(baseline);
     expect(await servers(f, { scope: "global" })).toEqual(["global:tron-added"]);
 
@@ -1049,7 +981,7 @@ describe("outside changes to MCP servers and custom models", () => {
     await until("push: MCP server hand-added", () => f.pushes.some(push => push.message.includes("MCP server hand-added")));
     const added = (await outsideEntries(f))[0]!;
     expect(added).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "hand-added" }, op: "set", added: true, tier: "notify", redacted: true,
-      layer: "mac", target: { kind: "mac" }, actor: { kind: "outside", id: globalMcp },
+      layer: "global", target: { kind: "global" }, actor: { kind: "outside", id: globalMcp },
       presentation: { label: "MCP server hand-added", section: "tools", display: { before: "Not configured", after: "Added" } } });
     expect(f.pushes.at(-1)).toMatchObject({ title: "Changed outside Tron" });
     expect(f.broadcasts.filter(event => event.topic === "mcp.changed").length).toBe(2);
@@ -1061,7 +993,7 @@ describe("outside changes to MCP servers and custom models", () => {
     const afterAdd = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
     delete afterAdd.mcpServers["tron-added"];
     await writeJson(globalMcp, afterAdd);
-    await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] });
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] });
     expect((await outsideEntries(f))[0]).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "tron-added" }, op: "unset",
       presentation: { display: { before: "Configured", after: "Removed" } } });
 
@@ -1069,7 +1001,7 @@ describe("outside changes to MCP servers and custom models", () => {
     const beforeTron = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
     await writeJson(globalMcp, { ...beforeTron, mcpServers: { ...beforeTron.mcpServers, "edited-before-tron": { url: "http://127.0.0.1:1/before" } } });
     await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "tron-second", transport: "http", url: "http://127.0.0.1:1/second" });
-    await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] });
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] });
     const aroundTron = await outsideEntries(f);
     expect(aroundTron.filter(entry => entry.qualifiers?.server === "edited-before-tron").map(entry => entry.op)).toEqual(["set"]);
     expect(aroundTron.some(entry => entry.qualifiers?.server === "tron-second")).toBe(false);
@@ -1141,7 +1073,7 @@ describe("outside changes to MCP servers and custom models", () => {
     const document = { providers: { "tron-provider": { baseUrl: "https://tron-models.invalid/v1", api: "openai-completions", apiKey: "tron-key", models: [{ id: "m" }] } } };
     await f.service.invoke(client(), "models.custom.put", { commandId: commandId(), document });
     expect(f.broadcasts.at(-1)).toEqual({ topic: "models.customChanged", payload: {} });
-    await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] });
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] });
     const beforeModels = (await outsideEntries(f)).length;
     const modelsPath = join(f.agentDir, "models.json");
     const saved = JSON.parse(await readFile(modelsPath, "utf8")) as { providers: Record<string, unknown> };
@@ -1170,10 +1102,10 @@ describe("every key at every allowed layer", () => {
   // One case per layer: each owns its budget and failure, and the per-instance
   // report accumulates across them into one artifact.
   const report: Array<Record<string, unknown>> = [];
-  caseEach(["chat", "profile", "project", "mac"])("changes, resolves, stores and undoes each declared key instance at the %s layer", async (only, owner) => {
+  caseEach(["session", "home", "project", "global"])("changes, resolves, stores and undoes each declared key instance at the %s store", async (only, owner) => {
     const f = await fixture(owner);
     const first = f.faux.getModel("first")!, second = f.faux.getModel("second")!;
-    // A Mac default model gives model-qualified keys an instance on every target.
+    // A Global default model gives model-qualified keys an instance on every target.
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), defaultProvider: first.provider, defaultModel: first.id }));
     const project = await gitProject(f.root, "every");
     await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({ transport: "sse", modelContextWindows: { [`${first.provider}/${first.id}`]: 64_000 } }));
@@ -1184,10 +1116,10 @@ describe("every key at every allowed layer", () => {
     await slot.setModel(first.provider, first.id);
     const controls = [...CONTROLS];
     const targets: Record<string, Record<string, unknown>> = {
-      chat: { kind: "session", sessionId: slot.id }, profile: { kind: "home" }, project: { kind: "project", cwd: project }, mac: { kind: "mac" },
+      session: { kind: "session", sessionId: slot.id }, home: { kind: "home" }, project: { kind: "project", cwd: project }, global: { kind: "global" },
     };
     type Served = { key: string; group: string; qualifiers?: Record<string, string>; value: unknown; layer: string;
-      presentation: { editableLayers: string[]; valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
+      projectSetting?: { file: string; path: string }; presentation: { editable: boolean; valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
     const resolve = async (layer: string, key: string) => {
       const resolution = await f.service.invoke(client([slot.id]), "settings.resolve", { target: targets[layer], keys: [key], renderer: { version: 1, controls } }) as unknown as { keys: Served[] };
       if (key === "permissions.macTerminalKey") expect(resolution.keys[0]?.group).toBe("connections");
@@ -1214,7 +1146,7 @@ describe("every key at every allowed layer", () => {
       if (valueKind === "numberMap") return { [String(options![0]!.value)]: range!.min + 1 };
       if (options?.length) return options.map(option => option.value).find(value => differs(value, row.value));
       if (valueKind === "integer") return Math.floor((range!.min + range!.max) / 2) === row.value ? range!.min : Math.floor((range!.min + range!.max) / 2);
-      if (valueKind === "toolSelection") return layer === "profile" ? ["settings"] : ["read"];
+      if (valueKind === "toolSelection") return layer === "home" ? ["settings"] : ["read"];
       if (valueKind === "stringList") return ["sample-entry"];
       if (valueKind === "packages") return ["npm:sample-package"];
       if (valueKind === "text") return "sample-text";
@@ -1222,32 +1154,41 @@ describe("every key at every allowed layer", () => {
     };
     /** The value in the store's own bytes, read through the schema binding. */
     const stored = async (key: KeyDeclaration, layer: string, qualifiers: Record<string, string>) => {
-      const binding = key.layers[layer as "mac"]!;
+      const binding = key.layers[layer as "global"]!;
       const json = async (path: string) => JSON.parse(await readFile(path, "utf8").catch(() => "{}")) as Record<string, unknown>;
       const stores = {
-        layers: ["chat", "profile", "project", "mac", "builtin"], mac: await json(join(f.agentDir, "settings.json")),
+        layers: ["session", "home", "project", "global", "default"], global: await json(join(f.agentDir, "settings.json")),
         project: { root: project, document: await json(join(project, ".pi", "settings.json")), applied: true },
-        profile: await json(join(f.tronHome, "gateway", "home", "profile.json")),
+        home: await json(join(f.tronHome, "gateway", "home", "profile.json")),
         trust: await json(join(f.agentDir, "trust.json")) as Record<string, boolean>,
         macTerminal: await f.macTerminalKeys.read(),
         floors: await json(join(f.tronHome, "gateway", "settings", "floors.json")),
         gateway: await json(join(f.tronHome, "gateway", "settings", "gateway.json")),
-        chat: slot.settingsChatLayer(),
+        session: slot.settingsSessionLayer(),
       } as unknown as SettingsStores;
       const qualified = binding.store === "pi" && binding.qualified !== undefined && qualifiers.model !== undefined;
-      const raw = readBinding(stores, layer as "mac", binding, qualifiers, qualified, key.id);
+      const raw = readBinding(stores, layer as "global", binding, qualifiers, qualified, key.id);
       // A composing layer may store its selection relative to the layers below.
-      return key.type.compose && raw !== undefined ? key.type.compose(composedBelow(stores, key, qualifiers, layer as "mac"), raw) : raw;
+      return key.type.compose && raw !== undefined ? key.type.compose(composedBelow(stores, key, qualifiers, layer as "global"), raw) : raw;
     };
     for (const key of KEYS) {
       for (const layer of Object.keys(key.layers).filter(layer => layer === only)) {
         const row = await resolve(layer, key.id);
         const instance = { key: key.id, layer, qualifiers: row?.qualifiers };
-        if (!row) { report.push({ ...instance, result: "no instance on its target" }); continue; }
+        // A key no one may write (the session folder) is not served on any target.
+        if (!row) { report.push({ ...instance, result: key.writers.length === 0 ? "verified unserved: no writer" : "no instance on its target" }); continue; }
         const value = await sample(layer, row);
-        const request = [{ key: key.id, layer, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];
-        const extra = layer === "chat" ? { fence: fence() } : {};
-        if (!row.presentation.editableLayers.includes(layer)) {
+        // A store's public scope: Home's saved settings are Home's Session scope.
+        const scope = layer === "home" ? "session" : layer;
+        const request = [{ key: key.id, layer: scope, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];
+        const extra = layer === "session" ? { fence: fence() } : {};
+        if (row.projectSetting && layer === "session") {
+          // A Project selection masks this Session key: the edit refuses and leaves the override inactive.
+          await expect(f.change(targets[layer]!, request, extra, client([slot.id]))).rejects.toThrow("edit its Project key instead");
+          report.push({ ...instance, result: "verified masked by Project" });
+          continue;
+        }
+        if (!row.presentation.editable) {
           await expect(f.change(targets[layer]!, request, extra, client([slot.id]))).rejects.toMatchObject({ code: "invalid_request" });
           report.push({ ...instance, result: "verified read-only" });
           continue;
@@ -1265,14 +1206,14 @@ describe("every key at every allowed layer", () => {
         expect(applied.status, `${key.id}@${layer}`).toBe("applied");
         const after = await resolve(layer, key.id);
         const expectedValue = key.redacted ? undefined : value;
-        expect(after!.layer, `${key.id}@${layer} source`).toBe(layer);
+        expect(after!.layer, `${key.id}@${layer} source`).toBe(scope);
         if (!key.redacted) expect(after!.value, `${key.id}@${layer} value`).toEqual(expectedValue);
         expect(await stored(key, layer, after!.qualifiers ?? row.qualifiers ?? {}), `${key.id}@${layer} store`).toEqual(value);
-        const undo = f.service.invoke(client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "chat" ? { fence: fence() } : {}) });
+        const undo = f.service.invoke(client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "session" ? { fence: fence() } : {}) });
         if (key.redacted) {
           // A redacted change has no recorded `before`: never undoable, so unset it directly.
           await expect(undo).rejects.toMatchObject({ code: "conflict" });
-          await f.change(targets[layer]!, [{ key: key.id, layer, op: "unset", ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }], extra, client([slot.id]));
+          await f.change(targets[layer]!, [{ key: key.id, layer: scope, op: "unset", ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }], extra, client([slot.id]));
           expect(await stored(key, layer, row.qualifiers ?? {}), `${key.id}@${layer} unset`).toBeUndefined();
         } else await undo;
         const undone = await resolve(layer, key.id);
@@ -1283,7 +1224,7 @@ describe("every key at every allowed layer", () => {
     transcript.push({ case: `every key: ${only}`, detail: report.filter(entry => entry.layer === only) });
     await mkdir(dirname(EVERY_KEY_ARTIFACT), { recursive: true });
     await writeFile(EVERY_KEY_ARTIFACT, `${JSON.stringify(report, null, 2)}\n`);
-    const gaps = report.filter(entry => entry.layer === only && entry.result !== "round-trip" && entry.result !== "verified read-only" && !String(entry.result).startsWith("Home applier"));
+    const gaps = report.filter(entry => entry.layer === only && !["round-trip", "verified read-only", "verified masked by Project", "verified unserved: no writer"].includes(String(entry.result)) && !String(entry.result).startsWith("Home applier"));
     expect(gaps).toEqual([]);
   }, 60_000);
 });

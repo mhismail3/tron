@@ -1,7 +1,7 @@
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { homeMemoryChange } from "../../test-support/chat-settings-change.js";
+import { homeMemoryChange } from "../../test-support/session-settings-change.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";

@@ -16,9 +16,9 @@ it("settings-approvals-paths: create, supersede, settle, expire, take outcomes a
   const log = await storePathLock({ module: "gateway/admin", name: "settings-approvals-paths", testFileUrl: import.meta.url, owned: "gateway/settings/approvals.json" });
   onTestFinished(countRandomUUID());
   const approvals = new SettingsApprovals(log.home);
-  const mac: SettingsTarget = { kind: "mac" };
+  const mac: SettingsTarget = { kind: "global" };
   const change = (key: string, after: unknown): PendingChange => ({
-    changeId: `change-${key}`, key, layer: "mac", op: "set", before: false, after, tier: "approve",
+    changeId: `change-${key}`, key, layer: "global", op: "set", before: false, after, tier: "approve",
     tierBasis: { direction: "widen", floor: "approve", floorSource: "code", web: false, risk: null },
   });
   const create = (sessionId: string, target: SettingsTarget, ...changes: PendingChange[]) =>

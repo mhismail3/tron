@@ -123,7 +123,7 @@ struct HostedSettingsRendererFixture: View {
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-controls-review") {
                         controlsReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
-                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("context"))
+                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
                     } else if HostedExtensionsReview.project {
                         SettingsRendererView(target: SettingsTarget.project(cwd: "/fixture/project").gatewayTarget, writeLayer: nil, presentation: .section("tools"))
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-providers") {
@@ -136,7 +136,7 @@ struct HostedSettingsRendererFixture: View {
                             onOpenSession: { openedRoute = $0 })
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-haptics") {
                         // The Context sheet itself, so the fixture's cover control stays reachable.
-                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("context"))
+                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-nested") {
                         Button("Open Settings") { nestedSettings = true }
                             .tronManagedSheet(isPresented: $nestedSettings, identity: "fixture.nested-settings") {
@@ -212,7 +212,6 @@ private struct UIReviewPushStore: PushCredentialStoring {
 }
 
 private actor HostedSettingsRendererSocket: GatewaySocketConnection {
-    private let sourceActions = ProcessInfo.processInfo.arguments.contains("-settings-renderer-source-actions")
     private var heldPreview: CheckedContinuation<Void, Never>?
     private var previewsHeld = 0
     func previewCount() -> Int { previewsHeld }
@@ -350,9 +349,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 "createdAt": .string(ISO8601DateFormatter().string(from: Date())),
                 "expiresAt": .string(ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))),
                 "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
-                "target": .object(["kind": .string("mac")]), "requester": .string("Fixture agent"),
+                "target": .object(["kind": .string("global")]), "requester": .string("Fixture agent"),
                 "changes": .array([.object(["changeId": .string("pending-\(id)"), "key": .string("run.retry.maxRetries"),
-                    "label": .string("Request \(id)"), "layer": .string("mac"), "op": .string("set"), "tier": .string("approve"),
+                    "label": .string("Request \(id)"), "layer": .string("global"), "op": .string("set"), "tier": .string("approve"),
                     "before": .number(4), "after": .number(6), "display": .object(["before": .string("4 retries"), "after": .string("6 retries")])])])])
         }
     }
@@ -403,7 +402,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 "key": .string("run.retry.maxRetries"), "op": .string("set"), "changed": .bool(true), "redacted": .bool(true),
                 "tier": .string("quiet"), "status": .string("applied"),
                 "presentation": .object(["label": .string("Agent retry count"), "section": .string("run"),
-                    "actor": .string("Agent"), "layer": .string("Mac"),
+                    "actor": .string("Agent"), "layer": .string("Global"),
                     "display": .object(["before": .string("Hidden"), "after": .string("Changed")])]),
             ])
         }
@@ -417,7 +416,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 "web": .bool(false), "risk": .string("quiet"),
                 "riskEvaluation": .object(["status": .string("assessed"), "rationale": .string("The deterministic floor is sufficient.")])]),
             "presentation": .object(["label": .string("Agent retry count"), "section": .string("run"),
-                "actor": .string("Agent"), "layer": .string("Mac"),
+                "actor": .string("Agent"), "layer": .string("Global"),
                 "display": .object(["before": .string("4 retries"), "after": .string("6 retries")])]),
         ])
     }
@@ -431,10 +430,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                    HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
             let keys = rows.compactMap { value -> JSONValue? in
                 guard var row = value.objectValue,
-                      row["layers"]?.arrayValue?.contains(where: { $0.objectValue?["layer"]?.stringValue == "mac" }) == true else { return nil }
-                row["layer"] = .string("mac"); row["origin"] = .string("inherited")
-                row["layers"] = .array([.object(["layer": .string("mac"), "value": row["value"] ?? .null]), .object(["layer": .string("builtin")])])
-                row["badges"] = .array([.object(["kind": .string("layer"), "label": .string("Mac")])])
+                      row["layers"]?.arrayValue?.contains(where: { $0.objectValue?["layer"]?.stringValue == "global" }) == true else { return nil }
+                row["layer"] = .string("global")
+                row["layers"] = .array([.object(["layer": .string("global"), "value": row["value"] ?? .null])])
                 if var presentation = row["presentation"]?.objectValue {
                     presentation["sessionOverridable"] = .bool(false)
                     presentation["projectSettable"] = .bool(false)
@@ -456,13 +454,11 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             let keys = HostedSettingsReviewSchema.additionalKeys.filter { $0.objectValue?["group"]?.stringValue == "context" }.map { value -> JSONValue in
                 guard var row = value.objectValue else { return value }
                 if row["key"]?.stringValue == "context.branchSummary.reserveTokens" {
-                    row["layer"] = .string("builtin")
-                    row["layers"] = .array([.object(["layer": .string("mac")]),
-                        .object(["layer": .string("builtin"), "value": row["value"] ?? .null])])
+                    row["layers"] = .array([.object(["layer": .string("global"), "value": row["value"] ?? .null])])
                 }
                 return .object(row)
             }
-            return .object(["target": .object(["kind": .string("mac")]), "layers": .array([.string("mac"), .string("builtin")]),
+            return .object(["target": .object(["kind": .string("global")]), "layers": .array([.string("global")]),
                 "renderer": .object(["version": .number(1)]), "keys": .array(keys),
                 "sections": .array(HostedSettingsReviewSchema.sections), "diagnostics": .array([])])
         }
@@ -470,13 +466,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             // A catalog source the app has no dedicated picker for, so the generic
             // paged catalog renders it (real model keys use the shared model picker).
             key("model.ref", group: "model", value: .object(["provider": .string("fixture"), "id": .string(model)]), display: modelName,
-                layer: "mac", badges: sourceActions ? [.object([
-                    "kind": .string("source"), "label": .string("Fixture source"),
-                    "action": .object(["kind": .string("useCurrentDefault"), "label": .string("Use the current default")]),
-                ]), .object([
-                    "kind": .string("future"), "label": .string("Future source"),
-                    "action": .object(["kind": .string("futureAction"), "label": .string("Unsupported action")]),
-                ])] : [], presentation: presentation("Model", "The model new chats start with.", 10, "essential", "catalog",
+                set: true, presentation: presentation("Model", "The model new chats start with.", 10, "essential", "catalog",
                     extra: ["optionsSource": .object(["name": .string("fixture.catalog"), "dependsOn": .array([])])])),
             key("model.thinking", group: "model", value: model == "pro" ? .string(thinking) : .string("off"),
                 display: model == "pro" ? thinking.capitalized : "Off", presentation: presentation("Thinking", "How much the model reasons.", 20,
@@ -485,10 +475,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             key("context.images.block", group: "context", value: .bool(blockImages), display: blockImages ? "On" : "Off",
                 presentation: presentation("Block images", "Images are not sent to the model.", 10, "essential", "toggle")),
             key("tools.active", group: "tools", value: .array(activeTools.map(JSONValue.string)), display: activeTools.joined(separator: ", "),
-                layer: HostedExtensionsReview.project ? "project" : "mac", presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
+                layer: HostedExtensionsReview.project ? "project" : "global", set: !HostedExtensionsReview.project, presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
                     extra: ["optionsSource": .object(["name": .string("catalog.tools"), "dependsOn": .array([])])])),
             key("run.retry.maxRetries", group: "run", subgroup: "Retry", value: .number(Double(retries)), display: "\(retries) retries",
-                layer: "mac", presentation: presentation("Retries", "How many times a failed request is retried.", 10, "essential", "number",
+                set: true, presentation: presentation("Retries", "How many times a failed request is retried.", 10, "essential", "number",
                     extra: ["range": .object(["min": .number(0), "max": .number(100), "unit": .string("retries")]),
                             "optionsSource": .object(["name": .string("fixture.retryRange"), "dependsOn": .array([])])])),
             key("run.futureNumber", group: "run", value: .number(1), display: "Future numeric value",
@@ -532,7 +522,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             section("run", "Run", 50, "Message delivery, retries, and transport"),
             section("lab", "Lab", 95, "A section this app has never seen"),
         ]
-        return .object(["target": .object(["kind": .string("mac")]), "layers": .array([.string("mac"), .string("builtin")]),
+        return .object(["target": .object(["kind": .string("global")]), "layers": .array([.string("global")]),
                         "renderer": .object(["version": .number(1)]), "keys": .array(keys + HostedExtensionsReview.keys(extensions: extensions)), "sections": .array(sections),
                         "diagnostics": .array([])])
     }
@@ -587,13 +577,13 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         // Validation is the Gateway's: the client holds no copy of a key's rules.
         if key == "lab.invalidValue", value?.stringValue == "rejected" {
             return .object(["dryRun": .bool(true), "status": .string("applied"), "tier": .string("quiet"), "changes": .array([.object([
-                "changeId": .string(""), "key": .string(key), "layer": .string("mac"), "status": .string("failed"), "tier": .string("quiet"),
+                "changeId": .string(""), "key": .string(key), "layer": .string("global"), "status": .string("failed"), "tier": .string("quiet"),
                 "error": .object(["code": .string("invalid_request"), "message": .string("Fixture value rejected")]),
             ])])])
         }
         if !dryRun {
             switch key {
-            case "model.ref": model = value?.objectValue?["id"]?.stringValue ?? (sourceActions && change["op"]?.stringValue == "unset" ? "lite" : model)
+            case "model.ref": model = value?.objectValue?["id"]?.stringValue ?? (change["op"]?.stringValue == "unset" ? "lite" : model)
             case "model.thinking": thinking = value?.stringValue ?? thinking
             case "run.retry.maxRetries": retries = value?.intValue ?? retries
             case "lab.invalidValue": invalidValue = value?.stringValue ?? invalidValue
@@ -612,7 +602,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             applied += 1
         }
         var outcome: [String: JSONValue] = ["changeId": .string(dryRun ? "" : "change-\(applied)"), "key": .string(key),
-            "layer": .string("mac"), "status": .string("applied"), "tier": .string("quiet")]
+            "layer": .string("global"), "status": .string("applied"), "tier": .string("quiet")]
         if dryRun && key == "context.images.block" && ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm") {
             outcome["confirm"] = .string("Confirm changing image delivery.")
         }
@@ -621,14 +611,15 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 })
     }
 
-    private func key(_ id: String, group: String, subgroup: String? = nil, value: JSONValue?, display: String, layer: String = "builtin",
-                     badges: [JSONValue] = [], presentation: JSONValue) -> JSONValue {
+    /// `set` is a value saved at Global (its Reset is offered); otherwise the row inherits the default.
+    private func key(_ id: String, group: String, subgroup: String? = nil, value: JSONValue?, display: String, layer: String = "global",
+                     set: Bool = false, badges: [JSONValue] = [], presentation: JSONValue) -> JSONValue {
         var object: [String: JSONValue] = [
             "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string(layer), "applied": .bool(true),
-            "overridden": .bool(layer == "mac"),
+            "overridden": .bool(set),
             "layers": .array(ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") && id == "tools.active"
-                ? HostedExtensionsReview.layers(own: value ?? .null) : [.object(["layer": .string("mac")])]),
-            "badges": .array([.object(["kind": .string("layer"), "label": .string(layer == "mac" ? "Set on Mac" : layer == "project" ? "Set in repository" : "Tron default")])] + badges),
+                ? HostedExtensionsReview.layers(own: value ?? .null) : [.object(["layer": .string("global")])]),
+            "badges": .array(badges),
             "presentation": presentation,
         ]
         if let subgroup { object["subgroup"] = .string(subgroup) }

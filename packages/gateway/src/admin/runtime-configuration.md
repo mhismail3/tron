@@ -18,7 +18,7 @@ accounts: [connections](../../docs/connections.md); MCP: [MCP](../../docs/mcp.md
 - Defaults: `modelContextWindows` in global or trusted-project SDK `settings.json`,
   keyed `provider/modelId` (≤ 500 per scope), read by new and cold-resumed sessions and
   explicit reloads; never by a live session or request.
-- Chat layer: `settings.change` with the model qualifier and
+- Session scope: `settings.change` with the model qualifier and
   `fence: {runtimeGeneration, revision}`, checked inside the idle-only lane. Stale
   model, invalid value, insufficient headroom or a cut below usage plus reserve is
   rejected (compact first). It applies without restart and records one

@@ -241,6 +241,12 @@ async function designate(f: Fixture, commandId: string, model: { provider: strin
   }) as unknown as HomeDesignation;
 }
 
+/** Home's model as its saved settings resolve it: its one model authority. */
+async function homeModel(f: Fixture): Promise<unknown> {
+  const owners = (f.registry as unknown as { settingsOwners: { model: { resolve(target: unknown, session: undefined, keys: string[]): Promise<{ keys: Array<{ value: unknown }> }> } } }).settingsOwners;
+  return (await owners.model.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"])).keys[0]?.value;
+}
+
 async function homeStatus(f: Fixture): Promise<HomeStatus> {
   return await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
 }
@@ -371,7 +377,7 @@ describe("Tron Home designation", () => {
     // The default-model branch: no model named means this Gateway's default.
     const designation = await designate(f, "home-designate-1", null);
     expect(designation.generation).toBe(1);
-    expect((await homeStatus(f)).model).toEqual(MODEL);
+    expect(await homeModel(f)).toEqual(MODEL);
 
     // The first runtime of the new Home is already the Home profile, read from
     // the live session rather than from the record.
@@ -394,7 +400,7 @@ describe("Tron Home designation", () => {
 
     expect(await homeStatus(f)).toMatchObject({
       available: true, enabled: true, homeId: designation.homeId,
-      sessionId: designation.sessionId, bindingRevision: 1, generation: 1, model: MODEL, live: true, sessionPresent: true,
+      sessionId: designation.sessionId, bindingRevision: 1, generation: 1, live: true, sessionPresent: true,
       // Home has no memory defaults: until its background models are set, the
       // projection says so, every activation refuses, and status names the fix.
       memory: { configured: false, open: false, paused: false },
@@ -424,7 +430,7 @@ describe("Tron Home designation", () => {
       model: { provider: PROVIDER, id: VIRTUAL_MODEL_ID },
     })).rejects.toMatchObject({ code: "invalid_request" });
     await expect(home.setModel(PROVIDER, VIRTUAL_MODEL_ID)).rejects.toMatchObject({ code: "invalid_request" });
-    expect(await homeStatus(f)).toMatchObject({ model: MODEL });
+    expect(await homeModel(f)).toEqual(MODEL);
 
     // An active Home slot cannot be rekeyed by a fork. Configure memory so
     // the source has a real canonical turn rather than an admission refusal.
@@ -590,7 +596,7 @@ describe("Tron Home designation", () => {
     expect(await homeStatus(f)).toMatchObject({ enabled: true, sessionId: fresh.sessionId, live: true, sessionPresent: true });
   });
 
-  homeCase("refuses a virtual model in the Home record on cold acquisition", async () => {
+  homeCase("refuses a virtual model in Home's saved settings on cold acquisition", async () => {
     const f = await fixture("model-virtual-record", { virtualModel: true });
     const designation = await designate(f, "home-designate-virtual-record");
     const home = await f.registry.acquire(designation.sessionId);
@@ -599,31 +605,29 @@ describe("Tron Home designation", () => {
     f.faux.setResponses([fauxAssistantMessage("persist virtual transcript")]);
     await home.prompt("persist disabled transcript");
     await waitUntil(() => home.snapshot().configurationBlocker === null);
-
-    const recordPath = join(f.tronHome, "gateway", "home", "home.json");
-    const record = JSON.parse(await readFile(recordPath, "utf8")) as { model: { provider: string; id: string } };
-    record.model = { provider: PROVIDER, id: VIRTUAL_MODEL_ID };
-    await writeFile(recordPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-    expect(JSON.parse(await readFile(recordPath, "utf8")).model).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
+    // An outside edit of Home's saved settings, which the change path would refuse.
+    const profilePath = join(f.tronHome, "gateway", "home", "profile.json");
+    const profile = JSON.parse(await readFile(profilePath, "utf8").catch(() => "{}")) as { model?: Record<string, unknown> };
+    await writeFile(profilePath, `${JSON.stringify({ ...profile, model: { ...profile.model, chat: { provider: PROVIDER, id: VIRTUAL_MODEL_ID } } })}\n`, { mode: 0o600 });
     await reopen(f);
     await waitForCatalog(f);
-    expect((await homeStatus(f)).model).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
+    expect(await homeModel(f)).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
     await designate(f, "home-reenable-virtual-record", null);
-    expect((await homeStatus(f)).model).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
+    expect(await homeModel(f)).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
 
     const requestsBeforeAcquire = f.faux.state.callCount;
     await expect(f.registry.acquire(designation.sessionId)).rejects.toMatchObject({ code: "conflict" });
     expect(f.faux.state.callCount).toBe(requestsBeforeAcquire);
   });
 
-  homeCase("restores the recorded model when re-enabling an unloaded Home", async () => {
+  homeCase("restores Home's saved model when re-enabling an unloaded Home", async () => {
     const f = await fixture("model-unloaded", { virtualModel: true });
     const designation = await designate(f, "home-designate-model-unloaded");
     const home = await f.registry.acquire(designation.sessionId);
     await f.service.invoke(client, "home.disable", { commandId: "home-disable-model-unloaded" });
     await home.setModel(PROVIDER, VIRTUAL_MODEL_ID);
     expect(home.snapshot().model).toMatchObject({ id: VIRTUAL_MODEL_ID });
-    expect((await homeStatus(f)).model).toEqual(MODEL);
+    expect(await homeModel(f)).toEqual(MODEL);
     f.faux.setResponses([fauxAssistantMessage("persist disabled transcript")]);
     await home.prompt("persist the disabled session");
     await waitUntil(() => home.snapshot().configurationBlocker === null);
@@ -634,12 +638,11 @@ describe("Tron Home designation", () => {
     await designate(f, "home-reenable-model-unloaded");
     const restored = await f.registry.acquire(designation.sessionId);
     expect(restored.snapshot().model).toMatchObject({ provider: PROVIDER, id: MODEL_ID });
-    expect((await homeStatus(f)).model).toEqual(MODEL);
+    expect(await homeModel(f)).toEqual(MODEL);
   });
 
-  homeCase("applies the recorded physical model when re-enabling a Home whose session moved on", async () => {
-    // The model is resolved at re-enable (the request's, else the
-    // record's), and the live session is brought back to it.
+  homeCase("applies Home's saved physical model when re-enabling a Home whose session moved on", async () => {
+    // Re-enable keeps Home's saved model, and the live session is brought back to it.
     const f = await fixture("model", { virtualModel: true });
     const designation = await designate(f, "home-designate-model");
     const home = await f.registry.acquire(designation.sessionId);
@@ -648,18 +651,18 @@ describe("Tron Home designation", () => {
     // An ordinary session may take a virtual model; Home must not.
     await home.setModel(PROVIDER, VIRTUAL_MODEL_ID);
     expect(home.snapshot().model).toMatchObject({ id: VIRTUAL_MODEL_ID });
-    expect((await homeStatus(f)).model).toEqual(MODEL);
+    expect(await homeModel(f)).toEqual(MODEL);
 
     const reenabled = await designate(f, "home-designate-model-again");
     expect(reenabled.generation).toBe(3);
     expect(await f.registry.acquire(designation.sessionId)).toBe(home);
     expect(home.snapshot().model).toMatchObject({ id: MODEL_ID });
     expect(activeTools(await contextOf(home))).toEqual(HOME_TOOLS);
-    expect((await homeStatus(f)).model).toEqual(MODEL);
+    expect(await homeModel(f)).toEqual(MODEL);
 
-    // A model applied to the enabled Home is the record's model from then on.
+    // A model applied to the enabled Home is its saved model from then on.
     await home.setModel(PROVIDER, OTHER_MODEL_ID);
-    expect((await homeStatus(f)).model).toEqual({ provider: PROVIDER, id: OTHER_MODEL_ID });
+    expect(await homeModel(f)).toEqual({ provider: PROVIDER, id: OTHER_MODEL_ID });
     await expect(f.service.invoke(client, "home.designate", {
       commandId: "home-designate-model-virtual",
       model: { provider: PROVIDER, id: VIRTUAL_MODEL_ID },

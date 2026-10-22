@@ -45,7 +45,7 @@ struct HostedProjectTrustFixture: View {
             VStack(spacing: 0) {
                 if ready {
                     if mountsFloors {
-                        NavigationStack { SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("permissions")) }
+                        NavigationStack { SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("permissions")) }
                             .tronSettingsLayout()
                     } else {
                         NavigationStack { TrustSettingsView(target: TrustTarget(cwd: "/fixture/project")) }
@@ -161,12 +161,13 @@ private actor ProjectTrustFixtureGateway {
         return .object(["key": .string("permissions.floor"),
             "qualifiers": .object(["direction": .string("widen"), "key": .string("permissions.projectTrust")]),
             "group": .string("permissions"), "subgroup": .null, "value": .string(floor),
-            "display": .string(labels[floor] ?? floor), "layer": .string(floorOverride == nil ? "builtin" : "mac"), "applied": .bool(true),
-            "layers": .array([.object(["layer": .string("mac")])]),
-            "badges": .array([.object(["kind": .string("layer"), "label": .string(floorOverride == nil ? "Tron default" : "Set on Mac")]),
-                              .object(["kind": .string("scope"), "label": .string("Project trust: loosening")])]),
+            "display": .string(labels[floor] ?? floor), "layer": .string(floorOverride == nil ? "default" : "global"), "applied": .bool(true),
+            "layers": .array([.object(["layer": .string("global")].merging(floorOverride == nil ? [:] : ["value": .string(floor)]) { $1 })]),
+            "overridden": .bool(floorOverride != nil),
+            "badges": .array([.object(["kind": .string("scope"), "label": .string("Project trust: loosening")])]),
             "presentation": .object(["label": .string("Project trust: loosening"),
                 "help": .string("Lowering this floor requires your confirmation."), "order": .number(10), "importance": .string("advanced"),
+                "sessionOverridable": .bool(false), "projectSettable": .bool(false), "editable": .bool(true),
                 "control": .string("choice"), "valueKind": .string("orderedChoice"), "options": .array(["quiet", "notify", "approve"].map { tier in
                     .object(["value": .string(tier), "label": .string(labels[tier]!)])
                 })])])

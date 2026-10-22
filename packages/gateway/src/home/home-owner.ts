@@ -41,8 +41,6 @@ import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 /** One Gateway installation keeps at most one Home. */
 const VERSION = 2;
 const MAXIMUM_RECORD_BYTES = 16 * 1_024 * 1_024;
-const MAXIMUM_PROVIDER_BYTES = 120;
-const MAXIMUM_MODEL_ID_BYTES = 300;
 /** The curated Home profile this build writes. A record written against a newer
  * revision is still this build's record to read: only `version` gates admission,
  * because a profile change is not a format change. Revision 2 added the read-only
@@ -73,7 +71,6 @@ export interface HomeRecord {
   routeGeneration: number;
   policyRevision: number;
   enabled: boolean;
-  model: ModelRef;
   createdAt: string;
   updatedAt: string;
   /** Pause is chapter-independent lifecycle state. The model lives only in Profile. */
@@ -93,9 +90,10 @@ export interface HomeSessionPort {
   /** Read the model actually selected by the live runtime, without reacquiring
    * a session whose Home designation is not committed yet. */
   currentSessionModel(sessionId: string): ModelRef | null;
-  /** Apply an explicit choice through the slot's canonical provenance path,
-   * including a choice equal to its inherited default. */
-  applySessionModel(sessionId: string, model: ModelRef): Promise<void>;
+  /** Home's model as its saved settings resolve it now. */
+  homeModel(): Promise<ModelRef | undefined>;
+  /** Save an explicit choice as Home's model, its one model authority. */
+  chooseHomeModel(sessionId: string, model: ModelRef): Promise<void>;
   /** Whether the session exists at all: a live runtime, or a canonical session
    * the catalog or disk still holds. */
   sessionPresent(sessionId: string): Promise<boolean>;
@@ -755,7 +753,6 @@ export class HomeOwner {
       bindingRevision: record.bindingRevision,
       generation: record.generation,
       routeGeneration: record.routeGeneration,
-      model: { ...record.model },
       live,
       sessionPresent,
       waitingForUser: openSessionId !== undefined && (this.options.sessions.waitingForUser?.(openSessionId) ?? false),
@@ -858,13 +855,6 @@ export class HomeOwner {
       if (error instanceof GatewayError || error instanceof EpisodicMemoryError || error instanceof HomeMemoryRefusal) return new Map();
       throw error;
     }
-  }
-
-  /** The admitted model for the enabled Home at the runtime construction
-   * boundary; ordinary sessions keep their transcript-selected model. */
-  modelFor(sessionId: string): ModelRef | undefined {
-    const record = this.record;
-    return record?.enabled && record.chapters.some(chapter => chapter.sessionId === sessionId) ? { ...record.model } : undefined;
   }
 
   /** Whether the record names this session as one of Home's chapters, current or
@@ -1556,15 +1546,14 @@ export class HomeOwner {
         || await this.options.sessions.sessionPresent(existingSessionId)
       )) {
         if (existing.enabled) {
-          if (input.model && (input.model.provider !== existing.model.provider || input.model.id !== existing.model.id)) {
+          const current = input.model ? await this.options.sessions.homeModel() : undefined;
+          if (input.model && current && (input.model.provider !== current.provider || input.model.id !== current.id)) {
             this.options.diagnostic?.({ outcome: "refused", reason: "model-change-requires-session-set-model" });
             throw new GatewayError("conflict", "Tron Home is already enabled with a different model; change its model through settings.change");
           }
           return designation(existing);
         }
-        // The model is the request's, else the one the record was last
-        // designated with; both were admitted before they were recorded.
-        const model = input.model ?? existing.model;
+        if (input.model) await this.options.sessions.chooseHomeModel(existingSessionId!, input.model);
         let next: HomeRecord | undefined;
         await this.commitProfileChange(existingSessionId!, current => {
           next = {
@@ -1572,19 +1561,11 @@ export class HomeOwner {
             enabled: true,
             generation: current.generation + 1,
             policyRevision: HOME_POLICY_REVISION,
-            model: { ...model },
             updatedAt: new Date().toISOString(),
           };
           return next;
         });
         if (!next) throw new Error("Home re-enable did not commit its record");
-        const nextSessionId = homeSessionId(next);
-        if (this.options.sessions.hasLiveRuntime(nextSessionId)) {
-          const current = this.options.sessions.currentSessionModel(nextSessionId);
-          if (current?.provider !== model.provider || current.id !== model.id) {
-            await this.options.sessions.applySessionModel(nextSessionId, model);
-          }
-        }
         this.options.diagnostic?.({ outcome: "enabled" });
         return designation(next);
       }
@@ -1604,11 +1585,10 @@ export class HomeOwner {
         this.designating = false;
       }
       try {
-        // The runtime already resolved Profile > Mac > Built-in. Designation
-        // must not turn an external fallback into an implicit Session override.
+        // The runtime already resolved Home's saved settings over Global. Only an
+        // explicit choice (or a session with no model at all) becomes Home's model.
         const startupModel = this.options.sessions.currentSessionModel(sessionId);
-        const model = input.model ?? startupModel ?? defaultModel();
-        if (input.model || !startupModel) await this.options.sessions.applySessionModel(sessionId, model);
+        if (input.model || !startupModel) await this.options.sessions.chooseHomeModel(sessionId, input.model ?? defaultModel());
         const now = new Date().toISOString();
         const record: HomeRecord = {
           version: VERSION,
@@ -1622,7 +1602,6 @@ export class HomeOwner {
           routeGeneration: existing ? existing.routeGeneration + 1 : 1,
           policyRevision: HOME_POLICY_REVISION,
           enabled: true,
-          model: { ...model },
           // The memory's configuration is the user's decision about *how* Home
           // remembers, so a replacement chapter keeps it and its pause decision.
           ...(existing?.memory ? { memory: { ...existing.memory } } : {}),
@@ -1664,20 +1643,6 @@ export class HomeOwner {
       await this.releaseMemory();
       this.options.diagnostic?.({ outcome: "disabled" });
       return designation(next);
-    });
-  }
-
-  /**
-   * The record is the single source of truth for Home's model, so a model
-   * applied to the enabled Home session is recorded. A model applied to the same
-   * session while it is disabled is an ordinary session's change and is not.
-   */
-  async noteModelApplied(sessionId: string, model: ModelRef): Promise<void> {
-    await this.recordMutex.run(async () => {
-      const record = this.record;
-      if (!record || !record.enabled || !record.chapters.some(chapter => chapter.sessionId === sessionId && chapter.state === "active")) return;
-      if (record.model.provider === model.provider && record.model.id === model.id) return;
-      await this.writeLocked({ ...record, model: { ...model }, updatedAt: new Date().toISOString() });
     });
   }
 
@@ -1817,8 +1782,7 @@ function designation(record: HomeRecord): HomeDesignation {
 function admitRecord(value: unknown): HomeRecord | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const root = value as Record<string, unknown>;
-  const model = root.model;
-  if (!hasOnlyKeys(root, ["version", "homeId", "chapters", "bindingRevision", "generation", "routeGeneration", "policyRevision", "enabled", "model", "createdAt", "updatedAt", "memory"])
+  if (!hasOnlyKeys(root, ["version", "homeId", "chapters", "bindingRevision", "generation", "routeGeneration", "policyRevision", "enabled", "createdAt", "updatedAt", "memory"])
     || root.version !== VERSION
     || !boundedString(root.homeId, 200)
     || !Number.isSafeInteger(root.bindingRevision) || (root.bindingRevision as number) < 1
@@ -1828,12 +1792,7 @@ function admitRecord(value: unknown): HomeRecord | undefined {
     || typeof root.enabled !== "boolean"
     || !boundedTimestamp(root.createdAt)
     || !boundedTimestamp(root.updatedAt)
-    || !Array.isArray(root.chapters) || root.chapters.length === 0 || root.chapters.length > HOME_MAX_CHAPTERS
-    || !model || typeof model !== "object" || Array.isArray(model)) return undefined;
-  const modelRecord = model as Record<string, unknown>;
-  if (!hasOnlyKeys(modelRecord, ["provider", "id"])
-    || !boundedString(modelRecord.provider, MAXIMUM_PROVIDER_BYTES)
-    || !boundedString(modelRecord.id, MAXIMUM_MODEL_ID_BYTES)) return undefined;
+    || !Array.isArray(root.chapters) || root.chapters.length === 0 || root.chapters.length > HOME_MAX_CHAPTERS) return undefined;
   const chapters = admitChapters(root.chapters);
   if (!chapters) return undefined;
   // An absent `memory` is the unconfigured state; malformed memory is preserved
@@ -1849,7 +1808,6 @@ function admitRecord(value: unknown): HomeRecord | undefined {
     routeGeneration: root.routeGeneration as number,
     policyRevision: root.policyRevision as number,
     enabled: root.enabled,
-    model: { provider: modelRecord.provider, id: modelRecord.id },
     createdAt: root.createdAt,
     updatedAt: root.updatedAt,
     ...(memory ? { memory } : {}),

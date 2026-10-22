@@ -55,25 +55,25 @@ enum HostedSettingsChangesReview {
         return .object(["entries": .array(rows), "nextCursor": offset == 0 ? .string("review-2") : .null])
     }
 
-    private static let samples: [(key: String, label: String, layer: String, scope: String, actor: [String: JSONValue],
+    private static let samples: [(key: String, label: String, target: String, scope: String, actor: [String: JSONValue],
                                   actorLabel: String, status: String, before: String, after: String)] = [
-        ("model.queue[role=worker]", "Worker models", "profile", "Home profile",
+        ("model.queue[role=worker]", "Worker models", "home", "Session",
          ["kind": .string("worker"), "id": .string(workerSessionID), "sessionId": .string(workerSessionID), "taskId": .string(workerTaskID)],
          "Home task \(workerTaskID)", "applied", "anthropic/claude-opus-5-5, openai/gpt-6",
          "anthropic/claude-opus-5-5, openai/gpt-6, opencode-go/deepseek-v4.1-flash"),
-        ("model.thinking[role=chat]", "Thinking", "chat", "Session",
+        ("model.thinking[role=chat]", "Thinking", "session", "Session",
          ["kind": .string("agent"), "id": .string("fixture-chat"), "sessionId": .string("fixture-chat")],
          "A chat's agent", "pending", "Medium", "High"),
-        ("run.retry.maxRetries", "Retries", "mac", "Mac", ["kind": .string("ui"), "id": .string("device")],
+        ("run.retry.maxRetries", "Retries", "global", "Global", ["kind": .string("ui"), "id": .string("device")],
          "You", "failed", "4 retries", "6 retries"),
-        ("tools.shell.path", "Shell", "project", "Repository", ["kind": .string("outside"), "id": .string(".tron/settings.json")],
+        ("tools.shell.path", "Shell", "project", "Project", ["kind": .string("outside"), "id": .string(".tron/settings.json")],
          "Outside Tron", "outside", "/bin/bash", "/opt/homebrew/bin/fish --login --init-command 'set -gx TRON 1'"),
-        ("permissions.budget.task", "Task budget", "profile", "Home profile", ["kind": .string("home"), "id": .string("home")],
+        ("permissions.budget.task", "Task budget", "home", "Session", ["kind": .string("home"), "id": .string("home")],
          "Home", "applied", "input 200000", "input 400000"),
-        ("model.queue[role=subagent]", "Subagent models", "profile", "Home profile",
+        ("model.queue[role=subagent]", "Subagent models", "home", "Session",
          ["kind": .string("worker"), "id": .string("worker-unknown"), "sessionId": .string("worker-unknown"), "taskId": .string("task_01J9ZQUNKNOWNTITLE")],
          "Home task task_01J9ZQUNKNOWNTITLE", "declined", "openai/gpt-6-luna", "anthropic/claude-haiku-5-5"),
-        ("context.compaction.reserveTokens", "Reserve", "mac", "Mac", ["kind": .string("ui"), "id": .string("device")],
+        ("context.compaction.reserveTokens", "Reserve", "global", "Global", ["kind": .string("ui"), "id": .string("device")],
          "You", "applied", "16,384 tokens", "20,000 tokens"),
     ]
 
@@ -82,13 +82,15 @@ enum HostedSettingsChangesReview {
         // Minutes, hours, then days: the first rows are new since the last look (3 h).
         let age: TimeInterval = index == 0 ? 2 * 3600 : index == 1 ? 20 * 60 : index == 2 ? 26 * 3600
             : index == 3 ? 3 * 86400 : index == 4 ? 5 * 60 : Double(index) * 4 * 3600
-        let target: JSONValue = sample.layer == "project"
+        let target: JSONValue = sample.target == "project"
             ? .object(["kind": .string("project"), "cwd": .string("/fixture/project")])
-            : sample.layer == "chat" ? .object(["kind": .string("session"), "sessionId": .string("fixture-chat")])
-            : .object(["kind": .string(sample.layer == "profile" ? "home" : "mac")])
+            : sample.target == "session" ? .object(["kind": .string("session"), "sessionId": .string("fixture-chat")])
+            : .object(["kind": .string(sample.target)])
+        // Home's saved settings are its Session scope.
+        let layer = sample.target == "home" ? "session" : sample.target
         var object: [String: JSONValue] = [
             "changeId": .string("review-\(index)"), "at": .string(iso(-age)), "actor": .object(sample.actor),
-            "target": target, "layer": .string(sample.layer), "key": .string(sample.key), "op": .string("set"),
+            "target": target, "layer": .string(layer), "key": .string(sample.key), "op": .string("set"),
             "tier": .string(sample.status == "pending" ? "approve" : "quiet"), "status": .string(sample.status),
             "presentation": .object(["label": .string(sample.label), "actor": .string(sample.actorLabel),
                 "layer": .string(sample.scope),

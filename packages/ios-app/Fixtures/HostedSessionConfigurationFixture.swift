@@ -163,7 +163,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "requester": .string("A chat's agent"), "reason": .string("The page said to"),
                 "changes": .array([.object([
                     "changeId": .string("change-\(sessionID)"), "key": .string("tools.active"),
-                    "label": .string("Active tools"), "layer": .string("chat"), "op": .string("set"), "tier": .string("approve"),
+                    "label": .string("Active tools"), "layer": .string("session"), "op": .string("set"), "tier": .string("approve"),
                     "tierBasis": .object([:]), "before": .array([.string("read"), .string("bash")]),
                     "after": .array([.string("read"), .string("bash"), .string("fetch_page")]),
                     "display": .object(["before": .string("read, bash"), "after": .string("read, bash, fetch_page")]),
@@ -201,12 +201,9 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             result = .object(["keys": .array([.object([
                 "key": .string("model.thinking[role=chat]"), "group": .string("model"),
                 "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized),
-                "layer": .string("session"), "applied": .bool(true), "origin": .string("launch"), "overridden": .bool(true),
+                "layer": .string("session"), "applied": .bool(true), "overridden": .bool(true),
                 "layers": .array([.object(["layer": .string("session"), "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized), "applied": .bool(true)])]),
-                "badges": .array([.object(["kind": .string("source"),
-                    "label": .string("From Mac default at start"),
-                    "detail": .string("From Mac default at start: \(snapshot.thinkingLevel.capitalized)"),
-                    "action": .object(["kind": .string("useCurrentDefault"), "label": .string("Use the current default")])])]),
+                "badges": .array([]),
                 "presentation": .object(["label": .string("Chat thinking"), "help": .string("Thinking for this chat."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("choice"),
                     "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true),
@@ -214,42 +211,27 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                                        .object(["value": .string("high"), "label": .string("High")])])]),
             ]), .object([
                 "key": .string("context.compaction.enabled"), "group": .string("context"),
-                "value": .bool(true), "display": .string("On"), "layer": .string("mac"),
+                "value": .bool(true), "display": .string("On"), "layer": .string("global"),
                 "applied": .bool(false), "badges": .array([]),
                 // As the Gateway serves it: a chat can set its own compaction.
-                "layers": .array([.object(["layer": .string("chat")]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
+                "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")])]),
                 "presentation": .object(["label": .string("Automatic compaction"), "help": .string("Automatic compaction policy."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("toggle"),
                     "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true)]),
             ]), HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model",
-                .object(["provider": .string("fixture"), "id": .string("model")]), "Fixture Model", "catalog", order: 5, essential: true, layer: "chat"),
+                .object(["provider": .string("fixture"), "id": .string("model")]), "Fixture Model", "catalog", order: 5, essential: true, layer: "session"),
                 HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true),
                 HostedSettingsReviewSchema.key("model.queue[role=background]", "workers", "Background models",
                     .array([.string("fixture/memory-a"), .string("fixture/memory-b")]), "2 models", "list", order: 44, essential: true)
             ] + HostedSettingsReviewSchema.additionalKeys.filter {
                 !["model.thinking[role=chat]", "context.compaction.enabled", "permissions.budget.task"].contains($0.objectValue?["key"]?.stringValue ?? "")
             }), "sections": .array(HostedSettingsReviewSchema.sections)])
-            // Ordinary sessions have no Home profile layer. Reuse the review
-            // values as Mac defaults, not fictional universal Home inheritance.
+            // An ordinary session edits a row it holds at its own Session scope.
             if var resolution = result.objectValue, let keys = resolution["keys"]?.arrayValue {
                 resolution["keys"] = .array(keys.map { value in
-                    guard var row = value.objectValue else { return value }
-                    let profileValue = row["layer"]?.stringValue == "profile"
-                    if profileValue {
-                        row["layer"] = .string("mac")
-                        row["badges"] = .array([.object(["kind": .string("layer"), "label": .string("Mac")])])
-                    }
-                    row["layers"] = .array((row["layers"]?.arrayValue ?? []).compactMap { value in
-                        guard var layer = value.objectValue, layer["layer"]?.stringValue != "profile" else { return nil }
-                        if profileValue, layer["layer"]?.stringValue == "mac" {
-                            layer["value"] = row["value"]; layer["display"] = row["display"]
-                        }
-                        return .object(layer)
-                    })
-                    if var presentation = row["presentation"]?.objectValue {
-                        presentation["editable"] = .bool((row["layers"]?.arrayValue ?? []).contains { ["chat", "session"].contains($0.objectValue?["layer"]?.stringValue ?? "") })
-                        row["presentation"] = .object(presentation)
-                    }
+                    guard var row = value.objectValue, var presentation = row["presentation"]?.objectValue else { return value }
+                    presentation["editable"] = .bool((row["layers"]?.arrayValue ?? []).contains { $0.objectValue?["layer"]?.stringValue == "session" })
+                    row["presentation"] = .object(presentation)
                     return .object(row)
                 })
                 result = .object(resolution)
@@ -273,7 +255,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 modelRequests += 1
                 modelRequestContinuation.yield(modelRequests)
                 guard let provider = change?["value"]?.objectValue?["provider"]?.stringValue, let modelID = change?["value"]?.objectValue?["id"]?.stringValue,
-                      change?["layer"]?.stringValue == "chat", change?["op"]?.stringValue == "set",
+                      change?["layer"]?.stringValue == "session", change?["op"]?.stringValue == "set",
                       params["target"]?.objectValue?["sessionId"]?.stringValue == snapshot.sessionId,
                       params["commandId"]?.stringValue != nil,
                       params["fence"]?.objectValue?["runtimeGeneration"]?.stringValue == snapshot.runtimeGeneration,
@@ -314,7 +296,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             }
             if change?["op"]?.stringValue == "unset" {
                 guard params["target"]?.objectValue?["sessionId"]?.stringValue == snapshot.sessionId,
-                      change?["key"]?.stringValue == "model.thinking[role=chat]", change?["layer"]?.stringValue == "chat",
+                      change?["key"]?.stringValue == "model.thinking[role=chat]", change?["layer"]?.stringValue == "session",
                       params["fence"]?.objectValue?["runtimeGeneration"]?.stringValue == snapshot.runtimeGeneration,
                       params["fence"]?.objectValue?["model"] == (try JSONValue.encode(snapshot.model)) else {
                     throw GatewayFailure(code: "invalid_request", message: "Expected a fenced Chat reset", retryable: false, details: nil)

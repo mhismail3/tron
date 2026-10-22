@@ -137,12 +137,6 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         for label in ["Worker models", "Subagent models", "Thinking budgets", "Offered models"] {
             XCTAssertTrue(app.staticTexts[label].exists, "Missing moved model setting: \(label)")
         }
-        open(app, "settings-row-model.thinkingBudgets-source")
-        XCTAssertTrue(app.navigationBars.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-        close(app)
-        open(app, "settings-row-model.offered-source")
-        XCTAssertTrue(app.navigationBars.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-        close(app)
         open(app, "Offered models")
         XCTAssertTrue(app.navigationBars.staticTexts["Offered models"].waitForExistence(timeout: 5))
         close(app); close(app)
@@ -150,9 +144,7 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         expand(app, title: "Connections")
         open(app, "Details for Fixture")
         expand(app, title: "Fixture")
-        open(app, "settings-row-permissions.macTerminalKey-source")
-        XCTAssertTrue(app.navigationBars.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-        capture(app, "regression-mac-key-source")
+        capture(app, "regression-mac-key")
     }
 
     private func settings(_ mode: String) -> XCUIApplication {

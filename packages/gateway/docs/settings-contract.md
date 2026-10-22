@@ -16,8 +16,8 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 - **F3 Policy.** Every change takes one Gateway path and one tier:
   `tier = max(floor + web, assessment)`, capped at approve; no per-key exceptions
   ([tiers](#tiers)).
-- **F4 Layers.** Top wins: **Project > Chat > Home profile > Mac > Built-in**, among the
-  layers the target has and the key allows. One resolver takes the topmost applied layer with
+- **F4 Scopes.** Top wins: **Project > Session/Home override > Global**, among the scopes
+  the target has and the key's grants allow. One resolver takes the topmost applied scope with
   a value; the effective value is computed, never stored.
 
 ## Layers
@@ -50,55 +50,55 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Floor |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `model.ref[role=chat]` | — | model | chat, profile, project, mac | as allowed | fixed | next-turn | quiet |
-| `model.thinking[role=chat]` | model | model | chat, profile, project, mac | as allowed | fixed | next-turn | quiet |
-| `model.contextWindow` | model | model | chat, project, mac | as allowed | fixed | next-turn | quiet |
-| `model.thinkingBudgets` | — | workers | project, mac | as allowed | fixed | new-chat | quiet |
-| `model.offered` | — | workers | project, mac | as allowed | live | next-turn | quiet |
-| `model.thinking[role=summarizer]` | — | context | project, mac | none | live | next-compaction | quiet |
-| `model.queue[role=worker]` | — | workers | chat, profile, mac | as allowed | live | delegate | notify |
-| `model.queue[role=subagent]` | — | workers | chat, profile, mac | as allowed | live | next-request | notify |
-| `model.queue[role=background]` | — | workers | profile, mac | as allowed | live | next-memory-pass | notify |
-| `model.thinking[role=worker]` | — | workers | profile | as allowed | fixed | delegate | notify |
-| `context.compaction.enabled` | — | context | chat, project, mac | none | live | next-compaction | quiet |
-| `context.compaction.reserveTokens` | model | context | chat, project, mac | none | live | next-compaction | quiet |
-| `context.compaction.keepRecentTokens` | model | context | chat, project, mac | none | live | next-compaction | quiet |
-| `context.compaction.instructions` | — | context | chat, project, mac | none | live | next-compaction | notify |
-| `context.branchSummary.reserveTokens` | — | context | project, mac | none | live | next-compaction | quiet |
-| `context.images.autoResize` | — | tools | chat, project, mac | as allowed | fixed | new-chat | quiet |
-| `context.images.block` | — | tools | chat, project, mac | as allowed | narrow live, widen fixed | next-request | narrow quiet, widen approve |
-| `tools.active` | — | tools | chat, profile, project, mac | chat, profile | fixed | next-turn | narrow quiet, widen notify |
-| `tools.codemode.mode` | — | tools | project, mac | none | fixed | new-chat | narrow quiet, widen notify |
-| `tools.codemode.inlineBudget` | — | tools | project, mac | none | fixed | new-chat | quiet |
-| `tools.shell.path` | — | tools | project, mac | none | fixed | new-chat | notify |
-| `tools.shell.commandPrefix` | — | tools | project, mac | none | fixed | new-chat | notify |
-| `permissions.projectTrust` | project | trust | mac | as allowed | live | reload | narrow notify, widen approve |
-| `permissions.macTerminalKey` | device | connections | mac | as allowed | live | next-change | narrow notify, widen approve |
-| `permissions.defaultProjectTrust` | — | trust | mac | as allowed | live | next-change | narrow notify, widen approve |
-| `permissions.floor` | key | approvals | mac | as allowed | live | next-change | narrow quiet, widen approve |
-| `permissions.budget.task` | — | workers | profile | as allowed | narrow live, widen fixed | delegate | narrow quiet, widen approve |
-| `run.queue.steeringMode` | — | run | chat, project, mac | as allowed | live | next-turn | quiet |
-| `run.queue.followUpMode` | — | run | chat, project, mac | as allowed | live | next-turn | quiet |
-| `run.retry.enabled` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.retry.maxRetries` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.retry.baseDelayMs` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.retry.provider.timeoutMs` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.retry.provider.maxRetries` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.retry.provider.maxRetryDelayMs` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.transport` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.httpIdleTimeoutMs` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.websocketConnectTimeoutMs` | — | run | chat, project, mac | as allowed | live | next-request | quiet |
-| `run.httpProxy` | — | run | mac | as allowed | live | restart | notify |
-| `run.cacheWarming` | — | run | mac | none | live | next-turn | narrow quiet, widen notify |
-| `sources.extensions` | — | sources | project, mac | none | fixed | reload | narrow quiet, widen notify |
-| `sources.skills` | — | sources | project, mac | none | fixed | reload | narrow quiet, widen notify |
-| `sources.prompts` | — | sources | project, mac | none | fixed | reload | narrow quiet, widen notify |
-| `sources.themes` | — | sources | project, mac | none | fixed | reload | narrow quiet, widen notify |
-| `sources.packages` | — | sources | project, mac | none | fixed | reload | narrow quiet, widen notify |
-| `sources.npmCommand` | — | sources | mac | none | live | next-change | notify |
-| `setup.sessionDir` | — | setup | mac | as allowed | live | restart | notify |
-| `setup.installTelemetry` | — | setup | mac | as allowed | live | next-request | quiet |
-| `setup.terminalIdleMinutes` | — | setup | mac | as allowed | live | next-change | notify |
+| `model.ref[role=chat]` | — | model | project, session, global, home | as allowed | fixed | next-turn | quiet |
+| `model.thinking[role=chat]` | model | model | project, session, global, home | as allowed | fixed | next-turn | quiet |
+| `model.contextWindow` | model | model | project, session, global | as allowed | fixed | next-turn | quiet |
+| `model.thinkingBudgets` | — | workers | project, global | as allowed | fixed | new-chat | quiet |
+| `model.offered` | — | workers | project, global | as allowed | live | next-turn | quiet |
+| `model.thinking[role=summarizer]` | — | context | project, global | none | live | next-compaction | quiet |
+| `model.queue[role=worker]` | — | workers | session, global, home | as allowed | live | delegate | notify |
+| `model.queue[role=subagent]` | — | workers | session, global, home | as allowed | live | next-request | notify |
+| `model.queue[role=background]` | — | workers | global, home | as allowed | live | next-memory-pass | notify |
+| `model.thinking[role=worker]` | — | workers | global, home | as allowed | fixed | delegate | notify |
+| `context.compaction.enabled` | — | context | project, session, global | none | live | next-compaction | quiet |
+| `context.compaction.reserveTokens` | model | context | project, session, global | none | live | next-compaction | quiet |
+| `context.compaction.keepRecentTokens` | model | context | project, session, global | none | live | next-compaction | quiet |
+| `context.compaction.instructions` | — | context | project, session, global | none | live | next-compaction | notify |
+| `context.branchSummary.reserveTokens` | — | context | project, global | none | live | next-compaction | quiet |
+| `context.images.autoResize` | — | tools | project, session, global | as allowed | fixed | new-chat | quiet |
+| `context.images.block` | — | tools | project, session, global | as allowed | narrow live, widen fixed | next-request | narrow quiet, widen approve |
+| `tools.active` | — | tools | project, session, global, home | session, home | fixed | next-turn | narrow quiet, widen notify |
+| `tools.codemode.mode` | — | tools | project, global | none | fixed | new-chat | narrow quiet, widen notify |
+| `tools.codemode.inlineBudget` | — | tools | project, global | none | fixed | new-chat | quiet |
+| `tools.shell.path` | — | tools | project, global | none | fixed | new-chat | notify |
+| `tools.shell.commandPrefix` | — | tools | project, global | none | fixed | new-chat | notify |
+| `permissions.projectTrust` | project | trust | global | as allowed | live | reload | narrow notify, widen approve |
+| `permissions.macTerminalKey` | device | connections | global | as allowed | live | next-change | narrow notify, widen approve |
+| `permissions.defaultProjectTrust` | — | trust | global | as allowed | live | next-change | narrow notify, widen approve |
+| `permissions.floor` | key | approvals | global | as allowed | live | next-change | narrow quiet, widen approve |
+| `permissions.budget.task` | — | workers | global, home | as allowed | narrow live, widen fixed | delegate | narrow quiet, widen approve |
+| `run.queue.steeringMode` | — | run | project, session, global | as allowed | live | next-turn | quiet |
+| `run.queue.followUpMode` | — | run | project, session, global | as allowed | live | next-turn | quiet |
+| `run.retry.enabled` | — | run | project, session, global | as allowed | live | next-request | quiet |
+| `run.retry.maxRetries` | — | run | project, session, global | as allowed | live | next-request | quiet |
+| `run.retry.baseDelayMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
+| `run.retry.provider.timeoutMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
+| `run.retry.provider.maxRetries` | — | run | project, session, global | as allowed | live | next-request | quiet |
+| `run.retry.provider.maxRetryDelayMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
+| `run.transport` | — | run | project, session, global | as allowed | live | next-request | quiet |
+| `run.httpIdleTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
+| `run.websocketConnectTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
+| `run.httpProxy` | — | run | global | as allowed | live | restart | notify |
+| `run.cacheWarming` | — | run | global | none | live | next-turn | narrow quiet, widen notify |
+| `sources.extensions` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
+| `sources.skills` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
+| `sources.prompts` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
+| `sources.themes` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
+| `sources.packages` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
+| `sources.npmCommand` | — | sources | global | none | live | next-change | notify |
+| `setup.sessionDir` | — | setup | global | as allowed | live | restart | notify |
+| `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | quiet |
+| `setup.terminalIdleMinutes` | — | setup | global | as allowed | live | next-change | notify |
 
 Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 
@@ -109,7 +109,7 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 <!-- /tron docs -->
 
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
-`catalog.thinkingLevels(model)`, `catalog.tools`, ...), `builtin`, `direction`, `writers`
+`catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `writers`
 (`ui`, `home`, `worker`, `agent`: the list is the grant), `redacted`, `applier`, and display
 fields (`label`, `help`, `order`, `importance`, `control`/`fallback`, `unit`/`format`,
 `confirm`, `entry`). MCP and Accounts keep their own RPCs; record subjects compare by digest.
@@ -120,15 +120,15 @@ The effect point (`next-turn`, `next-request`, `new-chat`, `reload`, `restart`, 
 when a change is not immediate; timing may differ by direction.
 
 - **Fixed** keys (model, thinking, context window, tools, resources, image resizing) are
-  captured at chat start as Chat values with provenance `{ value, from, at, ref }` (`launch`,
+  captured at chat start as Session values with provenance `{ value, from, at, ref }` (`launch`,
   `override`, `legacy-session`, `inherited`; history is never mined). **Use the current
   default** writes the lower layers' value through the change path.
 - **Live** keys are read at their effect point; Chat-bound Run keys resolve before each prompt
   and request onto the session's `SettingsManager` (Home too) and, for provider timeouts, at
-  `ModelRuntime.streamSimple`. **Follow the default** unsets a Chat value.
+  `ModelRuntime.streamSimple`. **Follow the default** unsets a Session value.
 - **Per direction** (`context.images.block`): narrowing applies next request; widening waits
   for a new chat unless approved or tapped. `requestPins` in `tron.settings.v1` hold directional
-  values; an approved Mac/Project widening releases inherited pins, never explicit Chat values.
+  values; an approved Mac/Project widening releases inherited pins, never explicit Session values.
 - Fork, cold resume and Home rollover carry `tron.settings.v1`, never the record. Changing a
   model or thinking never persists a default.
 
@@ -143,7 +143,7 @@ pending. 3. Apply through the key's applier under its store lock (atomic within 
 ordered with rollback across stores; one target per request, serialized per target).
 4. Append to the record and broadcast `settings.changed`.
 
-Outcomes name key, layer, status, tier and redacted `before`/`after`. A chat's own Chat layer
+Outcomes name key, layer, status, tier and redacted `before`/`after`. A chat's own Session scope
 changes only while idle; `setup.sessionDir` has no writer; Home Chat compaction values are
 refused. **Record:** `<tronHome>/gateway/settings/changes/`, append-only 500-entry segments
 listed in `index.json`, kept forever, paged by `settings.history` (a page may be empty with a
@@ -231,7 +231,7 @@ presence is explicit even for equal/false/zero values. Applied Project values se
 file/key; ignored fields serve bounded value-free diagnostics. Untrusted/unreadable Project notices
 name their file and never make a Session editor look Project-owned.
 `settings.options` pages options; `dryRun` returns per-key errors and the tier. Changes list
-pending approvals first. Global writes Mac, Session the Chat layer, Home only `profile`;
+pending approvals first. Global writes Global, Session the Session scope, Home its saved settings;
 Project is inspection only. Session/Home reuse Global's renderer and editors; Project-owned rows
 have a read-only value and separate Project info pill, explicit overrides have Overridden/Revert,
 and Global alone has a Changes entry. Hand-built screens remain only for guided flows and viewers.

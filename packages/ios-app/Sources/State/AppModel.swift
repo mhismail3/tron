@@ -4089,7 +4089,7 @@ extension AppModel {
     func undoSettingsChange(_ entry: SettingsChangeHistoryEntry) async throws {
         let target: JSONValue = .object(["kind": .string(entry.target.kind),
             "sessionId": entry.target.sessionId.map(JSONValue.string) ?? .null])
-        let snapshot = entry.layer == "chat" ? try rendererConfigurationSnapshot(target) : nil
+        let snapshot = entry.layer == "session" ? try rendererConfigurationSnapshot(target) : nil
         try await settingsTrust.undoSettingsChange(entry.changeId, fence: rendererConfigurationFence(snapshot)) { [weak self] in
             guard let snapshot else { return true }
             return self?.admitsConfigurationSend(snapshot) == true

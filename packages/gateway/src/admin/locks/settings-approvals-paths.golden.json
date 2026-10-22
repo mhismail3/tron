@@ -12,7 +12,7 @@
       "result": {
         "request": {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -24,7 +24,7 @@
             {
               "changeId": "change-a.x",
               "key": "a.x",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": true,
@@ -41,7 +41,7 @@
           "requestId": "00000001-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:00.000Z",
           "expiresAt": "2026-01-02T00:00:00.000Z",
-          "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+          "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
           "status": "pending"
         },
         "superseded": []
@@ -52,7 +52,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -64,7 +64,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -81,7 +81,7 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "pending"
             }
           ]
@@ -93,7 +93,7 @@
       "result": {
         "request": {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -105,7 +105,7 @@
             {
               "changeId": "change-b.y",
               "key": "b.y",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": 1,
@@ -122,7 +122,7 @@
           "requestId": "00000002-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:01.000Z",
           "expiresAt": "2026-01-02T00:00:01.000Z",
-          "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+          "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
           "status": "pending"
         },
         "superseded": []
@@ -133,7 +133,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -145,7 +145,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -162,12 +162,12 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "pending"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -179,7 +179,7 @@
                 {
                   "changeId": "change-b.y",
                   "key": "b.y",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -196,7 +196,7 @@
               "requestId": "00000002-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:01.000Z",
               "expiresAt": "2026-01-02T00:00:01.000Z",
-              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
               "status": "pending"
             }
           ]
@@ -208,7 +208,7 @@
       "result": {
         "request": {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -220,7 +220,7 @@
             {
               "changeId": "change-a.x",
               "key": "a.x",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": false,
@@ -237,13 +237,13 @@
           "requestId": "00000003-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:02.000Z",
           "expiresAt": "2026-01-02T00:00:02.000Z",
-          "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+          "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
           "status": "pending"
         },
         "superseded": [
           {
             "target": {
-              "kind": "mac"
+              "kind": "global"
             },
             "actor": {
               "kind": "agent",
@@ -255,7 +255,7 @@
               {
                 "changeId": "change-a.x",
                 "key": "a.x",
-                "layer": "mac",
+                "layer": "global",
                 "op": "set",
                 "before": false,
                 "after": true,
@@ -272,7 +272,7 @@
             "requestId": "00000001-0000-4000-8000-000000000000",
             "createdAt": "2026-01-01T00:00:00.000Z",
             "expiresAt": "2026-01-02T00:00:00.000Z",
-            "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+            "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
             "status": "superseded",
             "decidedAt": "2026-01-01T00:00:02.000Z"
           }
@@ -284,7 +284,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -296,7 +296,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -313,13 +313,13 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "superseded",
               "decidedAt": "2026-01-01T00:00:02.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -331,7 +331,7 @@
                 {
                   "changeId": "change-b.y",
                   "key": "b.y",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -348,12 +348,12 @@
               "requestId": "00000002-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:01.000Z",
               "expiresAt": "2026-01-02T00:00:01.000Z",
-              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
               "status": "pending"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -365,7 +365,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -382,7 +382,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "pending"
             }
           ]
@@ -407,7 +407,7 @@
             {
               "changeId": "change-a.x",
               "key": "a.x",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": true,
@@ -424,7 +424,7 @@
           "requestId": "00000004-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:03.000Z",
           "expiresAt": "2026-01-02T00:00:03.000Z",
-          "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+          "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
           "status": "pending"
         },
         "superseded": []
@@ -435,7 +435,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -447,7 +447,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -464,13 +464,13 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "superseded",
               "decidedAt": "2026-01-01T00:00:02.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -482,7 +482,7 @@
                 {
                   "changeId": "change-b.y",
                   "key": "b.y",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -499,12 +499,12 @@
               "requestId": "00000002-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:01.000Z",
               "expiresAt": "2026-01-02T00:00:01.000Z",
-              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
               "status": "pending"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -516,7 +516,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -533,7 +533,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "pending"
             },
             {
@@ -551,7 +551,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -568,7 +568,7 @@
               "requestId": "00000004-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:03.000Z",
               "expiresAt": "2026-01-02T00:00:03.000Z",
-              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
               "status": "pending"
             }
           ]
@@ -580,7 +580,7 @@
       "result": {
         "r1": {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -592,7 +592,7 @@
             {
               "changeId": "change-a.x",
               "key": "a.x",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": true,
@@ -609,7 +609,7 @@
           "requestId": "00000001-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:00.000Z",
           "expiresAt": "2026-01-02T00:00:00.000Z",
-          "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+          "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
           "status": "superseded",
           "decidedAt": "2026-01-01T00:00:02.000Z"
         },
@@ -621,7 +621,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -633,7 +633,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -650,13 +650,13 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "superseded",
               "decidedAt": "2026-01-01T00:00:02.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -668,7 +668,7 @@
                 {
                   "changeId": "change-b.y",
                   "key": "b.y",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -685,12 +685,12 @@
               "requestId": "00000002-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:01.000Z",
               "expiresAt": "2026-01-02T00:00:01.000Z",
-              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
               "status": "pending"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -702,7 +702,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -719,7 +719,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "pending"
             },
             {
@@ -737,7 +737,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -754,7 +754,7 @@
               "requestId": "00000004-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:03.000Z",
               "expiresAt": "2026-01-02T00:00:03.000Z",
-              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
               "status": "pending"
             }
           ]
@@ -766,7 +766,7 @@
       "result": [
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -778,7 +778,7 @@
             {
               "changeId": "change-b.y",
               "key": "b.y",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": 1,
@@ -795,12 +795,12 @@
           "requestId": "00000002-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:01.000Z",
           "expiresAt": "2026-01-02T00:00:01.000Z",
-          "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+          "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
           "status": "pending"
         },
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -812,7 +812,7 @@
             {
               "changeId": "change-a.x",
               "key": "a.x",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": false,
@@ -829,7 +829,7 @@
           "requestId": "00000003-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:02.000Z",
           "expiresAt": "2026-01-02T00:00:02.000Z",
-          "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+          "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
           "status": "pending"
         },
         {
@@ -847,7 +847,7 @@
             {
               "changeId": "change-a.x",
               "key": "a.x",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": true,
@@ -864,7 +864,7 @@
           "requestId": "00000004-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:03.000Z",
           "expiresAt": "2026-01-02T00:00:03.000Z",
-          "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+          "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
           "status": "pending"
         }
       ],
@@ -874,7 +874,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -886,7 +886,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -903,13 +903,13 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "superseded",
               "decidedAt": "2026-01-01T00:00:02.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -921,7 +921,7 @@
                 {
                   "changeId": "change-b.y",
                   "key": "b.y",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -938,12 +938,12 @@
               "requestId": "00000002-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:01.000Z",
               "expiresAt": "2026-01-02T00:00:01.000Z",
-              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
               "status": "pending"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -955,7 +955,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -972,7 +972,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "pending"
             },
             {
@@ -990,7 +990,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -1007,7 +1007,7 @@
               "requestId": "00000004-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:03.000Z",
               "expiresAt": "2026-01-02T00:00:03.000Z",
-              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
               "status": "pending"
             }
           ]
@@ -1018,7 +1018,7 @@
       "step": "settle r2 declined",
       "result": {
         "target": {
-          "kind": "mac"
+          "kind": "global"
         },
         "actor": {
           "kind": "agent",
@@ -1030,7 +1030,7 @@
           {
             "changeId": "change-b.y",
             "key": "b.y",
-            "layer": "mac",
+            "layer": "global",
             "op": "set",
             "before": false,
             "after": 1,
@@ -1047,7 +1047,7 @@
         "requestId": "00000002-0000-4000-8000-000000000000",
         "createdAt": "2026-01-01T00:00:01.000Z",
         "expiresAt": "2026-01-02T00:00:01.000Z",
-        "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+        "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
         "status": "declined",
         "decidedAt": "2026-01-01T00:00:04.000Z"
       },
@@ -1057,7 +1057,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1069,7 +1069,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -1086,13 +1086,13 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "superseded",
               "decidedAt": "2026-01-01T00:00:02.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1104,7 +1104,7 @@
                 {
                   "changeId": "change-b.y",
                   "key": "b.y",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -1121,13 +1121,13 @@
               "requestId": "00000002-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:01.000Z",
               "expiresAt": "2026-01-02T00:00:01.000Z",
-              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
               "status": "declined",
               "decidedAt": "2026-01-01T00:00:04.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1139,7 +1139,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -1156,7 +1156,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "pending"
             },
             {
@@ -1174,7 +1174,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -1191,7 +1191,7 @@
               "requestId": "00000004-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:03.000Z",
               "expiresAt": "2026-01-02T00:00:03.000Z",
-              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
               "status": "pending"
             }
           ]
@@ -1212,7 +1212,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1224,7 +1224,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -1241,13 +1241,13 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "superseded",
               "decidedAt": "2026-01-01T00:00:02.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1259,7 +1259,7 @@
                 {
                   "changeId": "change-b.y",
                   "key": "b.y",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -1276,13 +1276,13 @@
               "requestId": "00000002-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:01.000Z",
               "expiresAt": "2026-01-02T00:00:01.000Z",
-              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
               "status": "declined",
               "decidedAt": "2026-01-01T00:00:04.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1294,7 +1294,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -1311,7 +1311,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "pending"
             },
             {
@@ -1329,7 +1329,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -1346,7 +1346,7 @@
               "requestId": "00000004-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:03.000Z",
               "expiresAt": "2026-01-02T00:00:03.000Z",
-              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
               "status": "pending"
             }
           ]
@@ -1367,7 +1367,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1379,7 +1379,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -1396,13 +1396,13 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "superseded",
               "decidedAt": "2026-01-01T00:00:02.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1414,7 +1414,7 @@
                 {
                   "changeId": "change-b.y",
                   "key": "b.y",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -1431,13 +1431,13 @@
               "requestId": "00000002-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:01.000Z",
               "expiresAt": "2026-01-02T00:00:01.000Z",
-              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
               "status": "declined",
               "decidedAt": "2026-01-01T00:00:04.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1449,7 +1449,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -1466,7 +1466,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "pending"
             },
             {
@@ -1484,7 +1484,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -1501,7 +1501,7 @@
               "requestId": "00000004-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:03.000Z",
               "expiresAt": "2026-01-02T00:00:03.000Z",
-              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
               "status": "pending"
             }
           ]
@@ -1525,7 +1525,7 @@
           {
             "changeId": "change-a.x",
             "key": "a.x",
-            "layer": "mac",
+            "layer": "global",
             "op": "set",
             "before": false,
             "after": true,
@@ -1542,7 +1542,7 @@
         "requestId": "00000004-0000-4000-8000-000000000000",
         "createdAt": "2026-01-01T00:00:03.000Z",
         "expiresAt": "2026-01-02T00:00:03.000Z",
-        "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+        "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
         "status": "approved",
         "decidedAt": "2026-01-01T00:00:04.000Z",
         "told": true
@@ -1553,7 +1553,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1565,7 +1565,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -1582,13 +1582,13 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "superseded",
               "decidedAt": "2026-01-01T00:00:02.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1600,7 +1600,7 @@
                 {
                   "changeId": "change-b.y",
                   "key": "b.y",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -1617,13 +1617,13 @@
               "requestId": "00000002-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:01.000Z",
               "expiresAt": "2026-01-02T00:00:01.000Z",
-              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
               "status": "declined",
               "decidedAt": "2026-01-01T00:00:04.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1635,7 +1635,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -1652,7 +1652,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "pending"
             }
           ]
@@ -1663,7 +1663,7 @@
       "step": "settle r3 failed keeps its failure",
       "result": {
         "target": {
-          "kind": "mac"
+          "kind": "global"
         },
         "actor": {
           "kind": "agent",
@@ -1675,7 +1675,7 @@
           {
             "changeId": "change-a.x",
             "key": "a.x",
-            "layer": "mac",
+            "layer": "global",
             "op": "set",
             "before": false,
             "after": false,
@@ -1692,7 +1692,7 @@
         "requestId": "00000003-0000-4000-8000-000000000000",
         "createdAt": "2026-01-01T00:00:02.000Z",
         "expiresAt": "2026-01-02T00:00:02.000Z",
-        "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+        "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
         "status": "failed",
         "decidedAt": "2026-01-01T00:00:04.000Z",
         "failure": "boom"
@@ -1703,7 +1703,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1715,7 +1715,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": true,
@@ -1732,13 +1732,13 @@
               "requestId": "00000001-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "expiresAt": "2026-01-02T00:00:00.000Z",
-              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
               "status": "superseded",
               "decidedAt": "2026-01-01T00:00:02.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1750,7 +1750,7 @@
                 {
                   "changeId": "change-b.y",
                   "key": "b.y",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -1767,13 +1767,13 @@
               "requestId": "00000002-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:01.000Z",
               "expiresAt": "2026-01-02T00:00:01.000Z",
-              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
               "status": "declined",
               "decidedAt": "2026-01-01T00:00:04.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1785,7 +1785,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -1802,7 +1802,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "failed",
               "decidedAt": "2026-01-01T00:00:04.000Z",
               "failure": "boom"
@@ -1816,7 +1816,7 @@
       "result": [
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -1828,7 +1828,7 @@
             {
               "changeId": "change-a.x",
               "key": "a.x",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": true,
@@ -1845,14 +1845,14 @@
           "requestId": "00000001-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:00.000Z",
           "expiresAt": "2026-01-02T00:00:00.000Z",
-          "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+          "digest": "733bc23f4a4d3c3e3c92c759685ec604fa78597ed78e1a3460cabb0fe9831b85",
           "status": "superseded",
           "decidedAt": "2026-01-01T00:00:02.000Z",
           "told": true
         },
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -1864,7 +1864,7 @@
             {
               "changeId": "change-b.y",
               "key": "b.y",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": 1,
@@ -1881,7 +1881,7 @@
           "requestId": "00000002-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:01.000Z",
           "expiresAt": "2026-01-02T00:00:01.000Z",
-          "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+          "digest": "1553fe946f4ef75b656c8bf0a3eb2d6bc04de65c64a7c2ee96daec3a981e09e7",
           "status": "declined",
           "decidedAt": "2026-01-01T00:00:04.000Z",
           "told": true
@@ -1893,7 +1893,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1905,7 +1905,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -1922,7 +1922,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "failed",
               "decidedAt": "2026-01-01T00:00:04.000Z",
               "failure": "boom"
@@ -1940,7 +1940,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -1952,7 +1952,7 @@
                 {
                   "changeId": "change-a.x",
                   "key": "a.x",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": false,
@@ -1969,7 +1969,7 @@
               "requestId": "00000003-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:02.000Z",
               "expiresAt": "2026-01-02T00:00:02.000Z",
-              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "failed",
               "decidedAt": "2026-01-01T00:00:04.000Z",
               "failure": "boom"
@@ -1983,7 +1983,7 @@
       "result": [
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -1995,7 +1995,7 @@
             {
               "changeId": "change-a.x",
               "key": "a.x",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": false,
@@ -2012,7 +2012,7 @@
           "requestId": "00000003-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:02.000Z",
           "expiresAt": "2026-01-02T00:00:02.000Z",
-          "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+          "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
           "status": "failed",
           "decidedAt": "2026-01-01T00:00:04.000Z",
           "failure": "boom",
@@ -2031,7 +2031,7 @@
       "result": {
         "request": {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -2043,7 +2043,7 @@
             {
               "changeId": "change-c.z",
               "key": "c.z",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": "on",
@@ -2060,7 +2060,7 @@
           "requestId": "00000005-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:04.000Z",
           "expiresAt": "2026-01-02T00:00:04.000Z",
-          "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+          "digest": "d7c1202c7c10ee9e0ced044c0948c2842fa2658b70cb53843c86de3643c81feb",
           "status": "pending"
         },
         "superseded": []
@@ -2071,7 +2071,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2083,7 +2083,7 @@
                 {
                   "changeId": "change-c.z",
                   "key": "c.z",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": "on",
@@ -2100,7 +2100,7 @@
               "requestId": "00000005-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:04.000Z",
               "expiresAt": "2026-01-02T00:00:04.000Z",
-              "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+              "digest": "d7c1202c7c10ee9e0ced044c0948c2842fa2658b70cb53843c86de3643c81feb",
               "status": "pending"
             }
           ]
@@ -2116,7 +2116,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2128,7 +2128,7 @@
                 {
                   "changeId": "change-c.z",
                   "key": "c.z",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": "on",
@@ -2145,7 +2145,7 @@
               "requestId": "00000005-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:04.000Z",
               "expiresAt": "2026-01-02T00:00:04.000Z",
-              "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+              "digest": "d7c1202c7c10ee9e0ced044c0948c2842fa2658b70cb53843c86de3643c81feb",
               "status": "pending"
             }
           ]
@@ -2156,7 +2156,7 @@
       "step": "settle r5 declined",
       "result": {
         "target": {
-          "kind": "mac"
+          "kind": "global"
         },
         "actor": {
           "kind": "agent",
@@ -2168,7 +2168,7 @@
           {
             "changeId": "change-c.z",
             "key": "c.z",
-            "layer": "mac",
+            "layer": "global",
             "op": "set",
             "before": false,
             "after": "on",
@@ -2185,7 +2185,7 @@
         "requestId": "00000005-0000-4000-8000-000000000000",
         "createdAt": "2026-01-01T00:00:04.000Z",
         "expiresAt": "2026-01-02T00:00:04.000Z",
-        "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+        "digest": "d7c1202c7c10ee9e0ced044c0948c2842fa2658b70cb53843c86de3643c81feb",
         "status": "declined",
         "decidedAt": "2026-01-01T00:00:04.000Z"
       },
@@ -2195,7 +2195,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2207,7 +2207,7 @@
                 {
                   "changeId": "change-c.z",
                   "key": "c.z",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": "on",
@@ -2224,7 +2224,7 @@
               "requestId": "00000005-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:04.000Z",
               "expiresAt": "2026-01-02T00:00:04.000Z",
-              "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+              "digest": "d7c1202c7c10ee9e0ced044c0948c2842fa2658b70cb53843c86de3643c81feb",
               "status": "declined",
               "decidedAt": "2026-01-01T00:00:04.000Z"
             }
@@ -2237,7 +2237,7 @@
       "result": [
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -2249,7 +2249,7 @@
             {
               "changeId": "change-c.z",
               "key": "c.z",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": "on",
@@ -2266,7 +2266,7 @@
           "requestId": "00000005-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:04.000Z",
           "expiresAt": "2026-01-02T00:00:04.000Z",
-          "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+          "digest": "d7c1202c7c10ee9e0ced044c0948c2842fa2658b70cb53843c86de3643c81feb",
           "status": "declined",
           "decidedAt": "2026-01-01T00:00:04.000Z",
           "told": true
@@ -2284,7 +2284,7 @@
       "result": {
         "request": {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -2296,7 +2296,7 @@
             {
               "changeId": "change-e.e",
               "key": "e.e",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": 1,
@@ -2313,7 +2313,7 @@
           "requestId": "00000006-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:04.000Z",
           "expiresAt": "2026-01-02T00:00:04.000Z",
-          "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+          "digest": "dbaae17df3eb0d4020c8621a96455609638cc52aa7d0246cac451a36839ced68",
           "status": "pending"
         },
         "superseded": []
@@ -2324,7 +2324,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2336,7 +2336,7 @@
                 {
                   "changeId": "change-e.e",
                   "key": "e.e",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2353,7 +2353,7 @@
               "requestId": "00000006-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:04.000Z",
               "expiresAt": "2026-01-02T00:00:04.000Z",
-              "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+              "digest": "dbaae17df3eb0d4020c8621a96455609638cc52aa7d0246cac451a36839ced68",
               "status": "pending"
             }
           ]
@@ -2365,7 +2365,7 @@
       "result": {
         "request": {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -2377,7 +2377,7 @@
             {
               "changeId": "change-f.f",
               "key": "f.f",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": 1,
@@ -2394,7 +2394,7 @@
           "requestId": "00000007-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T12:00:04.000Z",
           "expiresAt": "2026-01-02T12:00:04.000Z",
-          "digest": "be9161e2e7475ebc919d7866cee6b27f8d008b9cd5683c38dda1d35564eca913",
+          "digest": "d40601aec252d3f66bead2e6a9117fb1271a0d908f1f6fe13cb7a5ae8d4a8a7c",
           "status": "pending"
         },
         "superseded": []
@@ -2405,7 +2405,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2417,7 +2417,7 @@
                 {
                   "changeId": "change-e.e",
                   "key": "e.e",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2434,12 +2434,12 @@
               "requestId": "00000006-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:04.000Z",
               "expiresAt": "2026-01-02T00:00:04.000Z",
-              "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+              "digest": "dbaae17df3eb0d4020c8621a96455609638cc52aa7d0246cac451a36839ced68",
               "status": "pending"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2451,7 +2451,7 @@
                 {
                   "changeId": "change-f.f",
                   "key": "f.f",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2468,7 +2468,7 @@
               "requestId": "00000007-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T12:00:04.000Z",
               "expiresAt": "2026-01-02T12:00:04.000Z",
-              "digest": "be9161e2e7475ebc919d7866cee6b27f8d008b9cd5683c38dda1d35564eca913",
+              "digest": "d40601aec252d3f66bead2e6a9117fb1271a0d908f1f6fe13cb7a5ae8d4a8a7c",
               "status": "pending"
             }
           ]
@@ -2484,7 +2484,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2496,7 +2496,7 @@
                 {
                   "changeId": "change-e.e",
                   "key": "e.e",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2513,12 +2513,12 @@
               "requestId": "00000006-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:04.000Z",
               "expiresAt": "2026-01-02T00:00:04.000Z",
-              "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+              "digest": "dbaae17df3eb0d4020c8621a96455609638cc52aa7d0246cac451a36839ced68",
               "status": "pending"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2530,7 +2530,7 @@
                 {
                   "changeId": "change-f.f",
                   "key": "f.f",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2547,7 +2547,7 @@
               "requestId": "00000007-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T12:00:04.000Z",
               "expiresAt": "2026-01-02T12:00:04.000Z",
-              "digest": "be9161e2e7475ebc919d7866cee6b27f8d008b9cd5683c38dda1d35564eca913",
+              "digest": "d40601aec252d3f66bead2e6a9117fb1271a0d908f1f6fe13cb7a5ae8d4a8a7c",
               "status": "pending"
             }
           ]
@@ -2559,7 +2559,7 @@
       "result": [
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -2571,7 +2571,7 @@
             {
               "changeId": "change-e.e",
               "key": "e.e",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": 1,
@@ -2588,7 +2588,7 @@
           "requestId": "00000006-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:04.000Z",
           "expiresAt": "2026-01-02T00:00:04.000Z",
-          "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+          "digest": "dbaae17df3eb0d4020c8621a96455609638cc52aa7d0246cac451a36839ced68",
           "status": "expired",
           "decidedAt": "2026-01-02T00:00:04.000Z"
         }
@@ -2599,7 +2599,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2611,7 +2611,7 @@
                 {
                   "changeId": "change-e.e",
                   "key": "e.e",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2628,13 +2628,13 @@
               "requestId": "00000006-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T00:00:04.000Z",
               "expiresAt": "2026-01-02T00:00:04.000Z",
-              "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+              "digest": "dbaae17df3eb0d4020c8621a96455609638cc52aa7d0246cac451a36839ced68",
               "status": "expired",
               "decidedAt": "2026-01-02T00:00:04.000Z"
             },
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2646,7 +2646,7 @@
                 {
                   "changeId": "change-f.f",
                   "key": "f.f",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2663,7 +2663,7 @@
               "requestId": "00000007-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T12:00:04.000Z",
               "expiresAt": "2026-01-02T12:00:04.000Z",
-              "digest": "be9161e2e7475ebc919d7866cee6b27f8d008b9cd5683c38dda1d35564eca913",
+              "digest": "d40601aec252d3f66bead2e6a9117fb1271a0d908f1f6fe13cb7a5ae8d4a8a7c",
               "status": "pending"
             }
           ]
@@ -2675,7 +2675,7 @@
       "result": [
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -2687,7 +2687,7 @@
             {
               "changeId": "change-e.e",
               "key": "e.e",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": 1,
@@ -2704,7 +2704,7 @@
           "requestId": "00000006-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:04.000Z",
           "expiresAt": "2026-01-02T00:00:04.000Z",
-          "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+          "digest": "dbaae17df3eb0d4020c8621a96455609638cc52aa7d0246cac451a36839ced68",
           "status": "expired",
           "decidedAt": "2026-01-02T00:00:04.000Z",
           "told": true
@@ -2716,7 +2716,7 @@
           "requests": [
             {
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2728,7 +2728,7 @@
                 {
                   "changeId": "change-f.f",
                   "key": "f.f",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2745,7 +2745,7 @@
               "requestId": "00000007-0000-4000-8000-000000000000",
               "createdAt": "2026-01-01T12:00:04.000Z",
               "expiresAt": "2026-01-02T12:00:04.000Z",
-              "digest": "be9161e2e7475ebc919d7866cee6b27f8d008b9cd5683c38dda1d35564eca913",
+              "digest": "d40601aec252d3f66bead2e6a9117fb1271a0d908f1f6fe13cb7a5ae8d4a8a7c",
               "status": "pending"
             }
           ]
@@ -2764,7 +2764,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2025-01-01T00:00:00.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2775,7 +2775,7 @@
                 {
                   "changeId": "change-hand.h-told",
                   "key": "hand.h-told",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2799,7 +2799,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2026-01-03T00:00:04.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2810,7 +2810,7 @@
                 {
                   "changeId": "change-hand.h-pending",
                   "key": "hand.h-pending",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2832,7 +2832,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2026-01-03T00:00:04.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2843,7 +2843,7 @@
                 {
                   "changeId": "change-hand.h-untold",
                   "key": "hand.h-untold",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2877,7 +2877,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2025-01-01T00:00:00.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2888,7 +2888,7 @@
                 {
                   "changeId": "change-hand.h-told",
                   "key": "hand.h-told",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2912,7 +2912,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2026-01-03T00:00:04.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2923,7 +2923,7 @@
                 {
                   "changeId": "change-hand.h-pending",
                   "key": "hand.h-pending",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2945,7 +2945,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2026-01-03T00:00:04.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -2956,7 +2956,7 @@
                 {
                   "changeId": "change-hand.h-untold",
                   "key": "hand.h-untold",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -2990,7 +2990,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2025-01-01T00:00:00.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -3001,7 +3001,7 @@
                 {
                   "changeId": "change-hand.h-told",
                   "key": "hand.h-told",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -3025,7 +3025,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2026-01-03T00:00:04.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -3036,7 +3036,7 @@
                 {
                   "changeId": "change-hand.h-pending",
                   "key": "hand.h-pending",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -3058,7 +3058,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2026-01-03T00:00:04.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -3069,7 +3069,7 @@
                 {
                   "changeId": "change-hand.h-untold",
                   "key": "hand.h-untold",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -3103,7 +3103,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2025-01-01T00:00:00.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -3114,7 +3114,7 @@
                 {
                   "changeId": "change-hand.h-told",
                   "key": "hand.h-told",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -3138,7 +3138,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2026-01-03T00:00:04.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -3149,7 +3149,7 @@
                 {
                   "changeId": "change-hand.h-pending",
                   "key": "hand.h-pending",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -3171,7 +3171,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2026-01-03T00:00:04.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -3182,7 +3182,7 @@
                 {
                   "changeId": "change-hand.h-untold",
                   "key": "hand.h-untold",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,
@@ -3212,7 +3212,7 @@
           "createdAt": "2026-01-02T00:00:04.000Z",
           "expiresAt": "2026-01-03T00:00:04.000Z",
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -3223,7 +3223,7 @@
             {
               "changeId": "change-hand.h-untold",
               "key": "hand.h-untold",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": false,
               "after": 1,
@@ -3252,7 +3252,7 @@
               "createdAt": "2026-01-02T00:00:04.000Z",
               "expiresAt": "2026-01-03T00:00:04.000Z",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "actor": {
                 "kind": "agent",
@@ -3263,7 +3263,7 @@
                 {
                   "changeId": "change-hand.h-pending",
                   "key": "hand.h-pending",
-                  "layer": "mac",
+                  "layer": "global",
                   "op": "set",
                   "before": false,
                   "after": 1,

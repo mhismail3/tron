@@ -4,9 +4,9 @@ import { lstat, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { KEYS } from "./settings-schema.js";
+import { KEYS, schemaKey } from "./settings-schema.js";
 import { foldHomeChapter, migrateApprovals, migrateAuditEntry, migrateObserved, migrateSessionSettings, migrationObject,
-  migrationRefusal, parseMigrationObject, type MigrationDefaults } from "./settings-migration-state.js";
+  migrationRefusal, migrationSetPath, parseMigrationObject, type MigrationDefaults } from "./settings-migration-state.js";
 
 type Document = Record<string, unknown>;
 type FileKind = "json" | "audit" | "session";
@@ -83,11 +83,11 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
   const notes: MigrationCapture["notes"] = [];
   const dispose = () => rm(temporary, { recursive: true, force: true });
   try {
-    const defaults: MigrationDefaults = { mac: await document(join(resolve(agentDir), "settings.json")),
+    const defaults: MigrationDefaults = { global: await document(join(resolve(agentDir), "settings.json")),
       gateway: await document(join(resolve(tronHome), "gateway", "settings", "gateway.json")), floors: {} };
     for (const key of KEYS) {
-      const binding = key.layers.profile;
-      if (binding?.store !== "profile") continue;
+      const binding = key.layers.home;
+      if (binding?.store !== "home") continue;
       let value: unknown = inventory.profile;
       for (const field of binding.path) value = value && typeof value === "object" && Object.hasOwn(value, field) ? (value as Document)[field] : undefined;
       if (value !== undefined) try { await key.type.validate(value, key.id); } catch { migrationRefusal(join(resolve(tronHome), "gateway", "home", "profile.json"), `invalid value for ${key.id}`); }
@@ -164,7 +164,18 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
       }
       if (await migrationFileHash(path) !== before) migrationRefusal(path, "input changed while preflighting");
     }
-    if (!foundActive) migrationRefusal(join(resolve(tronHome), "gateway", "home", "home.json"), "active chapter is not present in the canonical catalog");
+    const homePath = join(resolve(tronHome), "gateway", "home", "home.json");
+    if (!foundActive) migrationRefusal(homePath, "active chapter is not present in the canonical catalog");
+    // The retired record model becomes Home's saved model when none is saved.
+    if (Object.hasOwn(inventory.home, "model")) {
+      const { model, ...record } = inventory.home;
+      const key = schemaKey("model.ref[role=chat]"), path = (key.layers.home as { path: readonly string[] }).path;
+      try { await key.type.validate(model, key.id); } catch { migrationRefusal(homePath, "invalid Home record model"); }
+      if (path.reduce<unknown>((value, field) => value && typeof value === "object" ? (value as Document)[field] : undefined, folded) === undefined) {
+        folded = structuredClone(folded); migrationSetPath(folded, path, model);
+      }
+      await stage(homePath, inputs.find(input => input.path === homePath)!.hash, `${JSON.stringify(record, null, 2)}\n`);
+    }
     if (JSON.stringify(folded) !== JSON.stringify(inventory.profile)) {
       const path = join(resolve(tronHome), "gateway", "home", "profile.json");
       await stage(path, inputs.find(input => input.path === path)!.hash, `${JSON.stringify(folded, null, 2)}\n`);

@@ -486,10 +486,8 @@ enum HostedHomeToolFixture {
     "kind": "home"
    },
    "layers": [
-    "chat",
-    "profile",
-    "mac",
-    "builtin"
+    "session",
+    "global"
    ],
    "keys": [
     {
@@ -500,7 +498,7 @@ enum HostedHomeToolFixture {
       "id": "claude-opus-5-5"
      },
      "display": "Claude Opus 5.5",
-     "layer": "profile",
+     "layer": "session",
      "applied": true,
      "badges": [],
      "layers": []
@@ -510,7 +508,7 @@ enum HostedHomeToolFixture {
      "group": "run",
      "value": 3,
      "display": "3",
-     "layer": "builtin",
+     "layer": "global",
      "applied": true,
      "badges": [],
      "layers": []
@@ -539,7 +537,7 @@ enum HostedHomeToolFixture {
      "changes": [
       {
        "key": "run.retry.maxRetries",
-       "layer": "profile",
+       "layer": "session",
        "op": "set",
        "value": 6
       }
@@ -580,7 +578,7 @@ enum HostedHomeToolFixture {
     {
      "changeId": "ch-1",
      "key": "run.retry.maxRetries",
-     "layer": "profile",
+     "layer": "session",
      "status": "pending",
      "tier": "approve",
      "before": 3,

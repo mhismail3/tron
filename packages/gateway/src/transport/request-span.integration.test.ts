@@ -387,20 +387,20 @@ describe("settings.resolve request span", () => {
     await waitFor(() => frames.some(frame => frame.type === "hello"), "settings hello", { boundMs: 10_000 });
 
     const successfulId = "settings-success";
-    socket.send(JSON.stringify({ type: "request", id: successfulId, method: "settings.resolve", params: { target: { kind: "mac" }, keys: ["run.retry.maxRetries"] } }));
+    socket.send(JSON.stringify({ type: "request", id: successfulId, method: "settings.resolve", params: { target: { kind: "global" }, keys: ["run.retry.maxRetries"] } }));
     await waitFor(() => frames.some(frame => frame.id === successfulId), "settings success response");
     const successfulResponse = frames.find(frame => frame.id === successfulId)!;
     expect(successfulResponse.ok).toBe(true);
     const projectedSetting = successfulResponse.result?.keys?.find(setting => setting.key === "run.retry.maxRetries");
     expect(projectedSetting?.value).toBe(7);
-    expect(projectedSetting?.layer).toBe("mac");
+    expect(projectedSetting?.layer).toBe("global");
     const successfulCompletion = [...logger.debugTail(), ...logger.recent()].find(record => record.event === "rpc.completed" && record.requestID === successfulId);
     expect(successfulCompletion?.outcome).toBe("success");
     expect(successfulCompletion?.method).toBe("settings.resolve");
 
     mode = "failure";
     const failedId = "settings-failure";
-    socket.send(JSON.stringify({ type: "request", id: failedId, method: "settings.resolve", params: { target: { kind: "mac" }, keys: ["run.retry.maxRetries"] } }));
+    socket.send(JSON.stringify({ type: "request", id: failedId, method: "settings.resolve", params: { target: { kind: "global" }, keys: ["run.retry.maxRetries"] } }));
     await waitFor(() => frames.some(frame => frame.id === failedId), "settings failure response");
     expect(frames.find(frame => frame.id === failedId)?.ok).toBe(false);
     await waitFor(() => persistedRecords(logPath).some(record => record.requestID === failedId && record.event === "rpc.completed"), "persisted failed settings completion");

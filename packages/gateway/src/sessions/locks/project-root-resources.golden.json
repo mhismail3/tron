@@ -22,7 +22,7 @@
         "changes": [
           {
             "key": "permissions.projectTrust",
-            "layer": "mac",
+            "layer": "global",
             "op": "set",
             "qualifiers": {
               "project": "<tmp>/project/packages/app"
@@ -33,7 +33,7 @@
         "commandId": "lock-command-0001",
         "reason": "Trust the lock project",
         "target": {
-          "kind": "mac"
+          "kind": "global"
         }
       }
     },

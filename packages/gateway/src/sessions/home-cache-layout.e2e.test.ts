@@ -1,7 +1,7 @@
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { homeMemoryChange } from "../../test-support/chat-settings-change.js";
+import { homeMemoryChange } from "../../test-support/session-settings-change.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";

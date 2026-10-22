@@ -161,17 +161,6 @@ extension HomeToolDetailPresentation {
 // MARK: - settings
 
 extension HomeToolDetailPresentation {
-    static func layerLabel(_ layer: String) -> String {
-        switch layer {
-        case "chat": "Chat"
-        case "profile": "Home profile"
-        case "project": "Project"
-        case "mac": "Mac"
-        case "builtin": "Built-in"
-        default: layer.capitalized
-        }
-    }
-
     /// A setting value as the Settings rows read it: unset, a model reference, a
     /// boolean, or the value's compact text.
     static func settingValue(_ value: JSONValue?) -> String {
@@ -241,12 +230,12 @@ extension HomeToolDetailPresentation {
         let rows: [Row] = keys.prefix(limit).compactMap { value in
             guard let object = value.objectValue, let key = object["key"]?.stringValue else { return nil }
             let display = object["display"]?.stringValue ?? settingValue(object["value"])
-            let layer = object["layer"]?.stringValue.map(layerLabel)
+            let layer = object["layer"]?.stringValue.map(settingsLayerLabel)
             let unapplied = object["applied"]?.boolValue == false ? "not applied" : nil
             return Row(icon: "key", title: keyTitle(key, qualifiers: object["qualifiers"]?.objectValue),
                        value: [display, layer, unapplied].compactMap { $0 }.joined(separator: " · "))
         }
-        let layers = call.details?["layers"]?.arrayValue?.compactMap(\.stringValue).map(layerLabel)
+        let layers = call.details?["layers"]?.arrayValue?.compactMap(\.stringValue).map(settingsLayerLabel)
         let detail = [layers.map { "Layers, top wins: \($0.joined(separator: " > "))." },
                       keys.count > limit ? "\(keys.count - limit) more in Technical details." : nil].compactMap { $0 }.joined(separator: " ")
         return HomeToolDetailPresentation(
@@ -276,7 +265,7 @@ extension HomeToolDetailPresentation {
         for (index, request) in requests.enumerated() {
             guard let key = request["key"]?.stringValue else { continue }
             let outcome = outcomes.flatMap { index < $0.count ? $0[index] : nil }
-            let layer = (outcome?["layer"]?.stringValue ?? request["layer"]?.stringValue).map(layerLabel) ?? "Unknown layer"
+            let layer = (outcome?["layer"]?.stringValue ?? request["layer"]?.stringValue).map(settingsLayerLabel) ?? "Unknown layer"
             let unset = request["op"]?.stringValue == "unset"
             var rows = [Row(icon: "square.3.layers.3d", title: "Layer", value: layer)]
             if outcome?["redacted"]?.boolValue == true {

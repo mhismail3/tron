@@ -88,7 +88,7 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
 | Signal | Level | Meaning |
 |---|---|---|
 | `model-queue.skip` | warning | A fallback queue skipped a model for a background call, or a call hit a usage limit: `source: models`, `code` (queue role); the message names `provider/id` and the reason |
-| `model-queue.projection` | info when published; warning on failure | A parent published the exact child model-queue projection before launch (`mac` or `task-launch`, ordered model IDs), or publication failed and the child tool call was blocked |
+| `model-queue.projection` | info when published; warning on failure | A parent published the exact child model-queue projection before launch (`global` or `task-launch`, ordered model IDs), or publication failed and the child tool call was blocked |
 | `model.release-dates` | info on refresh; warning on failure or ignored persisted data | A release-date fetch completed or persisted state was rejected: `updated`, `providers`, `unrecognizedDates`, up to three `unknownDateSamples`, `reason` |
 | `request cache coverage` | debug; warning for a non-empty conversation without a cache marker | External: CortexKit Pi `pi-cache` logger, not a Tron stream nor in `system.logs.export`. Model, request ID, cache mode, TTL, wire bytes and breakpoint coverage; a missing marker identifies uncached-history replay |
 | `response cache usage` | info, once per metered stream | External, as above: uncached input, output, cache read/write and one-hour writes, with `response-ttl` or `catalog-estimate` pricing basis; estimates are not quota |

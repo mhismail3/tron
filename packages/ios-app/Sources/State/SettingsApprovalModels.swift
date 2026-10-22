@@ -122,7 +122,6 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
         var reason: String? = nil
     }
     let layers: [Layer]
-    var origin: String? = nil
     var overridden: Bool? = nil
     var projectSetting: SettingsProjectSource? = nil
     /// Absent from a Gateway that predates the renderer contract: the row is then read-only.

@@ -52,7 +52,7 @@
         "changes": [
           {
             "key": "permissions.projectTrust",
-            "layer": "mac",
+            "layer": "global",
             "op": "set",
             "qualifiers": {
               "project": "<tmp>/project/packages/app"
@@ -63,7 +63,7 @@
         "commandId": "lock-command-0002",
         "reason": "Trust the lock project",
         "target": {
-          "kind": "mac"
+          "kind": "global"
         }
       },
       "response": {
@@ -76,7 +76,7 @@
               "before": null,
               "changeId": "<id>",
               "key": "permissions.projectTrust",
-              "layer": "mac",
+              "layer": "global",
               "qualifiers": {
                 "project": "<tmp>/project"
               },
@@ -187,10 +187,10 @@
                 "reserveTokens": 4096,
                 "source": {
                   "enabled": "global",
-                  "instructions": "default",
+                  "instructions": "global",
                   "keepRecentTokens": "project",
                   "reserveTokens": "project",
-                  "thinkingLevel": "default"
+                  "thinkingLevel": "global"
                 },
                 "thinkingLevel": "inherit"
               }
@@ -396,10 +396,6 @@
               "applied": true,
               "badges": [
                 {
-                  "kind": "layer",
-                  "label": "Repository"
-                },
-                {
                   "detail": "Project: 7 retries; committed: Not set",
                   "kind": "state",
                   "label": "Uncommitted"
@@ -412,55 +408,51 @@
               "layers": [
                 {
                   "applied": true,
-                  "layer": "chat"
-                },
-                {
-                  "applied": true,
                   "display": "7 retries",
                   "layer": "project",
                   "value": 7
                 },
                 {
                   "applied": true,
-                  "layer": "mac"
+                  "layer": "session"
                 },
                 {
                   "applied": true,
-                  "display": "3 retries",
-                  "layer": "builtin",
-                  "value": 3
+                  "layer": "global"
                 }
               ],
-              "origin": "inherited",
+              "overridden": false,
               "presentation": {
                 "control": "readOnly",
-                "editableLayers": [
-                  "chat",
-                  "mac"
-                ],
+                "editable": true,
                 "effect": "next-request",
                 "help": "How many times a failed request is retried.",
                 "importance": "essential",
                 "label": "Retries",
                 "note": "Update Tron to edit",
                 "order": 40,
+                "projectSettable": true,
                 "range": {
                   "max": 20,
                   "min": 0,
                   "unit": "retries"
                 },
+                "sessionOverridable": true,
                 "timing": "live",
                 "valueKind": "integer"
+              },
+              "projectSetting": {
+                "file": "<tmp>/project/.pi/settings.json",
+                "path": "retry.maxRetries"
               },
               "subgroup": "Retry",
               "value": 7
             }
           ],
           "layers": [
-            "chat",
             "project",
-            "mac",
-            "builtin"
+            "session",
+            "global"
           ],
           "renderer": {
             "version": 1
@@ -503,10 +495,6 @@
               "applied": true,
               "badges": [
                 {
-                  "kind": "layer",
-                  "label": "Mac"
-                },
-                {
                   "kind": "scope",
                   "label": "<tmp>/project"
                 }
@@ -514,32 +502,28 @@
               "display": "Trusted",
               "group": "trust",
               "key": "permissions.projectTrust",
-              "layer": "mac",
+              "layer": "global",
               "layers": [
                 {
                   "applied": true,
                   "display": "Trusted",
-                  "layer": "mac",
+                  "layer": "global",
                   "value": true
-                },
-                {
-                  "applied": true,
-                  "layer": "builtin"
                 }
               ],
-              "origin": "inherited",
+              "overridden": true,
               "presentation": {
                 "confirm": "Trusting a project runs its extensions and hooks.",
                 "control": "readOnly",
-                "editableLayers": [
-                  "mac"
-                ],
+                "editable": false,
                 "effect": "reload",
                 "help": "Lets this project's extensions, hooks and settings load.",
                 "importance": "essential",
                 "label": "Trust for this project",
                 "note": "Update Tron to edit",
                 "order": 10,
+                "projectSettable": false,
+                "sessionOverridable": false,
                 "timing": "live",
                 "valueKind": "boolean"
               },
@@ -551,10 +535,6 @@
             {
               "applied": true,
               "badges": [
-                {
-                  "kind": "layer",
-                  "label": "Repository"
-                },
                 {
                   "detail": "Project: 7 retries; committed: Not set",
                   "kind": "state",
@@ -574,35 +554,32 @@
                 },
                 {
                   "applied": true,
-                  "layer": "mac"
-                },
-                {
-                  "applied": true,
-                  "display": "3 retries",
-                  "layer": "builtin",
-                  "value": 3
+                  "layer": "global"
                 }
               ],
-              "origin": "inherited",
+              "overridden": false,
               "presentation": {
                 "control": "readOnly",
-                "editableLayers": [
-                  "chat",
-                  "mac"
-                ],
+                "editable": false,
                 "effect": "next-request",
                 "help": "How many times a failed request is retried.",
                 "importance": "essential",
                 "label": "Retries",
                 "note": "Update Tron to edit",
                 "order": 40,
+                "projectSettable": true,
                 "range": {
                   "max": 20,
                   "min": 0,
                   "unit": "retries"
                 },
+                "sessionOverridable": true,
                 "timing": "live",
                 "valueKind": "integer"
+              },
+              "projectSetting": {
+                "file": "<tmp>/project/.pi/settings.json",
+                "path": "retry.maxRetries"
               },
               "subgroup": "Retry",
               "value": 7
@@ -610,8 +587,7 @@
           ],
           "layers": [
             "project",
-            "mac",
-            "builtin"
+            "global"
           ],
           "renderer": {
             "version": 1
@@ -660,7 +636,7 @@
         "changes": [
           {
             "key": "permissions.projectTrust",
-            "layer": "mac",
+            "layer": "global",
             "op": "set",
             "qualifiers": {
               "project": "<tmp>/project/packages/app"
@@ -671,7 +647,7 @@
         "commandId": "lock-command-0005",
         "reason": "Stop trusting the lock project",
         "target": {
-          "kind": "mac"
+          "kind": "global"
         }
       },
       "response": {
@@ -684,7 +660,7 @@
               "before": true,
               "changeId": "<id>",
               "key": "permissions.projectTrust",
-              "layer": "mac",
+              "layer": "global",
               "qualifiers": {
                 "project": "<tmp>/project"
               },
@@ -1701,13 +1677,13 @@
         "fixed": {
           "context.images.autoResize": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "ref": "<id>",
             "value": true
           },
           "model.contextWindow": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "qualifiers": {
               "model": "tron-lock-project-root-trust/faux-1"
             },
@@ -1716,7 +1692,7 @@
           },
           "model.ref[role=chat]": {
             "at": "<timestamp>",
-            "from": "mac",
+            "from": "global",
             "qualifiers": {
               "role": "chat"
             },
@@ -1728,7 +1704,7 @@
           },
           "model.thinking[role=chat]": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "qualifiers": {
               "model": "tron-lock-project-root-trust/faux-1",
               "role": "chat"
@@ -1738,7 +1714,7 @@
           },
           "tools.active": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "ref": "<id>",
             "value": [
               "read",
@@ -1770,13 +1746,13 @@
         "fixed": {
           "context.images.autoResize": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "ref": "<id>",
             "value": true
           },
           "model.contextWindow": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "qualifiers": {
               "model": "tron-lock-project-root-trust/faux-1"
             },
@@ -1785,7 +1761,7 @@
           },
           "model.ref[role=chat]": {
             "at": "<timestamp>",
-            "from": "mac",
+            "from": "global",
             "qualifiers": {
               "role": "chat"
             },
@@ -1797,7 +1773,7 @@
           },
           "model.thinking[role=chat]": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "qualifiers": {
               "model": "tron-lock-project-root-trust/faux-1",
               "role": "chat"
@@ -1807,7 +1783,7 @@
           },
           "tools.active": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "ref": "<id>",
             "value": [
               "read",
@@ -1828,7 +1804,7 @@
         "requestPins": {
           "context.images.block": {
             "at": "<timestamp>",
-            "from": "builtin",
+            "from": "global",
             "ref": "<id>",
             "value": false
           }
@@ -2095,22 +2071,15 @@
                       "layer": {
                         "anyOf": [
                           {
-                            "const": "chat",
+                            "const": "session",
                             "type": "string"
                           },
                           {
-                            "const": "profile",
-                            "type": "string"
-                          },
-                          {
-                            "const": "project",
-                            "type": "string"
-                          },
-                          {
-                            "const": "mac",
+                            "const": "global",
                             "type": "string"
                           }
-                        ]
+                        ],
+                        "description": "Session/Home override or Global. Project is read-only."
                       },
                       "op": {
                         "anyOf": [

@@ -110,8 +110,6 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     /// Absent on an older Gateway.
     let waitingForUser: Bool?
     let memory: Memory
-    /// The chat model Home's activations use; distinct from `memory.models`.
-    let model: ModelRef?
     let chapter: Chapter?
 
     /// Task and permission reads are admitted only while the Gateway's task recovery is open.
@@ -126,7 +124,6 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
               status.readiness.gaps.allSatisfy({ $0.utf8.count <= 256 }),
               status.generation.map({ $0 >= 0 }) ?? true,
               status.memory.spentTokens.map({ $0 >= 0 }) ?? true,
-              status.model.map({ !$0.provider.isEmpty && !$0.id.isEmpty && $0.provider.utf8.count <= 120 && $0.id.utf8.count <= 300 }) ?? true,
               (status.memory.models ?? []).count <= 8 && (status.memory.models ?? []).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 421 }),
               status.chapter.map({ $0.count > 0 && ($0.currentBytes ?? 0) >= 0 && ($0.currentEntries ?? 0) >= 0 }) ?? true,
               [status.reason, status.recovery.reason, status.memory.blocked, status.memory.reason,

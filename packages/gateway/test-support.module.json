@@ -10,7 +10,7 @@
     "test-fixtures/tron-corpus/**",
     "test-support.module.json",
     "test-support/README.md",
-    "test-support/chat-settings-change.ts",
+    "test-support/session-settings-change.ts",
     "test-support/episodic-chapter-source.ts",
     "test-support/fixed-recording.ts",
     "test-support/fixture-process-owner.mjs",

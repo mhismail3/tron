@@ -51,7 +51,7 @@ only enrolls and revokes keys (`src/security/mac-terminal.ts`) and ships the hos
   `output` and `exit` events. The socket name carries the protocol version. Idle period:
   `setup.terminalIdleMinutes`. With no shell and no connection for 24 hours the host
   exits. Diagnostics: `gateway/mac-terminal/host.log` (truncated past 1 MiB).
-- **The key** is the Mac-layer setting `permissions.macTerminalKey` (qualified by
+- **The key** is the Global setting `permissions.macTerminalKey` (qualified by
   `device`): one `~/.ssh/authorized_keys` line restricted to Tailscale ranges with no
   forwarding, admitting only `ecdsa-sha2-nistp256` (Secure Enclave) keys. Adding is
   an `approve`-floor widening, removing is `notify`; an iPhone enrolls only itself.

@@ -110,7 +110,7 @@ function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
       sessionPresent: async (id) => id === CORPUS_IDS.session, hasLiveRuntime: () => false, currentSessionModel: () => null,
       chapterMetrics: async () => ({ bytes: 2_048, entries: 4, quiescent: true }), hasConversation: async () => false,
       serializeSessionMutation: async (_id, commit) => commit(), replaceRuntimeForProfile: async (_sessionId, commit) => commit(),
-      applySessionModel: async () => {}, beginHomePublicationReconciliation: () => {}, retireHomeRuntimes: async () => {},
+      homeModel: async () => undefined, chooseHomeModel: async () => {}, beginHomePublicationReconciliation: () => {}, retireHomeRuntimes: async () => {},
       wakeHome: async () => { throw new Error("The corpus Home is never woken"); },
     },
     memoryModels: async () => [],
@@ -393,8 +393,7 @@ export const STORES: readonly StoreSpec[] = [
       return {
         status: { ...status, taskRecovery: undefined, hostPressure: undefined, workers: undefined },
         chapters: await owner.chapterList(),
-        designation: Object.fromEntries([CORPUS_IDS.session, CORPUS_IDS.otherSession].map((id) => [id, {
-          model: owner.modelFor(id) ?? null, homeChapter: owner.isHomeChapter(id) }])),
+        designation: Object.fromEntries([CORPUS_IDS.session, CORPUS_IDS.otherSession].map((id) => [id, { homeChapter: owner.isHomeChapter(id) }])),
       };
     }),
   },

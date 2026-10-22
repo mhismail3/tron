@@ -14,7 +14,7 @@ import { createTestRegistry } from "../../test-support/gateway-registry.js";
  * `test-results/terminal-chat-home/transcript.json`.
  */
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { homeMemoryChange } from "../../test-support/chat-settings-change.js";
+import { homeMemoryChange } from "../../test-support/session-settings-change.js";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
@@ -1382,7 +1382,11 @@ describe("Tron Home activations end to end", () => {
     expect(pending.snapshot().revision).toBeGreaterThan(afterDisable);
     expect(pending.snapshot().model).toMatchObject(OTHER_MODEL);
     const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
-    expect(stored.model).toEqual(OTHER_MODEL);
+    // Home's saved settings, not its record, own the chosen model.
+    expect(Object.hasOwn(stored, "model")).toBe(false);
+    const saved = await (f.registry as unknown as { settingsOwners: { model: { resolve(target: unknown, session: undefined, keys: string[]): Promise<{ keys: Array<{ value: unknown; layer: string }> }> } } })
+      .settingsOwners.model.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"]);
+    expect(saved.keys[0]).toMatchObject({ value: OTHER_MODEL, layer: "session" });
     expect(stored.chapters.map(chapter => [chapter.sessionId, chapter.state])).toEqual([
       [active.id, "sealed"], [pending.id, state],
     ]);

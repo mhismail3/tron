@@ -13,7 +13,7 @@ import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABIL
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
 import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { PI_VERSION } from "../kernel/pi/version.js";
-import type { ChangeContext, ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { ChangeContext, SessionAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { ApprovalRequest } from "../admin/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../admin/settings-record.js";
@@ -2483,11 +2483,11 @@ export class GatewayService {
   }
 
   /** A session target's settings source from the chat the client subscribed to: its
-   * cwd, Home flag, Chat layer and model runtime. Other targets read no session. */
+   * cwd, Home flag, Session scope and model runtime. Other targets read no session. */
   private async readSettingsSession(client: ClientContext, target: SettingsTarget): Promise<SessionSettingsSource | undefined> {
     if (target.kind !== "session") return undefined;
     const slot = await this.openedSlot(client, { sessionId: target.sessionId });
-    return { cwd: slot.cwd, home: slot.isHomeChapter, chat: slot.settingsChatLayer(), modelRuntime: slot.modelRuntime };
+    return slot.settingsSource();
   }
 
   private async canonicalSettingsTarget(raw: unknown): Promise<SettingsTarget> {
@@ -2496,21 +2496,18 @@ export class GatewayService {
     return target;
   }
 
-  /** A session target's Chat layer and its slot-lane appliers. The fence is the
+  /** A session target's Session scope and its slot-lane appliers. The fence is the
    * runtime the client read (and its model or revision); the lane guards stay.
    * An applier's missing fence refuses before planning, dry run too (#1642). */
-  private async settingsSession(slot: RuntimeSlot, rawFence: unknown, changes: ReadonlyArray<Pick<ChangeRequest, "key" | "layer">>, workToken?: string): Promise<SessionSettingsSource & { appliers: ChatAppliers }> {
+  private async settingsSession(slot: RuntimeSlot, rawFence: unknown, changes: ReadonlyArray<Pick<ChangeRequest, "key" | "layer">>, workToken?: string): Promise<SessionSettingsSource & { appliers: SessionAppliers }> {
     const fence = rawFence === undefined ? undefined : object(rawFence, "fence");
     if (fence) rejectUnknownFields(fence, ["runtimeGeneration", "model", "revision"], "fence");
-    const bindings = changes.flatMap(change => change.layer === "session" ? [KEYS.find(key => key.id === change.key)?.layers.chat] : []);
-    if (!fence && bindings.some(binding => binding?.store === "chat-settings" || binding?.store === "chat" && binding.field !== "tools")) throw new GatewayError("invalid_request", "A Chat-layer change needs the fence it read");
-    if (fence?.revision === undefined && bindings.some(binding => binding?.store === "chat" && binding.field === "contextWindow")) throw new GatewayError("invalid_request", "A context window change needs the fence revision it read");
+    const bindings = changes.flatMap(change => change.layer === "session" ? [KEYS.find(key => key.id === change.key)?.layers.session] : []);
+    if (!fence && bindings.some(binding => binding?.store === "session-settings" || binding?.store === "session" && binding.field !== "tools")) throw new GatewayError("invalid_request", "A Session-scope change needs the fence it read");
+    if (fence?.revision === undefined && bindings.some(binding => binding?.store === "session" && binding.field === "contextWindow")) throw new GatewayError("invalid_request", "A context window change needs the fence revision it read");
     const expectation = () => this.configurationExpectation({ expectedRuntimeGeneration: fence!.runtimeGeneration, expectedModel: fence!.model ?? null });
     return {
-      cwd: slot.cwd,
-      home: slot.isHomeChapter,
-      chat: slot.settingsChatLayer(),
-      modelRuntime: slot.modelRuntime,
+      ...slot.settingsSource(),
       appliers: {
         setModel: (ref, fixedAt) => slot.setModel(ref.provider, ref.id, workToken, expectation(), fixedAt),
         setThinking: (level, fixedAt) => slot.setThinking(oneOf(level, "level", thinkingLevels), workToken, expectation(), fixedAt),
@@ -2759,7 +2756,7 @@ export class GatewayService {
 
   /** This Gateway's default model for a new session, admitted the same way. */
   private async defaultHomeModel(): Promise<ModelRef> {
-    // The Mac layer's default model through the one resolver.
+    // The Global scope's default model through the one resolver.
     const resolution = await this.dependencies.settingsModel.resolve({ kind: "global" }, undefined, ["model.ref[role=chat]"], { storeState: false });
     const fallback = resolution.keys.find(key => key.key === "model.ref[role=chat]")?.value as ModelRef | undefined;
     if (!fallback) throw new GatewayError("invalid_request", "Tron Home needs a model: set a default model or name one");

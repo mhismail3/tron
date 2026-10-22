@@ -94,8 +94,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         shot("1478-home-settings-\(name)")
         // The Tools row names its card; the only "Tools" text is the row's own title.
         XCTAssertEqual(content.staticTexts.matching(NSPredicate(format: "label == 'Tools'")).count, 1, content.debugDescription)
-        XCTAssertGreaterThanOrEqual(tools.buttons["settings-row-tools.active-source"].frame.height, 44)
-        let cards = [models, tools, content.buttons["Configuration"], content.buttons["Changes"]]
+        let cards = [models, element(app, "settings-section-tools-detail"), content.buttons["settings-section-advanced-open"]]
         for card in cards.dropFirst() { for _ in 0..<4 where !card.isHittable { app.swipeUp() } }
         shot("1478-home-settings-\(name)-bottom")
         let gaps = zip(cards, cards.dropFirst()).map { $1.frame.minY - $0.frame.maxY }
@@ -119,17 +118,17 @@ final class TronHomeSheetsUITests: XCTestCase {
             link.tap()
             expandSheet(app, title: "Session Settings")
             let content = element(app, "session-settings-content")
-            let configuration = content.buttons["Configuration"], changes = content.buttons["Changes"]
-            XCTAssertTrue(configuration.waitForExistence(timeout: 8), app.debugDescription)
+            let tools = element(app, "settings-section-tools-detail"), more = content.buttons["settings-section-advanced-open"]
+            XCTAssertTrue(tools.waitForExistence(timeout: 8), app.debugDescription)
             // The image rows name their card: no "Images" heading above them (#1510).
             XCTAssertTrue(element(app, "settings-row-context.images.autoResize").exists, content.debugDescription)
             XCTAssertTrue(element(app, "settings-row-context.images.block").exists, content.debugDescription)
             XCTAssertEqual(content.staticTexts.matching(NSPredicate(format: "label == 'Images'")).count, 0, content.debugDescription)
             let suffix = size.contains("Accessibility") ? "ax-large" : appearance
             shot("1478-session-settings-\(suffix)")
-            for _ in 0..<6 where !changes.isHittable { app.swipeUp() }
+            for _ in 0..<6 where !more.isHittable { app.swipeUp() }
             shot("1478-session-settings-\(suffix)-bottom")
-            XCTAssertLessThan(changes.frame.minY - configuration.frame.maxY, 12, "Session Settings shares the tight card gap")
+            XCTAssertLessThan(more.frame.minY - tools.frame.maxY, 12, "Session Settings shares the tight card gap")
             app.terminate()
         }
     }
@@ -666,11 +665,11 @@ final class TronHomeSheetsUITests: XCTestCase {
         }
         toolSheet(app, "settings-change", chip: "Settings, Completed", index: 0, outcome: "Pending approval") {
             XCTAssertTrue(self.element(app, "home-tool-row-Set").label.contains("3 → 6"), self.element(app, "home-tool-row-Set").label)
-            XCTAssertTrue(self.element(app, "home-tool-row-Layer").label.contains("Home profile"))
+            XCTAssertTrue(self.element(app, "home-tool-row-Layer").label.contains("Session"))
             XCTAssertTrue(self.element(app, "home-tool-row-Tier").label.contains("Approve"))
         }
         toolSheet(app, "settings-resolve", chip: "Settings, Completed", index: 1, outcome: "Read") {
-            XCTAssertTrue(self.element(app, "home-tool-row-model.ref[role=worker]").label.contains("Claude Opus 5.5 · Home profile"))
+            XCTAssertTrue(self.element(app, "home-tool-row-model.ref[role=worker]").label.contains("Claude Opus 5.5 · Session"))
         }
         toolSheet(app, "task-rejected", chip: "Task, Failed", index: 0, outcome: "Rejected") {
             let failure = self.allText(self.element(app, "home-tool-failure"))

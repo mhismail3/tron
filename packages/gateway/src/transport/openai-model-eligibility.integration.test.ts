@@ -6,7 +6,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { chatSettingChange } from "../../test-support/chat-settings-change.js";
+import { sessionSettingChange } from "../../test-support/session-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { OpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { TrustService } from "../admin/trust-service.js";
@@ -360,9 +360,9 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     await mkdir(join(root, "project"), { recursive: true });
     const current = { provider: "openai-codex", id: "gpt-5.6-sol" };
     slot = Object.assign({ modelRuntime: runtime, setModel: vi.fn(async () => 2), snapshot: () => ({ model: current }) },
-      { cwd: join(root, "project"), settingsChatLayer: () => ({ model: current, settings: {} }) });
+      { cwd: join(root, "project"), settingsSessionLayer: () => ({ model: current, settings: {} }) });
     const subscribedClient = { ...client, isSubscribed: () => true };
-    await expect(service.invoke(subscribedClient, "settings.change", chatSettingChange("model", {
+    await expect(service.invoke(subscribedClient, "settings.change", sessionSettingChange("model", {
       commandId: "hidden-model-choice", sessionId: "historical-session", expectedRuntimeGeneration: "generation",
       expectedModel: { provider: "openai-codex", id: "gpt-5.6-sol" }, provider: "openai", modelId: "gpt-4",
     }))).rejects.toBeInstanceOf(GatewayError);
@@ -371,15 +371,15 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
 
     const providerList = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageLentTo: string | null }> };
     expect(providerList.providers.find(provider => provider.id === "openai-codex")?.usageLentTo).toBe("openai");
-    await expect(service.invoke(subscribedClient, "settings.change", chatSettingChange("model", {
+    await expect(service.invoke(subscribedClient, "settings.change", sessionSettingChange("model", {
       commandId: "lent-codex-choice", sessionId: "historical-session", expectedRuntimeGeneration: "generation",
       expectedModel: { provider: "openai-codex", id: "gpt-5.6-sol" }, provider: "openai-codex", modelId: runtime.getModels("openai-codex")[0]!.id,
     }))).rejects.toMatchObject({ code: "invalid_request" });
     expect(slot.setModel).not.toHaveBeenCalled();
 
     await expect(service.invoke(client, "settings.change", {
-      commandId: "hidden-default-model", target: { kind: "mac" },
-      changes: [{ key: "model.ref[role=chat]", layer: "mac", op: "set", value: { provider: "openai", id: "gpt-4" } }],
+      commandId: "hidden-default-model", target: { kind: "global" },
+      changes: [{ key: "model.ref[role=chat]", layer: "global", op: "set", value: { provider: "openai", id: "gpt-4" } }],
     })).rejects.toMatchObject({ code: "invalid_request" });
   });
 

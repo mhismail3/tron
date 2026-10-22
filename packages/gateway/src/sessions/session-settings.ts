@@ -3,9 +3,9 @@ import { getCurrentTools } from "../kernel/pi/ai.js";
 import type { SessionEntry, SessionManager } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { FixedSetting } from "../kernel/settings/tool-contract.js";
-import { hasChatSettingsApplier, schemaKey } from "../admin/settings-schema.js";
+import { hasSessionSettingsApplier, schemaKey } from "../admin/settings-schema.js";
 
-export const CHAT_SETTINGS_ENTRY = "tron.settings.v1";
+export const SESSION_SETTINGS_ENTRY = "tron.settings.v1";
 
 /** Rollover keeps policy, not conversation. Read only recognized canonical
  * state; audit receipts and old message/entry identities belong to the predecessor. */
@@ -14,19 +14,19 @@ export function appendChatSettingsSnapshot(entries: readonly SessionEntry[], man
   if (model?.type === "model_change") manager.appendModelChange(model.provider, model.modelId);
   const thinking = entries.findLast(entry => entry.type === "thinking_level_change");
   if (thinking?.type === "thinking_level_change") manager.appendThinkingLevelChange(thinking.thinkingLevel);
-  const fixed = readChatFixedSettings(entries);
-  const choice = readChatToolChoice(entries);
+  const fixed = readSessionFixedSettings(entries);
+  const choice = readSessionToolChoice(entries);
   if (choice) fixed["tools.active"] = choice.fixed ?? { value: choice.tools, from: "delegate", at: new Date().toISOString(), ref: randomUUID() };
-  manager.appendCustomEntry(CHAT_SETTINGS_ENTRY, {
-    settings: readChatSettings(entries), fixed, requestPins: readChatRequestPins(entries),
+  manager.appendCustomEntry(SESSION_SETTINGS_ENTRY, {
+    settings: readSessionSettings(entries), fixed, requestPins: readSessionRequestPins(entries),
   });
 }
 
 /** A choice after the last system frame wins; otherwise that frame is the
  * actual declared loadout, including changes made through the SDK itself. */
-export function readChatToolChoice(entries: readonly SessionEntry[]): { tools: string[]; fixed?: FixedSetting } | undefined {
-  const fixed = readChatFixedSettings(entries)["tools.active"];
-  const fixedIndex = fixed ? entries.findIndex(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY
+export function readSessionToolChoice(entries: readonly SessionEntry[]): { tools: string[]; fixed?: FixedSetting } | undefined {
+  const fixed = readSessionFixedSettings(entries)["tools.active"];
+  const fixedIndex = fixed ? entries.findIndex(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY
     && (entry.data as { fixed?: Record<string, FixedSetting> }).fixed?.["tools.active"]?.ref === fixed.ref) : -1;
   const declaredIndex = entries.findLastIndex(entry => entry.type === "message" && entry.message.role === "system");
   if (fixed && fixedIndex > declaredIndex && Array.isArray(fixed.value)) return { tools: fixed.value as string[], fixed };
@@ -38,8 +38,8 @@ export function readChatToolChoice(entries: readonly SessionEntry[]): { tools: s
 
 /** Branch-local truth. Fork/resume follows Pi's canonical branch; the audit
  * ledger is never used to restore a runtime override. */
-export function readChatSettings(entries: readonly SessionEntry[]): Record<string, unknown> {
-  const entry = entries.findLast(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY);
+export function readSessionSettings(entries: readonly SessionEntry[]): Record<string, unknown> {
+  const entry = entries.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY);
   if (!entry || entry.type !== "custom") return {};
   const data = entry.data as { settings?: unknown } | null;
   if (!data?.settings || typeof data.settings !== "object" || Array.isArray(data.settings)) {
@@ -50,16 +50,16 @@ export function readChatSettings(entries: readonly SessionEntry[]): Record<strin
 
 /** Directional request values are branch-local timing snapshots, not explicit
  * overrides. A lower layer can narrow them live but cannot silently widen them. */
-export function readChatRequestPins(entries: readonly SessionEntry[]): Record<string, FixedSetting> {
+export function readSessionRequestPins(entries: readonly SessionEntry[]): Record<string, FixedSetting> {
   return readChatSnapshots(entries, "requestPins");
 }
 
-export function readChatFixedSettings(entries: readonly SessionEntry[]): Record<string, FixedSetting> {
+export function readSessionFixedSettings(entries: readonly SessionEntry[]): Record<string, FixedSetting> {
   return readChatSnapshots(entries, "fixed");
 }
 
 function readChatSnapshots(entries: readonly SessionEntry[], field: "fixed" | "requestPins"): Record<string, FixedSetting> {
-  const entry = entries.findLast(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY);
+  const entry = entries.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY);
   if (!entry || entry.type !== "custom") return {};
   const snapshots = (entry.data as Record<string, unknown> | null)?.[field];
   if (snapshots === undefined) return {};
@@ -77,11 +77,11 @@ function readChatSnapshots(entries: readonly SessionEntry[], field: "fixed" | "r
 }
 
 /** The schema owns paths; callers cannot name an arbitrary SDK field. Undefined
- * deletes a Chat override, so the next request follows the resolver again. */
-export function changeChatSetting(settings: Record<string, unknown>, id: string, value: unknown): Record<string, unknown> {
+ * deletes a Session override, so the next request follows the resolver again. */
+export function changeSessionSetting(settings: Record<string, unknown>, id: string, value: unknown): Record<string, unknown> {
   const key = schemaKey(id);
-  const binding = key.layers.chat;
-  if (!hasChatSettingsApplier(key) || binding?.store !== "chat-settings") {
+  const binding = key.layers.session;
+  if (!hasSessionSettingsApplier(key) || binding?.store !== "session-settings") {
     throw new GatewayError("unsupported", "This setting has no live Chat applier");
   }
   const next = structuredClone(settings);

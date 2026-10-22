@@ -53,10 +53,10 @@
                 "reserveTokens": 2048,
                 "source": {
                   "enabled": "global",
-                  "instructions": "default",
+                  "instructions": "global",
                   "keepRecentTokens": "global",
                   "reserveTokens": "global",
-                  "thinkingLevel": "default"
+                  "thinkingLevel": "global"
                 },
                 "thinkingLevel": "inherit"
               }
@@ -248,7 +248,7 @@
           "run.retry.maxRetries"
         ],
         "target": {
-          "kind": "mac"
+          "kind": "global"
         }
       },
       "response": {
@@ -259,48 +259,36 @@
           "keys": [
             {
               "applied": true,
-              "badges": [
-                {
-                  "kind": "layer",
-                  "label": "Mac"
-                }
-              ],
+              "badges": [],
               "display": "4 retries",
               "group": "run",
               "key": "run.retry.maxRetries",
-              "layer": "mac",
+              "layer": "global",
               "layers": [
                 {
                   "applied": true,
                   "display": "4 retries",
-                  "layer": "mac",
+                  "layer": "global",
                   "value": 4
-                },
-                {
-                  "applied": true,
-                  "display": "3 retries",
-                  "layer": "builtin",
-                  "value": 3
                 }
               ],
-              "origin": "inherited",
+              "overridden": true,
               "presentation": {
                 "control": "readOnly",
-                "editableLayers": [
-                  "chat",
-                  "mac"
-                ],
+                "editable": true,
                 "effect": "next-request",
                 "help": "How many times a failed request is retried.",
                 "importance": "essential",
                 "label": "Retries",
                 "note": "Update Tron to edit",
                 "order": 40,
+                "projectSettable": true,
                 "range": {
                   "max": 20,
                   "min": 0,
                   "unit": "retries"
                 },
+                "sessionOverridable": true,
                 "timing": "live",
                 "valueKind": "integer"
               },
@@ -309,8 +297,7 @@
             }
           ],
           "layers": [
-            "mac",
-            "builtin"
+            "global"
           ],
           "renderer": {
             "version": 1
@@ -324,7 +311,7 @@
             }
           ],
           "target": {
-            "kind": "mac"
+            "kind": "global"
           }
         }
       }
@@ -337,7 +324,7 @@
           {
             "expected": 4,
             "key": "run.retry.maxRetries",
-            "layer": "mac",
+            "layer": "global",
             "op": "set",
             "value": 6
           }
@@ -345,7 +332,7 @@
         "commandId": "lock-command-0002",
         "reason": "Retry transient provider failures longer",
         "target": {
-          "kind": "mac"
+          "kind": "global"
         }
       },
       "response": {
@@ -358,7 +345,7 @@
               "before": 4,
               "changeId": "<id>",
               "key": "run.retry.maxRetries",
-              "layer": "mac",
+              "layer": "global",
               "status": "applied",
               "tier": "quiet"
             }
@@ -376,7 +363,7 @@
           "run.retry.maxRetries"
         ],
         "target": {
-          "kind": "mac"
+          "kind": "global"
         }
       },
       "response": {
@@ -387,48 +374,36 @@
           "keys": [
             {
               "applied": true,
-              "badges": [
-                {
-                  "kind": "layer",
-                  "label": "Mac"
-                }
-              ],
+              "badges": [],
               "display": "6 retries",
               "group": "run",
               "key": "run.retry.maxRetries",
-              "layer": "mac",
+              "layer": "global",
               "layers": [
                 {
                   "applied": true,
                   "display": "6 retries",
-                  "layer": "mac",
+                  "layer": "global",
                   "value": 6
-                },
-                {
-                  "applied": true,
-                  "display": "3 retries",
-                  "layer": "builtin",
-                  "value": 3
                 }
               ],
-              "origin": "inherited",
+              "overridden": true,
               "presentation": {
                 "control": "readOnly",
-                "editableLayers": [
-                  "chat",
-                  "mac"
-                ],
+                "editable": true,
                 "effect": "next-request",
                 "help": "How many times a failed request is retried.",
                 "importance": "essential",
                 "label": "Retries",
                 "note": "Update Tron to edit",
                 "order": 40,
+                "projectSettable": true,
                 "range": {
                   "max": 20,
                   "min": 0,
                   "unit": "retries"
                 },
+                "sessionOverridable": true,
                 "timing": "live",
                 "valueKind": "integer"
               },
@@ -437,8 +412,7 @@
             }
           ],
           "layers": [
-            "mac",
-            "builtin"
+            "global"
           ],
           "renderer": {
             "version": 1
@@ -452,7 +426,7 @@
             }
           ],
           "target": {
-            "kind": "mac"
+            "kind": "global"
           }
         }
       }
@@ -477,56 +451,44 @@
           "keys": [
             {
               "applied": true,
-              "badges": [
-                {
-                  "kind": "layer",
-                  "label": "Mac"
-                }
-              ],
+              "badges": [],
               "display": "6 retries",
               "group": "run",
               "key": "run.retry.maxRetries",
-              "layer": "mac",
+              "layer": "global",
               "layers": [
-                {
-                  "applied": true,
-                  "layer": "chat"
-                },
                 {
                   "applied": true,
                   "layer": "project"
                 },
                 {
                   "applied": true,
-                  "display": "6 retries",
-                  "layer": "mac",
-                  "value": 6
+                  "layer": "session"
                 },
                 {
                   "applied": true,
-                  "display": "3 retries",
-                  "layer": "builtin",
-                  "value": 3
+                  "display": "6 retries",
+                  "layer": "global",
+                  "value": 6
                 }
               ],
-              "origin": "inherited",
+              "overridden": false,
               "presentation": {
                 "control": "readOnly",
-                "editableLayers": [
-                  "chat",
-                  "mac"
-                ],
+                "editable": true,
                 "effect": "next-request",
                 "help": "How many times a failed request is retried.",
                 "importance": "essential",
                 "label": "Retries",
                 "note": "Update Tron to edit",
                 "order": 40,
+                "projectSettable": true,
                 "range": {
                   "max": 20,
                   "min": 0,
                   "unit": "retries"
                 },
+                "sessionOverridable": true,
                 "timing": "live",
                 "valueKind": "integer"
               },
@@ -535,10 +497,9 @@
             }
           ],
           "layers": [
-            "chat",
             "project",
-            "mac",
-            "builtin"
+            "session",
+            "global"
           ],
           "renderer": {
             "version": 1
@@ -580,7 +541,7 @@
               "changeId": "<id>",
               "commandId": "lock-command-0002",
               "key": "run.retry.maxRetries",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "presentation": {
                 "actor": "You",
@@ -589,13 +550,13 @@
                   "before": "4 retries"
                 },
                 "label": "Retries",
-                "layer": "Mac",
+                "layer": "Global",
                 "section": "run"
               },
               "reason": "Retry transient provider failures longer",
               "status": "applied",
               "target": {
-                "kind": "mac"
+                "kind": "global"
               },
               "tier": "quiet",
               "tierBasis": {

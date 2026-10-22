@@ -52,9 +52,9 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         for _ in 0..<6 where !(searchPaths.exists && searchPaths.isHittable) { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(searchPaths.exists, app.debugDescription)
         XCTAssertFalse(app.staticTexts["Sources"].exists, "no Sources group: \(app.debugDescription)")
-        XCTAssertFalse(app.buttons["settings-row-sources.packages-source"].exists, "no second package summary row")
+        XCTAssertFalse(app.descendants(matching: .any)["settings-row-sources.packages"].exists, "no second package summary row")
         let install = app.buttons["Install Package"].firstMatch
-        let npm = app.buttons["settings-row-sources.npmCommand-source"]
+        let npm = app.descendants(matching: .any)["settings-row-sources.npmCommand"]
         XCTAssertTrue(install.exists && npm.exists, app.debugDescription)
         // Same card: the npm row starts where the Install Package row ends,
         // and both precede Search paths.
@@ -122,9 +122,9 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         app.switches.matching(NSPredicate(format: "label == %@", "Always include codemode")).firstMatch
     }
 
-    /// Mac Codemode off: Always include codemode is inactive and shown Off,
-    /// tapping it writes nothing, Value & Source names the kept `+codemode` and
-    /// why; turning Codemode back on in Extensions shows the saved value again.
+    /// Global Codemode off: Always include codemode is inactive and shown Off,
+    /// tapping it writes nothing; turning Codemode back on in Extensions shows
+    /// the saved value again.
     @MainActor
     func testDefaultToolsInactiveWhileBuiltinExtensionOff() {
         continueAfterFailure = false
@@ -140,14 +140,6 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(1.5))
         XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0", "An inactive switch writes nothing")
         XCTAssertEqual(app.staticTexts["fixture.tools-write"].label, "none")
-
-        let source = app.buttons["settings-row-tools.active-source"]
-        reveal(source, in: app)
-        source.tap()
-        let note = app.descendants(matching: .any)["settings-provenance-inactive"]
-        XCTAssertTrue(note.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(note.label.contains("Codemode is off in Extensions") && note.label.contains("+codemode"), note.label)
-        closeTopSheet(app)
         closeTopSheet(app)
 
         let extensions = app.buttons["settings-link-Extensions"]
@@ -165,37 +157,18 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["fixture.tools-write"].label, "none", "tools.active was never rewritten")
     }
 
-    /// A project inherits the Mac's off Codemode: its Tools Value & Source
-    /// explains why the project's saved `+codemode` has no effect.
-    @MainActor
-    func testProjectToolsExplainInheritedBuiltinExtensionOff() {
-        continueAfterFailure = false
-        let app = launchDefaultTools(project: true)
-        defer { app.terminate() }
-        let source = app.buttons["settings-row-tools.active-source"]
-        reveal(source, in: app)
-        source.tap()
-        let note = app.descendants(matching: .any)["settings-provenance-inactive"]
-        XCTAssertTrue(note.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(note.label.contains("Codemode is off in Extensions"), note.label)
-    }
-
-    /// Light and dark at standard text: Mac Tools with Codemode off, its
-    /// Value & Source, then Tools after Codemode is turned back on; and a
-    /// project's view-only Tools inheriting the Mac's off Codemode.
+    /// Light and dark at standard text: Global Tools with Codemode off, then
+    /// Tools after Codemode is turned back on; and a project's view-only Tools
+    /// inheriting Global's off Codemode.
     @MainActor
     func testDefaultToolsExtensionsOffCaptures() {
         for (name, dark, large) in [("light", false, false), ("dark", true, false)] {
             let app = launchDefaultTools(dark: dark, large: large)
             openTools(app)
             keep(app, "1491-mac-\(name)-off")
-            let source = app.buttons["settings-row-tools.active-source"]
-            reveal(source, in: app)
+            let row = app.descendants(matching: .any)["settings-row-tools.active"]
+            reveal(row, in: app)
             keep(app, "1491-mac-\(name)-off-tools-row")
-            source.tap()
-            XCTAssertTrue(app.descendants(matching: .any)["settings-provenance-inactive"].waitForExistence(timeout: 10), app.debugDescription)
-            keep(app, "1491-mac-\(name)-off-value-source")
-            closeTopSheet(app)
             closeTopSheet(app)
             let extensions = app.buttons["settings-link-Extensions"]
             reveal(extensions, in: app)
@@ -210,12 +183,9 @@ final class TronExtensionsSettingsUITests: XCTestCase {
             app.terminate()
 
             let project = launchDefaultTools(project: true, dark: dark, large: large)
-            let projectSource = project.buttons["settings-row-tools.active-source"]
-            reveal(projectSource, in: project)
+            let projectRow = project.descendants(matching: .any)["settings-row-tools.active"]
+            reveal(projectRow, in: project)
             keep(project, "1491-project-\(name)-tools")
-            projectSource.tap()
-            XCTAssertTrue(project.descendants(matching: .any)["settings-provenance-inactive"].waitForExistence(timeout: 10), project.debugDescription)
-            keep(project, "1491-project-\(name)-value-source")
             project.terminate()
         }
     }

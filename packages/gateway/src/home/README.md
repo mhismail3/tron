@@ -26,9 +26,9 @@ unaffected by every rule here.
   `2`, `homeId`, ordered `chapters` (`{ sessionId, ordinal, state: active | sealed | reserved
   | materializing, createdAt, activationStarted, … }`), `bindingRevision`, `generation`
   (advances on every profile change, fences in-flight work), `routeGeneration` (advances only
-  on missing-session replacement), `policyRevision`, `enabled`, `model`, `memory` (pause state
-  only), timestamps. Missing = undesignated. A malformed, unsafe or unknown record is kept
-  and reported unavailable (designate and admission refuse); no migration or down-conversion.
+  on missing-session replacement), `policyRevision`, `enabled`, `memory` (pause), timestamps;
+  Home's model lives only in its saved settings. Missing = undesignated. A malformed or unknown
+  record is kept and reported unavailable; only the startup settings migration rewrites it.
 - **Workspace.** `<tronHome>/gateway/home/workspace` (`0700`, empty) is recorded **untrusted**.
   Global skills and prompt templates feed the composer only (the model sees one when inserted);
   `home-global-resources.ts` reloads them live as their agent-directory inputs change.
@@ -56,7 +56,7 @@ unaffected by every rule here.
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
   model on its Gateway-runtime view; no cache warming (`tron-home` answers `stop`). Append guards read the live record.
 - **Profile changes** run in one serialized owner, replacing a live runtime in place after an
-  idle check (else `busy`); the enabled Home's model is written back to the record.
+  idle check (else `busy`); the rebuilt runtime adopts Home's saved settings.
 - **Activation:** one admitted input and everything it triggers. Every provider request
   carries the activation-start system messages, ONE memory view frozen at the first request,
   and the activation's own messages; prior activations are never re-sent and the view is never
@@ -129,7 +129,7 @@ changes keep its store, cursors and spend.
 
 | Signal | Level | Meaning |
 |---|---|---|
-| `home.<outcome>`; `home.client-control`; `home.route-bound`; `home.resources-reload`; `home-model-record-failed` | info; `unavailable`, `refused`, failed controls and `resources-reload` warn; `home-model-record-failed` is a warning session-persistence code | Designation outcomes (`designated`, `enabled`, `disabled`, `unavailable` or `refused` with a coded `reason`), pause/resume-memory owner outcome (`operation`, `reason`), route binding `category` (`fresh`, `replay`, `open`), a live global-resource reload or watch that failed (`watch-failed` or a coded `reason`), and a failed write of the applied model into the designation. Never IDs, paths, models or memory text |
+| `home.<outcome>`; `home.client-control`; `home.route-bound`; `home.resources-reload` | info; `unavailable`, `refused`, failed controls and `resources-reload` warn | Designation outcomes (`designated`, `enabled`, `disabled`, `unavailable` or `refused` with a coded `reason`), pause/resume-memory owner outcome (`operation`, `reason`), route binding `category` (`fresh`, `replay`, `open`), a live global-resource reload or watch that failed (`watch-failed` or a coded `reason`). Never IDs, paths, models or memory text |
 | `home.chapter-rollover`; `home.chapter-recovery`; `home.chapter-refused`; `home.chapter-limit-stop`; `home-chapter-limit-stop-failed` code on `session.diagnostic` | info; refusals, limit stops and the failure warn; the `session.diagnostic` code is a session event, not a log record | Rollover `reason` (soft or hard byte/entry limit) and `chapterOrdinal`; recovery `reason` (`absent`, `adopt`, `conversation-published`, `settings-from-live`, `settings-from-cold`); refusal `reason` (`hard-bytes`, `sealed-write`, `ownership-changed`, …); a running activation stopped at the hard limit with crossing and settled bytes/entries; a chapter-limit Stop that did not settle keeps its admission fence |
 | `home.activation`; `home.activation-refused`; `home.memory-ingest`; `home-memory-revision-changed` / `home-memory-source-unavailable` reason on `rpc.error` | info; refusals and failures warn | An activation's first provider request (`effectiveTokens`, `contextWindow`, view lines/bytes, `excludedMessages`, `durationMs` readiness wait); a request refused before any provider call (`reason`, bounded `detail`; `memory-usage-limit` re-arms once the limit lapses); a memory-ingest failure `reason`; a memory-browser read that lost its revision fence or could not prove its sources (coded `cause`) |
 | `home.task.store-refused`; `home.task.authorization`; `home.task.transition`; `home.task.checkin`; `home.task.spend`; `home.task.dispatch-stage`; `home.task.producer-refused`; `home.task.report-reminder` | info; refusals and slow, timed-out or cancelled dispatch stages warn | Keyed by `taskHash`/`operationHash`, never intent, report or path ([tasks.md](tasks.md)): task-store refusal `reason` (fenced until the next start, in `home.status.taskRecovery`); scope, grant and decision transitions; durable `pending`/`active`/`terminal` transitions with `reason`, `failureCause`, `errorCode`; check-in `attention`; deduplicated token spend; a `delegate` admission `stage` slow (≥ 5 s), timed out (60 s) or cancelled; a refused detached-capable producer; the single report-only continuation |

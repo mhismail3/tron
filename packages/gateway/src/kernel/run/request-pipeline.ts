@@ -22,7 +22,7 @@ export class RunRequestPipeline {
   constructor(modelRuntime: ModelRuntime) {
     // The SDK merges initial optional defaults after agent.streamFunction.
     // Carry this exact request's resolved settings to the final provider cut:
-    // clearing a Chat/Mac value must not resurrect that stale SDK default.
+    // clearing a Chat/Global value must not resurrect that stale SDK default.
     // Ordinary runtimes and Home's borrowed *view* are session-owned; unrelated
     // memory/extension calls outside this stream retain their explicit options.
     wrapModelRuntimeStream(modelRuntime, (streamSimple) => (model, context, options) => {

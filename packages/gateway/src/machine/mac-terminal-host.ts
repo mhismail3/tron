@@ -74,7 +74,7 @@ export function macTerminalHostCommand(tronHome: string, nodePath = process.exec
  * unreadable or invalid value keeps every shell (null is "off"). */
 async function macTerminalIdleLimitMs(tronHome: string): Promise<number | null> {
   const key = schemaKey("setup.terminalIdleMinutes");
-  const binding = key.layers.mac;
+  const binding = key.layers.global;
   const path = binding && "path" in binding ? binding.path : [];
   let document: unknown;
   try {

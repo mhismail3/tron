@@ -1258,32 +1258,25 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         burst("manage-session")
         for _ in 0..<4 { app.swipeUp() }
         burst("manage-session-rows")
-        openSheet("chat-settings-link", "chat-settings")
+        openSheet("chat-settings-link", "session-settings")
         let settings = app.descendants(matching: .any)["session-settings-content"]
         XCTAssertFalse(settings.buttons["Switch Model"].exists)
-        let configuration = app.buttons["Configuration"]
-        revealBelowNavigationBar(app, configuration); configuration.tap()
-        let inspection = app.descendants(matching: .any)["settings-configuration"]
-        XCTAssertTrue(inspection.waitForExistence(timeout: 30))
-        XCTAssertEqual(inspection.switches.count, 0)
-        burst("chat-configuration")
+        openSheet("settings-section-advanced-open", "session-more", section: "run")
         dismissTopSheet(app)
-        openSheet("settings-section-advanced-open", "chat-more", section: "run")
-        dismissTopSheet(app)
-        dismissTopSheet(app) // Chat Settings
+        dismissTopSheet(app) // Session Settings
         dismissTopSheet(app) // Manage Session
 
-        // Settings: this Mac.
+        // Global Settings.
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
         burst("settings")
-        openSheet("settings-section-model-open", "mac-model", section: "model"); dismissTopSheet(app)
+        openSheet("settings-section-model-open", "global-model", section: "model"); dismissTopSheet(app)
         // More Settings carries Run and the approval floors; there is no Permissions row (#1295).
-        openSheet("settings-section-advanced-open", "mac-more", section: "run")
+        openSheet("settings-section-advanced-open", "global-more", section: "run")
         openSheet("settings-instances-permissions.floor-open", "agent-approvals"); dismissTopSheet(app); dismissTopSheet(app)
-        openSheet("settings-section-tools-open", "mac-tools", section: "tools"); dismissTopSheet(app)
+        openSheet("settings-section-tools-open", "global-tools", section: "tools"); dismissTopSheet(app)
         for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"), ("Hooks", "hooks"),
                               ("Model Providers", "providers"), ("Setup", "setup")] {
             openSheet("settings-link-\(title)", name); dismissTopSheet(app)
@@ -1291,8 +1284,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     /// Settings clarity against the real Gateway: consolidated device-local
-    /// destinations remain reachable through the chat gear; Value & Source retains
-    /// the Gateway's wording and a qualified value's model identity; a text setting's
+    /// destinations remain reachable through the chat gear; a text setting's
     /// return key reads Done, commits through the change path and dismisses the
     /// keyboard; an add-value row shows the schema's example and format. The kept
     /// screenshots are the approval and review evidence for each sheet.
@@ -1300,8 +1292,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     func testSettingsSourcesTextDoneAndRoutes() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let schema = try SettingsSchemaInventory.fromEnvironment()
-        let sources = Set(schema.layerLabels.values)
         try addMcpServerOutsideTron(fixture.agentDirectory, name: "docs-server")
         let app = launchApp()
         defer { app.terminate() }
@@ -1310,7 +1300,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace) {
             // New Session: Project Settings is a setup card like its neighbours, and the
-            // Model card keeps its value, while provenance belongs only in Value & Source.
+            // Model card keeps its value without provenance pills.
             let project = app.buttons["project-settings-link"]
             XCTAssertTrue(project.waitForExistence(timeout: 30), app.debugDescription)
             let projectName = URL(fileURLWithPath: fixture.workspace).lastPathComponent
@@ -1323,7 +1313,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             // when capturing it afterward.
             for _ in 0..<12 where !modelCard.isHittable || modelCard.frame.maxY > app.frame.maxY - 40 { app.swipeUp() }
             XCTAssertTrue(modelCard.exists, app.debugDescription)
-            XCTAssertFalse(sources.contains { modelCard.staticTexts[$0].exists },
+            XCTAssertFalse(provenanceWords.contains { modelCard.staticTexts[$0].exists },
                            "New Session must not reintroduce provenance pills")
             // Native setup cards combine their rendered text into the button
             // label; they do not declare a separate accessibility value.
@@ -1337,7 +1327,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
         // Reach the consolidated device-local destinations through the actual
-        // chat gear, then return without losing the Mac settings surface.
+        // chat gear, then return without losing the Global Settings surface.
         for (name, marker) in [("Appearance", app.staticTexts["Color Mode"]),
                                ("App Customizations", app.textFields["Chats per project"]),
                                ("Setup", app.switches["Run Swift files"])] {
@@ -1349,18 +1339,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertTrue(app.buttons["settings-done"].exists)
         }
         keepScreenshot(app, name: "1325-global-settings-live-routes")
-
-        // The same served source and model identity now live only behind the row body.
-        openSettingsSection(app, "model")
-        let thinking = settingRows(app, key: "model.thinking[role=chat]").firstMatch
-        XCTAssertTrue(thinking.waitForExistence(timeout: 30), app.debugDescription)
-        let provenance = inspectSource(app, row: thinking)
-        XCTAssertTrue(provenance.contains(where: sources.contains), "The served effective source remains inspectable: \(provenance)")
-        let modelLabel = provenance.first { $0.hasPrefix("For ") }
-        XCTAssertNotNil(modelLabel, "Qualified provenance must retain its model identity: \(provenance)")
-        XCTAssertFalse(modelLabel?.contains("/") ?? true, "The model identity uses its display name")
-        keepScreenshot(app, name: "1308-model-source-inspected")
-        dismissTopSheet(app)
 
         // Context: Summary instructions commits on the keyboard's Done and the keyboard goes away.
         openSettingsSection(app, "context")
@@ -1382,11 +1360,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         done.tap()
         XCTAssertTrue(waitForNonExistence(keyboard, timeout: 10), "Done must dismiss the keyboard")
         XCTAssertTrue(waitUntil(timeout: 60) {
-            let compaction = (try? self.macSettingsDocument(fixture.agentDirectory))?["compaction"] as? [String: Any]
+            let compaction = (try? self.globalSettingsDocument(fixture.agentDirectory))?["compaction"] as? [String: Any]
             return compaction?["instructions"] as? String == "Keep file paths."
-        }, "Done must commit Summary instructions through the change path to the Mac settings.json")
-        XCTAssertTrue(waitForSource(app, row: instructionsRow, schema.label(for: "mac"), timeout: 30),
-                      "the committed value is set on the Mac: \(badgeLabels(instructionsRow))")
+        }, "Done must commit Summary instructions through the change path to the Global settings.json")
+        XCTAssertTrue(waitForOverride(instructionsRow, timeout: 30),
+                      "the committed value is set at Global: \(rowProvenance(instructionsRow))")
         keepScreenshot(app, name: "939-text-field-committed")
         dismissTopSheet(app)
 
@@ -1466,7 +1444,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    func testChatSettingsServeEveryKeyAndEditAtChatLayer() throws {
+    func testSessionSettingsServeEveryKeyAndEditAtSessionScope() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let schema = try SettingsSchemaInventory.fromEnvironment()
@@ -1480,33 +1458,25 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         var coverage: [String: SurfaceCoverage] = [:]
 
         // Manage Session is reached through the composer's context control; the
-        // chat navigation-bar gear opens Mac Settings, not Manage Session.
+        // chat navigation-bar gear opens Global Settings, not Manage Session.
         let manageSessionButton = app.buttons["session-context-button"]
         XCTAssertTrue(manageSessionButton.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertTrue(manageSessionButton.label.contains("Manage Session"), manageSessionButton.debugDescription)
         manageSessionButton.tap()
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.buttons["chat-settings-link"].waitForExistence(timeout: 15),
-                      "Manage Session must link to Chat Settings: \(app.debugDescription)")
+                      "Manage Session must link to Session Settings: \(app.debugDescription)")
         XCTAssertTrue(app.buttons["project-settings-link"].exists,
                       "Manage Session must retain the Project Settings row")
         app.buttons["chat-settings-link"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        // The editor intentionally selects only session-editable keys. The
-        // complete served inventory belongs to its explicit read-only inspector.
-        let effective = app.buttons["Configuration"]
-        revealBelowNavigationBar(app, effective)
-        effective.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Configuration"].waitForExistence(timeout: 15))
-        coverage["session-effective"] = assertSettingsSurface(app, name: "session-effective",
-            layers: ["chat"], schema: schema, allowsInheritedRows: true, inlineSections: Set(schema.keys.map(\.group)))
-        dismissTopSheet(app)
-        XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
+        // The shared renderer lists the session's overridable keys in place.
+        coverage["session"] = assertSettingsSurface(app, name: "session", layers: ["session"], schema: schema, allowsInheritedRows: true)
         openSettingsSection(app, "advanced")
-        let chatLayerRetry = toggleSetting(app, key: "run.retry.enabled", expectingBadge: schema.label(for: "chat"))
-        XCTAssertNotEqual(chatLayerRetry.before, chatLayerRetry.after, "the Chat-layer edit was not accepted")
+        let sessionRetry = toggleSetting(app, key: "run.retry.enabled")
+        XCTAssertNotEqual(sessionRetry.before, sessionRetry.after, "the Session-scope edit was not accepted")
         dismissTopSheet(app) // Advanced
-        dismissTopSheet(app) // Chat Settings
+        dismissTopSheet(app) // Session Settings
         dismissTopSheet(app) // Manage Session
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Manage Session"], timeout: 15))
         manageSessionButton.tap()
@@ -1515,16 +1485,17 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
         openSettingsSection(app, "advanced")
         let reopenedRetry = topSwitchRow(app, key: "run.retry.enabled")
-        XCTAssertTrue(waitForSource(app, row: reopenedRetry, schema.label(for: "chat"), timeout: 30),
-                      "the reopened Chat Settings must show the Chat badge: \(reopenedRetry.debugDescription)")
-        XCTAssertEqual(switchValue(reopenedRetry), chatLayerRetry.after, "the reopened Chat value is not the accepted value")
-        keepScreenshot(app, name: "settings-surface-chat-settings-chat-edit")
+        XCTAssertTrue(waitForOverride(reopenedRetry, timeout: 30),
+                      "the reopened Session Settings must mark the override: \(reopenedRetry.debugDescription)")
+        XCTAssertEqual(switchValue(reopenedRetry), sessionRetry.after, "the reopened Session value is not the accepted value")
+        keepScreenshot(app, name: "settings-surface-session-settings-session-edit")
         dismissTopSheet(app) // Advanced
-        dismissTopSheet(app) // Chat Settings
+        dismissTopSheet(app) // Session Settings
         attachSettingsCoverage(coverage, schema: schema)
     }
 
-    /// Repository settings are inspectable actual overrides, not an app write surface.
+    /// Repository settings are read-only and list only applied values: an untrusted
+    /// repository override is not applied and not offered as an app write surface.
     @MainActor
     func testProjectSettingsExposeReadOnlyOverrides() throws {
         continueAfterFailure = false
@@ -1542,23 +1513,20 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let manage = app.buttons["session-context-button"]
         XCTAssertTrue(manage.waitForExistence(timeout: 60)); manage.tap()
         openProjectCard(app)
+        let none = app.staticTexts["No repository overrides"]
         let row = settingRow(app, key: "context.compaction.enabled")
-        XCTAssertTrue(row.waitForExistence(timeout: 30))
-        XCTAssertEqual(row.switches.count, 0, "Repository overrides have no toggle mutation route")
-        XCTAssertFalse(row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset' OR identifier ENDSWITH '-edit-layer'")).firstMatch.exists)
-        let value = inspectSource(app, row: row)
-        XCTAssertTrue(value.contains("Project: Off") && value.contains("Not applied (untrusted)") && value.contains("On"),
-                      "Inspection must retain the actual repository override without applying an untrusted value: \(value)")
+        XCTAssertTrue(none.waitForExistence(timeout: 30), "An untrusted override is not applied: \(app.debugDescription)")
+        XCTAssertFalse(row.exists, "An unapplied repository override has no row or mutation route")
         XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes, "Inspection must not change repository bytes")
         dismissTopSheet(app) // Project Settings; overrides are direct groups.
         openProjectCard(app)
-        XCTAssertEqual(inspectSource(app, row: row), value, "Reopening reads the same repository override")
+        XCTAssertTrue(none.waitForExistence(timeout: 30) && !row.exists, "Reopening reads the same repository state")
         XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes)
         keepScreenshot(app, name: "1308-project-readonly-source")
     }
 
     @MainActor
-    func testMacSettingsServeEveryKeyAndEditAtMacLayer() throws {
+    func testGlobalSettingsServeEveryKeyAndEditAtGlobalScope() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let schema = try SettingsSchemaInventory.fromEnvironment()
@@ -1570,15 +1538,15 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         createSession(app, inWorkspace: fixture.workspace)
         var coverage: [String: SurfaceCoverage] = [:]
 
-        // Settings (Mac layer) from the chat navigation-bar gear: one Mac key edits and reads back.
-        let macSettingsGear = app.navigationBars.buttons["Settings"]
-        func openMacSettings() {
-            XCTAssertTrue(macSettingsGear.waitForExistence(timeout: 30), app.debugDescription)
-            macSettingsGear.tap()
+        // Global Settings from the chat navigation-bar gear: one Global key edits and reads back.
+        let globalSettingsGear = app.navigationBars.buttons["Settings"]
+        func openGlobalSettings() {
+            XCTAssertTrue(globalSettingsGear.waitForExistence(timeout: 30), app.debugDescription)
+            globalSettingsGear.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
-        openMacSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 1, "one More Settings row (#1627)")
-        coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["mac"], schema: schema, sectionDestinations: [
+        openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 1, "one More Settings row (#1627)")
+        coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["global"], schema: schema, sectionDestinations: [
             "workers": "Models", "approvals": "More Settings", "run": "More Settings", "sources": "Extensions", "setup": "Setup"])
         openSettingsSection(app, "tools")
         let codeMode = app.buttons["Other tools with codemode"]
@@ -1589,7 +1557,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "settings-surface-code-mode-choice")
         only.tap()
         XCTAssertTrue(waitUntil(timeout: 30) {
-            let stored = (try? self.macSettingsDocument(fixture.agentDirectory))?["codemode"] as? [String: Any]
+            let stored = (try? self.globalSettingsDocument(fixture.agentDirectory))?["codemode"] as? [String: Any]
             return stored?["mode"] as? String == "only"
         }, "The native Default Tools editor must persist through settings.change")
         dismissTopSheet(app)
@@ -1598,18 +1566,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "settings-surface-settings-code-mode-edit")
         dismissTopSheet(app)
         openSettingsSection(app, "setup", linkLabel: "Setup")
-        let macEdit = toggleSetting(app, key: "setup.installTelemetry", expectingBadge: schema.label(for: "mac"))
-        XCTAssertNotEqual(macEdit.before, macEdit.after, "the Mac-layer edit was not accepted")
+        let globalEdit = toggleSetting(app, key: "setup.installTelemetry")
+        XCTAssertNotEqual(globalEdit.before, globalEdit.after, "the Global edit was not accepted")
         dismissTopSheet(app) // Setup Settings
         dismissTopSheet(app) // Settings
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
-        openMacSettings()
+        openGlobalSettings()
         openSettingsSection(app, "setup", linkLabel: "Setup")
         let reopenedTelemetry = topSwitchRow(app, key: "setup.installTelemetry")
-        XCTAssertTrue(waitForSource(app, row: reopenedTelemetry, schema.label(for: "mac"), timeout: 30),
-                      "the reopened Settings must show the Mac badge: \(reopenedTelemetry.debugDescription)")
-        XCTAssertEqual(switchValue(reopenedTelemetry), macEdit.after, "the reopened Mac value is not the accepted value")
-        keepScreenshot(app, name: "settings-surface-settings-mac-edit")
+        XCTAssertTrue(waitForOverride(reopenedTelemetry, timeout: 30),
+                      "the reopened Settings must offer the Global reset: \(reopenedTelemetry.debugDescription)")
+        XCTAssertEqual(switchValue(reopenedTelemetry), globalEdit.after, "the reopened Global value is not the accepted value")
+        keepScreenshot(app, name: "settings-surface-settings-global-edit")
         dismissTopSheet(app) // Setup Settings
         dismissTopSheet(app) // Settings
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
@@ -1623,54 +1591,48 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     func testSettingsOutsideChangesAndBuiltinExtensionPersist() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let schema = try SettingsSchemaInventory.fromEnvironment()
         let app = launchApp()
         defer { app.terminate() }
         open(fixture.invitationLink())
         completeFirstRunSetup(app, inWorkspace: fixture.workspace)
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
-        let macSettingsGear = app.navigationBars.buttons["Settings"]
-        func openMacSettings() {
-            XCTAssertTrue(macSettingsGear.waitForExistence(timeout: 30), app.debugDescription)
-            macSettingsGear.tap()
+        let globalSettingsGear = app.navigationBars.buttons["Settings"]
+        func openGlobalSettings() {
+            XCTAssertTrue(globalSettingsGear.waitForExistence(timeout: 30), app.debugDescription)
+            globalSettingsGear.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
-        openMacSettings()
+        openGlobalSettings()
         openSettingsSection(app, "setup", linkLabel: "Setup")
-        let macEdit = toggleSetting(app, key: "setup.installTelemetry", expectingBadge: schema.label(for: "mac"))
+        let globalEdit = toggleSetting(app, key: "setup.installTelemetry")
         dismissTopSheet(app) // Setup
         dismissTopSheet(app) // Settings
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
         // An outside edit replaces the value Tron wrote (settings-model.md 5.6): the
         // reopened row says so and Apply again writes Tron's value back.
-        try editMacSettingsOutsideTron(fixture.agentDirectory) { document in
-            document["enableInstallTelemetry"] = macEdit.before == "1"
+        try editGlobalSettingsOutsideTron(fixture.agentDirectory) { document in
+            document["enableInstallTelemetry"] = globalEdit.before == "1"
         }
-        openMacSettings()
+        openGlobalSettings()
         openSettingsSection(app, "setup", linkLabel: "Setup")
-        let outsideSummary = settingRow(app, key: "setup.installTelemetry")
-        // The badge's accessible label carries its detail ("Changed outside Tron, Mac: On → Off").
-        let outsideSource = inspectSource(app, row: outsideSummary)
-        XCTAssertTrue(outsideSource.contains { $0.hasPrefix("Changed outside Tron") },
-                      "Outside-change evidence must remain available in Value & Source: \(outsideSource)")
         // An actionable outside-change badge promotes this row to a detail link;
         // its toggle and Apply again belong to that child, not the summary row.
         let outsideEditor = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-open")
         XCTAssertNotNil(outsideEditor, "the outside change must open its value and actions")
         outsideEditor?.tap()
         let outsideRow = topSwitchRow(app, key: "setup.installTelemetry")
-        XCTAssertEqual(switchValue(outsideRow), macEdit.before, "the live value must follow the edited store")
+        XCTAssertEqual(switchValue(outsideRow), globalEdit.before, "the live value must follow the edited store")
         let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain", timeout: 120)
         XCTAssertNotNil(applyAgain, "the outside change of Tron's value must offer Apply again: \(app.debugDescription)")
         keepScreenshot(app, name: "settings-surface-outside-change-apply-again")
         applyAgain?.tap()
         XCTAssertTrue(waitUntil(timeout: 60) {
-            self.switchValue(outsideRow) == macEdit.after
+            self.switchValue(outsideRow) == globalEdit.after
         }, "Apply again must restore Tron's accepted value")
-        XCTAssertFalse(inspectSource(app, row: outsideRow).contains { $0.hasPrefix("Changed outside Tron") },
-                       "Apply again must clear the canonical outside-change evidence")
+        XCTAssertTrue(waitForNonExistence(app.buttons[settingRowToken("setup.installTelemetry") + "-applyAgain"], timeout: 30),
+                      "Apply again must clear the canonical outside-change evidence")
 
         // Clearing the outside marker removes its detail link and can retire
         // that child. Return to the actual Settings root, not a fixed sheet count.
@@ -1680,7 +1642,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         XCTAssertTrue(app.buttons["settings-done"].isHittable, "Apply again must return to Settings")
         // A hand-built screen on the same change path: Extensions' Built-in switch
-        // writes `sources.extensions` at the Mac layer (no legacy document read).
+        // writes `sources.extensions` at Global.
         let extensionsLink = app.buttons["settings-link-Extensions"]
         for _ in 0..<40 where !extensionsLink.isHittable { app.swipeDown() }
         extensionsLink.tap()
@@ -1691,18 +1653,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         toolSearch.tap()
         XCTAssertTrue(waitUntil(timeout: 30) { (toolSearch.value as? String) != toolSearchBefore }, "the Built-in switch did not change")
         XCTAssertTrue(waitUntil(timeout: 30) {
-            let entries = (try? self.macSettingsDocument(fixture.agentDirectory))?["extensions"] as? [String] ?? []
+            let entries = (try? self.globalSettingsDocument(fixture.agentDirectory))?["extensions"] as? [String] ?? []
             return entries.contains("-builtin:tool-search") == (toolSearchBefore == "1")
-        }, "turning Tool search off must write -builtin:tool-search to the Mac settings.json")
+        }, "turning Tool search off must write -builtin:tool-search to the Global settings.json")
         keepScreenshot(app, name: "settings-surface-builtin-extension-switch")
         // Extensions is a progressive child of Settings: close it, then Settings.
         for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists || app.switches["Tool search"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
         // MCP servers keep their own owner (settings-model.md 5.6a): a server added to
-        // the Mac mcp.json outside Tron while the MCP screen is open reaches it with no
+        // the Global mcp.json outside Tron while the MCP screen is open reaches it with no
         // reload (`mcp.changed` from the Gateway's file watch), and Changes records it by name.
-        openMacSettings()
+        openGlobalSettings()
         let mcpLink = app.buttons["settings-link-MCP Servers"]
         for _ in 0..<20 where !mcpLink.isHittable { app.swipeUp() }
         for _ in 0..<40 where !mcpLink.isHittable { app.swipeDown() }
@@ -1747,7 +1709,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             try "---\nname: \(name)\ndescription: Fixture skill.\n---\nFixture.\n"
                 .write(to: skill.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
         }
-        try editMacSettingsOutsideTron(directory) { document in
+        try editGlobalSettingsOutsideTron(directory) { document in
             document["packages"] = ["./future-node-package", "./current-node-package"]
         }
         let app = launchApp()
@@ -1780,15 +1742,15 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
     // MARK: - Settings surface helpers
 
-    /// A hand edit of the fixture's Mac `settings.json`, as an editor would make
+    /// A hand edit of the fixture's Global `settings.json`, as an editor would make
     /// it: write a sibling file, then rename it over the store.
-    private func macSettingsDocument(_ agentDirectory: String?) throws -> [String: Any] {
+    private func globalSettingsDocument(_ agentDirectory: String?) throws -> [String: Any] {
         let directory = try XCTUnwrap(agentDirectory)
         let data = try Data(contentsOf: URL(fileURLWithPath: directory).appendingPathComponent("settings.json"))
         return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
     }
 
-    private func editMacSettingsOutsideTron(_ agentDirectory: String?, _ edit: (inout [String: Any]) -> Void) throws {
+    private func editGlobalSettingsOutsideTron(_ agentDirectory: String?, _ edit: (inout [String: Any]) -> Void) throws {
         let directory = try XCTUnwrap(agentDirectory, "run through scripts/ios-gateway-e2e-test run-ui to name the fixture's agent directory")
         let store = URL(fileURLWithPath: directory).appendingPathComponent("settings.json")
         var document = (try JSONSerialization.jsonObject(with: Data(contentsOf: store)) as? [String: Any]) ?? [:]
@@ -1798,7 +1760,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         _ = try FileManager.default.replaceItemAt(store, withItemAt: staged)
     }
 
-    /// A hand edit of the fixture's Mac `mcp.json` adding one HTTP server, by rename-replace.
+    /// A hand edit of the fixture's Global `mcp.json` adding one HTTP server, by rename-replace.
     /// The loopback port refuses at once, so listing it opens no external connection.
     private func addMcpServerOutsideTron(_ agentDirectory: String?, name: String) throws {
         let directory = try XCTUnwrap(agentDirectory, "run through scripts/ios-gateway-e2e-test run-ui to name the fixture's agent directory")
@@ -1823,38 +1785,33 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         var optionalAbsent = 0
         var notServed = 0
         var notServedAbsent = 0
-        var sourceInspected = 0
+        var provenanceChecked = 0
         var valueChecked = 0
         var customOwnerChecked = 0
     }
 
-    /// Every generic served key has a value and inspectable source its layers allow;
+    /// Every generic served key has a value and the shared row's presence-based
+    /// provenance: an Overridden pill exactly beside its revert (never at Global);
     /// native Default Tools ownership is accounted separately. An unserved key
     /// has no generic row.
-    /// Floor and enrolled-device instances are served by the Mac target alone
-    /// (`settings-resolver.ts` `instances`). Mac project/device instances exist
+    /// Floor and enrolled-device instances are served by the Global target alone
+    /// (`settings-resolver.ts` `instances`). Global project/device instances exist
     /// only when a trust decision/enrollment exists; this fixture enrolls no SSH key.
     @MainActor
     private func assertSettingsSurface(_ app: XCUIApplication, name: String, layers: Set<String>,
                                        schema: SettingsSchemaInventory,
                                        allowsInheritedRows: Bool = false,
-                                       inlineSections: Set<String> = [],
                                        sectionDestinations: [String: String] = [:]) -> SurfaceCoverage {
         var coverage = SurfaceCoverage()
-        let isMacTarget = layers == ["mac"]
-        let allLayerLabels = Set(schema.layerLabels.values)
-        // Direct Configuration can cover an editor with the same section IDs.
-        // Every query must stay inside the current inspection surface.
-        let surface: XCUIElement = inlineSections.isEmpty ? app : app.descendants(matching: .any)["settings-configuration"]
+        let isGlobalTarget = layers == ["global"]
+        let surface: XCUIElement = app
         var groups: [String] = []
         for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
         // Some schema sections live inside a named destination, not a generic
         // section link. Follow the surface's explicit route (never a fallback),
         // then check the same schema rows and sources inside that section alone.
         for group in groups {
-            let inline = surface.descendants(matching: .any)["settings-section-\(group)-detail"]
-            let detail = inlineSections.contains(group) ? (inline.exists ? inline : nil)
-                : openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group])
+            let detail = openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group])
             // One accessibility snapshot per destination preserves the same row,
             // badge and value checks without a remote AX round-trip per descendant.
             let snapshot: XCUIElementSnapshot
@@ -1867,7 +1824,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             for key in schema.keys where key.group == group {
                 var keyElements = elements
                 var instances: XCUIElement?
-                // Large qualified inventories (Mac permission floors) have their
+                // Large qualified inventories (Global permission floors) have their
                 // own progressive sheet. A link is not a value/source row: enter
                 // it and apply the same assertions to its concrete instances.
                 let instancesLinkID = "settings-instances-\(key.id)-open"
@@ -1893,11 +1850,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 let token = settingRowToken(key.id)
                 let rows = keyElements.filter {
                     $0.elementType == .other && ($0.identifier == token || $0.identifier.hasPrefix(token + "_"))
-                        && !$0.identifier.hasSuffix("-source") && !$0.identifier.hasSuffix("-reset")
-                        && !$0.identifier.hasSuffix("-edit-layer") && !$0.identifier.hasSuffix("-error")
+                        && !$0.identifier.hasSuffix("-project") && !$0.identifier.hasSuffix("-reset")
+                        && !$0.identifier.hasSuffix("-applyAgain") && !$0.identifier.hasSuffix("-error")
                 }
-                let macInstancesOnly = key.qualifier == "key" || key.qualifier == "device"
-                let served = !key.layers.isDisjoint(with: layers) && (!macInstancesOnly || isMacTarget)
+                let globalInstancesOnly = key.qualifier == "key" || key.qualifier == "device"
+                let served = !key.layers.isDisjoint(with: layers) && (!globalInstancesOnly || isGlobalTarget)
                 guard served else {
                     coverage.notServed += 1
                     if !allowsInheritedRows {
@@ -1908,7 +1865,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 }
                 coverage.served += 1
                 if key.id == "tools.codemode.mode" && (name == "settings" || name == "project") {
-                    // Default Tools owns this key at Mac/Project scope (#1288).
+                    // Default Tools owns this key at Global/Project scope (#1288).
                     // Do not count its native control as a generic sourced row.
                     XCTAssertEqual(rows.count, 0, "There must not be a duplicate Code mode editor")
                     let controls = elements.filter { $0.elementType == .button && $0.label == "Other tools with codemode" }
@@ -1926,7 +1883,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                     continue
                 }
                 guard rows.count > 0 else {
-                    XCTAssertTrue((key.qualifier == "project" || key.qualifier == "device") && isMacTarget,
+                    XCTAssertTrue((key.qualifier == "project" || key.qualifier == "device") && isGlobalTarget,
                                   "\(name) serves \(key.id) but shows no row")
                     coverage.optionalAbsent += 1
                     continue
@@ -1935,26 +1892,21 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 let row = rows[0]
                 let children = descendants(of: row)
                 let rowElement = (instances ?? detail ?? surface).descendants(matching: .any).matching(identifier: row.identifier).firstMatch
-                let labels = inspectSource(app, row: rowElement)
-                let allowedBadges = Set(key.layers.union(["builtin"]).compactMap { schema.layerLabels[$0] })
-                // A launch snapshot names its canonical captured origin, not a
-                // second Session layer. Match the resolver's current source label;
-                // its detailed evidence separately retains the captured value.
-                let launchOrigins = Set(allowedBadges.map { "\($0) at launch" }).union(["Session override", "Home at launch"])
-                let provenance = Set(labels.filter {
-                    allowedBadges.contains($0) || (key.layers.contains("chat") && launchOrigins.contains($0))
-                })
-                XCTAssertEqual(provenance.count, 1,
-                               "\(name) row \(key.id) must retain one precise effective source in Value & Source: \(labels)")
-                coverage.sourceInspected += 1
+                let provenance = rowProvenance(rowElement)
+                let reverts = provenance.contains("Revert") || provenance.contains("Reset")
+                XCTAssertEqual(provenance.contains("Overridden"), reverts && !isGlobalTarget,
+                               "\(name) row \(key.id) marks an override exactly beside its revert: \(provenance)")
+                XCTAssertFalse(reverts && provenance.contains("Set by Project settings"),
+                               "\(name) row \(key.id) cannot revert a repository value: \(provenance)")
+                coverage.provenanceChecked += 1
                 // A switch's value is part of its button's label, so the value is read from every descendant.
                 let described = children.map(\.label)
                     + children.filter { $0.elementType == .switch }.compactMap { $0.value as? String }
-                XCTAssertTrue(described.contains { !$0.isEmpty && $0 != key.label && !allLayerLabels.contains($0) },
+                XCTAssertTrue(described.contains { !$0.isEmpty && $0 != key.label && !provenanceWords.contains($0) },
                               "\(name) row \(key.id) shows no value: \(described)")
                 coverage.valueChecked += 1
             }
-            if let detail, !inlineSections.contains(group) {
+            if let detail {
                 if sectionDestinations[group] != nil {
                     keepScreenshot(app, name: "settings-surface-\(name)-\(group)")
                 }
@@ -2008,7 +1960,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         XCTAssertTrue(details.firstMatch.waitForExistence(timeout: 30),
                       "the \(group) sub-sheet did not open: \(app.debugDescription)")
-        // Configuration can cover an editor of the same section.
         // Its last matching container is the exact newly presented owner.
         let detail = details.element(boundBy: max(details.count - 1, 0))
         return detail
@@ -2124,17 +2075,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         row.switches.firstMatch.value.map { String(describing: $0) }
     }
 
-    /// The row's sources (its accessibility value, one per " · ") and its
-    /// messages, such as a refusal under the row.
-    private func badgeLabels(_ row: XCUIElement) -> [String] {
-        let sources = (row.value as? String).map { $0.components(separatedBy: " · ") } ?? []
-        return sources + row.staticTexts.allElementsBoundByIndex.map { $0.label }
-    }
-
     /// Toggles one row's switch through the shared control and waits for the
-    /// Gateway's accepted state: the value flips and the badge names the layer.
+    /// Gateway's accepted state: the value flips and the row offers its revert.
     @MainActor
-    private func toggleSetting(_ app: XCUIApplication, key: String, expectingBadge badge: String) -> (before: String?, after: String?) {
+    private func toggleSetting(_ app: XCUIApplication, key: String) -> (before: String?, after: String?) {
         XCTAssertTrue(settingRow(app, key: key).waitForExistence(timeout: 15), "\(key) has no row: \(app.debugDescription)")
         let row = topSwitchRow(app, key: key)
         let toggle = row.switches.firstMatch
@@ -2143,41 +2087,24 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout: 60) { self.switchValue(row) != before },
                       "The Gateway did not accept the \(key) value")
         let after = switchValue(row)
-        XCTAssertTrue(waitForSource(app, row: row, badge, timeout: 30), "The accepted value must belong to \(badge)")
-        XCTAssertEqual(switchValue(row), after, "Inspection must not mutate the accepted value")
+        XCTAssertTrue(waitForOverride(row, timeout: 30), "The accepted value must be this scope's override: \(rowProvenance(row))")
+        XCTAssertEqual(switchValue(row), after, "Reading provenance must not mutate the accepted value")
         return (before, after)
     }
 
+    /// A value set at the row's own scope: the shared row offers its revert.
     @MainActor
-    private func waitForSource(_ app: XCUIApplication, row: XCUIElement, _ source: String, timeout: TimeInterval) -> Bool {
-        guard row.waitForExistence(timeout: timeout) else { return false }
-        return inspectSource(app, row: row).contains(source)
+    private func waitForOverride(_ row: XCUIElement, timeout: TimeInterval) -> Bool {
+        row.waitForExistence(timeout: timeout)
+            && row.buttons.matching(identifier: row.identifier + "-reset").firstMatch.waitForExistence(timeout: timeout)
     }
 
-    /// Inspect the effective value and application evidence, never the ordered
-    /// layer inventory (which intentionally names every possible layer).
+    /// The shared row's presence-based provenance: its Overridden pill, revert,
+    /// Project link or Apply again, read from one accessibility snapshot.
     @MainActor
-    private func inspectSource(_ app: XCUIApplication, row: XCUIElement) -> [String] {
-        let links = app.buttons.matching(identifier: row.identifier + "-source")
-        XCTAssertTrue(links.firstMatch.waitForExistence(timeout: 15), "The body must expose its provenance destination")
-        // A read-only inspector may cover an editable row with this same key.
-        // Scope the action to the newest presentation, never its covered sibling.
-        let link = links.element(boundBy: max(links.count - 1, 0))
-        revealBelowNavigationBar(app, link)
-        link.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Value & Source"].waitForExistence(timeout: 15))
-        var labels: [String] = []
-        for id in ["settings-provenance-effective", "settings-provenance-evidence"] {
-            let group = app.otherElements.matching(identifier: id).firstMatch
-            if group.exists, let snapshot = try? group.snapshot() {
-                for node in [snapshot] + descendants(of: snapshot) {
-                    labels += node.label.components(separatedBy: ", ")
-                    if let value = node.value as? String { labels.append(value) }
-                }
-            }
-        }
-        dismissTopSheet(app)
-        return labels.filter { !$0.isEmpty }
+    private func rowProvenance(_ row: XCUIElement) -> [String] {
+        guard row.exists, let snapshot = try? row.snapshot() else { return [] }
+        return ([snapshot] + descendants(of: snapshot)).map(\.label).filter(provenanceWords.contains)
     }
 
     @MainActor
@@ -2206,7 +2133,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let surfaces = coverage.mapValues { surface -> [String: Int] in
             ["served": surface.served, "rowsPresent": surface.rowsPresent, "optionalAbsent": surface.optionalAbsent,
              "notServed": surface.notServed, "notServedAbsent": surface.notServedAbsent,
-             "sourceInspected": surface.sourceInspected, "valueChecked": surface.valueChecked,
+             "provenanceChecked": surface.provenanceChecked, "valueChecked": surface.valueChecked,
              "customOwnerChecked": surface.customOwnerChecked]
         }
         let report: [String: Any] = ["schema": "tron.ios-settings-surface-coverage.v1", "schemaKeys": schema.keys.count,
@@ -2489,7 +2416,7 @@ struct RealGatewayUIFixture {
     let port: Int
     let code: String
     let workspace: String
-    /// The fixture Gateway's agent directory on this Mac (its Mac settings store).
+    /// The fixture Gateway's agent directory on this Mac (its Global settings store).
     var agentDirectory: String? = nil
 
     static func fromEnvironment() throws -> RealGatewayUIFixture {
@@ -2513,6 +2440,9 @@ struct RealGatewayUIFixture {
 /// built `settings-schema.ts` (`TRON_E2E_SETTINGS_INVENTORY`): one row per schema
 /// key with the layers it allows, its label and its qualifier, plus the Gateway's
 /// layer labels. Expectations come from it, never from a Swift copy of the keys.
+/// The shared row's provenance words; never a value.
+private let provenanceWords: Set<String> = ["Overridden", "Revert", "Reset", "Set by Project settings", "Apply again"]
+
 private struct SettingsSchemaInventory {
     struct Key {
         let id: String
@@ -2522,17 +2452,13 @@ private struct SettingsSchemaInventory {
         let qualifier: String?
     }
 
-    let layerLabels: [String: String]
     let keys: [Key]
-
-    func label(for layer: String) -> String { layerLabels[layer] ?? layer }
 
     static func fromEnvironment() throws -> SettingsSchemaInventory {
         guard let text = ProcessInfo.processInfo.environment["TRON_E2E_SETTINGS_INVENTORY"] else {
             throw XCTSkip("Run through scripts/ios-gateway-e2e-test run-ui to provide the fixture's settings schema inventory.")
         }
         guard let document = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
-              let labels = document["layerLabels"] as? [String: String],
               let rows = document["keys"] as? [[String: Any]], !rows.isEmpty else {
             throw SettingsInventoryError.malformed
         }
@@ -2541,7 +2467,7 @@ private struct SettingsSchemaInventory {
                   let layers = row["layers"] as? [String] else { throw SettingsInventoryError.malformed }
             return Key(id: id, label: label, group: group, layers: Set(layers), qualifier: row["qualifier"] as? String)
         }
-        return SettingsSchemaInventory(layerLabels: labels, keys: keys)
+        return SettingsSchemaInventory(keys: keys)
     }
 }
 

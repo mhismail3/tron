@@ -260,7 +260,7 @@ function describeHomeStatus(status: HomeStatus): string {
   const designation = !status.available
     ? `Home unavailable: ${status.reason ?? "the stored record could not be used"}`
     : !status.enabled ? "Home is not designated."
-      : `Home is designated: session ${status.sessionId}, generation ${status.generation}${status.model ? `, model ${status.model.provider}/${status.model.id}` : ""}, ${status.live ? "runtime live" : "runtime not loaded"}${status.sessionPresent ? "" : ", session missing"}.`;
+      : `Home is designated: session ${status.sessionId}, generation ${status.generation}, ${status.live ? "runtime live" : "runtime not loaded"}${status.sessionPresent ? "" : ", session missing"}.`;
   const gaps = status.readiness.gaps.length ? status.readiness.gaps.join(", ") : "none";
   const recovery = status.recovery.reason ? `${status.recovery.action} (${status.recovery.reason})` : status.recovery.action;
   return `${designation} Phase: ${status.phase}. Readiness: ${status.readiness.ready ? "ready" : `not ready; ${gaps}`}. ${describeHomeMemory(status.memory)} ${describeHomeContext(status.activation)} Recovery: ${recovery}.`;
@@ -319,7 +319,7 @@ export async function configureHomeMemory(
   // Memory runs on the background model queue, a Home profile key changed through the one settings path.
   await client.request("settings.change", {
     commandId: randomUUID(), target: { kind: "home" },
-    changes: [{ key: "model.queue[role=background]", layer: "profile", op: "set", value: models }],
+    changes: [{ key: "model.queue[role=background]", layer: "session", op: "set", value: models }],
   });
   const status = await client.request("home.status", {}) as unknown as HomeStatus;
   return describeHomeMemory(status.memory);

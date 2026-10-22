@@ -75,9 +75,9 @@ describe("gateway/protocol wire contract locks", () => {
     await call("session.history.list", { sessionId, runtimeGeneration: (opened.result as { session: { runtimeGeneration: string } }).session.runtimeGeneration });
     await call("command.status", { method: "session.rename", commandId: "lock-command-0003" });
     await call("model.list", { sessionId });
-    await call("settings.resolve", { target: { kind: "mac" }, keys: ["run.retry.maxRetries"] });
-    await call("settings.change", { commandId: gateway.commandId(), target: { kind: "mac" }, reason: "Wire contract",
-      changes: [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 5 }] });
+    await call("settings.resolve", { target: { kind: "global" }, keys: ["run.retry.maxRetries"] });
+    await call("settings.change", { commandId: gateway.commandId(), target: { kind: "global" }, reason: "Wire contract",
+      changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 5 }] });
     await call("settings.history", { limit: 5 });
     await call("session.archive.set", { commandId: gateway.commandId(), sessionId, archived: true });
     await call("session.prompt", { commandId: gateway.commandId(), sessionId: "missing-session", text: "refused" });

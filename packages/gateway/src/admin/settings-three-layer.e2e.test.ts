@@ -92,7 +92,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await f.project({ retry: { maxRetries: 2 } });
     let refusal: { code?: string; message?: string } | undefined;
     try { await f.retryChange(slot, "set", 1); } catch (error) { refusal = error as typeof refusal; }
-    const stored = slot.settingsChatLayer().settings;
+    const stored = slot.settingsSessionLayer().settings;
     evidence.push({ case: "masked mutation", refusal, stored });
     expect(refusal?.code).toBe("conflict");
     expect(stored).toMatchObject({ retry: { maxRetries: 0 } });
@@ -112,7 +112,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     const observed = { projectValue, activeOverride, inherited, requests };
     evidence.push({ case: "inactive override and revert", observed });
     expect(observed).toEqual({ projectValue: 2, activeOverride: 0, inherited: 1, requests: 2 });
-    expect(slot.settingsChatLayer().settings).not.toHaveProperty("retry.maxRetries");
+    expect(slot.settingsSessionLayer().settings).not.toHaveProperty("retry.maxRetries");
   });
 
   it("Revert already removes only its own override and follows the Global provider policy", async () => {

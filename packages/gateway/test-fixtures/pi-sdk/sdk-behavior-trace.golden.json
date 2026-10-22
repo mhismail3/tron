@@ -404,7 +404,7 @@
         "fixed": {
           "model.ref[role=chat]": {
             "at": "<timestamp>",
-            "from": "chat",
+            "from": "session",
             "ref": "<id>",
             "value": {
               "id": "<id>",
@@ -709,22 +709,15 @@
                       "layer": {
                         "anyOf": [
                           {
-                            "const": "chat",
+                            "const": "session",
                             "type": "string"
                           },
                           {
-                            "const": "profile",
-                            "type": "string"
-                          },
-                          {
-                            "const": "project",
-                            "type": "string"
-                          },
-                          {
-                            "const": "mac",
+                            "const": "global",
                             "type": "string"
                           }
-                        ]
+                        ],
+                        "description": "Session/Home override or Global. Project is read-only."
                       },
                       "op": {
                         "anyOf": [

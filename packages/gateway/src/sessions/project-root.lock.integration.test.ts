@@ -91,8 +91,8 @@ describe("gateway/session-catalog project-root lock", () => {
     const undecided = await phone.request("trust.inspect", { cwd: nested });
     const refused = await phone.request("session.create", { commandId: gateway.commandId(), cwd: nested });
     const decided = await phone.request("settings.change", {
-      commandId: gateway.commandId(), target: { kind: "mac" }, reason: "Trust the lock project",
-      changes: [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: true, qualifiers: { project: nested } }],
+      commandId: gateway.commandId(), target: { kind: "global" }, reason: "Trust the lock project",
+      changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project: nested } }],
     });
     const rootInspection = await phone.request("trust.inspect", { cwd: project });
     const nestedInspection = await phone.request("trust.inspect", { cwd: nested });
@@ -107,8 +107,8 @@ describe("gateway/session-catalog project-root lock", () => {
     await gateway.settled(sessionId);
     // Revoking the root's decision reloads the chat through its projectDir without the Project layer.
     const revoked = await phone.request("settings.change", {
-      commandId: gateway.commandId(), target: { kind: "mac" }, reason: "Stop trusting the lock project",
-      changes: [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: false, qualifiers: { project: nested } }],
+      commandId: gateway.commandId(), target: { kind: "global" }, reason: "Stop trusting the lock project",
+      changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: false, qualifiers: { project: nested } }],
     });
     expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId, text: "and after revoking trust?" })).ok).toBe(true);
     await gateway.settled(sessionId);

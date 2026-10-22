@@ -904,7 +904,7 @@ export interface CompactionConfiguration {
   keepRecentTokens: number;
   thinkingLevel: "inherit" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   instructions: string;
-  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "chat" | "global" | "project" | "default">;
+  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "session" | "global" | "project">;
 }
 export interface ResolvedCompactionConfiguration extends CompactionConfiguration {
   model?: ModelRef;
@@ -1231,7 +1231,6 @@ export interface HomeStatus {
   bindingRevision?: number;
   generation?: number;
   routeGeneration?: number;
-  model?: ModelRef;
   chapter?: {
     count: number;
     currentBytes?: number;

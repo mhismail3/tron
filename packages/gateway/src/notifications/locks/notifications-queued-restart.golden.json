@@ -369,10 +369,10 @@
                 "reserveTokens": 2048,
                 "source": {
                   "enabled": "global",
-                  "instructions": "default",
+                  "instructions": "global",
                   "keepRecentTokens": "global",
                   "reserveTokens": "global",
-                  "thinkingLevel": "default"
+                  "thinkingLevel": "global"
                 },
                 "thinkingLevel": "inherit"
               }

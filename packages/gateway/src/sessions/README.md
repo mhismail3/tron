@@ -112,7 +112,7 @@ metadata, never JSONL, and never implies parallel execution.
 ## Entry points
 
 - Admission and lanes: `RuntimeSlot` (prompt, steer, follow-up, Stop, rename,
-  Chat-layer setters); runtime acquisition and eviction: `RuntimeRegistry`.
+  Session-scope setters); runtime acquisition and eviction: `RuntimeRegistry`.
 - Owned dispatch for Automations and Home tasks: `OwnedSessionDispatch` (shared
   leases, recovery evidence, terminal acknowledgement, opt-in 24-hour deadline).
 - Notifications use call-time kernel hooks; the slot owns presence, waiting episodes and failure diagnostics.

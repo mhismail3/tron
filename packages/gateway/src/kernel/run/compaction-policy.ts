@@ -16,19 +16,19 @@ export class CompactionOperationPolicy {
   private warning: string | undefined;
   /** True only for a Home session. Never read from global settings. */
   private readonly disabled: boolean;
-  private readonly chat: (() => Record<string, unknown>) | undefined;
+  private readonly explicitSettings: (() => Record<string, unknown>) | undefined;
 
   constructor(
     private readonly session: AgentSession,
     private readonly agentDir: string,
-    private readonly resolvePolicy: (settings: SettingsManager, chat: Record<string, unknown>, model?: string) => CompactionConfiguration,
+    private readonly resolvePolicy: (settings: SettingsManager, session: Record<string, unknown>, model?: string) => CompactionConfiguration,
     /** Tron Home keeps its own history: SDK compaction is disabled for this
      * session only, through the same per-session overlay `applyBudgets`
      * reapplies from canonical settings at every idle admission. */
-    options: { disabled?: boolean; chat?: () => Record<string, unknown> } = {},
+    options: { disabled?: boolean; session?: () => Record<string, unknown> } = {},
   ) {
     this.disabled = options.disabled === true;
-    this.chat = options.chat;
+    this.explicitSettings = options.session;
     this.next = this.resolvePolicy(session.settingsManager, this.guardedChatSettings(), this.modelKey());
     this.budgetSources = { enabled: this.next.source.enabled, reserveTokens: this.next.source.reserveTokens, keepRecentTokens: this.next.source.keepRecentTokens };
     this.refresh();
@@ -51,15 +51,15 @@ export class CompactionOperationPolicy {
     }
   }
 
-  /** This chat's explicit Chat layer (`tron.settings.v1`), supplied by its
-   * RuntimeSlot: branch-local like every Chat value, so fork and resume follow
+  /** This chat's explicit Session scope (`tron.settings.v1`), supplied by its
+   * RuntimeSlot: branch-local like every Session value, so fork and resume follow
    * Pi's canonical branch. */
   private chatSettings(): Record<string, unknown> {
-    return this.chat?.() ?? {};
+    return this.explicitSettings?.() ?? {};
   }
 
   /** A damaged Chat entry never fails construction or a refresh: the Project and
-   * Mac policy applies and the published warning says so until a valid read. */
+   * Global policy applies and the published warning says so until a valid read. */
   private guardedChatSettings(): Record<string, unknown> {
     try { return this.chatSettings(); } catch {
       this.warning = "Canonical Chat compaction settings are invalid. Project and Mac compaction settings apply.";

@@ -18,7 +18,7 @@ import { performance } from "node:perf_hooks";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { afterAll, describe, expect, it } from "vitest";
-import { homeMemoryChange } from "../../test-support/chat-settings-change.js";
+import { homeMemoryChange } from "../../test-support/session-settings-change.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";

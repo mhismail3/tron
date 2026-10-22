@@ -621,7 +621,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
     item.faux.setResponses([item.response("blocked image response"), item.response("visible image response")]);
     for (const blocked of [true, false]) {
-      // The Chat layer, as Manage Session sets it: Tron applies it at each request.
+      // The Session scope, as Manage Session sets it: Tron applies it at each request.
       await item.slot.setChatRunSetting("context.images.block", blocked, undefined, undefined, true);
       const text = `C21 image input blocked=${blocked}`;
       const before = item.requests.length;

@@ -64,9 +64,9 @@ export interface QueueAvailability { role: ModelQueueRole; models: QueueModelSta
 
 export type ModelQueueRecord =
   | { event: "model-queue.skip"; role: ModelQueueRole; model: string; reason: string }
-  | { event: "model-queue.projection"; role: "subagent"; scope: "mac" | "task-launch"; sessionId?: string;
+  | { event: "model-queue.projection"; role: "subagent"; scope: "global" | "task-launch"; sessionId?: string;
       status: "published"; models: readonly string[] }
-  | { event: "model-queue.projection"; role: "subagent"; scope: "mac" | "task-launch"; sessionId?: string;
+  | { event: "model-queue.projection"; role: "subagent"; scope: "global" | "task-launch"; sessionId?: string;
       status: "failed"; reason: string };
 
 export interface ModelQueueOptions {
@@ -194,14 +194,14 @@ export class ModelQueueOwner {
       const document = JSON.stringify({ version: 1, queues: { subagent: availability.models.map(entry => entry.model) }, unavailable });
       if (Buffer.byteLength(document) > PROJECTION_BYTES) throw new GatewayError("conflict", "Model queue projection exceeds its byte limit");
       await writeProjectionFile(path, document);
-      this.options.log?.({ event: "model-queue.projection", role: "subagent", scope: task ? "task-launch" : "mac",
+      this.options.log?.({ event: "model-queue.projection", role: "subagent", scope: task ? "task-launch" : "global",
         ...(task ? { sessionId: task.sessionId } : {}), status: "published", models: availability.models.map(entry => entry.model) });
     });
     this.publishing = run.catch(() => {});
     try { await run; }
     catch (error) {
       const code = error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
-      this.options.log?.({ event: "model-queue.projection", role: "subagent", scope: task ? "task-launch" : "mac",
+      this.options.log?.({ event: "model-queue.projection", role: "subagent", scope: task ? "task-launch" : "global",
         ...(task ? { sessionId: task.sessionId } : {}), status: "failed", reason: code });
       throw error;
     }

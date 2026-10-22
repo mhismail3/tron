@@ -19,9 +19,9 @@
           "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
         },
         "target": {
-          "kind": "mac"
+          "kind": "global"
         },
-        "layer": "mac",
+        "layer": "global",
         "key": "run.retry.maxRetries",
         "op": "set",
         "before": 6,
@@ -52,9 +52,9 @@
           "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
         },
         "target": {
-          "kind": "mac"
+          "kind": "global"
         },
-        "layer": "mac",
+        "layer": "global",
         "key": "context.images.block",
         "op": "set",
         "before": true,
@@ -80,9 +80,9 @@
           "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
         },
         "target": {
-          "kind": "mac"
+          "kind": "global"
         },
-        "layer": "mac",
+        "layer": "global",
         "key": "run.retry.maxRetries",
         "op": "set",
         "before": 6,
@@ -107,9 +107,9 @@
           "id": "device:corpus-phone"
         },
         "target": {
-          "kind": "mac"
+          "kind": "global"
         },
-        "layer": "mac",
+        "layer": "global",
         "key": "permissions.floor",
         "qualifiers": {
           "key": "context.images.block",
@@ -136,9 +136,9 @@
           "id": "device:corpus-phone"
         },
         "target": {
-          "kind": "mac"
+          "kind": "global"
         },
-        "layer": "mac",
+        "layer": "global",
         "key": "permissions.floor",
         "qualifiers": {
           "key": "run.retry.maxRetries"
@@ -164,9 +164,9 @@
           "id": "device:corpus-phone"
         },
         "target": {
-          "kind": "mac"
+          "kind": "global"
         },
-        "layer": "mac",
+        "layer": "global",
         "key": "context.images.block",
         "op": "set",
         "after": true,
@@ -189,9 +189,9 @@
           "id": "device:corpus-phone"
         },
         "target": {
-          "kind": "mac"
+          "kind": "global"
         },
-        "layer": "mac",
+        "layer": "global",
         "key": "run.retry.maxRetries",
         "op": "set",
         "after": 6,
@@ -209,11 +209,10 @@
     ],
     "resolved": {
       "target": {
-        "kind": "mac"
+        "kind": "global"
       },
       "layers": [
-        "mac",
-        "builtin"
+        "global"
       ],
       "keys": [
         {
@@ -222,26 +221,15 @@
           "subgroup": "Images",
           "value": true,
           "display": "Blocked",
-          "layer": "mac",
+          "layer": "global",
           "applied": true,
-          "badges": [
-            {
-              "kind": "layer",
-              "label": "Mac"
-            }
-          ],
-          "origin": "inherited",
+          "badges": [],
+          "overridden": true,
           "layers": [
             {
-              "layer": "mac",
+              "layer": "global",
               "value": true,
               "display": "Blocked",
-              "applied": true
-            },
-            {
-              "layer": "builtin",
-              "value": false,
-              "display": "Allowed",
               "applied": true
             }
           ]
@@ -256,28 +244,18 @@
           "subgroup": "Floors",
           "value": "approve",
           "display": "Approve",
-          "layer": "builtin",
+          "layer": "global",
           "applied": true,
           "badges": [
-            {
-              "kind": "layer",
-              "label": "Built-in"
-            },
             {
               "kind": "scope",
               "label": "Block images: loosening"
             }
           ],
-          "origin": "inherited",
+          "overridden": false,
           "layers": [
             {
-              "layer": "mac",
-              "applied": true
-            },
-            {
-              "layer": "builtin",
-              "value": "approve",
-              "display": "Approve",
+              "layer": "global",
               "applied": true
             }
           ]
@@ -292,30 +270,20 @@
           "subgroup": "Floors",
           "value": "notify",
           "display": "Notify",
-          "layer": "mac",
+          "layer": "global",
           "applied": true,
           "badges": [
-            {
-              "kind": "layer",
-              "label": "Mac"
-            },
             {
               "kind": "scope",
               "label": "Block images: tightening"
             }
           ],
-          "origin": "inherited",
+          "overridden": true,
           "layers": [
             {
-              "layer": "mac",
+              "layer": "global",
               "value": "notify",
               "display": "Notify",
-              "applied": true
-            },
-            {
-              "layer": "builtin",
-              "value": "quiet",
-              "display": "Quiet",
               "applied": true
             }
           ]
@@ -329,30 +297,20 @@
           "subgroup": "Floors",
           "value": "approve",
           "display": "Approve",
-          "layer": "mac",
+          "layer": "global",
           "applied": true,
           "badges": [
-            {
-              "kind": "layer",
-              "label": "Mac"
-            },
             {
               "kind": "scope",
               "label": "Retries"
             }
           ],
-          "origin": "inherited",
+          "overridden": true,
           "layers": [
             {
-              "layer": "mac",
+              "layer": "global",
               "value": "approve",
               "display": "Approve",
-              "applied": true
-            },
-            {
-              "layer": "builtin",
-              "value": "quiet",
-              "display": "Quiet",
               "applied": true
             }
           ]
@@ -363,26 +321,15 @@
           "subgroup": "Retry",
           "value": 6,
           "display": "6 retries",
-          "layer": "mac",
+          "layer": "global",
           "applied": true,
-          "badges": [
-            {
-              "kind": "layer",
-              "label": "Mac"
-            }
-          ],
-          "origin": "inherited",
+          "badges": [],
+          "overridden": true,
           "layers": [
             {
-              "layer": "mac",
+              "layer": "global",
               "value": 6,
               "display": "6 retries",
-              "applied": true
-            },
-            {
-              "layer": "builtin",
-              "value": 3,
-              "display": "3 retries",
               "applied": true
             }
           ]
@@ -394,7 +341,7 @@
       "pending": [
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -406,7 +353,7 @@
             {
               "changeId": "00000007-0000-4000-8000-000000000000",
               "key": "context.images.block",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": true,
               "after": false,
@@ -423,14 +370,14 @@
           "requestId": "00000008-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:00.000Z",
           "expiresAt": "2026-01-02T00:00:00.000Z",
-          "digest": "0abc5c2be413a02dea4179571c798b6056a9f76e596881d3249d45e0406f8687",
+          "digest": "16757fe0301a1006dd69c45663cc4d443e295e511405f9b32c4e3d1786763e8e",
           "status": "pending"
         }
       ],
       "requests": [
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -442,7 +389,7 @@
             {
               "changeId": "00000005-0000-4000-8000-000000000000",
               "key": "run.retry.maxRetries",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": 6,
               "after": 2,
@@ -459,13 +406,13 @@
           "requestId": "00000006-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:00.000Z",
           "expiresAt": "2026-01-02T00:00:00.000Z",
-          "digest": "2246d27eb89965c640884f66bcfe8c4029fe2f1479f9a89b3257d09eb8869186",
+          "digest": "cd04bb013f0905cf28340075db5b11fe5b550eaf4e04e8462b266e3cd5bbc22d",
           "status": "declined",
           "decidedAt": "2026-01-01T00:00:00.000Z"
         },
         {
           "target": {
-            "kind": "mac"
+            "kind": "global"
           },
           "actor": {
             "kind": "agent",
@@ -477,7 +424,7 @@
             {
               "changeId": "00000007-0000-4000-8000-000000000000",
               "key": "context.images.block",
-              "layer": "mac",
+              "layer": "global",
               "op": "set",
               "before": true,
               "after": false,
@@ -494,7 +441,7 @@
           "requestId": "00000008-0000-4000-8000-000000000000",
           "createdAt": "2026-01-01T00:00:00.000Z",
           "expiresAt": "2026-01-02T00:00:00.000Z",
-          "digest": "0abc5c2be413a02dea4179571c798b6056a9f76e596881d3249d45e0406f8687",
+          "digest": "16757fe0301a1006dd69c45663cc4d443e295e511405f9b32c4e3d1786763e8e",
           "status": "pending"
         }
       ]

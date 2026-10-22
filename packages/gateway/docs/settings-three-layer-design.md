@@ -10,7 +10,7 @@ Current behavior: [settings contract](settings-contract.md).
   Home uses its Profile as the Session override, has no Project, and no second chapter override.
 - Global is the saved machine configuration with release defaults underneath, presented as one
   editable scope. Keep existing owned Pi/Gateway/credential stores; merging the concept does not
-  mean moving credentials into a giant settings file. No UI Mac/Built-in layer distinction.
+  mean moving credentials into a giant settings file. No UI Mac/default distinction.
 - Replace per-key scope/layer permission lists with `sessionOverridable` and `projectSettable` booleans.
   Store bindings, value validation, writers, safety floors, effects and capability constraints remain
   necessary metadata, not independent scope policies. iOS derives row eligibility from the registry.
@@ -112,7 +112,7 @@ trust and explicit credential separation. Learned profile notes never become an 
   Session or Project values. Session/Profile Revert unsets only that override and inherits Global.
   Explicit override equal to Global still gets Overridden until reverted. All resets use expected
   revisions, tiering, receipts and undo. Lowering a safety floor still needs the maintainer's tap.
-- Home workers: retain current bounded admission inheritance, not an ambient Profile layer. Capture
+- Home workers: retain current bounded admission inheritance, not an ambient Home recipe. Capture
   worker model queue/thinking, subagent queue and task budget at delegation; explicit task choices
   replace that seed; store resulting choices in the worker's Session override. Other worker defaults
   come from Global, not arbitrary Home tool/connection settings. The worker's trusted Project beats
@@ -196,7 +196,7 @@ legacy undo applier may retire only when no retained undoable entry references i
   transformations and stage replacements; crash recovery completes the same migration, never exposes
   half-upgraded stores. Backup/version completion only after durable writes; rerun is a no-op. A
   failed preflight changes nothing; corrupt/unclassifiable legacy state refuses with path, not drops.
-- Preserve saved Mac values in their owned stores as Global. Convert Profile entries to the same
+- Preserve saved Global values in their owned stores as Global. Convert Profile entries to the same
   override vocabulary. Fold active Home chapter choices into Profile while preserving currently
   effective behavior; no extra chapter setting layer. Archive superseded provenance in the backup.
 - Explicit/legacy Session values remain overrides. Old inherited launch snapshots that differ from

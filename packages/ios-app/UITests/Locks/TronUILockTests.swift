@@ -63,21 +63,22 @@ final class TronUILockTests: XCTestCase {
         }
     }
 
-    /// Manage Session's settings for a stopped session, then one row's Value & Source.
+    /// The shared Session settings screen of a stopped session, opened from Manage Session.
     @MainActor
-    func testSessionSettingsAndValueSource() throws {
+    func testSessionSettings() throws {
         for mode in Self.modes {
             let app = launch(["-tron-session-configuration-fixture", "-fixture-appearance", mode])
             let stop = app.buttons["Stop session"]
             try require(stop, in: app)
             stop.tap()
             app.buttons["Release terminal settlement"].tap()
-            let source = app.buttons["settings-row-model.thinking_role_chat_-source"]
-            try require(source, in: app)
+            let settings = app.buttons["chat-settings-link"]
+            try require(settings, in: app)
+            for _ in 0..<6 where !settings.isHittable { app.swipeUp() }
+            settings.tap()
+            try require(app.navigationBars.staticTexts["Session Settings"], in: app)
+            try require(app.buttons["settings-section-model-open"], in: app)
             assertUILock(app, "settings-session-\(mode)")
-            source.tap()
-            try require(app.navigationBars.staticTexts["Value & Source"], in: app)
-            assertUILock(app, "settings-value-source-\(mode)")
             app.terminate()
         }
     }

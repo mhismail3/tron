@@ -3,7 +3,7 @@
   "requests": [
     {
       "target": {
-        "kind": "mac"
+        "kind": "global"
       },
       "actor": {
         "kind": "agent",
@@ -15,7 +15,7 @@
         {
           "changeId": "00000007-0000-4000-8000-000000000000",
           "key": "context.images.block",
-          "layer": "mac",
+          "layer": "global",
           "op": "set",
           "before": true,
           "after": false,
@@ -32,12 +32,12 @@
       "requestId": "00000008-0000-4000-8000-000000000000",
       "createdAt": "2026-01-01T00:00:00.000Z",
       "expiresAt": "2026-01-02T00:00:00.000Z",
-      "digest": "0abc5c2be413a02dea4179571c798b6056a9f76e596881d3249d45e0406f8687",
+      "digest": "16757fe0301a1006dd69c45663cc4d443e295e511405f9b32c4e3d1786763e8e",
       "status": "pending"
     },
     {
       "target": {
-        "kind": "mac"
+        "kind": "global"
       },
       "actor": {
         "kind": "agent",
@@ -49,7 +49,7 @@
         {
           "changeId": "00000005-0000-4000-8000-000000000000",
           "key": "run.retry.maxRetries",
-          "layer": "mac",
+          "layer": "global",
           "op": "set",
           "before": 6,
           "after": 2,
@@ -66,7 +66,7 @@
       "requestId": "00000006-0000-4000-8000-000000000000",
       "createdAt": "2026-01-01T00:00:00.000Z",
       "expiresAt": "2026-01-02T00:00:00.000Z",
-      "digest": "2246d27eb89965c640884f66bcfe8c4029fe2f1479f9a89b3257d09eb8869186",
+      "digest": "cd04bb013f0905cf28340075db5b11fe5b550eaf4e04e8462b266e3cd5bbc22d",
       "status": "declined",
       "decidedAt": "2026-01-01T00:00:00.000Z"
     }

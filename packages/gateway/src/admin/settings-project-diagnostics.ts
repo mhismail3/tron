@@ -13,7 +13,7 @@ export function projectSettingsDiagnostics(raw: Record<string, unknown>, file: s
   diagnostics: Diagnostic[]; diagnosticsTruncated?: true;
 } {
   const rules = KEYS.flatMap(key => {
-    const binding = key.layers.project ?? key.layers.mac;
+    const binding = key.layers.project ?? key.layers.global;
     const paths = binding?.store === "pi-model-ref" ? [["defaultProvider"], ["defaultModel"]]
       : binding?.store === "pi" ? [binding.path, ...(binding.qualified ? [binding.qualified] : [])] : [];
     return paths.map(path => ({ path, key: key.id, allowed: key.projectSettable }));

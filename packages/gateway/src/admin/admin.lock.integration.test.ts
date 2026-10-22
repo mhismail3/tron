@@ -8,7 +8,7 @@ import { compareWithGolden, lockPaths, lockUpdateRequested } from "../../test-su
  * module: the one settings change path (`settings.change`, docs/settings-model.md)
  * through the real Gateway over a loopback WebSocket, as the iPhone uses it.
  *
- * The lock records the resolution before and after a Mac-layer change, the same
+ * The lock records the resolution before and after a Global change, the same
  * key resolved for a live chat, the change response and history, the Mac
  * `settings.json` the change wrote, the files under the settings record, and
  * the notifications enqueued at the relay boundary, compared with
@@ -21,7 +21,7 @@ const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
 describe("gateway/admin kernel locks", () => {
-  it("settings change: a Mac-layer change is recorded, resolved everywhere and reaches a live chat", async () => {
+  it("settings change: a Global change is recorded, resolved everywhere and reaches a live chat", async () => {
     const gateway = await startLockGateway("admin-settings-change", { settings: { retry: { maxRetries: 4 } } });
     gateways.push(gateway);
     const phone = await gateway.connect("phone");
@@ -31,12 +31,12 @@ describe("gateway/admin kernel locks", () => {
     const opened = await phone.request("session.open", { sessionId });
     expect((await phone.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
 
-    const before = await phone.request("settings.resolve", { target: { kind: "mac" }, keys: [KEY] });
+    const before = await phone.request("settings.resolve", { target: { kind: "global" }, keys: [KEY] });
     const changed = await phone.request("settings.change", {
-      commandId: gateway.commandId(), target: { kind: "mac" }, reason: "Retry transient provider failures longer",
-      changes: [{ key: KEY, layer: "mac", op: "set", value: 6, expected: 4 }],
+      commandId: gateway.commandId(), target: { kind: "global" }, reason: "Retry transient provider failures longer",
+      changes: [{ key: KEY, layer: "global", op: "set", value: 6, expected: 4 }],
     });
-    const after = await phone.request("settings.resolve", { target: { kind: "mac" }, keys: [KEY] });
+    const after = await phone.request("settings.resolve", { target: { kind: "global" }, keys: [KEY] });
     const chat = await phone.request("settings.resolve", { target: { kind: "session", sessionId }, keys: [KEY] });
     const history = await phone.request("settings.history", { limit: 10 });
 

@@ -152,7 +152,7 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(Self.layerLabel(change.layer))
+                Text(settingsLayerLabel(change.layer))
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(Color.tronTextSecondary)
                 if let confirm = change.confirm {
@@ -207,10 +207,6 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
         .buttonStyle(TronActionButtonStyle(role: .destructive, accent: .tronError))
         .disabled(busy)
         .accessibilityIdentifier("settings-approval-decline-\(request.requestId)")
-    }
-
-    private static func layerLabel(_ layer: String) -> String {
-        settingsLayerLabel(layer)
     }
 
     private func load() async {

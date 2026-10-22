@@ -124,7 +124,7 @@ Dropped (design rationale); see #758.
 ### 5.7 Project writes
 → [Project writes](settings-contract.md#project-writes)
 
-## 6. The Home profile layer
+## 6. The Home Home recipe
 → [Home profile](settings-contract.md#home-profile)
 
 ### 6.1 What it is

@@ -202,26 +202,45 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
 }
 
 const retries = (value: number, expected: number) => ({
-  action: "change", reason: "Flaky provider today", changes: [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value, expected }],
+  action: "change", reason: "Flaky provider today", changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value, expected }],
 });
 
 describe("settings risk gate", () => {
-  it("a project model saved before its first chat is inherited with Project provenance and never changes Mac defaults", async () => {
+  it("refuses a Project model write, and a repository's own model is inherited with Project provenance without changing Global defaults", async () => {
     const f = await fixture();
     const target = { kind: "project", cwd: f.project };
-    const saved = await f.approveProjectChange([{ key: "model.ref[role=chat]", layer: "project", op: "set", value: MEMORY_MODEL }]);
+    const projectFile = join(f.project, ".pi", "settings.json");
+    const before = await readFile(projectFile, "utf8").catch(() => null);
+    await expect(f.approveProjectChange([{ key: "model.ref[role=chat]", layer: "project", op: "set", value: MEMORY_MODEL }]))
+      .rejects.toThrow("Project settings are read-only");
+    expect(await readFile(projectFile, "utf8").catch(() => null)).toBe(before);
+    expect((await f.history()).filter(entry => entry.key === "model.ref[role=chat]")).toEqual([]);
+    // The repository owns its file: its model is inherited by the next chat.
+    await mkdir(join(f.project, ".pi"), { recursive: true });
+    await writeFile(projectFile, JSON.stringify({ defaultProvider: MEMORY_MODEL.provider, defaultModel: MEMORY_MODEL.id }));
     const project = await f.service.invoke(phone(), "settings.resolve", { target, keys: ["model.ref[role=chat]"] }) as unknown as { keys: Array<{ value: unknown; layer: string }> };
     expect(project.keys[0]).toMatchObject({ value: MEMORY_MODEL, layer: "project" });
     expect(await f.macDocument()).toMatchObject({ defaultProvider: MODEL.provider, defaultModel: MODEL.id });
     const slot = await f.registry.create(f.project);
     expect(slot.snapshot().model).toMatchObject(MEMORY_MODEL);
-    const source = slot.settingsChatLayer().fixed?.["model.ref[role=chat]"];
+    const source = slot.settingsSessionLayer().fixed?.["model.ref[role=chat]"];
     expect(source).toMatchObject({ from: "project", value: MEMORY_MODEL });
-    const history = await f.history();
-    expect(history.filter(entry => entry.key === "model.ref[role=chat]")).toEqual([
-      expect.objectContaining({ layer: "project", after: MEMORY_MODEL, status: "applied" }),
-    ]);
-    transcript.push({ case: "project default before first chat", steps: [{ saved, project, source }] });
+    transcript.push({ case: "project write refused; repository model inherited", steps: [{ project, source }] });
+  });
+
+  it("a model picked at designation is Home's saved model and serves its next turn", async () => {
+    const f = await fixture();
+    const designation = await f.registry.homeOwner().designate({ model: MEMORY_MODEL }, () => MODEL);
+    await setHomeMemoryModels(f.registry, [MEMORY_MODEL]);
+    const home = await f.registry.acquire(designation.sessionId);
+    const served: string[] = [];
+    f.faux.setResponses([async (_context, _options, _state, model) => { served.push(model.id); return fauxAssistantMessage("designated model"); }]);
+    await home.prompt("Which model serves Home?");
+    await waitFor(() => (served.length > 0 && home.snapshot().configurationBlocker === null) || undefined, "designated Home turn");
+    const saved = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "home" }, keys: ["model.ref[role=chat]"] }) as unknown as { keys: Array<{ value: unknown; layer: string }> };
+    transcript.push({ case: "designation model is Home's saved model", steps: [{ served, saved: saved.keys }] });
+    expect(served).toEqual([MEMORY_MODEL.id]);
+    expect(saved.keys[0]).toMatchObject({ value: MEMORY_MODEL, layer: "session" });
   });
 
   it("Home's durable model choice has one Session family across its alias, Revert and re-enable", async () => {
@@ -261,8 +280,10 @@ describe("settings risk gate", () => {
     await turn();
     expect(served).toEqual([MEMORY_MODEL.id, MODEL.id, MEMORY_MODEL.id]);
     expect(home.snapshot().model).toMatchObject(MEMORY_MODEL);
+    // Designation's explicit model is Home's first saved choice; each later choice is one entry.
     const changes = (await f.history()).filter(entry => entry.key === "model.ref[role=chat]");
-    expect(changes).toHaveLength(3);
+    expect(changes).toHaveLength(4);
+    expect(changes.filter(entry => entry.actor.kind === "ui" && entry.actor.id === "home-designation")).toHaveLength(1);
     expect(changes.every(entry => entry.target.kind === "home" && entry.layer === "session")).toBe(true);
     transcript.push({ case: "single durable Home model family", steps: [{ served, resolved, changes }] });
   });
@@ -340,16 +361,19 @@ describe("settings risk gate", () => {
     expect(failed).toEqual([["home", "session"]]);
   });
 
-  it.each(["warm", "cold"] as const)("carries Chat choices from a %s predecessor into Home's next chapter without copying messages", async temperature => {
+  it.each(["warm", "cold"] as const)("carries Session choices from a %s predecessor into Home's next chapter without copying messages", async temperature => {
     const f = await fixture({ reasoning: true, ...(temperature === "cold" ? { maximumLiveRuntimes: 1 } : {}) });
     const first = await f.designateHome();
-    for (const [key, value] of [["model.thinking[role=chat]", "high"], ["model.contextWindow", 64_000], ["run.retry.maxRetries", 7], ["context.images.block", true]] as const) {
+    for (const [key, value] of [["model.thinking[role=chat]", "high"], ["run.retry.maxRetries", 7], ["context.images.block", true]] as const) {
       const snapshot = first.snapshot();
       await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: first.id },
         fence: { runtimeGeneration: snapshot.runtimeGeneration, revision: snapshot.revision, model: snapshot.model },
-        changes: [{ key, layer: "chat", op: "set", value }] });
+        changes: [{ key, layer: "session", op: "set", value }] });
     }
-    const choices = first.settingsChatLayer();
+    // Home's saved settings have no context window; the chapter's own window still carries.
+    const window = first.snapshot();
+    await first.setContextWindow(window.model!.provider, window.model!.id, 64_000, window.revision, window.runtimeGeneration);
+    const choices = first.settingsSessionLayer();
     const owner = f.registry.homeOwner() as unknown as { options: { sessions: { chapterMetrics: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } } };
     const metrics = owner.options.sessions.chapterMetrics;
     owner.options.sessions.chapterMetrics = async () => ({ bytes: 0, entries: 50_001, quiescent: true });
@@ -373,7 +397,7 @@ describe("settings risk gate", () => {
     await f.service.invoke(phone(), "home.prompt", { commandId: commandId(), text: "The second chapter starts here." });
     const next = await f.registry.acquire(successor);
     await waitFor(() => requests.length > 0 && !next.isBusy, "successor response");
-    expect(next.settingsChatLayer()).toEqual(choices);
+    expect(next.settingsSessionLayer()).toEqual(choices);
     // Home intentionally summarizes earlier chapters in its request view. It
     // must not copy their canonical messages or entry identities into this file.
     const nextEntries = next.canonicalSessionEntries();
@@ -383,8 +407,8 @@ describe("settings risk gate", () => {
     expect(f.homeDiagnostics).toContainEqual({ outcome: "chapter-recovery", reason: temperature === "cold" ? "settings-from-cold" : "settings-from-live" });
     expect(next.snapshot().thinkingLevel).toBe("high");
     expect(next.snapshot().contextWindowPolicy?.effective).toBe(64_000);
-    expect(next.settingsChatLayer()).toEqual(choices);
-    transcript.push({ case: `Home chapter settings carry-forward (${temperature})`, steps: [{ before: choices, after: next.settingsChatLayer(), messagesCarried: false }] });
+    expect(next.settingsSessionLayer()).toEqual(choices);
+    transcript.push({ case: `Home chapter settings carry-forward (${temperature})`, steps: [{ before: choices, after: next.settingsSessionLayer(), messagesCarried: false }] });
   });
 
   it("image resizing is fixed at start until the audited current-default reset", async () => {
@@ -402,17 +426,17 @@ describe("settings risk gate", () => {
       await slot.prompt("observe resizing", [image]);
       await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "resize request settled");
     };
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
-      { key: "context.images.autoResize", layer: "mac", op: "set", value: false },
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" }, changes: [
+      { key: "context.images.autoResize", layer: "global", op: "set", value: false },
     ] });
     await observe();
     expect(observed.at(-1)?.resized).toBe(true);
-    expect(slot.settingsChatLayer().fixed?.["context.images.autoResize"]).toMatchObject({ from: "builtin", value: true });
+    expect(slot.settingsSessionLayer().fixed?.["context.images.autoResize"]).toMatchObject({ from: "global", value: true });
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: slot.id },
-      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL }, changes: [{ key: "context.images.autoResize", layer: "chat", op: "unset" }] });
+      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL }, changes: [{ key: "context.images.autoResize", layer: "session", op: "unset" }] });
     await observe();
     expect(observed.at(-1)?.resized).toBe(false);
-    expect(slot.settingsChatLayer().fixed?.["context.images.autoResize"]).toMatchObject({ from: "mac", value: false });
+    expect(slot.settingsSessionLayer().fixed?.["context.images.autoResize"]).toMatchObject({ from: "global", value: false });
     transcript.push({ case: "fixed image resizing", steps: observed });
   });
 
@@ -433,7 +457,7 @@ describe("settings risk gate", () => {
       return captures.at(-1)!;
     };
     const mac = (value: boolean) => f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: { kind: "mac" }, changes: [{ key: "context.images.block", layer: "mac", op: "set", value }],
+      commandId: commandId(), target: { kind: "global" }, changes: [{ key: "context.images.block", layer: "global", op: "set", value }],
     });
     expect((await observe()).images).toBeGreaterThan(0);
     await mac(true);
@@ -450,7 +474,7 @@ describe("settings risk gate", () => {
     expect((await observe(createdWhileBlocked)).images).toBe(0);
     expect((await observe(await f.chat())).images).toBeGreaterThan(0);
     const pending = f.settle((await f.run(slot, "request images", [{ name: "settings", args: {
-      action: "change", reason: "Need the attached image", changes: [{ key: "context.images.block", layer: "chat", op: "set", value: false }],
+      action: "change", reason: "Need the attached image", changes: [{ key: "context.images.block", layer: "session", op: "set", value: false }],
     } }])).results);
     expect(pending.status).toBe("pending");
     expect((await observe()).images).toBe(0);
@@ -466,7 +490,7 @@ describe("settings risk gate", () => {
       async context => {
         withinTurn.push(context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image").length);
         return fauxAssistantMessage(fauxToolCall("settings", { action: "change", reason: "Stop reading images", changes: [
-          { key: "context.images.block", layer: "chat", op: "set", value: true },
+          { key: "context.images.block", layer: "session", op: "set", value: true },
         ] }));
       },
       async context => {
@@ -479,19 +503,19 @@ describe("settings risk gate", () => {
     expect(withinTurn).toHaveLength(2);
     expect(withinTurn[0]).toBeGreaterThan(0);
     expect(withinTurn[1]).toBe(0);
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
-      { key: "permissions.floor", layer: "mac", op: "set", value: "quiet", qualifiers: { key: "context.images.block", direction: "widen" } },
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" }, changes: [
+      { key: "permissions.floor", layer: "global", op: "set", value: "quiet", qualifiers: { key: "context.images.block", direction: "widen" } },
     ] });
     const lowered = f.settle((await f.run(slot, "request images under the lower floor", [{ name: "settings", args: {
-      action: "change", reason: "Need the attached image", changes: [{ key: "context.images.block", layer: "chat", op: "set", value: false }],
+      action: "change", reason: "Need the attached image", changes: [{ key: "context.images.block", layer: "session", op: "set", value: false }],
     } }])).results);
     expect(lowered).toMatchObject({ status: "applied", tier: "quiet" });
     expect((await observe()).images).toBe(0);
-    expect(slot.settingsChatLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true }) });
+    expect(slot.settingsSessionLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true }) });
     await f.service.invoke(phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: slot.id },
       fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
-      changes: [{ key: "context.images.block", layer: "chat", op: "unset" }],
+      changes: [{ key: "context.images.block", layer: "session", op: "unset" }],
     });
     expect((await observe()).images).toBeGreaterThan(0);
     transcript.push({ case: `${kind} directional image request policy`, steps: [...captures, { withinTurn, lowered }] });
@@ -529,12 +553,12 @@ describe("settings risk gate", () => {
     transcript.push({ case: `Global image widening via ${viaSession ? "session" : "default"}`, result: { widened, inherited: await images(inheriting), explicit: await images(explicit) } });
   });
 
-  it("open chats follow live retry defaults while a canonical Chat override stays local and can be unset", async () => {
+  it("open chats follow live retry defaults while a canonical Session override stays local and can be unset", async () => {
     const f = await fixture();
     const mac = (maxRetries: number) => f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: { kind: "mac" }, changes: [
-        { key: "run.retry.maxRetries", layer: "mac", op: "set", value: maxRetries },
-        { key: "run.retry.baseDelayMs", layer: "mac", op: "set", value: 1 },
+      commandId: commandId(), target: { kind: "global" }, changes: [
+        { key: "run.retry.maxRetries", layer: "global", op: "set", value: maxRetries },
+        { key: "run.retry.baseDelayMs", layer: "global", op: "set", value: 1 },
       ],
     });
     await mac(0);
@@ -558,21 +582,21 @@ describe("settings risk gate", () => {
     const changeChat = (op: "set" | "unset") => f.service.invoke(phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: first.id },
       fence: { runtimeGeneration: first.snapshot().runtimeGeneration, model: MODEL },
-      changes: [{ key: "run.retry.maxRetries", layer: "chat", op, ...(op === "set" ? { value: 0 } : {}) }],
+      changes: [{ key: "run.retry.maxRetries", layer: "session", op, ...(op === "set" ? { value: 0 } : {}) }],
     });
     await changeChat("set");
-    expect(first.settingsChatLayer().settings).toMatchObject({ retry: { maxRetries: 0 } });
+    expect(first.settingsSessionLayer().settings).toMatchObject({ retry: { maxRetries: 0 } });
     await mac(2);
     expect(await attempts(first)).toBe(1);
     expect(await attempts(second)).toBe(3);
     await changeChat("unset");
     expect(await attempts(first)).toBe(3);
     expect((await f.macDocument()).retry).toMatchObject({ maxRetries: 2 });
-    const changes = (await f.history()).filter(entry => entry.layer === "chat" && entry.key === "run.retry.maxRetries");
+    const changes = (await f.history()).filter(entry => entry.layer === "session" && entry.key === "run.retry.maxRetries");
     expect(changes.map(entry => entry.op)).toEqual(expect.arrayContaining(["set", "unset"]));
     transcript.push({ case: "live retry settings", steps: [{ chat: first.id, changes, mac: await f.macDocument() }] });
   });
-  it("a Chat compaction override reaches only its own chat's SDK compaction, survives fork and cold resume, and Follow the default restores the Mac value", async () => {
+  it("a Chat compaction override reaches only its own chat's SDK compaction, survives fork and cold resume, and Follow the default restores the Global value", async () => {
     const f = await fixture();
     const first = await f.chat();
     const second = await f.chat();
@@ -587,22 +611,22 @@ describe("settings risk gate", () => {
       fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: MODEL }, changes,
     });
     await changeChat(first, [
-      { key: "context.compaction.enabled", layer: "chat", op: "set", value: false },
-      { key: "context.compaction.reserveTokens", layer: "chat", op: "set", value: 4_096 },
-      { key: "context.compaction.instructions", layer: "chat", op: "set", value: "Keep the plan." },
+      { key: "context.compaction.enabled", layer: "session", op: "set", value: false },
+      { key: "context.compaction.reserveTokens", layer: "session", op: "set", value: 4_096 },
+      { key: "context.compaction.instructions", layer: "session", op: "set", value: "Keep the plan." },
     ]);
-    expect(first.settingsChatLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
-    // The projection follows the Chat value at once; the SDK budgets at the next idle admission.
+    expect(first.settingsSessionLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
+    // The projection follows the Session value at once; the SDK budgets at the next idle admission.
     expect(first.snapshot().compactionPolicy?.next).toMatchObject({ enabled: false, reserveTokens: 4_096, instructions: "Keep the plan.",
-      source: { enabled: "chat", reserveTokens: "chat", instructions: "chat", keepRecentTokens: "default" } });
+      source: { enabled: "session", reserveTokens: "session", instructions: "session", keepRecentTokens: "global" } });
     await idle(first, "apply the chat compaction policy");
     await idle(second, "apply the default compaction policy");
     expect(sdk(first)).toMatchObject({ enabled: false, reserveTokens: 4_096 });
     expect(sdk(second)).toMatchObject({ enabled: true, reserveTokens: 16_384 });
-    // A Mac default reaches the other open chat; the overridden fields stay local.
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
-      { key: "context.compaction.reserveTokens", layer: "mac", op: "set", value: 32_768 },
-      { key: "context.compaction.keepRecentTokens", layer: "mac", op: "set", value: 12_000 },
+    // A Global default reaches the other open chat; the overridden fields stay local.
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" }, changes: [
+      { key: "context.compaction.reserveTokens", layer: "global", op: "set", value: 32_768 },
+      { key: "context.compaction.keepRecentTokens", layer: "global", op: "set", value: 12_000 },
     ] });
     await idle(first, "keep the chat override");
     await idle(second, "follow the new default");
@@ -610,27 +634,27 @@ describe("settings risk gate", () => {
     expect(sdk(second)).toMatchObject({ enabled: true, reserveTokens: 32_768, keepRecentTokens: 12_000 });
     const resolved = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "session", sessionId: first.id },
       keys: ["context.compaction.enabled"] }) as { keys: Array<{ key: string; value: unknown; layer: string }> };
-    expect(resolved.keys[0]).toMatchObject({ value: false, layer: "chat" });
-    // Fork rebinds this slot to the new branch with the same Chat values; each
+    expect(resolved.keys[0]).toMatchObject({ value: false, layer: "session" });
+    // Fork rebinds this slot to the new branch with the same Session values; each
     // branch then owns its own.
     const parentId = first.id;
     const point = first.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
     const fork = await first.fork(point.id, "at");
     expect(first.id).toBe(fork.sessionId);
-    expect(first.settingsChatLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
-    // Follow the default: unsetting the Chat values restores the Mac and Built-in values.
+    expect(first.settingsSessionLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
+    // Follow the default: unsetting the Session values restores the Mac and Built-in values.
     await changeChat(first, [
-      { key: "context.compaction.enabled", layer: "chat", op: "unset" },
-      { key: "context.compaction.reserveTokens", layer: "chat", op: "unset" },
-      { key: "context.compaction.instructions", layer: "chat", op: "unset" },
+      { key: "context.compaction.enabled", layer: "session", op: "unset" },
+      { key: "context.compaction.reserveTokens", layer: "session", op: "unset" },
+      { key: "context.compaction.instructions", layer: "session", op: "unset" },
     ]);
-    expect(first.settingsChatLayer().settings).toEqual({});
+    expect(first.settingsSessionLayer().settings).toEqual({});
     await idle(first, "follow the default again");
     expect(sdk(first)).toMatchObject({ enabled: true, reserveTokens: 32_768, keepRecentTokens: 12_000 });
-    expect(first.snapshot().compactionPolicy?.next.source).toMatchObject({ enabled: "default", reserveTokens: "global", instructions: "default" });
-    const changes = (await f.history()).filter(entry => entry.layer === "chat" && entry.key.startsWith("context.compaction."));
+    expect(first.snapshot().compactionPolicy?.next.source).toMatchObject({ enabled: "global", reserveTokens: "global", instructions: "global" });
+    const changes = (await f.history()).filter(entry => entry.layer === "session" && entry.key.startsWith("context.compaction."));
     expect(changes.map(entry => entry.op)).toEqual(expect.arrayContaining(["set", "unset"]));
-    // Cold resume of the parent keeps its own Chat values (the fork's unset is branch-local).
+    // Cold resume of the parent keeps its own Session values (the fork's unset is branch-local).
     await f.registry.dispose();
     const reopened = await createTestRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
@@ -640,9 +664,9 @@ describe("settings risk gate", () => {
     settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime, sessions: reopened,
       home: () => reopened.homeOwner(), registry: reopened });
     const resumed = await reopened.acquire(parentId);
-    expect(resumed.settingsChatLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
+    expect(resumed.settingsSessionLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
     expect(resumed.snapshot().compactionPolicy?.next).toMatchObject({ enabled: false, reserveTokens: 4_096, keepRecentTokens: 12_000,
-      source: { enabled: "chat", reserveTokens: "chat", keepRecentTokens: "global" } });
+      source: { enabled: "session", reserveTokens: "session", keepRecentTokens: "global" } });
     await idle(resumed, "resumed chat compaction policy");
     expect(sdk(resumed)).toMatchObject({ enabled: false, reserveTokens: 4_096 });
     transcript.push({ case: "chat compaction override", steps: [{ parent: parentId, fork: fork.sessionId, sdk: sdk(resumed), mac: await f.macDocument() }] });
@@ -653,14 +677,14 @@ describe("settings risk gate", () => {
     const snapshot = home.snapshot();
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: home.id },
       fence: { runtimeGeneration: snapshot.runtimeGeneration, revision: snapshot.revision, model: snapshot.model },
-      changes: [{ key: "context.compaction.enabled", layer: "chat", op: "set", value: true }] }))
+      changes: [{ key: "context.compaction.enabled", layer: "session", op: "set", value: true }] }))
       .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("cannot be set") });
     const served = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "session", sessionId: home.id }, keys: ["context.compaction.enabled"] }) as { keys: Array<{ layers: Array<{ layer: string }> }> };
     expect(served.keys).toEqual([]);
-    expect(home.settingsChatLayer().settings).toEqual({});
+    expect(home.settingsSessionLayer().settings).toEqual({});
     expect(home.runtime.session.settingsManager.getCompactionSettings().enabled).toBe(false);
   });
-  it("Home's actual provider requests follow transport and retry-delay defaults, then a Chat override and its unset", async () => {
+  it("Home's actual provider requests follow transport and retry-delay defaults, then a Session override and its unset", async () => {
     const f = await fixture();
     const home = await f.designateHome();
     const requests: Array<{ transport?: string; maxRetryDelayMs?: number }> = [];
@@ -674,15 +698,15 @@ describe("settings risk gate", () => {
       return requests.at(-1);
     };
     expect(await request()).toEqual({ transport: "auto", maxRetryDelayMs: 60_000 });
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
-      { key: "run.transport", layer: "mac", op: "set", value: "sse" },
-      { key: "run.retry.provider.maxRetryDelayMs", layer: "mac", op: "set", value: 17 },
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" }, changes: [
+      { key: "run.transport", layer: "global", op: "set", value: "sse" },
+      { key: "run.retry.provider.maxRetryDelayMs", layer: "global", op: "set", value: 17 },
     ] });
     expect(await request()).toEqual({ transport: "sse", maxRetryDelayMs: 17 });
     const change = (op: "set" | "unset") => f.service.invoke(phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: home.id },
       fence: { runtimeGeneration: home.snapshot().runtimeGeneration, model: MODEL }, changes: [
-        { key: "run.transport", layer: "chat", op, ...(op === "set" ? { value: "websocket" } : {}) },
+        { key: "run.transport", layer: "session", op, ...(op === "set" ? { value: "websocket" } : {}) },
       ],
     });
     await change("set");
@@ -700,7 +724,7 @@ describe("settings risk gate", () => {
       { key: "run.websocketConnectTimeoutMs", option: "websocketConnectTimeoutMs", value: 9_000 },
     ];
     const mac = (op: "set" | "unset") => f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: { kind: "mac" }, changes: fields.map(field => ({ key: field.key, layer: "mac", op,
+      commandId: commandId(), target: { kind: "global" }, changes: fields.map(field => ({ key: field.key, layer: "global", op,
         ...(op === "set" ? { value: field.value } : {}) })),
     });
     await mac("set");
@@ -719,7 +743,7 @@ describe("settings risk gate", () => {
     const change = (op: "set" | "unset") => f.service.invoke(phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: slot.id },
       fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: MODEL },
-      changes: fields.map(field => ({ key: field.key, layer: "chat", op, ...(op === "set" ? { value: field.value + 1 } : {}) })),
+      changes: fields.map(field => ({ key: field.key, layer: "session", op, ...(op === "set" ? { value: field.value + 1 } : {}) })),
     });
     await change("set");
     await mac("unset");
@@ -741,30 +765,30 @@ describe("settings risk gate", () => {
     transcript.push({ case: `${kind} optional Run replacement`, steps: observations });
   });
 
-  it("an agent records its own live override without deadlocking; fork and cold resume retain it without changing Mac defaults", async () => {
+  it("an agent records its own live override without deadlocking; fork and cold resume retain it without changing Global defaults", async () => {
     const f = await fixture();
     const slot = await f.chat();
     const changed = await f.run(slot, "limit retries in this chat only", [{ name: "settings", args: {
       action: "change", reason: "Keep this task bounded", changes: [
-        { key: "run.retry.maxRetries", layer: "chat", op: "set", value: 0 },
-        { key: "run.retry.provider.timeoutMs", layer: "chat", op: "set", value: 10_000 },
+        { key: "run.retry.maxRetries", layer: "session", op: "set", value: 0 },
+        { key: "run.retry.provider.timeoutMs", layer: "session", op: "set", value: 10_000 },
       ],
     } }]);
     expect(f.settle(changed.results)).toMatchObject({ status: "applied", tier: "quiet" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 3 });
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" },
-      changes: [{ key: "context.images.block", layer: "mac", op: "set", value: true }] });
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },
+      changes: [{ key: "context.images.block", layer: "global", op: "set", value: true }] });
     f.faux.setResponses([fauxAssistantMessage("capture narrowing")]);
     await slot.prompt("capture the narrowed default");
     await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "narrowed request settled");
     const document = await f.macDocument();
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...document, images: { blockImages: false } }));
-    expect(slot.settingsChatLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true, from: "mac" }) });
+    expect(slot.settingsSessionLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true, from: "global" }) });
     const expectedChat = { retry: { maxRetries: 0, provider: { timeoutMs: 10_000 } } };
-    expect(slot.settingsChatLayer().settings).toEqual(expectedChat);
+    expect(slot.settingsSessionLayer().settings).toEqual(expectedChat);
     const point = slot.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
     const fork = await slot.fork(point.id, "at");
-    expect(slot.settingsChatLayer().settings).toEqual(expectedChat);
+    expect(slot.settingsSessionLayer().settings).toEqual(expectedChat);
     const file = slot.runtime.session.sessionManager.getSessionFile()!;
     const canonical = (await readFile(file, "utf8")).split("\n").filter(Boolean).map(line => JSON.parse(line));
     expect(canonical).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.settings.v1",
@@ -780,8 +804,8 @@ describe("settings risk gate", () => {
     settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime,
       sessions: reopened, home: () => reopened.homeOwner(), registry: reopened });
     const resumed = await reopened.acquire(fork.sessionId);
-    expect(resumed.settingsChatLayer().settings).toEqual(expectedChat);
-    expect(resumed.settingsChatLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true, from: "mac" }) });
+    expect(resumed.settingsSessionLayer().settings).toEqual(expectedChat);
+    expect(resumed.settingsSessionLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true, from: "global" }) });
     let attempts = 0;
     let timeoutMs: number | undefined;
     f.faux.setResponses(Array.from({ length: 4 }, () => async (_context, options) => {
@@ -794,7 +818,7 @@ describe("settings risk gate", () => {
     expect(attempts).toBe(1);
     expect(timeoutMs).toBe(10_000);
     transcript.push({ case: "canonical chat override fork/resume", steps: [{ fork: fork.sessionId, attempts,
-      settings: resumed.settingsChatLayer().settings, mac: await f.macDocument() }] });
+      settings: resumed.settingsSessionLayer().settings, mac: await f.macDocument() }] });
   });
 
   it("an ordinary chat's agent: quiet from a clean run and after bash, notify after an undeclared third-party tool, approve for a notify floor after web", async () => {
@@ -842,7 +866,7 @@ describe("settings risk gate", () => {
     // A notify-floor change (adding a default tool widens tools.active) after web: approve, so pending.
     const widen = await f.run(slot, "add a tool", [
       { name: "fetch_page", args: {} },
-      { name: "settings", args: { action: "change", reason: "The page said to", changes: [{ key: "tools.active", layer: "mac", op: "set", value: ["read", "bash", "edit", "write", "fetch_page"] }] } },
+      { name: "settings", args: { action: "change", reason: "The page said to", changes: [{ key: "tools.active", layer: "global", op: "set", value: ["read", "bash", "edit", "write", "fetch_page"] }] } },
     ]);
     const pending = f.settle(widen.results) as { status: string; tier: string; approval: { requestId: string } };
     expect(pending).toMatchObject({ status: "pending", tier: "approve" });
@@ -853,7 +877,7 @@ describe("settings risk gate", () => {
     expect(waiting).toMatchObject({
       requestId: pending.approval.requestId, actor: { kind: "agent", sessionId: slot.id }, requester: "A chat's agent", reason: "The page said to",
       // The Mac held nothing, so the selection is stored relative to the built-in tools.
-      changes: [{ key: "tools.active", layer: "mac", tier: "approve", after: ["+fetch_page"], display: { before: "Not set", after: "+fetch_page" } }],
+      changes: [{ key: "tools.active", layer: "global", tier: "approve", after: ["+fetch_page"], display: { before: "Not set", after: "+fetch_page" } }],
     });
     steps.push({ step: "notify floor after web", result: pending, approvals: await f.approvals() });
 
@@ -871,7 +895,7 @@ describe("settings risk gate", () => {
     const f = await fixture();
     const home = await f.designateHome();
     const steps: Array<Record<string, unknown>> = [];
-    const trustProject = (project: string) => ({ action: "change", reason: "The maintainer asked me to work there", changes: [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: true, qualifiers: { project } }] });
+    const trustProject = (project: string) => ({ action: "change", reason: "The maintainer asked me to work there", changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project } }] });
 
     // Home asking to trust a project: pending; nothing applies until approved on the device.
     const asked = await f.run(home, "trust the other project", [{ name: "settings", args: trustProject(f.other) }]);
@@ -910,14 +934,14 @@ describe("settings risk gate", () => {
     steps.push({ step: "Home quiet then notify after web_fetch", result: f.settle(webTurn.results) });
 
     // Only the maintainer's tap lowers a floor: Home's request is refused.
-    const lowerFloor = { key: "permissions.floor", layer: "mac", op: "set", value: "notify", qualifiers: { key: "permissions.projectTrust", direction: "widen" } };
+    const lowerFloor = { key: "permissions.floor", layer: "global", op: "set", value: "notify", qualifiers: { key: "permissions.projectTrust", direction: "widen" } };
     const refused = await f.run(home, "lower the trust floor", [{ name: "settings", args: { action: "change", reason: "To save taps", changes: [lowerFloor] } }]);
     expect(refused.results[0]).toMatchObject({ isError: true, text: expect.stringContaining("cannot be changed by home") });
     // His row asks first: a dry run names the approve tier and the key's confirm text.
-    const preview = await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [lowerFloor], dryRun: true }) as { tier: string; changes: Array<{ confirm?: string }> };
+    const preview = await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" }, changes: [lowerFloor], dryRun: true }) as { tier: string; changes: Array<{ confirm?: string }> };
     expect(preview).toMatchObject({ tier: "approve", changes: [{ confirm: expect.stringContaining("Lowering a floor") }] });
     // His tap lowers it at once; the record names its tier (approve, the floor key's widen floor).
-    const lowered = await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [lowerFloor] }) as Record<string, unknown>;
+    const lowered = await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" }, changes: [lowerFloor] }) as Record<string, unknown>;
     expect(lowered).toMatchObject({ status: "applied", tier: "approve" });
     const floorEntry = (await f.history()).find(entry => entry.key === "permissions.floor")!;
     expect(floorEntry).toMatchObject({ actor: { kind: "ui" }, status: "applied", tier: "approve", tierBasis: { direction: "widen", floor: "approve" }, after: "notify" });
@@ -935,7 +959,7 @@ describe("settings risk gate", () => {
   it("refuses a superseded approval, and expires a pending change after 24 hours with the requester told on its next turn", async () => {
     const f = await fixture();
     const slot = await f.chat();
-    const widen = (tools: string[]) => ({ action: "change", reason: "Need the page tool", changes: [{ key: "tools.active", layer: "mac", op: "set", value: tools }] });
+    const widen = (tools: string[]) => ({ action: "change", reason: "Need the page tool", changes: [{ key: "tools.active", layer: "global", op: "set", value: tools }] });
     const first = f.settle((await f.run(slot, "add a tool", [{ name: "fetch_page", args: {} }, { name: "settings", args: widen(["read", "fetch_page"]) }])).results) as { approval: { requestId: string; digest: string } };
     const second = f.settle((await f.run(slot, "add two tools", [{ name: "fetch_page", args: {} }, { name: "settings", args: widen(["read", "fetch_page", "count_lines"]) }])).results) as { approval: { requestId: string; digest: string } };
     // The newer diff supersedes the older: approving the older is refused.
@@ -965,7 +989,7 @@ describe("settings risk gate", () => {
     const f = await fixture();
     const home = await f.designateHome();
     const asked = await f.run(home, "trust the other project", [{ name: "settings", args: { action: "change", reason: "The maintainer asked me to work there",
-      changes: [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: true, qualifiers: { project: f.other } }] } }]);
+      changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project: f.other } }] } }]);
     const pending = f.settle(asked.results) as { status: string; approval: { requestId: string; digest: string } };
     expect(pending).toMatchObject({ status: "pending", tier: "approve" });
     f.advance(APPROVAL_TTL_MS + 1);
@@ -1119,7 +1143,7 @@ describe("settings risk gate", () => {
 
     // Change while the worker's request is in flight: stored now, signalled once, nothing cancelled.
     const changed = await homeSays("Change live-worker", "settings", { action: "change", taskId: "live-worker", reason: "Harder step next",
-      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: REASONING }, { key: "model.thinking[role=chat]", layer: "chat", op: "set", value: "high" }] });
+      changes: [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: REASONING }, { key: "model.thinking[role=chat]", layer: "session", op: "set", value: "high" }] });
     expect(changed.isError).toBe(false);
     expect(changed.text).toContain("signalled in its steering lane");
     const changeResult = changed.details as { status: string; signal: { status: string; taskId: string; appliesFrom: string }; worker: Record<string, unknown> };
@@ -1130,15 +1154,15 @@ describe("settings risk gate", () => {
 
     // A key with no supported mid-run boundary is refused with the boundary named; nothing is queued.
     const refused = await homeSays("Change live-worker tools", "settings", { action: "change", taskId: "live-worker", reason: "Fewer tools",
-      changes: [{ key: "tools.active", layer: "chat", op: "set", value: ["read"] }] });
+      changes: [{ key: "tools.active", layer: "session", op: "set", value: ["read"] }] });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/active tools change only between runs/);
 
     // The maintainer raised thinking's floor: Home's next thinking change waits, and the worker keeps "high".
-    await service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" },
-      changes: [{ key: "permissions.floor", layer: "mac", op: "set", value: "approve", qualifiers: { key: "model.thinking[role=chat]" } }] });
+    await service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },
+      changes: [{ key: "permissions.floor", layer: "global", op: "set", value: "approve", qualifiers: { key: "model.thinking[role=chat]" } }] });
     const pending = await homeSays("Lower live-worker thinking", "settings", { action: "change", taskId: "live-worker", reason: "Cheaper final step",
-      changes: [{ key: "model.thinking[role=chat]", layer: "chat", op: "set", value: "low" }] });
+      changes: [{ key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" }] });
     expect(pending.text).toMatch(/^Pending the maintainer's approval .*the worker keeps its current settings/);
     expect(pending.details).toMatchObject({ status: "pending", worker: { selected: { thinking: "high" } } });
     expect((pending.details as { signal?: unknown }).signal).toBeUndefined();
@@ -1171,7 +1195,7 @@ describe("settings risk gate", () => {
 
     // Settled: the change is stored for the next run (resume) and no signal is sent.
     const settledChange = await homeSays("Reset live-worker model", "settings", { action: "change", taskId: "live-worker", reason: "Back to the default for any resume",
-      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: { provider: f.model.provider, id: f.model.id } }] });
+      changes: [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: { provider: f.model.provider, id: f.model.id } }] });
     expect(settledChange.details).toMatchObject({ status: "applied", signal: { status: "not-running", appliesFrom: "next-run" },
       worker: { running: false, lastResponse: { model: `${REASONING.provider}/${REASONING.id}`, thinking: "low" } } });
     expect(settledChange.text).toContain("takes effect when the task is resumed");

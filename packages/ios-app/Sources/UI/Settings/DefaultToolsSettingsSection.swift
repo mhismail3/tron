@@ -1,8 +1,8 @@
 import SwiftUI
 import TronMobileCore
 
-/// The existing default-tool controls, owned by the Tools sheet at its Mac or
-/// Project layer. Toggling a managed entry preserves every other selector.
+/// The existing default-tool controls, owned by the Tools sheet at its Global
+/// or Project scope. Toggling a managed entry preserves every other selector.
 /// While a managed tool's built-in extension does not load at this scope, its
 /// switch is inactive and the saved entry is kept, not shown (#1491).
 struct DefaultToolsSettingsSection: View {
@@ -140,15 +140,5 @@ struct DefaultToolsSettingsSection: View {
         let global = entries("global")
         if global.contains("-" + path) { return false }
         return global.contains("+" + path) || !global.contains("!" + path)
-    }
-
-    /// Why a saved managed entry at `layer` has no effect, for Value & Source.
-    static func inactiveNote(_ resolution: SettingsResolution, layer: String) -> String? {
-        let saved = resolution.setting(toolsKey)?.value(at: layer)?.arrayValue?.compactMap(\.stringValue) ?? []
-        let extensions = resolution.setting(extensionsKey)
-        let off = managed.filter { saved.contains($0.entry) && !builtinLoads($0.builtin, extensions: extensions) }
-        guard !off.isEmpty else { return nil }
-        return off.map { "\($0.name) is off in Extensions, so the saved \($0.entry) has no effect until it is turned back on." }
-            .joined(separator: " ")
     }
 }

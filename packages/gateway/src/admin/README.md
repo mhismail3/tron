@@ -66,7 +66,7 @@ worker by `taskId`.
 
 Ports in: `gateway-main.ts` wires `SettingsModel`, `SettingsChangePath`,
 `OutsideChanges` and the risk evaluator; `GatewayService` dispatches the RPCs,
-pushes and broadcasts; `RuntimeSlot` supplies the Chat-layer applier, fence and
+pushes and broadcasts; `RuntimeSlot` supplies the Session-scope applier, fence and
 running-worker `announce`; Home supplies `HomeProfileItems` for learned notes.
 
 ## Invariants

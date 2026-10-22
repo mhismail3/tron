@@ -13,7 +13,7 @@ import { INVOCATION_RECEIPT_TYPE } from "../kernel/run/invocation-receipts.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import type { RunMarkerStore } from "../kernel/run/run-markers.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { chatSettingChange } from "../../test-support/chat-settings-change.js";
+import { sessionSettingChange } from "../../test-support/session-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 describe("compaction cancellation with the pinned runtime", { concurrent: false }, () => {
@@ -191,8 +191,8 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
       enabled: "context.compaction.enabled", reserveTokens: "context.compaction.reserveTokens", keepRecentTokens: "context.compaction.keepRecentTokens",
       thinkingLevel: "model.thinking[role=summarizer]", instructions: "context.compaction.instructions",
     };
-    await settings.settingsChanges.change({ kind: "mac" }, Object.entries(compaction).map(([field, value]) => ({
-      key: keys[field]!, layer: "mac" as const, ...(value === null ? { op: "unset" as const } : { op: "set" as const, value }),
+    await settings.settingsChanges.change({ kind: "global" }, Object.entries(compaction).map(([field, value]) => ({
+      key: keys[field]!, layer: "global" as const, ...(value === null ? { op: "unset" as const } : { op: "set" as const, value }),
     })), { actor: { kind: "ui", id: "fixture" } });
     registry.refreshCompactionPolicies("global", cwd);
   };
@@ -279,7 +279,7 @@ describe("compaction operation admission and authoritative reconciliation", { co
       isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
     };
     let command = 0;
-    const switchModel = (modelId: string) => service.invoke(client, "settings.change", chatSettingChange("model", {
+    const switchModel = (modelId: string) => service.invoke(client, "settings.change", sessionSettingChange("model", {
       sessionId: fresh.id, expectedRuntimeGeneration: fresh.snapshot().runtimeGeneration, expectedModel: fresh.snapshot().model ?? null, provider: item.faux.getModel().provider, modelId, commandId: `model-change-${++command}`,
     }));
     // Negative control: losing the initiating token recreates the original

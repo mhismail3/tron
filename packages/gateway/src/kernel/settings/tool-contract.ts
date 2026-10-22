@@ -149,7 +149,7 @@ export interface ChangeResult {
   changes: ChangeOutcome[];
   /** A pending request: what the maintainer decides and the exact diff it binds to. */
   approval?: { requestId: string; digest: string; expiresAt: string };
-  /** A Home task worker target's signal for its applied Chat-layer changes (#1336). */
+  /** A Home task worker target's signal for its applied Session-scope changes (#1336). */
   signal?: SettingsSignal;
 }
 

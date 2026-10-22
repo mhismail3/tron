@@ -73,8 +73,8 @@ describe("gateway/session-catalog project-root resources lock", () => {
     const packagesUntrusted = await phone.request("packages.list", { cwd: nested });
     const hooksUntrusted = await phone.request("hooks.list", { cwd: nested });
     const decided = await phone.request("settings.change", {
-      commandId: gateway.commandId(), target: { kind: "mac" }, reason: "Trust the lock project",
-      changes: [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: true, qualifiers: { project: nested } }],
+      commandId: gateway.commandId(), target: { kind: "global" }, reason: "Trust the lock project",
+      changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project: nested } }],
     });
     expect(decided.ok, JSON.stringify(decided)).toBe(true);
     const packagesTrusted = await phone.request("packages.list", { cwd: nested });

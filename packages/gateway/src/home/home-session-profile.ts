@@ -1,5 +1,4 @@
 import type { ProfileModelRuntime, SessionProfile } from "../kernel/host/session-profile.js";
-import type { ModelRef } from "../protocol/types.js";
 import { HOME_TOOL_NAMES } from "./home-runtime-policy.js";
 
 export const HOME_SESSION_PROFILE_NAME = "home";
@@ -8,8 +7,6 @@ const HOME_MODULE_NAMES: readonly string[] = [
 ];
 export interface HomeSessionProfileServices {
   decision(sessionId: string, cwd: string): "home" | "ordinary" | "unnamed";
-  model(sessionId: string): ModelRef | undefined;
-  changed(sessionId: string, model: ModelRef): Promise<void>;
   runtime(): Promise<ProfileModelRuntime>;
 }
 
@@ -30,11 +27,8 @@ export function homeSessionProfile(services: () => HomeSessionProfileServices): 
     },
     projectTrust: "never", projectSettings: false, managedSubagents: false, directBash: false,
     tools: [...HOME_TOOL_NAMES], modelRuntime: "gateway", acquireModelRuntime: () => services().runtime(),
-    model: {
-      recorded: sessionId => services().model(sessionId),
-      changed: (sessionId, model) => services().changed(sessionId, model), physicalOnly: true,
-    },
-    launchDefaults: "settings-profile-layer", compaction: "disabled", settingsActor: "home", workerSettings: true,
+    physicalModelsOnly: true,
+    launchDefaults: "settings-home-recipe", compaction: "disabled", settingsActor: "home", workerSettings: true,
     chapter: true, subagentCatalog: false, profileChanges: true, requestPolicy: true,
   };
 }
