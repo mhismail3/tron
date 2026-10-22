@@ -1758,31 +1758,6 @@ struct TronSettingsRow<Trailing: View>: View {
     }
 }
 
-/// Centers its second subview (a pill) on one line of its first, hidden subview
-/// (a line of the title's font), and reports that line's baseline as its own, so
-/// a first-baseline stack puts the pill on the title line's center.
-private struct TronTitleLineCenteredLayout: Layout {
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard subviews.count == 2 else { return .zero }
-        let line = subviews[0].sizeThatFits(.unspecified), pill = subviews[1].sizeThatFits(.unspecified)
-        return CGSize(width: pill.width, height: max(line.height, pill.height))
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard subviews.count == 2 else { return }
-        for subview in subviews {
-            subview.place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: .unspecified)
-        }
-    }
-
-    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
-                           subviews: Subviews, cache: inout ()) -> CGFloat? {
-        guard subviews.count == 2, guide == .firstTextBaseline || guide == .lastTextBaseline else { return nil }
-        let line = subviews[0].dimensions(in: .unspecified)
-        return bounds.midY - line.height / 2 + line[guide]
-    }
-}
-
 /// A settings row's labels and trailing control. The control keeps its natural
 /// width when both fit on one line, so the subtitle uses the rest of the row.
 /// When they compete, the control caps at 45% and truncates, but never below the
