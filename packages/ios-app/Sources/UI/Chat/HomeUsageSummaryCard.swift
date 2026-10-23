@@ -88,7 +88,7 @@ struct HomeUsageSummaryCard: View {
         return !usageProviders.isEmpty
     }
 
-    /// Only the card's first read shows the pulse: a refresh keeps the
+    /// Only the card's first read shows placeholders: a refresh keeps the
     /// published snapshots on screen until the new ones replace them. With
     /// every provider hidden there is nothing to wait for.
     private var isLoading: Bool {
@@ -109,9 +109,12 @@ struct HomeUsageSummaryCard: View {
         VStack(spacing: 0) {
             if showsCard {
                 Button(action: onChooseProviders) {
-                    // Once the providers are known their rows lay out hidden under the
-                    // pulse, so the card already has its final height when they fade in.
-                    ZStack {
+                    VStack(alignment: .leading, spacing: 10) {
+                        // The catalog cannot name a provider before it arrives. Once
+                        // known, names remain visible while only usage is loading.
+                        if model.providerCatalog(for: .global) == nil {
+                            ProviderUsageLoadingLine()
+                        }
                         VStack(alignment: .leading, spacing: 10) {
                             if shownProviders.isEmpty && !isLoading {
                                 Text("No providers shown · Tap to choose")
@@ -125,11 +128,6 @@ struct HomeUsageSummaryCard: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .opacity(isLoading ? 0 : 1)
-                        if isLoading {
-                            TronLoadingState(label: "Loading account usage", accent: .tronEmerald)
-                                .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
-                        }
                     }
                     .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)
                     .padding(.vertical, 10)
@@ -160,7 +158,7 @@ struct HomeUsageSummaryCard: View {
             await load()
         }
         .onChange(of: model.profileRevision) { _, _ in usageController.begin(clear: true) }
-        .onChange(of: model.providerInvalidationGeneration) { _, _ in usageController.begin(clear: true) }
+        .onChange(of: model.providerInvalidationGeneration) { _, _ in usageController.begin() }
     }
 
     /// A provider row: its name on the left, vertically centered against its
@@ -195,11 +193,11 @@ struct HomeUsageSummaryCard: View {
     @ViewBuilder
     private func usageColumns(_ provider: ProviderSummary, _ snapshot: ProviderUsageSnapshot?) -> some View {
         if isLoading {
-            // Static stand-ins at the final height: the card's pulse is the loading indicator.
-            HStack(alignment: .top, spacing: HomeUsageCardLayout.columnSpacing) {
-                ForEach(ProviderUsagePresentation.loadingPlaceholderParts, id: \.text) { part in
-                    usageColumn(part, color: Color.tronTextMuted, minimumWidth: columnMinimumWidth, probe: nil)
-                        .redacted(reason: .placeholder)
+            ProviderUsageLoadingPlaceholder {
+                HStack(alignment: .top, spacing: HomeUsageCardLayout.columnSpacing) {
+                    ForEach(ProviderUsagePresentation.loadingPlaceholderParts, id: \.text) { part in
+                        usageColumn(part, color: Color.tronTextMuted, minimumWidth: columnMinimumWidth, probe: nil)
+                    }
                 }
             }
         } else if let snapshot {

@@ -299,6 +299,9 @@ struct SessionContextSheet: View {
                         }
                 }
             }
+            .onChange(of: displayedPresentation?.cwd) { _, _ in
+                workspacePresentation = .loading
+            }
             .onChange(of: presentationActivity) { previous, current in
                 guard !previous.allowsPresentationPublication,
                       current.allowsPresentationPublication else { return }
@@ -643,7 +646,8 @@ struct SessionContextSheet: View {
         workspaceLoadGeneration &+= 1
         let generation = workspaceLoadGeneration
         guard workspaceRefreshIdentity == identity, !Task.isCancelled else { return }
-        workspacePresentation = .loading
+        // Covering this sheet cancels its read, not its published workspace.
+        // Keep that value while the resumed read is in flight.
         // Scene activation can precede transport/subscription reconciliation.
         // The task keys off admitted authority, so readiness restarts this read
         // immediately instead of leaving a transient error until another wake.
@@ -652,7 +656,8 @@ struct SessionContextSheet: View {
                 let inspection = try await model.workspaceInspection.inspect(sessionID: sessionID)
                 guard generation == workspaceLoadGeneration, !Task.isCancelled,
                       workspaceRefreshIdentity == identity else { return }
-                workspacePresentation = SessionWorkspaceRowPresentation.resolve(inspection)
+                let next = SessionWorkspaceRowPresentation.resolve(inspection)
+                if next != workspacePresentation { workspacePresentation = next }
             } catch is CancellationError {
                 return
             } catch {

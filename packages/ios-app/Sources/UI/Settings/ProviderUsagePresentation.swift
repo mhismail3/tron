@@ -477,10 +477,24 @@ enum ProviderUsageLoadingLineEngine {
 /// so the row holds its height while the snapshot is in flight and the resolved
 /// text can crossfade in without a layout jump.
 struct ProviderUsageLoadingLine: View {
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+
+    var body: some View {
+        ProviderUsageLoadingPlaceholder {
+            Text(verbatim: ProviderUsagePresentation.loadingPlaceholder)
+                .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// One animation/material owner for Providers row subtext and dashboard columns.
+/// The caller supplies its final layout so loading never replaces the whole row.
+struct ProviderUsageLoadingPlaceholder<Content: View>: View {
+    @ViewBuilder let content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     @State private var isVisible = false
 
     var body: some View {
@@ -492,11 +506,9 @@ struct ProviderUsageLoadingLine: View {
                 surfaceActive: presentationActivity.allowsContinuousAnimation && isVisible
             )
         )) { context in
-            Text(verbatim: ProviderUsagePresentation.loadingPlaceholder)
-                .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
+            content()
                 .foregroundStyle(Color.tronTextMuted)
                 .redacted(reason: .placeholder)
-                .fixedSize(horizontal: false, vertical: true)
                 .opacity(reduceMotion
                     ? ProviderUsageLoadingLineEngine.maximumOpacity
                     : ProviderUsageLoadingLineEngine.opacity(
