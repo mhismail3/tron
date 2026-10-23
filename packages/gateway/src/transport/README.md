@@ -12,7 +12,7 @@ and diagnostic exports.
 `server.ts`, `gateway-service.ts` (the RPC switch; `scripts/tron docs rpc` lists it),
 `command-receipts.ts`, `session-sync.ts`, `ordered-outbound-queue.ts`,
 `connection-policy.ts`, `lan-endpoint.ts`, `tailscale-peer.ts`, `upload-http.ts`,
-`request-span.ts`, `stall-diagnostics.ts`, `logger.ts` (`GatewayLogger`) and
+`stall-diagnostics.ts`, `logger.ts` (`GatewayLogger`) and
 `diagnostic-export.ts`.
 
 ## Contract
@@ -107,7 +107,7 @@ heartbeat-refreshed memory reading with its age.
 | `http.upload-cleanup` | warning | Discarding an abandoned upload failed other than by conflict or not-found; owned bytes remain |
 | `rpc.error` | warning for a `GatewayError` other than `internal`; error, with `error`, for a fault or `internal` | An RPC handler threw: `method`, `requestID`, `connectionId`, `sessionId`, `commandId`, `code`, `outcome`, `reason`, `operationId`, `ageMs` |
 | `rpc.received` | info | An admitted `system.logs.export` reached its handler (`outcome=admitted`); joins the phone's `logs.export.requested` to `rpc.completed` |
-| `rpc.completed` | debug for a success under `SLOW_RPC_WARNING_MS` (1,000 ms), or `SLOW_PROMPT_WARNING_MS` (250 ms) for a prompt; warning at or above it, on failure or on `connectionClosed` | Every RPC end: correlation, `outcome`, `durationMs`, `stages` (`request-span.ts`, most expensive first, ≤ 1,024 bytes) and `unaccountedMs`. Prompt spans name lane waits, inventory admission, receipt persistence and response write; `settings.resolve` names its store awaits as finite `settings.*` stages |
+| `rpc.completed` | debug for a success under `SLOW_RPC_WARNING_MS` (1,000 ms), or `SLOW_PROMPT_WARNING_MS` (250 ms) for a prompt; warning at or above it, on failure or on `connectionClosed` | Every RPC end: correlation, `outcome`, `durationMs`, `stages` (`util/request-span.ts`, most expensive first, ≤ 1,024 bytes) and `unaccountedMs`. Prompt spans name lane waits, inventory admission, receipt persistence and response write; `settings.resolve` names its store awaits as finite `settings.*` stages |
 | `receipt.completed-persist-failed` | warning | The detached completed-receipt write after an accepted `session.prompt` response failed (`gateway-service.ts`); the pending receipt stays the replay fence |
 | `rpc.cancelled` | debug under `SLOW_RPC_WARNING_MS`; warning at or above it | A `{type:"cancel",id}` frame named a disposable read this connection owns, or a shared `session.open` lost its last waiter: `stage` (innermost open), `durationMs`, `stages`; replaces `rpc.completed`. Mutations and prompts are never cancelled |
 | `gateway.shed` | warning | A disposable read outlived its `DISPOSABLE_READ_DEADLINES_MS` deadline (`reason=deadline`), or a cold load (raised from `runtime-registry.ts`) met a heap past `HEAP_REFUSAL_SHARE` (`reason=heap`, `admission` `open`/`import`, heap bytes); the client gets `busy` with `retryAfterMs`; replaces `rpc.completed` |

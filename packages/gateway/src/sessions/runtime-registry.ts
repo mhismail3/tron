@@ -41,7 +41,7 @@ import {
 import { AsyncMutex } from "../util/async-mutex.js";
 import { QueuedWorkGate } from "../util/queued-work-gate.js";
 import { abortableRead } from "../util/abortable-read.js";
-import { currentRequestSpan, stage } from "../transport/request-span.js";
+import { currentRequestSpan, stage } from "../util/request-span.js";
 import type { ResourceRecorder, ResourceRuntimeEntry } from "../transport/stall-diagnostics.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";

@@ -1,6 +1,6 @@
 import { type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type GitResult, type FixedSetting, type Resolution, type SettingsTarget, TIERS, type LayerId, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
 import type { MacTerminalKeys } from "../security/mac-terminal.js";
-import { stage } from "../transport/request-span.js";
+import { stage } from "../util/request-span.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";

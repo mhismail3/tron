@@ -20,7 +20,7 @@ import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
-import { bytes, RequestSpan, runInRequestSpan, stage, wait } from "./request-span.js";
+import { bytes, RequestSpan, runInRequestSpan, stage, wait } from "../util/request-span.js";
 import { TailscalePeerPaths, type PeerPathLookup, type PeerPathReader } from "./tailscale-peer.js";
 import { LanEndpoint, httpListenerOptions, type LanAdvertisement, type LanEndpointConfig, type LanListenerLimits } from "./lan-endpoint.js";
 import { isTailscaleAddress } from "../config.js";

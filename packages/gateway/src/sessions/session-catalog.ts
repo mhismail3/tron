@@ -3,7 +3,7 @@ import { lstat, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { backgroundWork, type BackgroundWorkRegistration } from "../background-work.js";
 import { isIgnoredCatalogDirectory } from "./catalog-discovery.js";
-import { offLoop } from "../transport/request-span.js";
+import { offLoop } from "../util/request-span.js";
 import type {
   CatalogMetadataIndex,
   CatalogMetadataIndexRow,

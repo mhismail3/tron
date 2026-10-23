@@ -27,7 +27,7 @@ import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry, type GatewayWorkHandle } from "../kernel/run/gateway-work-registry.js";
-import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.js";
+import { RequestSpan, runInRequestSpan, stage } from "../util/request-span.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "./session-catalog.js";

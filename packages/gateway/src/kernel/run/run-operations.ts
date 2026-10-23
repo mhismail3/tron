@@ -1,4 +1,4 @@
-import { stage } from "../../transport/request-span.js";
+import { stage } from "../../util/request-span.js";
 import { RunEventsOwner } from "./run-events.js";
 import type { SessionConfigurationBlocker } from "../../protocol/types.js";
 import { admitPrompt } from "./prompt-admission.js";

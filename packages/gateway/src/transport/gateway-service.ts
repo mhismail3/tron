@@ -1,6 +1,6 @@
 import type { MacTerminalHost } from "../security/mac-terminal.js";
 import { abortableRead } from "../util/abortable-read.js";
-import { offLoop, stage } from "./request-span.js";
+import { offLoop, stage } from "../util/request-span.js";
 import { join } from "node:path";
 import type { AuthType } from "../kernel/pi/ai.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";

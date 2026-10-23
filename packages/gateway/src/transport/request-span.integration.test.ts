@@ -22,7 +22,7 @@ import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService, type GatewayServiceDependencies } from "./gateway-service.js";
 import { GatewayLogger, type LogRecord } from "./logger.js";
 import { GatewayServer } from "./server.js";
-import { RequestSpan, runInRequestSpan } from "./request-span.js";
+import { RequestSpan, runInRequestSpan } from "../util/request-span.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 /**

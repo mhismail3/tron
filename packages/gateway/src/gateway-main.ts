@@ -39,7 +39,7 @@ import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transp
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
 import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-diagnostics.js";
-import { requestsCompetingForLoop } from "./transport/request-span.js";
+import { requestsCompetingForLoop } from "./util/request-span.js";
 import { backgroundWork } from "./background-work.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
 import { OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";

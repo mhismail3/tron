@@ -56,7 +56,7 @@ NVM or a user shim. PATH then gains `/opt/homebrew/bin` last so shells find `git
 `backgroundWork` (started by `gateway-main.ts` once the listener serves) decides when
 recurring work runs. Jobs take turns one slice at a time, yielding with
 `setImmediate`. A due slice waits while a request competes for the loop
-(`requestsCompetingForLoop()` in `transport/request-span.ts`; receipt-backed off-loop
+(`requestsCompetingForLoop()` in `util/request-span.ts`; receipt-backed off-loop
 mutations do not count) or while loop-delay p99 is at or above
 `BACKGROUND_PAUSE_P99_MS`, re-checking every `BACKGROUND_PAUSE_RECHECK_MS`. A long
 slice awaits `backgroundWork.yieldToLoop()` between batches. A rejecting slice is

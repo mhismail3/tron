@@ -3,7 +3,7 @@ import { PromptAttempt } from "./prompt-attempt.js";
 import type { ImageContent } from "../pi/ai.js";
 import type { SessionPhase } from "../../protocol/types.js";
 import { GatewayError, asUncertainOutcome } from "../../errors.js";
-import { count, wait } from "../../transport/request-span.js";
+import { count, wait } from "../../util/request-span.js";
 import { withInvocationContext } from "../../extensions/owner-attribution.js";
 import { safeJson } from "../projection/projection.js";
 import type { InputTrigger } from "../host/input-admission.js";
