@@ -2001,10 +2001,6 @@ export class GatewayService {
           ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.models(modelRuntime, params.cursor, params.limit, client.signal), client.signal)
           : this.models(modelRuntime, params.cursor, params.limit, client.signal);
       }
-      case "model.recent":
-        // Global and session-free: usage recency is one Gateway-wide preference,
-        // not a per-session projection. params requires no fields.
-        return safeJson({ models: this.dependencies.sessions.recentModelUsage() });
       case "auth.begin": {
         const sessionId = optionalString(params.sessionId, "sessionId", 200);
         const providerId = string(params.providerId, "providerId", { max: 120 });

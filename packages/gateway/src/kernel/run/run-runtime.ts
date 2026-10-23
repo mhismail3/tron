@@ -99,7 +99,6 @@ export abstract class RunRuntime<FixedAt> {
     markers: RunMarkerStore;
     modules: ModuleHost;
     isSessionPresented(id: string): boolean;
-    noteModelUsed?: (id: string, model: { provider: string; id: string }) => void;
     compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
     persistenceDiagnostic?: (id: string, code: string) => void;
     stopSteeringDiagnostic?: (event: {

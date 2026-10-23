@@ -32,7 +32,6 @@ import type {
 } from "../protocol/types.js";
 import { SessionAttentionStore, type SessionAttentionProjection } from "../kernel/projection/session-attention-store.js";
 import { SessionArchiveStore } from "./session-archive-store.js";
-import { RecentModelStore, type RecentModelUsage } from "../providers/recent-models.js";
 import {
   SessionPresentationPresenceRegistry,
   type SessionPresentationPresenceProjection,
@@ -561,7 +560,6 @@ export class RuntimeRegistry {
   private readonly processActivityRecency = new ProcessActivityRecency();
   private readonly attention: SessionAttentionStore;
   private readonly archive: SessionArchiveStore;
-  private readonly recentModels: RecentModelStore;
   private readonly presentationPresence = new SessionPresentationPresenceRegistry();
   private readonly catalogMetadataIndex: CatalogMetadataIndex;
   /** The catalog owner: one row per canonical session file (G-1c switches the
@@ -637,7 +635,6 @@ export class RuntimeRegistry {
   private workspaceDisposed = false;
   private catalogIndexDisposed = false;
   private sessionCatalogDisposed = false;
-  private recentModelsDisposed = false;
 
   constructor(
     private readonly options: {
@@ -655,8 +652,6 @@ export class RuntimeRegistry {
       broadcast: SessionBroadcast;
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
       sessionListChanged: () => void;
-      /** Global broadcast seam for `models.recentChanged`. */
-      recentModelsChanged?: () => void;
       sessionRekeyed?: (previousId: string, nextId: string) => void;
       beforeSessionRekey?: (previousId: string, nextId: string) => Promise<void>;
       beforeSessionDelete?: (sessionId: string) => Promise<void>;
@@ -735,7 +730,6 @@ export class RuntimeRegistry {
     this.markers = new RunMarkerStore(options.tronHome);
     this.attention = new SessionAttentionStore(options.tronHome);
     this.archive = new SessionArchiveStore(options.tronHome);
-    this.recentModels = new RecentModelStore(options.tronHome);
     this.catalogMetadataIndex = new CatalogMetadataIndex(join(options.tronHome, "gateway"), options.catalogIndexFailure);
     this.sessionCatalog = new SessionCatalog({
       catalogRoot: () => this.catalogDirectory(),
@@ -1031,22 +1025,6 @@ export class RuntimeRegistry {
   /** Drain admission is owned here; readers derive it from the canonical phase rather than mirroring a stop flag. */
   get isAdministrativeDrainStarted(): boolean { return this.drainPhase !== "idle"; }
 
-  /** Shared model recency for the model picker; newest first and bounded. */
-  recentModelUsage(): RecentModelUsage[] { return this.recentModels.entries(); }
-
-  /**
-   * Bounded best-effort recency for one admitted user-session run. Subagent
-   * sessions never acquire a Gateway runtime, so every reporting slot is a user
-   * session. A failed preference write must not disturb the admitted run.
-   */
-  private async noteModelUsed(sessionId: string, model: { provider: string; id: string }): Promise<void> {
-    try {
-      if (await this.recentModels.record(model.provider, model.id)) this.options.recentModelsChanged?.();
-    } catch {
-      this.options.persistenceDiagnostic?.(sessionId, "recent-model-record-failed");
-    }
-  }
-
   async initialize(onPhase?: (phase: "catalog-warming" | "attention-recovery") => void): Promise<void> {
     // Lifecycle owners load first (Home's designation), so no session opens with a late profile.
     for (const lifecycle of this.lifecycles()) await lifecycle.initialize();
@@ -1055,7 +1033,6 @@ export class RuntimeRegistry {
     // optimization. The later evidence cut therefore cannot omit a marker already admitted to this pass.
     await this.attention.initialize();
     await this.archive.initialize();
-    await this.recentModels.initialize();
     // The catalog owner loads its durable rows, reconciles once, and watches the folder for external
     // writers; the periodic pass is the backstop for any event the watcher could not see (G-9 moves
     // both into the scheduler). A reader joins that first cut rather than walking the folder itself.
@@ -1742,7 +1719,6 @@ export class RuntimeRegistry {
       extensionActivityRecency: this.extensionActivityRecency,
       processActivityRecency: this.processActivityRecency,
       workRegistry: this.workRegistry,
-      noteModelUsed: (sessionId: string, model: { provider: string; id: string }) => { void this.noteModelUsed(sessionId, model); },
       ...(this.options.persistenceDiagnostic ? { persistenceDiagnostic: this.options.persistenceDiagnostic } : {}),
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
       ...(this.options.stopSteeringDiagnostic ? { stopSteeringDiagnostic: this.options.stopSteeringDiagnostic } : {}),
@@ -4642,11 +4618,6 @@ export class RuntimeRegistry {
           this.catalogIndexDisposed = true;
         }
       })());
-    }
-    // Model recency is recorded fire-and-forget from an admitted run, so a
-    // preference write can equally outlive this owner.
-    if (!this.recentModelsDisposed) {
-      pending.push(this.recentModels.dispose().then(() => { this.recentModelsDisposed = true; }));
     }
     // The archive backstop clears records fire-and-forget while sessions
     // publish, and a summary published during slot shutdown can start one more.

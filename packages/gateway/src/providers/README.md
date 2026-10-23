@@ -72,6 +72,10 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
   The same policy owns `initialModel`: new runtimes refresh eligibility before accepting a
   saved default or selecting the first eligible fallback; existing transcripts never use it.
   The concrete session policy remains the sole owner of budgets and canonical overrides.
+- **Model recency.** The provider descriptor owns `RecentModelStore`, `model.recent`
+  and the `modelUsed` hook. Only admitted user-input runs record usage; preference
+  writes stay off the run path, failures diagnose, and shutdown drains writes before
+  shared stores release. The kernel never holds or forwards the preference store.
 - Context windows, recents and release dates:
   [runtime configuration](../admin/runtime-configuration.md#context-windows).
   Model fallback queues: [settings contract](../../docs/settings-contract.md).

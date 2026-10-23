@@ -373,7 +373,6 @@ export interface RuntimeSlotDependencies {
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
   /** Bounded recency for the shared model picker. Called once per admitted
    * user-session run start; implementations stay off the run's critical path. */
-  noteModelUsed?: (sessionId: string, model: { provider: string; id: string }) => void;
   /** Clears retained archive state before the Gateway admits a run, so a
    * session can never be working while it is hidden from the dashboard. Called
    * inside this slot's lane after `assertUsable()` and before run ownership

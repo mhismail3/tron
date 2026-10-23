@@ -274,7 +274,8 @@ const homeComposition: HomeComposition = {
   homeTaskDiagnostic,
 };
 const { modules, home } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
-  () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch }));
+  () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch,
+    recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}), persistenceDiagnostic }));
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),
   agentDir: config.agentDir,
@@ -305,6 +306,9 @@ const resourceSampler: ResourceSampler = new ResourceSampler({
 // Late-bound: the scheduler is constructed after the registry, and archiving
 // must not hide a session whose automation run is already dispatched.
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
+const persistenceDiagnostic = (sessionId: string, code: string) => logger.log("warning", "Session persistence diagnostic", {
+  event: code, source: "session", sessionId,
+});
 const sessions = new RuntimeRegistry({
   modules, agentDir: config.agentDir,
   createModelRuntime: () => createProviderModelRuntime(config.agentDir),
@@ -320,7 +324,6 @@ const sessions = new RuntimeRegistry({
   broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
   sessionListChanged: () => transport?.notifySessionListChanged(),
-  recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}),
   sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
   beforeSessionRekey: (previousId, nextId) => automations.rekeySessionTarget(previousId, nextId),
   beforeSessionDelete: (sessionId) => automations.blockSessionTarget(sessionId),
@@ -328,9 +331,7 @@ const sessions = new RuntimeRegistry({
     auth.cancelSession(sessionId);
     transport?.revokeSessionTerminals(sessionId);
   },
-  persistenceDiagnostic: (sessionId, code) => logger.log("warning", "Session persistence diagnostic", {
-    event: code, source: "session", sessionId,
-  }),
+  persistenceDiagnostic,
   archiveDiagnostic: (diagnostic) => diagnostic.outcome === "failure"
     // Privacy: outcome and stage only. No session ID or path reaches logs.
     ? logger.log("warning", `Session archive state was not persisted (${diagnostic.stage})`, {

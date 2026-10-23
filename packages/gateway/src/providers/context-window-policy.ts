@@ -1,4 +1,6 @@
 import type { ContextPolicyLifecycle, ModuleDescriptor } from "../kernel/host/module-host.js";
+import { RecentModelStore, type RecentModelSignals } from "./recent-models.js";
+import { safeJson } from "../kernel/projection/projection.js";
 import { initialModel, type OpenAIModelEligibility } from "./openai-model-eligibility.js";
 import { existsSync } from "node:fs";
 import type { Model } from "../kernel/pi/ai.js";
@@ -255,14 +257,27 @@ export class SessionContextWindowPolicy {
   }
 }
 
-export const createContextWindowModule = (eligibility: () => OpenAIModelEligibility): ModuleDescriptor => ({
+export const createContextWindowModule = (eligibility: () => OpenAIModelEligibility, signals: () => RecentModelSignals): ModuleDescriptor<RecentModelStore> => ({
   name: "tron-context-window",
   purpose: "Keeps the session's model context window applied as the model changes.",
   tools: [], commands: [],
-  start: () => ({
-    hooks: { modelRuntimeInstalled: () => ({ attach: runtime => eligibility().attachRuntime(runtime), initialModel }) },
-    extension: session => contextWindowExtension(() => session.contextPolicy()),
-  }),
+  start: host => {
+    const recents = new RecentModelStore(host.tronHome);
+    return {
+      contract: recents,
+      rpc: { "model.recent": { kind: "read", handle: async () => safeJson({ models: recents.entries() }) } },
+      hooks: {
+        modelRuntimeInstalled: () => ({ attach: runtime => eligibility().attachRuntime(runtime), initialModel }),
+        modelUsed: (sessionId, model) => {
+          void recents.record(model.provider, model.id).then(changed => {
+            if (changed) signals().recentModelsChanged?.();
+          }).catch(() => signals().persistenceDiagnostic?.(sessionId, "recent-model-record-failed"));
+        },
+        kernelLifecycle: () => ({ initialize: () => recents.initialize(), started: () => {}, closing: () => {}, dispose: () => recents.dispose() }),
+      },
+      extension: session => contextWindowExtension(() => session.contextPolicy()),
+    };
+  },
 });
 
 /** Hook the owner, not SDK private lifecycle fields. Factories survive resource

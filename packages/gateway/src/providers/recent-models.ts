@@ -18,6 +18,11 @@ export interface RecentModelUsage {
   lastUsedAt: string;
 }
 
+export interface RecentModelSignals {
+  recentModelsChanged?: (() => void) | undefined;
+  persistenceDiagnostic?: ((sessionId: string, code: string) => void) | undefined;
+}
+
 interface RecentModelsDocument {
   version: 1;
   /** Newest first, unique by provider/id. */

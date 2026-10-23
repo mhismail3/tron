@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, recentModelsOf } from "../../test-support/gateway-registry.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -98,23 +98,23 @@ describe("recent model usage", { concurrent: false }, () => {
       const firstRecorded = fixture_.nextRecentChange();
       await run(slot, modelA, "first");
       await firstRecorded;
-      expect(fixture_.registry.recentModelUsage()[0]).toMatchObject({ id: "recent-a" });
+      expect(recentModelsOf(fixture_.registry).entries()[0]).toMatchObject({ id: "recent-a" });
       // The seeded list is already at the bound, so the newest run displaces the
       // oldest entry instead of growing the document.
-      expect(fixture_.registry.recentModelUsage()).toHaveLength(MAXIMUM_RECENT_MODELS);
-      expect(fixture_.registry.recentModelUsage().map((model) => model.id).slice(0, 3)).toEqual(["recent-a", "model-00", "model-01"]);
-      expect(fixture_.registry.recentModelUsage().some((model) => model.id === "model-11")).toBe(false);
+      expect(recentModelsOf(fixture_.registry).entries()).toHaveLength(MAXIMUM_RECENT_MODELS);
+      expect(recentModelsOf(fixture_.registry).entries().map((model) => model.id).slice(0, 3)).toEqual(["recent-a", "model-00", "model-01"]);
+      expect(recentModelsOf(fixture_.registry).entries().some((model) => model.id === "model-11")).toBe(false);
 
       const secondRecorded = fixture_.nextRecentChange();
       await run(slot, modelB, "second");
       await secondRecorded;
-      expect(fixture_.registry.recentModelUsage().map((model) => model.id).slice(0, 3)).toEqual(["recent-b", "recent-a", "model-00"]);
+      expect(recentModelsOf(fixture_.registry).entries().map((model) => model.id).slice(0, 3)).toEqual(["recent-b", "recent-a", "model-00"]);
 
       // Reusing a model moves it to the front instead of adding a second row.
       const thirdRecorded = fixture_.nextRecentChange();
       await run(slot, modelA, "third");
       await thirdRecorded;
-      const usage = fixture_.registry.recentModelUsage();
+      const usage = recentModelsOf(fixture_.registry).entries();
       expect(usage.map((model) => model.id).slice(0, 3)).toEqual(["recent-a", "recent-b", "model-00"]);
       expect(new Set(usage.map((model) => `${model.provider}/${model.id}`)).size).toBe(usage.length);
       expect(usage.every((model) => Number.isFinite(Date.parse(model.lastUsedAt)))).toBe(true);
@@ -126,7 +126,7 @@ describe("recent model usage", { concurrent: false }, () => {
         code: "conflict",
         message: expect.stringContaining("Subagent sessions are informational"),
       });
-      expect(fixture_.registry.recentModelUsage().map((model) => model.id).slice(0, 3)).toEqual(["recent-a", "recent-b", "model-00"]);
+      expect(recentModelsOf(fixture_.registry).entries().map((model) => model.id).slice(0, 3)).toEqual(["recent-a", "recent-b", "model-00"]);
     } finally {
       await rm(fixture_.root, { recursive: true, force: true });
     }
@@ -148,7 +148,7 @@ describe("recent model usage", { concurrent: false }, () => {
       expect(document.models.map((entry) => entry.id)).toContain("recent-a");
       // The owner is closed: a later admission cannot publish into the
       // directory this disposal released.
-      const store = (fixture_.registry as unknown as { recentModels: { record(provider: string, id: string): Promise<boolean> } }).recentModels;
+      const store = recentModelsOf(fixture_.registry);
       expect(await store.record("session-archive-fixture", "faux-1")).toBe(false);
       expect(JSON.parse(await readFile(path, "utf8"))).toEqual(document);
     } finally {
@@ -176,7 +176,7 @@ describe("recent model usage", { concurrent: false }, () => {
       await registry.initialize();
       await awaitCatalogCut(registry);
     await awaitCatalogCut(registry);
-      expect(registry.recentModelUsage()).toEqual([]);
+      expect(recentModelsOf(registry).entries()).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

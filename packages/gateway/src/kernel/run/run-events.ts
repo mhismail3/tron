@@ -119,7 +119,7 @@ export class RunEventsOwner {
             // Recency follows the admitted user run, so a background or
             // assistant-continuation start never reports the selected model.
             const usedModel = this.operations.runtime.session.model;
-            if (usedModel) this.operations.dependencies.noteModelUsed?.(this.operations.id, { provider: usedModel.provider, id: usedModel.id });
+            if (usedModel) this.operations.dependencies.modules.policy("modelUsed")?.(this.operations.id, { provider: usedModel.provider, id: usedModel.id });
           } else this.operations.prepareAssistantOwnedToolSegment();
         }
         const activeInvocation = this.operations.runInvocations.invocationForOperation(this.operations.activeOperationId);
