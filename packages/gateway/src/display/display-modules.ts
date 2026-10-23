@@ -3,7 +3,7 @@ import type { DisplayArtifactStore } from "./display-artifact-store.js";
 import type { BrowserLiveViewRegistry } from "./browser-live-view.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 import { createTronDisplayExtension } from "./tron-display-extension.js";
-import { admitToolDisplayProjection } from "./display-contract.js";
+import { admitToolDisplayProjection, displayReferences } from "./display-contract.js";
 import { observeTrustedAgentBrowserResult } from "./browser-live-view-adapter.js";
 import type { ToolResultProjection } from "../kernel/projection/tool-result.js";
 import { createTronNativeCaptureExtension } from "./tron-native-capture-extension.js";
@@ -17,7 +17,7 @@ export function createDisplayModule(services: () => DisplayModuleServices): Modu
     start: host => {
       const workspace = host.contract(workspaceModule);
       const projection: ToolResultProjection = {
-        display: admitToolDisplayProjection,
+        display: admitToolDisplayProjection, references: displayReferences,
         observeBrowserResult: input => {
           const views = services().liveViews;
           return views ? observeTrustedAgentBrowserResult({ ...input, views }) : input.result;

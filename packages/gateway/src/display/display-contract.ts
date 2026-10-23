@@ -246,18 +246,20 @@ function admitDisplayProjection(toolName: string | undefined, value: unknown): D
   };
 }
 
-export function displayArtifactIDs(entries: readonly unknown[]): string[] {
+export function displayReferences(entries: readonly unknown[], sessionId: string): { artifacts: string[]; liveViews: Set<string> } {
   const ids = new Set<string>();
+  const liveViews = new Set<string>();
   for (const entry of entries) {
     if (!entry || typeof entry !== "object") continue;
-    const value = entry as { type?: unknown; message?: { role?: unknown; toolName?: unknown; details?: unknown } };
+    const value = entry as { type?: unknown; message?: { role?: unknown; toolName?: unknown; toolCallId?: unknown; details?: unknown } };
     if (value.type !== "message" || value.message?.role !== "toolResult") continue;
     const details = value.message.details;
-    const display = admitDisplayProjection(
+    const display = admitToolDisplayProjection(
       typeof value.message.toolName === "string" ? value.message.toolName : undefined,
-      details,
+      details, value.message.toolCallId, sessionId,
     );
     if (display?.artifact) ids.add(display.artifact.id);
+    if (display?.liveView) liveViews.add(`${display.liveView.viewId}\0${display.liveView.generation}`);
     const nested = details && typeof details === "object" && !Array.isArray(details)
       ? (details as Record<string, unknown>).tronNested : undefined;
     const nestedDisplays = nested && typeof nested === "object" && !Array.isArray(nested)
@@ -267,6 +269,14 @@ export function displayArtifactIDs(entries: readonly unknown[]): string[] {
       const nestedDisplay = admitDisplayProjection("display", { display: (item as Record<string, unknown>).display });
       if (nestedDisplay?.artifact) ids.add(nestedDisplay.artifact.id);
     }
+    const browserLiveViews = nested && typeof nested === "object" && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>).browserLiveViews : undefined;
+    if (Array.isArray(browserLiveViews)) for (const item of browserLiveViews) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const reference = admitBrowserToolReference("agent_browser", value.message.toolCallId,
+        { tronBrowserReference: (item as Record<string, unknown>).receipt }, sessionId);
+      if (reference) liveViews.add(`${reference.descriptor.viewId}\0${reference.descriptor.generation}`);
+    }
   }
-  return [...ids];
+  return { artifacts: [...ids], liveViews };
 }

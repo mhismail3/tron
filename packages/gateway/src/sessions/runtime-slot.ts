@@ -149,10 +149,8 @@ import type { DisplayArtifactStore } from "../display/display-artifact-store.js"
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { tronContext } from "../workspace/tron-core-extension.js";
 import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
-import { displayArtifactIDs } from "../display/display-contract.js";
 import type { ToolDisplayProjection } from "../kernel/projection/tool-result.js";
 import { trustedExtensionOriginKind } from "../kernel/projection/extension-origin.js";
-import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "../kernel/run/direct-bash-process-owner.js";
 import type { ModuleHost, SessionContext } from "../kernel/host/module-host.js";
@@ -1532,24 +1530,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     const key = `${manager.getSessionId()}\0${leafID ?? "root"}`;
     if (this.displayArtifactReferenceKey !== key) {
       const branch = leafID ? manager.getBranch(leafID) : [];
-      this.displayArtifactReferences = displayArtifactIDs(branch);
-      this.browserLiveReferences.clear();
-      for (const entry of branch) {
-        if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
-        const details = entry.message.details;
-        const display = this.displayProjection(entry.message.toolName, details, entry.message.toolCallId, manager.getSessionId());
-        if (display?.liveView) this.browserLiveReferences.add(`${display.liveView.viewId}\0${display.liveView.generation}`);
-        const nested = details && typeof details === "object" && !Array.isArray(details)
-          ? (details as Record<string, unknown>).tronNested : undefined;
-        const browserLiveViews = nested && typeof nested === "object" && !Array.isArray(nested)
-          ? (nested as Record<string, unknown>).browserLiveViews : undefined;
-        if (Array.isArray(browserLiveViews)) for (const item of browserLiveViews) {
-          if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-          const reference = admitBrowserToolReference("agent_browser", entry.message.toolCallId,
-            { tronBrowserReference: (item as Record<string, unknown>).receipt }, manager.getSessionId());
-          if (reference) this.browserLiveReferences.add(`${reference.descriptor.viewId}\0${reference.descriptor.generation}`);
-        }
-      }
+      const references = this.dependencies.modules.policy("toolResultProjection")?.().references(branch, manager.getSessionId());
+      this.displayArtifactReferences = references?.artifacts ?? [];
+      this.browserLiveReferences = references?.liveViews ?? new Set();
       this.displayArtifactReferenceKey = key;
     }
   }
@@ -5316,7 +5299,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   async reconcileDisplayArtifactOwnership(): Promise<void> {
     const manager = this.runtime.session.sessionManager;
-    const references = new Set(displayArtifactIDs(manager.getEntries()));
+    const references = new Set(this.dependencies.modules.policy("toolResultProjection")?.().references(manager.getEntries(), this.id).artifacts ?? []);
     await this.dependencies.displayArtifacts.reconcileSession(this.id, references);
   }
 

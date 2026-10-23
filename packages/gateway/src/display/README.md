@@ -17,6 +17,8 @@ settlement](../../docs/native-tool-settlement.md).
 
 **Display descriptors.** `display-modules.ts` owns display/native-capture metadata.
 They close over existing display owners; native capture remains absent without live views.
+The display projection also admits canonical artifact/live-view references in one scan;
+runtime slots cache its result only for the exact current session and leaf.
 
 **Computer descriptor.** `computer-module.ts` owns `tron-computer` metadata and
 its per-session extension. Availability remains Mac-only, sampled when the
@@ -95,7 +97,7 @@ Projection reads the persisted details live and after cold reload.
 scripts/tron test gateway src/display/display.store.lock.integration.test.ts \
   src/display/display-image-lifetime.integration.test.ts \
   src/transport/server-live-view.integration.test.ts \
-  src/sessions/codemode-nested-presentation.integration.test.ts
+  src/kernel/projection/codemode-nested-presentation.integration.test.ts
 ```
 
 Canonical-branch cases: `runtime-registry.integration.test.ts`.
