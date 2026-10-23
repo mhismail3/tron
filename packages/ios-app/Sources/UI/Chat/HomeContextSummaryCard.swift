@@ -62,7 +62,9 @@ struct HomeContextSummaryCard: View {
     private var detail: String {
         let context = usage.usedSummary ?? SessionContextUsageRefreshPresentation(
             lastTranscriptKind: snapshot.lastTranscriptKind, assistantMessages: snapshot.stats.assistantMessages).detail
-        let total = snapshot.stats.tokens.total.formatted(.number.notation(.compactName))
+        let tokens = snapshot.stats.tokens
+        let total = (tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite)
+            .formatted(.number.notation(.compactName))
         let cache = snapshot.stats.latestCacheHitRate.map {
             "\($0.formatted(.number.precision(.fractionLength(1))))%"
         } ?? "—"

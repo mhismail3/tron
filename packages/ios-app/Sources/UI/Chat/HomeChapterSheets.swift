@@ -92,7 +92,7 @@ extension HomeSheet {
                 .accessibilityIdentifier("home-chapter-size")
             if let contents = chapter.contents {
                 ToolChipFlowLayout(spacing: TronSpacing.sm) {
-                    ForEach(HomeChapterPresentation.contentsStats(contents), id: \.self) { stat in
+                    ForEach(HomeChapterPresentation.contentsLines(contents).map { $0.text }, id: \.self) { stat in
                         TronListTagPill(tag: TronListTag(text: stat))
                     }
                 }
