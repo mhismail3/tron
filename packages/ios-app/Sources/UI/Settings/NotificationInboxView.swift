@@ -202,7 +202,7 @@ struct NotificationInboxRowList: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        if model.notificationInbox.isLoading && notifications.isEmpty {
+        if model.notificationInbox.isLoadingFirstWindows && notifications.isEmpty {
             TronSheetLoadingState(label: "Loading notifications from paired Gateways…", accent: .tronEmerald)
         } else if notifications.isEmpty {
             NotificationInboxEmptyState(filter: filter)

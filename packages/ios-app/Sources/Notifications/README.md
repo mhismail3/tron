@@ -45,7 +45,9 @@ notification inbox.
   its scroll sentinel. Mark Read sends each profile a `readAll` cut at its newest shown row; opening
   a synchronized chat acknowledges that chat's rows (all of Home's chapters for Home). Kinds:
   `agent_finished` (neutral "Agent finished" for every terminal outcome) and `waiting`. No
-  pull-to-refresh; `notification.inbox.changed` drives updates and a failed read keeps rows.
+  pull-to-refresh; `notification.inbox.changed` drives updates and a failed read keeps rows. The
+  sheet's loading pulse is only for a profile's first windows: a refresh of a shown window, even an
+  empty Unread one after Mark Read, keeps the settled rows or empty state.
 
 ## Invariants
 
