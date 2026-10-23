@@ -8,6 +8,50 @@ import XCTest
 final class TronHomeSheetsUITests: XCTestCase {
     private var timings: [String: Double] = [:]
 
+    // Native visual review journey; behavioral regressions are added after approval.
+    @MainActor func testPolishReviewLight() { polishReview(arguments: [], name: "light") }
+    @MainActor func testPolishReviewDark() { polishReview(arguments: ["-home-dark"], name: "dark") }
+    @MainActor func testPolishReviewXXXL() {
+        polishReview(arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"], name: "xxxl", summaryOnly: true)
+    }
+    @MainActor private func polishReview(arguments: [String], name: String, summaryOnly: Bool = false) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + arguments
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
+        app.buttons["home-pinned-row"].tap()
+        let context = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(context, "enabled == true"))
+        open(app, context, ready: "home-manage-state", name: "review-manage")
+        expand(app, done: "home-sheet-done-manage")
+        shot("polish-\(name)-summary")
+        open(app, element(app, "home-manage-chapters"), ready: "home-chapter-list", name: "review-chapters")
+        expand(app, done: "home-sheet-done-chapters")
+        open(app, element(app, "home-chapter-2"), ready: "home-chapter-detail", name: "review-chapter")
+        expand(app, done: "home-sheet-done-chapter")
+        shot("polish-\(name)-chapter")
+        app.buttons["home-sheet-done-chapter"].tap()
+        app.buttons["home-sheet-done-chapters"].tap()
+        if summaryOnly { return }
+        open(app, element(app, "home-manage-profile"), ready: "home-profile-items", name: "review-profile")
+        expand(app, done: "home-sheet-done-profile")
+        shot("polish-\(name)-profile")
+        let item = element(app, "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
+        open(app, item, ready: "home-profile-item-detail", name: "review-profile-item")
+        expand(app, done: "home-sheet-done-profile-item")
+        shot("polish-\(name)-retire")
+        app.buttons["home-sheet-done-profile-item"].tap()
+        app.buttons["home-sheet-done-profile"].tap()
+        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "review-tasks")
+        expand(app, done: "home-sheet-done-tasks")
+        shot("polish-\(name)-tasks")
+        open(app, element(app, "home-task-active"), ready: "home-task-detail", name: "review-worker")
+        expand(app, done: "home-sheet-done-task")
+        app.swipeUp()
+        shot("polish-\(name)-worker")
+    }
+
     @MainActor
     func testHostPressureNormalAndIdleWorkers() {
         checkHostStatus(level: "Normal", workers: "0 workers running", arguments: [])
