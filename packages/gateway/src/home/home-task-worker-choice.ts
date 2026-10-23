@@ -89,7 +89,7 @@ export interface HomeWorkerChoicePort {
  * only; later Home/profile changes cannot retarget it. The worker queue's and
  * subagent queue's availability is returned to Home and written into the brief. */
 export async function dispatchWithWorkerChoice(owner: Pick<HomeOwner, "dispatchTask">, ports: HomeWorkerChoicePort,
-sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal) {
+  sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal) {
   if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
     throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
   }
