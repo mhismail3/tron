@@ -43,8 +43,8 @@ extension HomeSheet {
                     )
                 }
             }
-            // One sectioned container: Home's kinds in the order it applies them,
-            // then what no longer applies.
+            // One container per kind, in the order Home applies them, then what
+            // no longer applies.
             if !list.items.isEmpty {
                 TronListGroup(sections: HomeProfilePresentation.groups(active).map {
                     TronListSection(title: HomeProfilePresentation.groupTitle($0.kind), rows: $0.items)

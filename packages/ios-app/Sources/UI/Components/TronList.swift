@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 // The one list standard for Manage Home and Manage Session subsheets (#1691):
-// short fixed sets are one sectioned glass group of joined rows; unbounded
+// short fixed sets are glass groups of joined rows, one container per section; unbounded
 // feeds are separate glass cards that load themselves. Every row has the same
 // anatomy, so sheets only map their data into `TronListRowContent`.
 
@@ -64,6 +64,9 @@ enum TronListMetrics {
     static let minimumHeight: CGFloat = 48
     static let feedGap: CGFloat = 8
     static let cornerRadius: CGFloat = 16
+    /// Between a grouped list's section containers, and from a header to its container.
+    static let sectionGap: CGFloat = 18
+    static let headerGap: CGFloat = 8
     /// Dividers start at the text column.
     static func dividerInset(hasLeading: Bool) -> CGFloat {
         hasLeading ? horizontalPadding + leadingWidth + slotGap : horizontalPadding
@@ -210,15 +213,16 @@ struct TronListTagPill: View {
 
 // MARK: - Grouped lists
 
-/// One section of a grouped list: rows plus an optional in-container header.
+/// One section of a grouped list: rows plus an optional header above its container.
 struct TronListSection<Row: Identifiable> {
     let title: String?
     let rows: [Row]
     var id: String { title ?? "rows" }
 }
 
-/// Short, fixed sets: one sectioned glass container, joined rows, inset dividers.
-/// Section headers sit inside the container; a thin band separates sections.
+/// Short, fixed sets: each section is its own glass container of joined rows with
+/// inset dividers. A titled section's header and row count sit above its container,
+/// on the container's edges.
 struct TronListGroup<Row: Identifiable, RowView: View>: View {
     let sections: [TronListSection<Row>]
     var hasLeading = false
@@ -236,35 +240,40 @@ struct TronListGroup<Row: Identifiable, RowView: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: TronListMetrics.sectionGap) {
             ForEach(Array(sections.enumerated()), id: \.offset) { index, section in
-                if index > 0 {
-                    Rectangle().fill(Color.tronTextPrimary.opacity(0.04)).frame(height: 6)
-                        .overlay(alignment: .top) { TronListDivider(inset: 0) }
-                        .overlay(alignment: .bottom) { TronListDivider(inset: 0) }
-                }
-                if let title = section.title {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronAccentText)
-                        Spacer(minLength: 8)
-                        Text(section.rows.count.formatted()).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
+                VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
+                    if let title = section.title {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronAccentText)
+                            Spacer(minLength: 8)
+                            Text(section.rows.count.formatted()).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier(identifier.map { "\($0)-header-\(index)" } ?? "")
                     }
-                    .padding(.horizontal, TronListMetrics.horizontalPadding)
-                    .padding(.top, 12).padding(.bottom, 2)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityAddTraits(.isHeader)
+                    container(section, index: index)
                 }
-                ForEach(Array(section.rows.enumerated()), id: \.element.id) { rowIndex, item in
-                    if rowIndex > 0 { TronListDivider(inset: TronListMetrics.dividerInset(hasLeading: hasLeading)) }
-                    row(item)
-                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(identifier ?? "")
+    }
+
+    private func container(_ section: TronListSection<Row>, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(section.rows.enumerated()), id: \.element.id) { rowIndex, item in
+                if rowIndex > 0 { TronListDivider(inset: TronListMetrics.dividerInset(hasLeading: hasLeading)) }
+                row(item)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: .tronEmerald, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.10)
         .clipShape(RoundedRectangle(cornerRadius: TronListMetrics.cornerRadius, style: .continuous))
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(identifier ?? "")
+        .accessibilityIdentifier(identifier.map { "\($0)-section-\(index)" } ?? "")
     }
 }
 

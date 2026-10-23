@@ -437,7 +437,7 @@ struct ProjectResourcesView: View {
         .tint(Color.tronEmerald)
     }
 
-    /// One sectioned container, a section per kind; a kind with nothing loaded says so.
+    /// One container per kind; a kind with nothing loaded says so.
     private var resourceGroup: some View {
         TronListGroup(sections: content.sections.map { section in
             TronListSection(title: section.kind.rawValue, rows: section.rows.isEmpty
