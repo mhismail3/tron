@@ -1,4 +1,5 @@
 import XCTest
+import Vision
 
 /// Production SwiftUI and typed Gateway sockets: each case observes a user-visible
 /// outcome. No source, token or fixture-constant-only assertions.
@@ -7,14 +8,17 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         let app = home(["-memory-redesign"]); defer { app.terminate() }
         manageHome(app)
         tap(app, "home-manage-memory-browser")
-        let result = element(app, "home-memory-row-38")
-        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "home-memory-row-39").waitForExistence(timeout: 5), app.debugDescription)
+        expand(app, done: "home-sheet-done-memory")
+        let result = element(app, "home-memory-row-38"); reveal(app, result)
+        XCTAssertTrue(result.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(result.label.contains("Read File") && result.label.contains("Completed"), result.label)
         XCTAssertFalse(result.label.contains("import") || result.label.contains("interface"), "Rows never expose arbitrary output")
         tap(app, "home-memory-row-38")
         XCTAssertTrue(element(app, "home-memory-detail").waitForExistence(timeout: 5))
-        let summary = app.staticTexts["Reviewed the memory contract and preserved the canonical source identity."]
-        let output = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'export interface MemoryRecord'")).firstMatch
+        let detail = element(app, "home-memory-detail")
+        let summary = detail.staticTexts["Reviewed the memory contract and preserved the canonical source identity."].firstMatch
+        let output = detail.staticTexts.containing(NSPredicate(format: "label CONTAINS 'export interface MemoryRecord'")).firstMatch
         XCTAssertTrue(summary.exists && output.exists, app.debugDescription)
         XCTAssertLessThan(summary.frame.minY, output.frame.minY, "Summary precedes the literal tool output")
         tap(app, "home-memory-info")
@@ -28,6 +32,8 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
     @MainActor func testMemoryCountIsTheTagWithoutDuplicateSubtext() {
         let app = home(["-memory-redesign"]); defer { app.terminate() }
         manageHome(app); tap(app, "home-manage-memory-browser")
+        XCTAssertTrue(element(app, "home-memory-row-39").waitForExistence(timeout: 5), app.debugDescription)
+        expand(app, done: "home-sheet-done-memory")
         let row = element(app, "home-memory-summary-32-2")
         reveal(app, row)
         let tags = row.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Summary of '"))
@@ -47,7 +53,9 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         XCTAssertTrue(title.exists && time.exists && entry.exists, app.debugDescription)
         XCTAssertEqual(time.frame.minX, title.frame.minX, accuracy: 1, "Time follows the title text, not the icon")
         XCTAssertEqual(entry.frame.minX, title.frame.minX, accuracy: 1, "Entry follows the same text edge")
-        XCTAssertEqual(app.staticTexts["h-6732"].frame.maxX, app.staticTexts["Current"].frame.maxX, accuracy: 1)
+        let timeValue = element(app, "history-entry-detail").staticTexts.matching(NSPredicate(format: "label MATCHES %@", "^[A-Z][a-z]{2} [0-9]{1,2}, 20[0-9]{2}.*")).firstMatch
+        XCTAssertTrue(timeValue.exists, app.debugDescription)
+        XCTAssertEqual(app.staticTexts["h-6732"].frame.maxX, timeValue.frame.maxX, accuracy: 1, "Metadata values retain one trailing edge")
         keep("history-metadata-edges")
     }
 
@@ -79,13 +87,13 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         let app = session(["-manage-session-review", "-workspace-capture-delay"]); defer { app.terminate() }
         let workspace = app.buttons["Workspace"]
         reveal(app, workspace)
-        expectation(for: NSPredicate(format: "label CONTAINS 'Working tree clean'"), evaluatedWith: workspace)
+        expectation(for: NSPredicate { _, _ in self.paintedText(workspace).contains("Working tree clean") }, evaluatedWith: workspace)
         waitForExpectations(timeout: 5)
-        let published = workspace.label
+        let published = paintedText(workspace)
         tap(app, "manage-session-rename"); tap(app, "Cancel")
         // Native AX queries sample the delayed socket response interval; the old
         // monitor clears the value immediately, before its one-second read resolves.
-        for _ in 0..<5 { XCTAssertEqual(workspace.label, published, "Closing a covering sheet must retain the published workspace") }
+        for _ in 0..<5 { XCTAssertEqual(paintedText(workspace), published, "Closing a covering sheet must retain the published workspace") }
         keep("workspace-uncovered-retains-value")
     }
 
@@ -103,7 +111,7 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         XCTAssertTrue(opus.waitForExistence(timeout: 5)); opus.tap()
         XCTAssertTrue(card.staticTexts["Claude Opus 5.5"].waitForExistence(timeout: 5), "Home selection must persist through the existing Home-scoped settings RPC")
         tap(app, "home-manage-settings"); tap(app, "settings-section-model-open")
-        XCTAssertFalse(element(app, "settings-row-model.ref_role_chat_").exists)
+        XCTAssertFalse(element(app, "settings-section-model-detail").descendants(matching: .any)["settings-row-model.ref_role_chat_"].exists)
         XCTAssertTrue(element(app, "settings-row-model.queue_role_worker_").waitForExistence(timeout: 5), "Worker/delegation choices remain in Home Models")
         keep("home-model-write-and-remaining-workers")
     }
@@ -115,7 +123,8 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 5))
         XCTAssertTrue(card.staticTexts["Effort"].exists && card.staticTexts["Context Window"].exists)
         tap(app, "settings-row-model.thinking_role_chat_-reset")
-        XCTAssertTrue(card.staticTexts["High"].waitForExistence(timeout: 5), "Revert must use the fenced session unset, not a model picker")
+        let revertedEffort = expectation(for: NSPredicate(format: "value == %@", "High"), evaluatedWith: card.buttons["Effort"])
+        wait(for: [revertedEffort], timeout: 5)
         tap(app, "manage-model-switch")
         let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Alternative Model'")).firstMatch
         XCTAssertTrue(alternative.waitForExistence(timeout: 5)); alternative.tap()
@@ -142,18 +151,39 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
     @MainActor private func home(_ extra: [String]) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + extra
-        app.launch(); XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10)); return app
+        app.launch()
+        XCTAssertTrue(app.buttons[extra.contains("-dashboard-view-home") ? "home-usage-card" : "home-pinned-row"].waitForExistence(timeout: 10))
+        return app
     }
     @MainActor private func session(_ extra: [String]) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = ["-tron-session-configuration-fixture"] + extra
-        app.launch(); tap(app, "Stop session"); return app
+        app.launch(); tap(app, "Stop session")
+        let done = app.navigationBars.containing(.staticText, identifier: "Manage Session").buttons["Done"].firstMatch
+        if done.exists && done.frame.minY > 120 { expand(app, button: done) }
+        return app
     }
-    @MainActor private func manageHome(_ app: XCUIApplication) { tap(app, "home-pinned-row"); tap(app, "session-context-button"); XCTAssertTrue(element(app, "home-manage-state").waitForExistence(timeout: 5)) }
+    @MainActor private func manageHome(_ app: XCUIApplication) {
+        tap(app, "home-pinned-row"); tap(app, "session-context-button")
+        XCTAssertTrue(element(app, "home-manage-state").waitForExistence(timeout: 5)); expand(app, done: "home-sheet-done-manage")
+    }
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
     @MainActor private func reveal(_ app: XCUIApplication, _ item: XCUIElement) { for _ in 0..<10 where !item.isHittable { app.swipeUp() } }
     @MainActor private func tap(_ app: XCUIApplication, _ id: String) {
         let item = element(app, id); XCTAssertTrue(item.waitForExistence(timeout: 5), "Missing \(id): \(app.debugDescription)"); reveal(app, item); item.tap()
+    }
+    @MainActor private func expand(_ app: XCUIApplication, done: String) { expand(app, button: app.buttons[done]) }
+    @MainActor private func expand(_ app: XCUIApplication, button: XCUIElement) {
+        guard button.exists && button.frame.minY > 120 else { return }
+        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: app.frame.width / 2, dy: button.frame.midY)).press(forDuration: 0.1,
+            thenDragTo: origin.withOffset(CGVector(dx: app.frame.width / 2, dy: 20)))
+    }
+    @MainActor private func paintedText(_ item: XCUIElement) -> String {
+        guard let image = item.screenshot().image.cgImage else { XCTFail("Missing row pixels"); return "" }
+        let request = VNRecognizeTextRequest(); request.recognitionLevel = .accurate; request.usesLanguageCorrection = false
+        do { try VNImageRequestHandler(cgImage: image).perform([request]) } catch { XCTFail("OCR failed: \(error)") }
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
     }
     private func usageFrames(_ label: String) -> [String: CGRect] {
         Dictionary(uniqueKeysWithValues: label.split(separator: ";").compactMap { entry in

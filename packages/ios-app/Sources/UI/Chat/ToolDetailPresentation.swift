@@ -821,6 +821,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
         case "list_mcp_resource_templates": "List MCP resource templates"
         case "read_mcp_resource": "Read MCP resource"
         case "read": "Read file"
+        case "read_file": "Read File"
         case "write": "Write file"
         case "edit": "Edit file"
         case "bash": "Run command"

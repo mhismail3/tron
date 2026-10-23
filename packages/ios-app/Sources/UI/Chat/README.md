@@ -155,6 +155,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 ## Verify
 
 Classes under `TronMobileUITests/`: `TronHomeControlsUITests`, `TronHomeDashboardUITests`, `TronHomeSheetsUITests`,
+`TronConsolidatedUIRegressionTests` (Memory/canonical navigation, metadata, usage loading,
+Workspace cover/uncover, Manage model writes and scoped Settings routes),
 `TronDashboardHomeButtonUITests`, `TronNewSessionUITests`, `TronSubagentParityUITests`,
 `TronToolSheetsPolishUITests`, `TronChatDisplayStripUITests`, `TronChatAnnotationUITests`,
 `TronComposerUploadUITests`, `TronChatHapticsUITests`, `TronReadonlyAttachmentUITests`, `TronCameraCaptureUITests`,
