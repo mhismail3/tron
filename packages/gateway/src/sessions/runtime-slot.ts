@@ -151,7 +151,6 @@ import { tronContext } from "../workspace/tron-core-extension.js";
 import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
 import type { ToolDisplayProjection } from "../kernel/projection/tool-result.js";
 import { trustedExtensionOriginKind } from "../kernel/projection/extension-origin.js";
-import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "../kernel/run/direct-bash-process-owner.js";
 import type { ModuleHost, SessionContext } from "../kernel/host/module-host.js";
 import { projectHookRegistrations } from "../kernel/projection/hook-projection.js";
@@ -341,8 +340,6 @@ export interface RuntimeSlotDependencies {
   blobs: BlobStore;
   exports: BlobStore;
   displayArtifacts: DisplayArtifactStore;
-  /** Disposable observer registrations; browser state remains provider-owned. */
-  browserLiveViews?: BrowserLiveViewRegistry;
   modules: ModuleHost; // started modules whose extensions this runtime registers
   /** The settings model and its one change path, late-bound:
    * installed on the registry after construction (docs/settings-model.md 5.1). */
@@ -2016,7 +2013,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     bindRuntimeSession(this.runtime, {
       beforeInvalidate: () => {
         this.runInvocations.handOffReplacedCommand();
-        this.dependencies.browserLiveViews?.retireSession(this.id);
+        this.dependencies.modules.observers("sessionRetired").forEach(retire => { try { retire(this.id); } catch { /* Cleanup is best effort. */ } });
       },
       rebind: async () => this.bindSession(),
     });
@@ -6698,7 +6695,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     // installation outlives this slot and is retired by its own runtime owner.
     this.detachOpenAIEligibility?.();
     this.detachOpenAIEligibility = undefined;
-    this.dependencies.browserLiveViews?.retireSession(this.id);
+    this.dependencies.modules.observers("sessionRetired").forEach(retire => { try { retire(this.id); } catch { /* Cleanup is best effort. */ } });
     this.unregisterExtensionExpiry();
     this.unregisterProcessExpiry();
     for (const activity of this.extensionActivities.values()) {

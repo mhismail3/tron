@@ -28,7 +28,9 @@ export function createDisplayModule(services: () => DisplayModuleServices): Modu
           return views ? observeTrustedAgentBrowserResult({ ...input, views }) : input.result;
         },
       };
-      return { hooks: { toolResultProjection: () => projection }, extension: session => {
+      return { hooks: {
+        toolResultProjection: () => projection, sessionRetired: sessionId => services().liveViews?.retireSession(sessionId),
+      }, extension: session => {
         const owners = services();
         return createTronDisplayExtension({
           sessionId: session.sessionId, cwd: session.cwd, artifacts: owners.artifacts,

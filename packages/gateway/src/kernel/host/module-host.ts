@@ -123,9 +123,10 @@ export const KERNEL_HOOKS = {
 export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
-export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision" | "sessionLineage" | "taskLedger" | "kernelLifecycle" | "modelRuntimeInstalled" | "modelUsed">]: (...args: never[]) => unknown } & {
+export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision" | "sessionLineage" | "taskLedger" | "kernelLifecycle" | "modelRuntimeInstalled" | "modelUsed" | "sessionRetired">]: (...args: never[]) => unknown } & {
   modelRuntimeInstalled(): ModelRuntimePolicy;
   modelUsed(sessionId: string, model: { provider: string; id: string }): void;
+  sessionRetired(sessionId: string): void;
   toolResultProjection(): ToolResultProjection;
   runSettled(): RunSettledPolicy;
   sessionLineage(): SessionLineagePolicy;

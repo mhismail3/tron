@@ -93,7 +93,9 @@ Projection reads the persisted details live and after cold reload.
   never authorizes a read.
 - Runtime replacement and slot disposal revoke the retiring session's views and load
   token without revoking unrelated live sessions. The real-runtime lifecycle lock
-  checks both boundaries and rejects re-admission with the retired token.
+  checks both boundaries and rejects re-admission with the retired token. Display
+  performs retirement through the kernel's synchronous, best-effort `sessionRetired`
+  observers; runtime slots do not retain the live-view registry.
 - Live viewing never launches, controls or closes a browser.
 
 ## Verify

@@ -1713,7 +1713,6 @@ export class RuntimeRegistry {
       blobs: this.blobs,
       exports: this.exports,
       displayArtifacts: this.displayArtifacts,
-      ...(this.options.browserLiveViews ? { browserLiveViews: this.options.browserLiveViews } : {}),
       workspace: this.workspace,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,
