@@ -1832,7 +1832,10 @@ struct ChatView: View {
                 || model.presentationTarget(for: sessionID) != presentationTarget
                 // An independent covering sheet can defer reconnect restoration
                 // without changing the mounted target or local ready frame.
-                || presentationTarget.map { !model.hasMountedSessionAuthority($0) } == true)
+                // While the reconnect is still reconciling, the model owns that
+                // restoration; reopening here would cover the retained transcript.
+                || (!model.isReconcilingForeground
+                    && presentationTarget.map { !model.hasMountedSessionAuthority($0) } == true))
     }
 
     private var hasSettledOpeningOffset: Bool {
