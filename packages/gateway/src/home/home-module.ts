@@ -14,6 +14,7 @@ import type { InputAdmissionPolicy } from "../kernel/host/input-admission.js";
 import type { SessionLineagePolicy } from "../kernel/host/session-lineage.js";
 import { assertChapterWritable } from "./home-chapter-state.js";
 import { homeInputAdmission } from "./home-input-admission.js";
+import { dispatchWithWorkerChoice, type HomeWorkerChoicePort } from "./home-task-worker-choice.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { HomeTaskDiagnostic, HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
 import type { HomeSessionReader } from "./home-session-read.js";
@@ -42,10 +43,11 @@ export interface HomeModuleServices {
  * operations and reads of owners installed after registry construction. */
 export function homeModuleServices(owner: HomeOwner,
   platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport; homeDiagnostic?: HomeDiagnostic; homeTaskDiagnostic?: (record: HomeTaskDiagnostic) => void; },
-  ports: Pick<HomeModuleServices, "knowledge" | "read" | "delegate"> & { changes(): SettingsChangePath | undefined; resourcesIdle(sessionId: string): void; runtime: HomeSessionProfileServices["runtime"] },
+  ports: Pick<HomeModuleServices, "knowledge" | "read"> & { workerChoice: HomeWorkerChoicePort; changes(): SettingsChangePath | undefined; resourcesIdle(sessionId: string): void; runtime: HomeSessionProfileServices["runtime"] },
 ): Omit<HomeModuleServices, "search"> {
   return {
-    knowledge: ports.knowledge, read: ports.read, delegate: ports.delegate,
+    knowledge: ports.knowledge, read: ports.read,
+    delegate: (sessionId, request, signal) => dispatchWithWorkerChoice(owner, ports.workerChoice, sessionId, request, signal),
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
     lineage: {
       state: sessionId => {

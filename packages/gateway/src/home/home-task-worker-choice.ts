@@ -1,7 +1,13 @@
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
-import { getSupportedThinkingLevels, type ModelThinkingLevel } from "../kernel/pi/ai.js";
+import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model, type ModelThinkingLevel } from "../kernel/pi/ai.js";
 import { GatewayError } from "../errors.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
+import { ModelQueueExhausted, splitModelRef, type ModelQueueOwner } from "../providers/model-queue.js";
+import { SUBAGENT_QUEUE_MODEL, type QueueModelState } from "../providers/model-queue-extension.js";
+import type { SettingsModel } from "../admin/settings-model.js";
+import type { SessionSnapshot } from "../protocol/types.js";
+import type { HomeOwner } from "./home-owner.js";
+import type { HomeTaskDispatchRequest } from "./home-task-dispatcher.js";
 
 /** The thinking levels a delegation may name: the set the slot's `setThinking` accepts. */
 export const HOME_TASK_THINKING_LEVELS: readonly ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -67,3 +73,78 @@ async function validModelReferences(runtime: ModelRuntime): Promise<string> {
     .map(model => `${model.provider}/${model.id}`);
   return references.length ? `Valid models: ${references.join(", ")}.` : "No valid model is available.";
 }
+
+/** The generic reads Home's worker choice needs (the registry supplies them). */
+export interface HomeWorkerChoicePort {
+  settings(): Pick<SettingsModel, "resolve"> | undefined;
+  homeRuntime(sessionId: string): Promise<Pick<SessionSnapshot, "model" | "thinkingLevel">>;
+  modelQueues(): Promise<{ worker: string[]; subagent: string[] }>;
+  availability(role: "worker" | "subagent", signal: AbortSignal | undefined, queue: string[]): ReturnType<ModelQueueOwner["availability"]> | undefined;
+  model(provider: string, id: string): Model<Api> | undefined;
+}
+
+/** Home resolves its typed worker profile at the delegate boundary: the first
+ * available model of the worker queue (settings-model.md 6.3), else Home's own
+ * model when the queue is empty. The selected values are copied into this task
+ * only; later Home/profile changes cannot retarget it. The worker queue's and
+ * subagent queue's availability is returned to Home and written into the brief. */
+export async function dispatchWithWorkerChoice(owner: Pick<HomeOwner, "dispatchTask">, ports: HomeWorkerChoicePort,
+sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal) {
+  if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
+    throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
+  }
+  const settings = ports.settings();
+  const home = await ports.homeRuntime(sessionId);
+  const resolution = settings ? await settings.resolve({ kind: "home" }, undefined, ["model.thinking[role=worker]"]) : undefined;
+  const profileThinking = resolution?.keys.find(key => key.key === "model.thinking[role=worker]")?.value as
+    string | { sameAs: "home" } | undefined;
+  const modelQueues = await ports.modelQueues();
+  const workerQueue = request.model === undefined ? await ports.availability("worker", signal, modelQueues.worker) : undefined;
+  const subagentQueue = await ports.availability("subagent", signal, modelQueues.subagent);
+  const queued = workerQueue && workerQueue.models.length > 0 ? workerQueue.models : undefined;
+  const first = queued?.find(entry => entry.available);
+  if (queued && !first) throw new ModelQueueExhausted("worker", queued);
+  const candidateModel = request.model ?? (first ? splitModelRef(first.model) : home.model);
+  const candidateThinking = request.thinking ?? (typeof profileThinking === "string" ? profileThinking : home.thinkingLevel);
+  const choice: HomeTaskWorkerChoice = {
+    ...(candidateModel ? { model: candidateModel } : {}),
+    ...(candidateThinking && candidateModel ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {}),
+  };
+  let clampNote: string | undefined;
+  if (choice.model) {
+    const model = ports.model(choice.model.provider, choice.model.id);
+    const supported = model ? getSupportedThinkingLevels(model) : [];
+    if (choice.thinking && model && supported.length) {
+      const requested = choice.thinking;
+      choice.thinking = clampThinkingLevel(model, requested);
+      if (choice.thinking !== requested) clampNote = `${requested} clamped to ${choice.thinking}`;
+    }
+  }
+  const skipped = (models: readonly QueueModelState[]) => models.filter(entry => !entry.available)
+    .map(entry => `${entry.model} skipped: ${entry.reason ?? "unavailable"}`);
+  const modelText = choice.model ? `${choice.model.provider}/${choice.model.id}` : "Gateway default";
+  const thinkingText = choice.thinking ?? "Gateway default";
+  const explicitReason = request.model || request.thinking ? request.reason!.trim() : undefined;
+  const modelSource = request.model ? `explicit: ${explicitReason}`
+    : queued ? ["worker queue", ...skipped(queued.slice(0, queued.indexOf(first!)))].join("; ") : "same as Home";
+  const thinkingSource = request.thinking ? `explicit: ${explicitReason}`
+    : typeof profileThinking === "string" ? "Home profile" : "same as Home";
+  const choiceNotes = [clampNote].filter(Boolean).join("; ");
+  const subagentModels = subagentQueue?.models.length ? subagentQueue.models : undefined;
+  const subagentLine = subagentModels
+    ? `\n\nSubagent models, in fallback order: ${subagentModels.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ")}. Explicit eligible subagent model choices in this brief take precedence over the default queue: pass the chosen provider/model to the subagent launch. Otherwise, launch subagents with model ${SUBAGENT_QUEUE_MODEL.provider}/${SUBAGENT_QUEUE_MODEL.id}: it runs the first available one and moves along this queue on a usage-limit error. If an explicit choice is unavailable or hits a usage limit, disclose the reason and the chosen fallback; do not silently substitute the queue default.`
+    : "";
+  const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.${subagentLine}`;
+  const { model: _model, thinking: _thinking, ...input } = request;
+  const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}),
+    ...(queued ? { queue: queued } : {}) };
+  const handle = await owner.dispatchTask(sessionId, { ...input, ...choice, modelQueues, intent: brief,
+    provenance: {
+      model: { via: request.model ? "home-explicit" : queued ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
+      thinking: { via: request.thinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
+    } }, signal);
+  return { ...handle, worker, ...(subagentModels ? { subagentModels } : {}) };
+}
+
+/** Admits a delegation's model and thinking level against the Gateway's own model
+ * runtime, the one designation validates against. Read-only. */
