@@ -10,7 +10,8 @@ and settings change path use one contract and one persisted store format.
 `tool-contract.ts`: layer/tier/qualifier and model-reference/queue role/key vocabulary,
 retired scope-name mapping
 shared by session readers and store migration, and tool request, resolution,
-result and worker-state interfaces. `settings-record.ts` owns append-only audit
+result and worker-state interfaces. `settings-types.ts` owns value validation, formatting,
+ordered queue summaries and Pi-compatible tool-selection composition. `settings-record.ts` owns append-only audit
 segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
 approvals, their admission bounds, settlement, expiry and untold outcomes.
 `settings-migration-state.ts` owns shared-store value transformation and digest

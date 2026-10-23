@@ -21,7 +21,7 @@ import { KEYS, SECTIONS, auditSubject, recordSubject, schemaKey } from "../admin
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, type HomeProfileOp } from "../modules/home/home-profile.js";
 import type { ObservedStore } from "../admin/settings-outside.js";
 import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
-import { maxTier } from "../admin/settings-types.js";
+import { maxTier } from "../kernel/settings/settings-types.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";

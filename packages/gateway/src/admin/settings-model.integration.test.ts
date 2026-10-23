@@ -15,7 +15,7 @@ import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
 import { KEYS, terminalIdleLimitMs } from "./settings-schema.js";
 import type { Resolution, ResolvedKey, SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
-import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "./settings-types.js";
+import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "../kernel/settings/settings-types.js";
 import { ScopeToolCatalog } from "./tool-catalog.js";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";

@@ -20,7 +20,7 @@ import { McpAdminService } from "./mcp-admin-service.js";
 import { ModelConfigService } from "./model-config-service.js";
 import { SettingsRiskEvaluator, type SettingsRiskInput } from "./settings-risk.js";
 import { JEV_MAX_ESTIMATED_CHARGE_CENTS } from "../knowledge/jev-client.js";
-import { CONTROLS } from "./settings-types.js";
+import { CONTROLS } from "../kernel/settings/settings-types.js";
 import { composedBelow, readBinding, type SettingsStores } from "./settings-resolver.js";
 import { type Resolution } from "../kernel/settings/tool-contract.js";
 import { KEYS, type KeyDeclaration } from "./settings-schema.js";
