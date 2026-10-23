@@ -113,14 +113,13 @@ function homeMemoryItem(message: EpisodicMessageRecord, node: EpisodicNodeRecord
  * Never use a result's first line as a preview; it can be arbitrary source code. */
 export function homeMemoryToolDisplay(entry: EpisodicCanonicalEntry, item: HomeMemoryItem): HomeMemoryItem["display"] {
   if (item.projection.omitted) return undefined;
-  // An edited projection is not the original call. Keep its content out of rows
-  // without claiming the original target or result status still applies.
-  if (item.projection.omissions.includes("context-edit")) {
-    return item.kind === "talk" ? { kind: "tool-call" } : item.kind === "echo" ? { kind: "tool-result" } : undefined;
-  }
+  // Canonical roles distinguish a plain reply from a call even after an edit.
+  // Edited calls/results retain only that kind, not the original target/status.
+  const edited = item.projection.omissions.includes("context-edit");
   const message = entry.raw.message as Record<string, unknown> | undefined;
   if (!message || typeof message !== "object") return undefined;
   if (message.role === "toolResult") {
+    if (edited) return { kind: "tool-result" };
     return { kind: "tool-result", toolName: displayText(message.toolName) ?? "Tool",
       status: message.isError === true ? "error" : "ok" };
   }
@@ -129,6 +128,7 @@ export function homeMemoryToolDisplay(entry: EpisodicCanonicalEntry, item: HomeM
     part !== null && typeof part === "object" && part.type === "toolCall");
   const call = calls[0];
   if (!call) return undefined;
+  if (edited) return { kind: "tool-call" };
   const args = call.arguments && typeof call.arguments === "object" && !Array.isArray(call.arguments)
     ? call.arguments as Record<string, unknown> : {};
   const path = typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : undefined;

@@ -391,7 +391,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-detail"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Task result: settings model epic #758 finished."].exists)
         keepScreenshot(named: "home-memory-detail")
-        tapManageRow(app, "home-memory-exact-evidence")
+        tapManageRow(app, "home-memory-canonical-transcript")
         XCTAssertTrue(app.descendants(matching: .any)["home-evidence-text"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Canonical original, not the memory projection"].exists)
         keepScreenshot(named: "home-exact-evidence")
