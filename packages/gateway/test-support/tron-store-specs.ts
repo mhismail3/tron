@@ -110,7 +110,7 @@ function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
       sessionPresent: async (id) => id === CORPUS_IDS.session, hasLiveRuntime: () => false, currentSessionModel: () => null,
       chapterMetrics: async () => ({ bytes: 2_048, entries: 4, quiescent: true }), hasConversation: async () => false,
       serializeSessionMutation: async (_id, commit) => commit(), replaceRuntimeForProfile: async (_sessionId, commit) => commit(),
-      homeModel: async () => undefined, chooseHomeModel: async () => {}, beginHomePublicationReconciliation: () => {}, retireHomeRuntimes: async () => {},
+      homeModel: async () => undefined, chooseHomeModel: async () => {}, retireHomeRuntimes: async () => {},
       wakeHome: async () => { throw new Error("The corpus Home is never woken"); },
     },
     memoryModels: async () => [],

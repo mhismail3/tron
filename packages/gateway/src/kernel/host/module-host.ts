@@ -1,3 +1,4 @@
+import type { SessionLineagePolicy } from "./session-lineage.js";
 import type { ExtensionFactory, ModelRuntime, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
 import type { SettingsToolAccess } from "../settings/tool-contract.js";
 import type { JsonValue, TronModuleSummary } from "../../protocol/types.js";
@@ -99,6 +100,7 @@ export const KERNEL_HOOKS = {
   inputAdmission: "policy",
   appendGuard: "policy",
   runSettled: "policy",
+  sessionLineage: "policy",
   runTerminal: "policy",
   interactionRequired: "policy",
   toolResultProjection: "policy",
@@ -111,9 +113,10 @@ export const KERNEL_HOOKS = {
 export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
-export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision">]: (...args: never[]) => unknown } & {
+export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision" | "sessionLineage">]: (...args: never[]) => unknown } & {
   toolResultProjection(): ToolResultProjection;
   runSettled(): RunSettledPolicy;
+  sessionLineage(): SessionLineagePolicy;
   requestPolicy(): RequestPolicyHook;
   inputAdmission(): InputAdmissionPolicy;
   profileDecision(sessionId: string, cwd: string): string | "unrecorded";

@@ -683,10 +683,10 @@ describe("Home task cold reconciliation", () => {
     const running = home.prompt("Mid-run"); void running.catch(() => {});
     await waitFor(() => entered, "Home run in flight");
     // Stands in for the fence an uncertain ledger publication sets.
-    (f.registry as any).homePublicationUncertain = true;
+    f.registry.homeOwner().publicationUncertain = true;
     const live = () => (f.registry as any).slots.has(f.home.sessionId) as boolean;
     let retired = false;
-    const retirement = (f.registry as any).retireUncertainHomeRuntimes(true).then(() => { retired = true; });
+    const retirement = (f.registry as any).retireUncertainHomeRuntimes().then(() => { retired = true; });
     try {
       await new Promise(resolve => setTimeout(resolve, 50));
       expect(retired).toBe(false);

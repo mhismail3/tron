@@ -122,7 +122,6 @@ async function fixture() {
     hasConversation: async () => manager.getEntries().some(entry => entry.type === "message"),
     serializeSessionMutation: async (_id, commit) => commit(),
     replaceRuntimeForProfile: async (_id, commit) => commit(),
-    beginHomePublicationReconciliation: () => {},
     retireHomeRuntimes: async () => {},
   };
   const owner = new HomeOwner({ tronHome, trust, workspace, sessions, taskSessions: {} as RuntimeRegistry, memoryModels: async () => [], memorySummarizer: () => async () => { throw new Error("unused"); } });

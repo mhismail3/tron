@@ -1,5 +1,6 @@
 import { HOME_SESSION_PROFILE_NAME } from "../home/home-session-profile.js";
 import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
+import type { SessionLineagePolicy } from "../kernel/host/session-lineage.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "../kernel/pi/ai.js";
@@ -106,7 +107,6 @@ import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-t
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
 import type { HomeDiagnostic } from "../home/home-diagnostic.js";
 import { readHomeSessionEntry } from "../home/home-session-read.js";
-import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic } from "../home/home-memory.js";
 import { ModelQueueExhausted, ModelQueueOwner, modelQueueKey, modelQueueProjectionPath, splitModelRef, type ModelQueueRecord } from "../providers/model-queue.js";
 import { SUBAGENT_QUEUE_MODEL, type ModelQueueRole, type QueueModelState } from "../providers/model-queue-extension.js";
@@ -565,7 +565,6 @@ export class RuntimeRegistry {
   /** The model fallback queues (providers/model-queue.ts); absent without a Gateway model runtime. */
   readonly modelQueue: ModelQueueOwner | undefined;
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
-  private homePublicationUncertain = false;
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
@@ -841,8 +840,7 @@ export class RuntimeRegistry {
 
         replaceRuntimeForProfile: (sessionId, commit) => this.replaceHomeRuntimeForProfile(sessionId, commit),
         serializeSessionMutation: (sessionId, commit) => this.serializeSessionMutation(sessionId, commit),
-        beginHomePublicationReconciliation: () => { this.homePublicationUncertain = true; },
-        retireHomeRuntimes: (reloaded) => this.retireUncertainHomeRuntimes(reloaded),
+        retireHomeRuntimes: () => this.retireUncertainHomeRuntimes(),
         wakeHome: async (sessionId) => { if (this.home.reservedChapter(sessionId)) { await this.materializeReservedHome(sessionId); await this.assertReservedHomeAttempt(sessionId); } return (await this.acquire(sessionId)).admitHomeWake(); }, // A post-rollover wake materializes the successor as home.prompt does (#1518).
       },
       ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
@@ -1042,13 +1040,13 @@ export class RuntimeRegistry {
         await this.home.recordReservedChapterPath(sessionId, attemptId, createdPath);
         expectedPath = createdPath;
       }
-      const chapterState = this.home.chapterStateFor(sessionId);
-      if (!chapterState.materializing || !chapterState.homeId || chapterState.ordinal !== chapter.ordinal
+      const chapterState = this.lineage().state(sessionId);
+      if (!chapterState.materializing || !chapterState.lineageId || chapterState.ordinal !== chapter.ordinal
         || chapterState.attemptId !== attemptId || chapterState.expectedPath !== expectedPath) {
         throw new GatewayError("conflict", "Home materialization authority no longer matches its durable reservation", true);
       }
       slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, this.options.modules.profile(HOME_SESSION_PROFILE_NAME), {
-        homeId: chapterState.homeId,
+        homeId: chapterState.lineageId,
         ordinal: chapterState.ordinal,
         sessionId,
         attemptId,
@@ -1658,8 +1656,15 @@ export class RuntimeRegistry {
     throw new GatewayError("not_found", "Tron session was not found");
   }
 
+  /** The composed lineage owner (Home), resolved at each call (k0-kernel.md §2.1). */
+  private lineage(): SessionLineagePolicy {
+    const hook = this.options.modules.policy("sessionLineage");
+    if (!hook) throw new Error("No session lineage owner is composed");
+    return hook();
+  }
+
   private assertChapterWritable(sessionId: string): void {
-    assertChapterWritable(this.home.chapterStateFor(sessionId));
+    this.lineage().assertWritable(sessionId);
   }
 
   async setAttention(sessionId: string, unread: boolean, throughCompletionRevision?: number): Promise<SessionAttentionProjection> {
@@ -1834,7 +1839,7 @@ export class RuntimeRegistry {
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       modules: this.options.modules,
       settings: () => this.settingsOwners,
-      homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
+      lineageState: (sessionId: string) => this.lineage().state(sessionId),
       homeTaskSettings: async (sessionId: string, taskId: string, purpose: "resolve" | "change") => {
         const target = await this.home.taskSettingsTarget(sessionId, taskId, purpose);
         return { ...target, slot: await this.acquire(target.sessionId) };
@@ -1903,7 +1908,7 @@ export class RuntimeRegistry {
       path: row.path,
       cwd: row.cwd,
       ...(row.parentSessionPath ? { parentSessionPath: row.parentSessionPath } : {}),
-      ...(this.home.chapterStateFor(row.id).homeId ? { name: "Home" } : row.name ? { name: row.name } : {}),
+      ...(this.lineage().state(row.id).lineageId ? { name: "Home" } : row.name ? { name: row.name } : {}),
       created: new Date(row.createdAt),
       modified: new Date(row.updatedAt),
       messageCount: row.messageCount,
@@ -2286,7 +2291,7 @@ export class RuntimeRegistry {
     // The dashboard list never shows a Home chapter. Membership (catalog, search,
     // open by id) keeps them; only this client-facing projection omits them.
     const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs)
-      .filter((seed) => scope !== "user" || !this.home.isHomeChapter(seed.id));
+      .filter((seed) => scope !== "user" || this.lineage().state(seed.id).lineageId === undefined);
     const archivedCount = seeds.reduce((total, seed) => total + (seed.archivedAt === undefined ? 0 : 1), 0);
     const visible = archived === "only"
       ? orderArchivedSessions(seeds.filter((seed) => seed.archivedAt !== undefined))
@@ -3249,7 +3254,7 @@ export class RuntimeRegistry {
    * release uses the slot's shared automation/operation lease authority. */
   retainLiveSession(sessionId: string): (() => void) | undefined {
     this.assertSlotAdmissionOpen();
-    if (this.homePublicationUncertain && this.home.chapterStateFor(sessionId).homeId) return undefined;
+    if (this.lineage().publicationUncertain() && this.lineage().state(sessionId).lineageId) return undefined;
     const slot = this.slots.get(sessionId);
     if (!slot || slot.isDisposed || this.deletingSessionIds.has(sessionId)
       || this.indexAmbiguousSessionIds().has(sessionId)) return undefined;
@@ -3272,7 +3277,7 @@ export class RuntimeRegistry {
    * given. With no chapter loaded the names are still offered, undescribed; the
    * catalog never loads a runtime just to describe them. */
   homeToolCatalog(): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
-    const chapter = [...this.slots].find(([id, slot]) => !slot.isDisposed && this.home.isHomeChapter(id))?.[1];
+    const chapter = [...this.slots].find(([id, slot]) => !slot.isDisposed && this.lineage().state(id).lineageId !== undefined)?.[1];
     const described = new Map((chapter?.settingsToolCatalog() ?? []).map(tool => [tool.name, tool.description]));
     return HOME_TOOL_NAMES.map(name => {
       const description = described.get(name);
@@ -3282,7 +3287,7 @@ export class RuntimeRegistry {
 
   async acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {
     this.assertSlotAdmissionOpen();
-    if (this.homePublicationUncertain && this.home.chapterStateFor(sessionId).homeId) {
+    if (this.lineage().publicationUncertain() && this.lineage().state(sessionId).lineageId) {
       throw new GatewayError("conflict", "Tron Home is rebuilding after uncertain ledger publication", true);
     }
     const existing = this.slots.get(sessionId);
@@ -3406,8 +3411,8 @@ export class RuntimeRegistry {
   }
 
   private async scanHomeBeforeManager(sessionId: string, path: string): Promise<void> {
-    const chapter = this.home.chapterStateFor(sessionId);
-    if (!chapter.homeId) return;
+    const chapter = this.lineage().state(sessionId);
+    if (!chapter.lineageId) return;
     // A sealed chapter opens cold exactly as a warm one does: read-only. The caller's
     // header read refuses an unstable tail before the SDK can repair it, and the slot's
     // chapter state refuses every write (`assertChapterWritable`). Only an in-progress
@@ -4348,15 +4353,15 @@ export class RuntimeRegistry {
 
   /** Drop every live Home projection after an uncertain ledger replacement.
    * Acquisitions are globally stale-marked until every old slot is retired. */
-  private async retireUncertainHomeRuntimes(reloaded: boolean): Promise<void> {
-    const homes = [...this.slots].filter(([sessionId]) => this.home.chapterStateFor(sessionId).homeId);
+  private async retireUncertainHomeRuntimes(): Promise<void> {
+    const homes = [...this.slots].filter(([sessionId]) => this.lineage().state(sessionId).lineageId);
     for (const [sessionId, slot] of homes) {
       await slot.retireAfterSettled();
       const retired = await this.retireIdleRuntime({
         sessionId,
         slot,
         reason: "publication-uncertain",
-        eligible: () => this.homePublicationUncertain
+        eligible: () => this.lineage().publicationUncertain()
           && this.slots.get(sessionId) === slot
           && !slot.isBusy,
       });
@@ -4364,7 +4369,6 @@ export class RuntimeRegistry {
         throw new GatewayError("conflict", "A stale Home runtime could not be retired after ledger publication uncertainty", true);
       }
     }
-    this.homePublicationUncertain = !reloaded;
   }
 
   /** Cold admission measures the finite canonical file cut, not a zero-valued

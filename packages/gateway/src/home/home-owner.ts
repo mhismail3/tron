@@ -120,11 +120,9 @@ export interface HomeSessionPort {
    * profile decision for it, so the next prompt uses the new profile. A busy
    * session refuses retryably before `commit` runs. */
   replaceRuntimeForProfile(sessionId: string, commit: () => Promise<void>): Promise<void>;
-  /** Synchronously stale-mark Home slots before any asynchronous reload work. */
-  beginHomePublicationReconciliation(): void;
   /** Retire every live Home slot after uncertain publication; next admission
    * rebuilds from the record reloaded by this owner. */
-  retireHomeRuntimes(reloaded: boolean): Promise<void>;
+  retireHomeRuntimes(): Promise<void>;
   /** Starts one wake activation for the Home session: admission, the trigger
    * result, and the run. `delivered` is false when no result could be delivered. */
   wakeHome(sessionId: string): Promise<{ delivered: boolean }>;
@@ -206,6 +204,9 @@ export class HomeOwner {
   private designating = false;
   private record: HomeRecord | undefined;
   private unavailable: string | undefined;
+  /** Every live chapter is stale-marked from an uncertain ledger publication until
+   * its runtimes are retired (the kernel reads it through `sessionLineage`). */
+  publicationUncertain = false;
   private readonly tasks: HomeTaskDispatcher;
   private readonly inbox: WakeInboxOwner;
   /** The wake owner's single-flight state: one drain at a time, with one request
@@ -1695,15 +1696,17 @@ export class HomeOwner {
         // A visible replacement makes the caller's prior in-memory record
         // untrustworthy. Fence synchronous route readers before reloading.
         this.unavailable = "Home ledger publication is being reconciled";
-        this.options.sessions.beginHomePublicationReconciliation();
+        // Synchronously stale-mark Home slots before any asynchronous reload work.
+        this.publicationUncertain = true;
         const reloaded = await this.load(false);
         this.options.sessions.homeChaptersChanged?.();
         // Do not await this here: writeLocked may be running inside a slot lane,
         // and Registry retirement queues behind that lane. Keep the owner fenced
         // until the retained retirement completes successfully.
         const retirement = Promise.resolve()
-          .then(() => this.options.sessions.retireHomeRuntimes(reloaded))
+          .then(() => this.options.sessions.retireHomeRuntimes())
           .then(() => {
+            this.publicationUncertain = !reloaded;
             if (reloaded) this.unavailable = undefined;
           })
           .catch(error => {

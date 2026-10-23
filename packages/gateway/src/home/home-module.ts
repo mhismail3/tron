@@ -11,6 +11,8 @@ import type { HomeDiagnostic } from "./home-diagnostic.js";
 import { HomeRequestPolicyError } from "./home-request-policy.js";
 import type { RequestPolicyHook } from "../kernel/host/request-policy.js";
 import type { InputAdmissionPolicy } from "../kernel/host/input-admission.js";
+import type { SessionLineagePolicy } from "../kernel/host/session-lineage.js";
+import { assertChapterWritable } from "./home-chapter-state.js";
 import { homeInputAdmission } from "./home-input-admission.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { HomeTaskDiagnostic, HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
@@ -20,6 +22,7 @@ import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/se
 
 export interface HomeModuleServices {
   runSettled: RunSettledPolicy;
+  lineage: SessionLineagePolicy;
   requestPolicy: RequestPolicyHook;
   inputAdmission: InputAdmissionPolicy;
   profile: HomeSessionProfileServices;
@@ -44,6 +47,14 @@ export function homeModuleServices(owner: HomeOwner,
   return {
     knowledge: ports.knowledge, read: ports.read, delegate: ports.delegate,
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
+    lineage: {
+      state: sessionId => {
+        const { homeId, ...state } = owner.chapterStateFor(sessionId);
+        return homeId === undefined ? state : { ...state, lineageId: homeId };
+      },
+      assertWritable: sessionId => assertChapterWritable(owner.chapterStateFor(sessionId)),
+      publicationUncertain: () => owner.publicationUncertain,
+    },
     profile: {
       decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), runtime: ports.runtime,
     },
@@ -87,7 +98,7 @@ export function createHomeModule(services: () => HomeModuleServices): ModuleDesc
     tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"], commands: [],
     start: () => ({ profiles: [homeSessionProfile(() => services().profile)], hooks: {
       profileDecision: (sessionId, cwd) => { const name = services().profile.decision(sessionId, cwd); return name === "unnamed" ? "unrecorded" : name; },
-      runSettled: () => services().runSettled, requestPolicy: () => services().requestPolicy,
+      runSettled: () => services().runSettled, sessionLineage: () => services().lineage, requestPolicy: () => services().requestPolicy,
       inputAdmission: () => services().inputAdmission, appendGuard: homeAppendGuardHook(() => services().appendGuard) }, extension: session => {
       const owners = services();
       return createTronHomeExtension(() => owners.memory(session.sessionId()),
