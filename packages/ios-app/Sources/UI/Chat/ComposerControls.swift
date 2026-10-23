@@ -467,6 +467,26 @@ enum SessionContextProgressPolicy {
     }
 }
 
+/// The shared determinate context ring; its caller supplies size and semantic tint.
+struct SessionContextProgressRing: View {
+    let fraction: Double
+    let accent: Color
+    let diameter: CGFloat
+    var isCompacting = false
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.tronTextMuted.opacity(0.34), lineWidth: 2)
+            Circle()
+                .trim(from: 0, to: min(1, max(0, fraction)))
+                .stroke(accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            if isCompacting { Circle().fill(accent).frame(width: 4, height: 4) }
+        }
+        .frame(width: diameter, height: diameter)
+    }
+}
+
 /// Historical session-owned context indicator. It remains mounted at zero
 /// while the authoritative chat opens, then animates to the canonical value.
 /// Tapping it opens the chat's management sheet (Manage Session, or Manage Home
@@ -493,21 +513,8 @@ struct SessionContextProgressButton: View {
 
     var body: some View {
         Button(action: onTap) {
-            ZStack {
-                Circle()
-                    .stroke(Color.tronTextMuted.opacity(0.34), lineWidth: 2)
-                Circle()
-                    .trim(from: 0, to: fraction)
-                    .stroke(accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                if isCompacting {
-                    Circle().fill(accent).frame(width: 4, height: 4)
-                }
-            }
-            .frame(
-                width: ComposerControlMetrics.contextRingDiameter,
-                height: ComposerControlMetrics.contextRingDiameter
-            )
+            SessionContextProgressRing(fraction: fraction, accent: accent,
+                                       diameter: ComposerControlMetrics.contextRingDiameter, isCompacting: isCompacting)
             .frame(
                 width: ComposerControlMetrics.hitTarget,
                 height: ComposerControlMetrics.hitTarget

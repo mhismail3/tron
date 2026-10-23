@@ -1182,20 +1182,21 @@ private actor HostedHomeShellGateway {
     }
     private func taskSummary(_ id: String) -> JSONValue {
         let terminal = id == "terminal"
+        let paddingReview = ProcessInfo.processInfo.arguments.contains("-home-task-padding-review")
         // The Gateway sends whole epoch milliseconds; the task DTOs decode them as Int.
         let now = nowMilliseconds()
         let created = id == "active" ? now - 2 * 3_600_000 : now - 86_400_000
         let updated = id == "active" ? now - 6 * 60_000 : now - 3 * 3_600_000
         return .object(["taskId": .string(id), "createdAt": .number(created), "updatedAt": .number(updated),
-            "title": .string(id == "active" ? "Settings model: continue epic #758" : "Garden review email draft"), "project": .string("tron"),
+            "title": .string(paddingReview ? "Review shared settings navigation and transcript history behavior across every sheet" : id == "active" ? "Settings model: continue epic #758" : "Garden review email draft"), "project": .string("tron"),
             "sessionId": .string("worker-session"), "target": .string("/trusted/project"),
             "lifecycle": .string(terminal ? "terminal" : "active"), "outcome": terminal ? .string(id == "active" ? "interrupted" : "final") : .null,
             "spend": taskSpend(), "attention": .bool(false), "pendingGrant": .bool(false),
-            "checkins": .array(id == "active" ? [.object([
+            "checkins": .array(id == "active" || paddingReview ? [.object([
                 "id": .string("checkin-one"), "taskId": .string(id), "sessionId": .string("worker-session"),
                 "operationId": .string("task-operation"), "at": .string(isoAgo(360)),
-                "step": .string("Validating settings changes"), "done": .string("Gateway journey passed"),
-                "next": .string("Review native screenshots"), "attention": .string("none"),
+                "step": .string(paddingReview ? "Native visual review capture complete with a long two-line check-in summary" : "Validating settings changes"), "done": .string("Gateway journey passed"),
+                "next": .string(paddingReview ? "Review the shared sheet rows with exact evidence and report the remaining scope" : "Review native screenshots"), "attention": .string("none"),
             ])] : [])])
     }
     private func taskRecord(_ id: String) -> JSONValue {

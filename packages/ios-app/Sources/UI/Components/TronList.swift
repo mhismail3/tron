@@ -94,6 +94,9 @@ struct TronListRow: View {
                         .foregroundStyle(Color.tronTextSecondary)
                         .lineLimit(content.monoSubtext ? 1 : 2)
                         .truncationMode(content.monoSubtext ? .middle : .tail)
+                        // Keep measurement and placement at the same line-limited
+                        // height; compressing this later leaves space below metadata.
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !tagsOnTitleLine && (!content.tags.isEmpty || content.timestamp != nil) { metadataLine }
@@ -139,6 +142,7 @@ struct TronListRow: View {
             .foregroundStyle(Color.tronTextPrimary)
             .lineLimit(content.preview ? 3 : 2)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .tronListMarker(.title)
     }
 
     private var metadataLine: some View {
@@ -154,6 +158,7 @@ struct TronListRow: View {
             }
         }
         .padding(.top, 2)
+        .tronListMarker(.metadata)
     }
 
 }
@@ -562,7 +567,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
 
 // MARK: - Geometry markers (hosted UI tests only)
 
-enum TronListMarkerKind: String { case leading, status, tags }
+enum TronListMarkerKind: String { case leading, status, tags, title, metadata, subtext, container }
 
 private struct TronListMarkerKey: PreferenceKey {
     static let defaultValue: [TronListMarkerKind: Anchor<CGRect>] = [:]

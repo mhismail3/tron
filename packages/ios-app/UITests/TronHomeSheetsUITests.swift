@@ -8,12 +8,36 @@ import XCTest
 final class TronHomeSheetsUITests: XCTestCase {
     private var timings: [String: Double] = [:]
 
+    @MainActor func testPolishTaskPaddingReview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-task-padding-review", "-home-dark"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
+        app.buttons["home-pinned-row"].tap()
+        let context = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(context, "enabled == true"))
+        open(app, context, ready: "home-manage-state", name: "review-manage")
+        expand(app, done: "home-sheet-done-manage")
+        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "review-tasks")
+        expand(app, done: "home-sheet-done-tasks")
+        shot("polish-long-tasks")
+        var lines: [String] = []
+        for id in ["active", "terminal"] {
+            let row = element(app, "home-task-\(id)")
+            let card = element(app, "home-task-card-\(id)-container")
+            let title = element(app, "home-task-\(id)-title")
+            let status = element(app, "home-task-\(id)-status")
+            let metadata = element(app, "home-task-\(id)-metadata")
+            lines.append("\(id): row=\(row.frame), card=\(card.frame), title=\(title.frame), status=\(status.frame), metadata=\(metadata.frame), top=\(min(title.frame.minY, status.frame.minY) - card.frame.minY), bottom=\(card.frame.maxY - metadata.frame.maxY)")
+        }
+        let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
+        attachment.name = "task-row-geometry"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
     // Native visual review journey; behavioral regressions are added after approval.
     @MainActor func testPolishReviewLight() { polishReview(arguments: [], name: "light") }
     @MainActor func testPolishReviewDark() { polishReview(arguments: ["-home-dark"], name: "dark") }
-    @MainActor func testPolishReviewInsetMetrics() {
-        polishReview(arguments: ["-home-summary-inset-metrics"], name: "inset", summaryOnly: true)
-    }
     @MainActor func testPolishReviewXXXL() {
         polishReview(arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"], name: "xxxl", summaryOnly: true)
     }

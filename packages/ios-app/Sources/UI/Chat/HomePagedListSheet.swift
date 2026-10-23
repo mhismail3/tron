@@ -170,6 +170,8 @@ struct HomePagedListSheet: View {
                 guard canAct else { return }; child = .task(row.taskId)
             }
         }
+        .tronListMarker(.container)
+        .tronListMarkers("home-task-card-\(row.taskId)")
     }
 
     private func load(_ request: FeedStore<HomeSheetContent, HomeSheetReadQuery, HomeSheetReadIdentity>.Request,

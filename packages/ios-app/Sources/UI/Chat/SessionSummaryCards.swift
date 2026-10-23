@@ -167,13 +167,13 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(spacing: 6) {
                     ForEach(statistics.indices, id: \.self) { index in
-                        SessionSummaryMetric(value: statistics[index].0, label: statistics[index].1)
+                        metric(statistics[index].0, statistics[index].1)
                     }
                 }
             } else {
                 HStack(spacing: 0) {
                     ForEach(statistics.indices, id: \.self) { index in
-                        SessionSummaryMetric(value: statistics[index].0, label: statistics[index].1)
+                        metric(statistics[index].0, statistics[index].1)
                     }
                 }
             }
@@ -199,14 +199,7 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
         }
     }
 
-}
-
-/// Shared usage metric treatment for Home and normal session summaries.
-struct SessionSummaryMetric: View {
-    let value: String
-    let label: String
-
-    var body: some View {
+    private func metric(_ value: String, _ label: String) -> some View {
         VStack(spacing: 3) {
             Text(value)
                 .font(SessionSummaryTypography.metric)

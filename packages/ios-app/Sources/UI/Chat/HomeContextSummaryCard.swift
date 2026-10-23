@@ -7,15 +7,6 @@ struct HomeContextSummaryCard: View {
     let snapshot: SessionContextPresentation
     let read: HomeManageDTO
 
-    // Temporary native review alternative; removed once the maintainer chooses.
-    private var insetMetrics: Bool {
-        #if HOSTED_TEST
-        ProcessInfo.processInfo.arguments.contains("-home-summary-inset-metrics")
-        #else
-        false
-        #endif
-    }
-
     private var usage: SessionContextUsagePresentation {
         guard let breakdown = read.context.breakdown else { return SessionContextUsagePresentation(snapshot.contextUsage) }
         return .available(used: breakdown.effectiveTokens, window: breakdown.contextWindow,
@@ -25,7 +16,7 @@ struct HomeContextSummaryCard: View {
 
     var body: some View {
         TronGlassCard(accent: .tronEmerald) {
-            VStack(alignment: .leading, spacing: TronSpacing.xl) {
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
                 HStack(spacing: TronSpacing.md) {
                     TronStatusPill(text: HomeStatusLinePresentation.state(read.status), accent: HomeSheet.statusAccent(read.status))
                         .accessibilityIdentifier("home-manage-state")
@@ -37,34 +28,21 @@ struct HomeContextSummaryCard: View {
                         .accessibilityIdentifier("home-manage-workers")
                 }
                 HStack(spacing: TronSpacing.xl) {
-                    Gauge(value: percent, in: 0...100) { Text("Context used") }
-                        .gaugeStyle(.accessoryCircularCapacity)
-                        .tint(Color.tronEmerald)
-                        .labelsHidden()
+                    SessionContextProgressRing(fraction: percent / 100, accent: .tronEmerald, diameter: TronSpacing.xlarge)
+                        .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Context used")
                         .accessibilityValue("\(Int(percent.rounded())) percent")
                         .accessibilityIdentifier("home-context-ring")
                     VStack(alignment: .leading, spacing: TronSpacing.xxs) {
-                        switch usage {
-                        case .available(let used, let window, _):
-                            Text("\(max(0, window - used).formatted(.number.notation(.compactName))) tokens left")
-                                .font(SessionSummaryTypography.headline)
-                            Text(usage.usedSummary ?? "")
-                                .font(SessionSummaryTypography.usageDetail)
-                                .foregroundStyle(Color.tronTextSecondary)
-                        case .unavailable:
-                            Text("Context pending").font(SessionSummaryTypography.headline)
-                            Text(SessionContextUsageRefreshPresentation(lastTranscriptKind: snapshot.lastTranscriptKind,
-                                                                       assistantMessages: snapshot.stats.assistantMessages).detail)
-                                .font(SessionSummaryTypography.detail)
-                                .foregroundStyle(Color.tronTextSecondary)
-                        }
-                        if insetMetrics { metrics.padding(.top, TronSpacing.md) }
+                        Text(headline).font(SessionSummaryTypography.headline)
+                        Text(detail)
+                            .font(SessionSummaryTypography.usageDetail)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .accessibilityIdentifier("home-context-detail")
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                 }
-                if !insetMetrics { metrics }
             }
             .padding(TronSpacing.xxl)
         }
@@ -74,17 +52,25 @@ struct HomeContextSummaryCard: View {
         .accessibilityIdentifier("home-context-summary")
     }
 
+    private var headline: String {
+        if case .available(let used, let window, _) = usage {
+            return "\(max(0, window - used).formatted(.number.notation(.compactName))) tokens left"
+        }
+        return "Context pending"
+    }
+
+    private var detail: String {
+        let context = usage.usedSummary ?? SessionContextUsageRefreshPresentation(
+            lastTranscriptKind: snapshot.lastTranscriptKind, assistantMessages: snapshot.stats.assistantMessages).detail
+        let total = snapshot.stats.tokens.total.formatted(.number.notation(.compactName))
+        let cache = snapshot.stats.latestCacheHitRate.map {
+            "\($0.formatted(.number.precision(.fractionLength(1))))%"
+        } ?? "—"
+        return "\(context) · \(total)\u{00A0}total\u{00A0}tokens · \(cache)\u{00A0}cache\u{00A0}hit"
+    }
+
     private var percent: Double {
         if case .available(_, _, let percent) = usage { return min(100, max(0, percent)) }
         return 0
-    }
-
-    private var metrics: some View {
-        HStack(spacing: TronSpacing.md) {
-            SessionSummaryMetric(value: snapshot.stats.tokens.total.formatted(.number.notation(.compactName)), label: "Total tokens")
-            SessionSummaryMetric(value: snapshot.stats.latestCacheHitRate.map {
-                "\($0.formatted(.number.precision(.fractionLength(1))))%"
-            } ?? "—", label: "Cache hit %")
-        }
     }
 }
