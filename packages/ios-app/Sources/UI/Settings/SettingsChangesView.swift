@@ -552,7 +552,7 @@ private struct SettingsChangeDetailView: View {
     private var afterValue: String {
         entry.redacted == true ? "Changed" : entry.after.map(String.init(describing:)) ?? "—"
     }
-    private var statusAccent: Color { entry.status == "failed" ? .tronError : .tronEmerald }
+    private var statusAccent: Color { entry.status == "failed" ? .tronError : .tronPrimary }
     private var divider: some View { TronSettingsDivider() }
 
     /// A readable local time and how long ago, never the raw ISO timestamp.

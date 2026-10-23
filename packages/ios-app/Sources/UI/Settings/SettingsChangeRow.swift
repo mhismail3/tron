@@ -78,7 +78,7 @@ struct SettingsChangeRowView: View, Equatable {
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.row == rhs.row && lhs.isNew == rhs.isNew }
 
-    private var accent: Color { row.failed ? .tronError : .tronEmerald }
+    private var accent: Color { row.failed ? .tronError : .tronPrimary }
 
     var body: some View {
         TronGlassCard(accent: accent) {

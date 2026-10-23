@@ -38,6 +38,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   lazy outer stacks; small divider-owned sections stay eager. Bounded card stacks that host a
   presenter (Settings sections, Manage Session) stay in an ordinary stack, because lazy eviction
   of glass cards invalidates SwiftUI's layout graph and can end a nested presenter's lifetime.
+- **Code insets.** `ToolDetailCodeBlock` uses a flat, lightly tinted inset, never Liquid Glass.
+  Memory entries and tool argument/error sheets share it, so an entry card owns the only glass
+  container around its monospace content.
 - **Long content.** Containers above `TronLongContentPolicy.flatSurfaceCharacterThreshold` use
   `tronScrollSurface`; shorter ones keep glass with identical padding and typography. Prompt text
   keeps about `promptVisibleLines` lines and masks only the text's bottom ink on overflow; the

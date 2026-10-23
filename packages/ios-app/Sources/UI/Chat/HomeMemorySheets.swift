@@ -66,6 +66,7 @@ extension HomeSheet {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home-memory-summary-detail")
+        .imageScale(.small)
     }
 
     /// A message: who said it and when, the message as Home recorded it, what Home
@@ -109,6 +110,7 @@ extension HomeSheet {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home-memory-detail")
+        .imageScale(.small)
     }
 
     /// The canonical history of one memory entry, paged in bounded characters.

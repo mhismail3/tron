@@ -403,7 +403,7 @@ private struct ComposerPlaceholder: View {
     var body: some View {
         Text(line)
             .font(TronTypography.input)
-            // The shared hint role stays quieter without losing AA text contrast.
+            // All composers use the shared muted placeholder role, not primary ink.
             .foregroundStyle(Color.inputPlaceholder)
             .lineLimit(1)
     }

@@ -478,7 +478,8 @@ struct ToolDetailCodeBlock: View {
             .padding(12)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .tronGlassSurface(accent: accent, tintOpacity: 0.07)
+            // Code is an inset, never another backdrop filter inside a card.
+            .background(accent.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

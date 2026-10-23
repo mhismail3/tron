@@ -35,7 +35,9 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   Deep Burgundy or Olive Gold. `Color.tronPrimary` reads that observable owner; ink, title,
   icon, container and pill tint share the adaptive ink without recreating navigation or chats.
   Semantic status and resource identities stay independent. UIKit inputs refresh primary ink
-  on update, not only creation. The shared placeholder role retains 85% ink for text contrast.
+  on update, not only creation. Composer placeholders use the shared muted text role, not
+  saturated primary ink. Normal usage labels, context-ring arcs and Changes states use primary;
+  warning and failure colors remain semantic. Memory kind icons use smaller primary symbols.
 - Section headings are visible by default, including dashboard and top-level Settings groups.
   Settings drill-in pages opt in with `TronSettingsSections(hidesLoneHeading: true)`;
   only a structurally lone section loses its heading, never its explanatory detail.

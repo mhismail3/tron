@@ -164,6 +164,7 @@ struct HomePagedListSheet: View {
         }
         .tronListMarker(.container)
         .tronListMarkers("home-memory-card-\(line.start)")
+        .imageScale(.small)
     }
 
     private func taskRow(_ row: HomeTaskPageDTO.Row) -> some View {
@@ -202,18 +203,18 @@ struct HomePagedListSheet: View {
 }
 
 extension HomeMemoryPresentation {
-    /// One kind icon and colour per memory line; the card itself stays uniform.
+    /// Kind stays in the symbol and label; all Memory icons share the primary role.
     static func kind(_ line: HomeMemoryViewDTO.Line) -> (icon: String, tone: Color, label: String) {
-        guard let item = line.item else { return ("square.stack.3d.up", .tronPurple, "Summary") }
+        guard let item = line.item else { return ("square.stack.3d.up", .tronPrimary, "Summary") }
         if item.isToolActivity {
             let icon = item.display?.toolName.flatMap { ToolDetailPresentation.sheetTitleIcon(for: $0) } ?? "wrench.adjustable"
-            return (icon, ChatSemanticPillRole.tool.accent, item.kind == .echo ? "Tool result" : "Tool call")
+            return (icon, .tronPrimary, item.kind == .echo ? "Tool result" : "Tool call")
         }
         return switch item.attribution {
         case .user: ("person", .tronPrimary, "You")
-        case .assistant: ("text.bubble", .tronTeal, "Home")
-        case .tool: ("wrench.adjustable", .tronInfo, "Tool")
-        case .event: ("bolt", .tronAmber, "Result")
+        case .assistant: ("text.bubble", .tronPrimary, "Home")
+        case .tool: ("wrench.adjustable", .tronPrimary, "Tool")
+        case .event: ("bolt", .tronPrimary, "Result")
         }
     }
 

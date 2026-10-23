@@ -202,7 +202,7 @@ struct HomeUsageSummaryCard: View {
             }
         } else if let snapshot {
             let parts = ProviderUsagePresentation.windowParts(snapshot, columns: true)
-            let color = snapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted
+            let color = snapshot.status == .available ? Color.tronPrimary : Color.tronTextMuted
             Group {
                 if parts.isEmpty {
                     Text(ProviderUsagePresentation.summary(snapshot))

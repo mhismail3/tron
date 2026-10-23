@@ -509,7 +509,7 @@ struct SessionContextProgressButton: View {
         switch boundedPercentage {
         case 95...: .tronError
         case 80...: .tronAmber
-        default: .tronEmerald
+        default: .tronPrimary
         }
     }
 
