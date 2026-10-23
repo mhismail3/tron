@@ -244,11 +244,11 @@ lands, a slice runs the named locks and the full Gateway suite directly. Locks s
 | E5 `kernel/run` | admission, queue, abort, compaction, receipts, request pipeline, profiles (§2.2); the Home and notification hooks | all `run-*`, `run-markers`, `run.store`, `command-receipts`, E0a, E0b, E0d |
 | E6 `kernel/delegation` | delegation files, generic task report/check-in/worker extension, owned-session dispatch port (#1692, #1696) | `delegation-subagent`, `home-task-store`, E0a, E0c, subagent parity |
 | E7 `kernel/session` | catalog, acquisition, heap, eviction, archive/delete, drain; `HomeOwner` built by Home's `start`; then the rest of §5's left column (registry worker paths, slot worker role, `home-task-subagents.ts`, `DelegationOperations` for Home and automations) | `session-catalog.store`, `session-archive`, `session-attention`, `home.store`, Pi corpus, E0a, E0d |
-| E8 (Phase 3) | Home files move under `modules/home` | `verify --all` |
+| E8 (Phase 3) | Home files move under `modules/home`; then the E7 remainder: display, providers and settings hooks, registry and slot out of `gateway/run`, the delegation tail | `verify --all` |
 
 Order: wiring first (E1-E3), then read-only projection (E4), the behavior core (E5),
 delegation, which depends on run ownership (E6), and the registry, which depends on all
-(E7). Home leaves the registry through `sessionLineage` (§2.1; decision A, maintainer 2026-10-23): the kernel asks Home only for lineage facts, never through a HomeOwner mirror, and the registry's Home procedures (reserved-successor materialization, publication retirement, task recovery and dispatch) move to Home over K1 operations. The rest of §5's left column follows E7 (maintainer, 2026-10-22): while `gateway/run` owns the slot
+(E7). E7 closed (maintainer, 2026-10-23) once the registry no longer constructed or called Home; its remaining items moved to E8. The net-negative line target is checked at Phase 2 exit. Home leaves the registry through `sessionLineage` (§2.1; decision A, maintainer 2026-10-23): the kernel asks Home only for lineage facts, never through a HomeOwner mirror, and the registry's Home procedures (reserved-successor materialization, publication retirement, task recovery and dispatch) move to Home over K1 operations. The rest of §5's left column follows E7 (maintainer, 2026-10-22): while `gateway/run` owns the slot
 and registry, which import delegation, a delegation→run import is a hard two-way pair (#1348 layers probe). E2 before E3-E7 keeps moved files from being re-touched for imports (D1). K4 and K6 are
 file moves on disjoint files that may run beside E3-E7 (`admin-settings-change`,
 `settings-approvals`, `admin.store`, `run-prompt-stream`). Each step is several slices of one
