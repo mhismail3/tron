@@ -14,7 +14,8 @@ import {
 } from "./session-search-contract.js";
 import { SessionSearchIndex, type SearchIndexStamp, type SearchIndexDocument } from "./session-search-index.js";
 import type { SessionCatalogIdentity } from "./session-catalog.js";
-import { excerpt, extractSearchTexts, validateSearchBranch, type SearchTextEntry } from "./session-search-text.js";
+import { excerpt, extractSearchTexts, type SearchTextEntry } from "./session-search-text.js";
+import { validateSearchBranch } from "./session-branch.js";
 import { redactCredentials } from "../util/credential-redaction.js";
 import { yieldToEventLoop } from "../util/event-loop-yield.js";
 

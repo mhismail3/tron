@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { SessionSearchForkBoundary } from "./session-branch.js";
 
 const SESSION_SEARCH_MAX_QUERY_BYTES = 2_048;
 const SESSION_SEARCH_MAX_RESULTS = 50;
@@ -20,12 +21,6 @@ export interface SessionSearchAnchorRevision {
   leafEntryId?: string;
   entryOrdinal: number;
   forkBoundary?: SessionSearchForkBoundary;
-}
-
-export interface SessionSearchForkBoundary {
-  kind: "sessionFork" | "subagentFork";
-  inheritedEntryId: string;
-  gapOrdinal: number;
 }
 
 export interface SessionSearchResult {

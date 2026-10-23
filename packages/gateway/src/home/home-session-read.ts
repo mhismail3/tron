@@ -2,7 +2,7 @@ import { GatewayError } from "../errors.js";
 import { EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS, EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import { parseEntry, projectBranch } from "../episodic/episodic-source.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import { validateSearchBranch } from "../sessions/session-search-text.js";
+import { validateSearchBranch } from "../sessions/session-branch.js";
 
 export interface HomeSessionReadRequest {
   sessionId: string;

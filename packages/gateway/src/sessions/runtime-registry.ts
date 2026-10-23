@@ -85,7 +85,7 @@ import {
   type CatalogMetadataIndexFailure,
   type CatalogMetadataIndexSummary,
 } from "./catalog-metadata-index.js";
-import { branchFromParsedSession, branchFromSessionEntries } from "./session-branch.js";
+import { branchFromParsedSession, branchFromSessionEntries, validateSearchBranch, type SessionSearchForkBoundary } from "./session-branch.js";
 import { appendChatSettingsSnapshot } from "./session-settings.js";
 import { appendContextWindowSnapshot } from "../providers/context-window-policy.js";
 import {
@@ -115,8 +115,6 @@ import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { applyHomeCacheRetention, type HomeRequestRecord } from "../home/home-request-policy.js";
 import { homeModuleServices } from "../home/home-module.js";
-import type { SessionSearchForkBoundary } from "./session-search-contract.js";
-import { validateSearchBranch } from "./session-search-text.js";
 import {
   CatalogDiscovery,
   DEFAULT_CATALOG_DISCOVERY_LIMITS,
