@@ -2,6 +2,7 @@ import type { AgentSession } from "../pi/coding-agent.js";
 import type { ImageContent } from "../pi/ai.js";
 import type { RequestPolicy } from "./request-policy.js";
 
+export const CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.context-delivery.v4";
 export type InputDelivery = "user" | "wake";
 export interface InputEnvelope { signal: AbortSignal; tokens: number; freshTokens: number; bytes: number; entries: number }
 /** The kernel needs only these identities to bind canonical input receipts.

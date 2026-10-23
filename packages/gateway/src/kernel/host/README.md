@@ -16,7 +16,8 @@ ordinary profile's first extension and joins canonical receipt writes before inp
 concrete refusal errors stay with the implementing module. `canonical-append.ts`
 carries live writer facts and an opaque module-issued authority, never a copy of
 chapter state or a second Stop fence. `input-admission.ts` carries delivery identities,
-bounds and live envelope readers; delivery state and budgeting remain module-owned.
+bounds, the canonical context-delivery receipt type and live envelope readers;
+delivery state and budgeting remain module-owned.
 `session-profile.ts` owns the neutral immutable runtime recipe and ordinary defaults.
 
 ## Contract

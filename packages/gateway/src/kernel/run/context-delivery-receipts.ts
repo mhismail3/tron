@@ -1,5 +1,5 @@
 import type { SessionEntry, AgentSession } from "../pi/coding-agent.js";
-import type { InputMessage } from "../host/input-admission.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, type InputMessage } from "../host/input-admission.js";
 import type { JsonValue } from "../../protocol/types.js";
 import { safeJson } from "../projection/projection.js";
 import { GatewayError } from "../../errors.js";
@@ -23,7 +23,6 @@ export async function deliverPromptInput(
       owner: { id: message.details.taskId, title: "Home task", source: "gateway:home-task" } })), entry.id);
 }
 
-export const CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.context-delivery.v4";
 const HISTORICAL_CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.session-input.v1";
 
 interface ContextDeliveryReceiptData {

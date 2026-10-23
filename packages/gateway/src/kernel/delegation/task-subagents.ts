@@ -3,7 +3,7 @@ import { basename, dirname, join } from "node:path";
 import type { FileEntry } from "../pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
 import type { ExtensionRunLifecycleState } from "../../protocol/types.js";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../run/context-delivery-receipts.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../host/input-admission.js";
 import { delegatedArtifactPathAllowed, DELEGATED_PROVIDER_TOOL_NAME } from "./delegated-provider.js";
 import { MAX_EXTENSION_ARTIFACT_BYTES, observedPausedProcessTerminalAt } from "../projection/extension-run-projection.js";
 import { homeTaskOperationSpan } from "./task-report.js";

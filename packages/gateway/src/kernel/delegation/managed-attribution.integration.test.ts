@@ -16,7 +16,8 @@ import { producerIdentity, withExtensionOwner } from "../../extensions/owner-att
 import { AsyncResource } from "node:async_hooks";
 import { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "../run/context-delivery-receipts.js";
+import { makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "../run/context-delivery-receipts.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../host/input-admission.js";
 import { invocationProjection, invocationReceipts } from "../run/invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt, extensionActivityReceipts } from "../../sessions/extension-activity-history.js";
 

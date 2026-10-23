@@ -1,7 +1,7 @@
-import type { InputEnvelope, InputDelivery } from "../../kernel/host/input-admission.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, type InputEnvelope, type InputDelivery } from "../../kernel/host/input-admission.js";
 import { estimateTokens } from "../../kernel/pi/coding-agent.js";
 import { createHash } from "node:crypto";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../../kernel/run/context-delivery-receipts.js";
+import { makeContextDeliveryReceipt } from "../../kernel/run/context-delivery-receipts.js";
 import { parseHomeTaskReport } from "../../kernel/delegation/task-report.js";
 import { HOME_TASK_RESULT_MESSAGE, INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/run/invocation-receipts.js";
 import { GatewayError } from "../../errors.js";

@@ -131,9 +131,9 @@ import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCa
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
 import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "../kernel/delegation/child-session-admission.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "./extension-activity-history.js";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../kernel/run/context-delivery-receipts.js";
+import { makeContextDeliveryReceipt } from "../kernel/run/context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "../kernel/run/invocation-receipts.js";
-import type { InputTrigger } from "../kernel/host/input-admission.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, type InputTrigger } from "../kernel/host/input-admission.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
 import { userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
