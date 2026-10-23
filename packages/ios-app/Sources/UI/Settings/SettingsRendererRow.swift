@@ -10,6 +10,7 @@ struct SettingsRendererRow: View {
     let editable: Bool
     /// Detailed rows show the registry's help beside the shared editor.
     var detailed = false
+    var modelConfiguration = false
     /// One of several instances of a key (per project, per model): titled by its
     /// instance, with the key's label and help on the enclosing group.
     var instanced = false
@@ -38,7 +39,9 @@ struct SettingsRendererRow: View {
 
     private var presentation: SettingsKeyPresentation? { setting.presentation }
     private var title: String {
-        instanced ? (Self.instanceName(setting) ?? baseInstanceTitle ?? presentation?.label ?? setting.key)
+        if modelConfiguration && setting.key == "model.thinking[role=chat]" { return "Effort" }
+        if modelConfiguration && setting.key == "model.contextWindow" { return "Context Window" }
+        return instanced ? (Self.instanceName(setting) ?? baseInstanceTitle ?? presentation?.label ?? setting.key)
             : (presentation?.label ?? setting.key)
     }
 
@@ -87,7 +90,11 @@ struct SettingsRendererRow: View {
 
     /// Every row carries a glyph so titles align; the glyph names the control kind.
     private var icon: String {
-        switch control {
+        if modelConfiguration {
+            if setting.key == "model.thinking[role=chat]" { return "brain" }
+            if setting.key == "model.contextWindow" { return "gauge.with.dots.needle.50percent" }
+        }
+        return switch control {
         case .toggle: "switch.2"
         case .number: "number"
         case .text: "character.cursor.ibeam"
@@ -106,7 +113,9 @@ struct SettingsRendererRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Group {
-                if let liveControl, setting.projectSetting == nil { liveControl } else { control(for: control) }
+                if modelConfiguration && setting.key == "model.ref[role=chat]" {
+                    modelHeader
+                } else if let liveControl, setting.projectSetting == nil { liveControl } else { control(for: control) }
             }
                 .environment(\.tronSettingsRowAccessory, accessory)
                 .environment(\.tronSettingsRowStatus, overriddenStatus)
@@ -114,6 +123,29 @@ struct SettingsRendererRow: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(settingsRowIdentifier(setting))
+    }
+
+    /// The former Manage model-card header, with the schema renderer still owning
+    /// the value, offered choices, project provenance and independent Revert action.
+    private var modelHeader: some View {
+        let value = setting.value?.objectValue
+        let provider = value?["provider"]?.stringValue
+        let id = value?["id"]?.stringValue
+        let sessionID = target.objectValue?["sessionId"]?.stringValue
+        let catalog = model.providerCatalog(for: sessionID.map { .session(id: $0) } ?? .global)?.models ?? []
+        let selected = catalog.first { $0.provider == provider && $0.id == id }
+        return TronSettingsRow(icon: nil, title: selected?.displayName ?? display,
+                               subtitle: selected?.displayProviderName ?? provider.map { ModelRef(provider: $0, id: id ?? "").displayProviderName },
+                               titleFont: SessionSummaryTypography.headline) {
+            TronProgressiveSheetLink(accessibilityLabel: "Switch Model", identity: "manage.model.switch", detents: .contentFit) {
+                SettingsModelPicker(setting: setting, target: target, title: "Models",
+                                    onReset: canReset ? { onChange(nil) } : nil) { onChange($0) }
+            } label: {
+                TronInlineActionLabel("Switch Model")
+            }
+            .disabled(!editable || control == .readOnly || setting.projectSetting != nil)
+            .accessibilityIdentifier("manage-model-switch")
+        }
     }
 
     /// Always present, even empty: the shared row then keeps its value control a
@@ -157,7 +189,10 @@ struct SettingsRendererRow: View {
     }
 
     /// An absent optional value is not a second provenance statement.
-    private var display: String { setting.value == nil && setting.display == "Not set" && presentation?.redacted != true ? "—" : setting.display }
+    private var display: String {
+        if modelConfiguration && setting.key == "model.contextWindow" && setting.value == nil { return "Default" }
+        return setting.value == nil && setting.display == "Not set" && presentation?.redacted != true ? "—" : setting.display
+    }
 
     @ViewBuilder
     private func control(for control: SettingsRowControl) -> some View {
@@ -321,8 +356,13 @@ struct SettingsRendererRow: View {
             }
         } else {
             TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
-                TronDynamicValue(text: display, color: .tronTextSecondary)
-                    .textSelection(.enabled)
+                if modelConfiguration {
+                    TronInlineActionLabel(display, accent: .tronEmerald)
+                        .textSelection(.enabled)
+                } else {
+                    TronDynamicValue(text: display, color: .tronTextSecondary)
+                        .textSelection(.enabled)
+                }
             }
         }
     }

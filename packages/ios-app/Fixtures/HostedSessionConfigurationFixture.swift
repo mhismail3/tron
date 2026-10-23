@@ -198,6 +198,9 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         return .object(["keys": .array(keys.map { value in
             guard var row = value.objectValue, var presentation = row["presentation"]?.objectValue else { return value }
             let session = !project && row["layer"]?.stringValue == "session"
+            if row["key"]?.stringValue == "model.contextWindow" {
+                row["qualifiers"] = .object(["model": .string("anthropic/claude-opus-5-5")])
+            }
             if project { row["layer"] = .string("global") }
             row["overridden"] = .bool(session)
             presentation["editable"] = .bool(!project && presentation["sessionOverridable"]?.boolValue == true)

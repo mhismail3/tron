@@ -81,6 +81,9 @@ struct ProjectSettingsSections: View {
     let cwd: String
     let profileID: String
     let showsWorkspace: Bool
+    /// Session Settings supplies its rows to the one group that also owns trust.
+    /// Standalone Project Settings keeps its existing project/workspace layout.
+    var sessionSettings: AnyView? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var trust: ProjectTrustSummary?
@@ -118,13 +121,20 @@ struct ProjectSettingsSections: View {
             } else {
                 // The rows are fixed once the overrides arrive (the sheet's pulse
                 // hides them until then); trust and Git fill values in place.
-                TronSettingsGroup("Project", detail: cwd, accent: .tronEmerald) {
+                TronSettingsGroup(sessionSettings == nil ? "Project" : "Settings",
+                                  detail: sessionSettings == nil ? cwd : nil, accent: .tronEmerald) {
+                    if let sessionSettings {
+                        sessionSettings
+                        TronSettingsDivider()
+                    }
                     // The row opens the project's one trust editor; its own look is unchanged.
                     TronProgressiveSheetLink(accessibilityLabel: "Project Trust", identity: "project.settings.trust.\(profileID).\(cwd)",
                                              destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
-                        TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: trust?.stateTitle ?? "Trust",
-                                        subtitle: trust?.stateDetail ?? " ", subtitleColor: .tronTextSecondary)
-                            .contentShape(Rectangle())
+                        TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: sessionSettings == nil ? (trust?.stateTitle ?? "Trust") : "Project Trust",
+                                        subtitle: trust?.stateDetail ?? " ", subtitleColor: .tronTextSecondary) {
+                            if sessionSettings != nil { TronDynamicValue(text: trust?.stateTitle ?? "") }
+                        }
+                        .contentShape(Rectangle())
                     }
                     .accessibilityValue(trust?.stateTitle ?? "")
                     .accessibilityIdentifier("project-settings-trust")

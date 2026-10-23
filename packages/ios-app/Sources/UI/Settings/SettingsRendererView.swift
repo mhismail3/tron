@@ -18,6 +18,8 @@ struct SettingsRendererView: View {
     /// Inside a caller's scroll view (a hand-built sheet that shows a section's keys).
     var embedded = false
     var detailedKeys = false
+    /// Manage's three model controls reuse this renderer's admission and receipts.
+    var modelConfiguration = false
     /// Existing live model/tool owners retain admission and pending controls;
     /// schema rows supply their single source/reset path, not another editor.
     var liveControl: ((ResolvedSetting) -> AnyView)? = nil
@@ -143,7 +145,13 @@ struct SettingsRendererView: View {
         case .instances(let key):
             instancesDetail(key, resolution: resolution, options: snapshot.options)
         case .keys(let ids):
-            let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id && selection.includes($0) } }
+            let chosen = ids.flatMap { id in
+                let candidates = resolution.keys.filter { $0.key == id && selection.includes($0) }
+                guard modelConfiguration && id == "model.contextWindow" else { return candidates }
+                let ref = resolution.keys.first { $0.key == "model.ref[role=chat]" }?.value?.objectValue
+                let modelKey = [ref?["provider"]?.stringValue, ref?["id"]?.stringValue].compactMap { $0 }.joined(separator: "/")
+                return Array(candidates.filter { $0.qualifiers?["model"] == modelKey }.prefix(1))
+            }
             rows(detailedKeys ? Self.sorted(chosen) : chosen, resolution: resolution, options: snapshot.options, detailed: detailedKeys)
         }
     }
@@ -272,6 +280,7 @@ struct SettingsRendererView: View {
             target: target,
             editable: writableLayer(for: setting) != nil,
             detailed: detailed,
+            modelConfiguration: modelConfiguration,
             instanced: instanced,
             baseInstanceTitle: baseInstanceTitle,
             // A live control keeps its surface's viewport-wide slider host;

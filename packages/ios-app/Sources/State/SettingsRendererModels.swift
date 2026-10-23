@@ -58,6 +58,7 @@ enum SettingsKeySelection: Equatable {
     case allExcept(Set<String>)
     case editable(excluding: Set<String>)
     case sessionOverrides
+    case sessionOverridesExcept(Set<String>)
     case projectValues
 
     func includes(_ setting: ResolvedSetting) -> Bool {
@@ -68,6 +69,8 @@ enum SettingsKeySelection: Equatable {
             return !excluded.contains(setting.key) && setting.presentation?.editable == true
         case .sessionOverrides:
             return setting.presentation?.sessionOverridable == true && setting.presentation?.editable == true
+        case .sessionOverridesExcept(let excluded):
+            return Self.sessionOverrides.includes(setting) && !excluded.contains(setting.key)
         case .projectValues: return setting.projectSetting != nil
         }
     }

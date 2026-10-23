@@ -19,6 +19,7 @@ extension HomeSheet {
         let mutating = model.homeMutations.isRunning(profileID: profileID)
         return VStack(alignment: .leading, spacing: 18) {
             usageHeader(read)
+            if let sessionID { ManageModelConfigurationCard(sessionID: sessionID, home: true) }
             manageRows(read, unresolved: unresolved)
             settingsRow
             manageControls(read.status, unresolved: unresolved, mutating: mutating)

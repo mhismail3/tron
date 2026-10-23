@@ -272,6 +272,7 @@ struct SettingsSectionLinks: View {
     private func sectionDescription(_ id: String) -> String? {
         let members = members(id)
         if id == "advanced" { return "Connection, retries, and approvals" }
+        if id == "model", homeProfileID != nil { return "Workers and delegation" }
         if members.count > 1, id == "model" { return "Models, thinking, and workers" }
         let text = members.compactMap(\.description).joined(separator: " · ")
         return text.isEmpty ? nil : text
@@ -339,7 +340,7 @@ struct SessionSettingsView: View {
         homeProfileID == nil ? SettingsTarget.sessionGatewayTarget(sessionID) : .object(["kind": .string("home")])
     }
     private var selection: SettingsKeySelection {
-        .sessionOverrides
+        .sessionOverridesExcept(ManageModelConfigurationCard.keys)
     }
 
     var body: some View {
@@ -347,9 +348,8 @@ struct SessionSettingsView: View {
         let shown = Set(sections.filter { section in
             model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
         }.map(\.id))
-        let agent = ["model", "workers", "context", "approvals", "run"].filter(shown.contains)
-        let tools = ["tools"].filter(shown.contains)
-        let more = sections.map(\.id).filter { shown.contains($0) && !SettingsGroupKind.placedSections.contains($0) }
+        let rows = (homeProfileID == nil ? ["context", "approvals", "run", "tools"] : ["workers", "approvals", "run", "tools"])
+            .filter(shown.contains)
         // The chat's project, read-only, below its own choices; Manage Session's
         // Workspace row already names the branch. Its notices are listed there once.
         let project = homeProfileID == nil ? projectCWD.flatMap { cwd in
@@ -368,21 +368,17 @@ struct SessionSettingsView: View {
                     if sections.isEmpty {
                         TronSheetLoadingState(label: "Loading settings…")
                     } else {
-                        if !agent.isEmpty {
-                            SettingsGroupCard(.agent) { links(agent, sections) }
-                        }
-                        if !tools.isEmpty {
-                            SettingsGroupCard(.tools) { links(tools, sections) }
-                        }
-                        if !more.isEmpty {
-                            SettingsGroupCard(.more) { links(more, sections) }
+                        if project == nil {
+                            TronSettingsGroup("Settings", accent: .tronEmerald) { links(rows, sections) }
+                                .tronSettingsVisualTheme(accent: .tronEmerald)
                         }
                     }
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier(homeProfileID == nil ? "session-settings-content" : "home-settings-content")
                 if let project {
-                    ProjectSettingsSections(cwd: project.cwd, profileID: project.profileID, showsWorkspace: false)
+                    ProjectSettingsSections(cwd: project.cwd, profileID: project.profileID, showsWorkspace: false,
+                                            sessionSettings: AnyView(links(rows, sections)))
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("session-project-settings")
                 }

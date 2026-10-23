@@ -16,6 +16,10 @@ final class TronManageModelPreviewTests: XCTestCase {
         try ready(app, "home-manage-state"); expand(app, done: "home-sheet-done-manage")
         shot("\(mode)-manage-home")
         app.swipeUp(); shot("\(mode)-manage-home-lower")
+        if app.buttons["manage-model-switch"].exists {
+            try reveal(app, "manage-model-switch"); shot("\(mode)-home-model-header")
+            app.swipeUp(); shot("\(mode)-home-model-controls")
+        }
         try reveal(app, "home-manage-settings"); try tap(app, "home-manage-settings")
         try ready(app, "home-settings-content"); shot("\(mode)-home-settings")
         app.swipeUp(); shot("\(mode)-home-settings-lower")
@@ -28,6 +32,10 @@ final class TronManageModelPreviewTests: XCTestCase {
         if let done, done.frame.minY > 120 { drag(app, y: done.frame.midY) }
         shot("\(mode)-manage-session")
         app.swipeUp(); shot("\(mode)-manage-session-lower")
+        if app.buttons["manage-model-switch"].exists {
+            try reveal(app, "manage-model-switch"); shot("\(mode)-session-model-header")
+            app.swipeUp(); shot("\(mode)-session-model-controls")
+        }
         try reveal(app, "chat-settings-link"); try tap(app, "chat-settings-link")
         try ready(app, "session-settings-content"); shot("\(mode)-session-settings")
         app.swipeUp(); shot("\(mode)-session-settings-lower")
@@ -41,7 +49,8 @@ final class TronManageModelPreviewTests: XCTestCase {
     @MainActor private func expand(_ app: XCUIApplication, done id: String) { let done = app.buttons[id]; if done.exists && done.frame.minY > 120 { drag(app, y: done.frame.midY) } }
     @MainActor private func drag(_ app: XCUIApplication, y: CGFloat) {
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-        origin.withOffset(CGVector(dx: 60, dy: y)).press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
+        origin.withOffset(CGVector(dx: app.frame.width / 2, dy: y)).press(forDuration: 0.1,
+            thenDragTo: origin.withOffset(CGVector(dx: app.frame.width / 2, dy: 20)))
     }
     @MainActor private func shot(_ name: String) { let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); a.name = "1754-\(name)"; a.lifetime = .keepAlways; add(a) }
 }

@@ -54,10 +54,15 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   rows never infer ownership from value equality.
 - **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView` (scopes:
   Project, Session, Global); Home writes its saved settings, a chat its own Session scope.
-  Both reuse Global's renderer and editors, including models and tools. Project-owned controls are
-  read-only with a shared Project info pill; explicit overrides have Overridden and circular Revert.
-  `SettingsProjectGroups` shows applied Project values only. Session Settings ends with Project Settings'
-  `ProjectSettingsSections` (no Workspace row), whose notices alone list ignored repository fields. Summaries omit unset values. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
+  Both reuse Global's renderer and editors. Manage model cards select the three chat-model keys:
+  catalog header/Switch Model, Effort and the current model-qualified Context Window. They use the
+  same writes, approvals and override/Revert path; changing the card changes no scope semantics.
+  Home Settings has one Settings container (Models: workers/delegation only, More Settings, Tools).
+  Session Settings has one Settings container (Compaction, More Settings, Tools, Project Trust),
+  no Models subsheet. Project-owned controls are read-only with a shared Project info pill;
+  explicit overrides have Overridden and circular Revert. `SettingsProjectGroups` shows applied
+  Repository Overrides last; `ProjectSettingsSections` owns the unchanged trust editor and ignored
+  repository-field notices (no Workspace row in Session Settings). Summaries omit unset values. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
 - **Changes.** Only Global has a Changes entry. `SettingsChangesView` pages `settings.history` by
   Project/Session/Global, pins approvals above history and keeps last-look per Mac. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
@@ -70,6 +75,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   advertised method; the visible sheet owns the operation's prompts, and an answered choice
   restarts with `replaceOperationId` (`ProviderAuthSelectionTrail`). Usage rows reserve a skeleton
   only when `usageSupported`; `localOnly` shows Unlimited; `usageLentTo` hides the lender row.
+  `ProviderUsageLoadingPlaceholder` also wraps dashboard value cells, preserving provider names
+  and final column geometry; Reduce Motion keeps the same static rectangles.
 - **Models and compaction.** Model names are the catalog's `name`; thinking choices come from the
   model's advertised levels; the default model comes from canonical settings, never catalog order.
   `compaction-policy.v1` adds per-field thinking and focus inheritance.

@@ -92,10 +92,12 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   Its newest-first caption has eight points of extra top breathing room beneath the sheet chrome.
   A child transcript is a read-only `ReadOnlySubagentSessionStore` lease whose only mutation is the
   capability-gated stop (`process-transcript-abort.v1`).
-- **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing); Session
+- **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing), then the
+  shared emerald `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Effort and
+  Context Window); the existing settings renderer owns reads, writes, pending approvals and Revert. Session
   container: Workspace (`workspace-inspector.v1`), Instructions, Resources (tags Global, Project or
   External; Commands and Subagents preview a body whose View All opens the shared reader), Session
-  History (`session-history-pages.v1`), Subagent History; Session Settings (Project section last);
+  History (`session-history-pages.v1`), Subagent History; Session Settings (Repository Overrides last);
   Terminal and Export as HTML/JSON. Manage Session, Manage Home and every sheet they open take
   the emerald sheet theme (semantic colors aside); a sub-sheet's `title` constant (or
   `HomeSheetDestination.title`) is also its row's label.
@@ -107,14 +109,21 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   [Home contract](../../../../gateway/docs/home.md). Task Stop and Steer live in the worker's chat
   (#911). `HomeContextSummaryCard` shows a native used-fraction ring, state and pressure-colored
   worker pills, cumulative Total tokens (`input + output + cacheRead + cacheWrite`) and the latest
-  cache-hit percentage. Normal sessions retain their own summary. Profile's Confirm pill alone
+  cache-hit percentage, with the ring centered against title and subtext together. Both Manage
+  surfaces place their model card immediately below the summary. Normal sessions retain their own summary. Profile's Confirm pill alone
   opens bulk confirmation; Retire uses destructive styling throughout. Chapter summaries keep
   their message/reply/task counts in wrapping shared tags; Worker details use standard row subtext.
   Memory summary counts live in their shared tag (“Summary of N messages”, singular for one),
   not a duplicate subtext line; message attribution tags are unchanged. History Entry metadata
   labels share the title’s leading edge past its icon; values stay trailing-aligned.
+  Memory tool rows use canonical-derived safe labels, not arguments or output. Detail sheets put
+  Summary before the message, show tool JSON/output in the shared code block, and expose canonical
+  transcript plus shared technical metadata. Captions use `settingsRowSubtext` across surfaces.
   Shared list previews measure and place at the same line-limited height, keeping task-card
   metadata insets balanced without changing other sheets' padding.
+- **Dashboard usage.** Provider names remain visible while only their value cells use the shared
+  Providers skeleton (static with Reduce Motion). Refresh retains published values. Manage Session
+  keeps its published Workspace row when a subsheet covers it; only a different cwd clears it.
 - **New Session.** Settings, trust and Git preparation are fenced to the original profile,
   lifecycle and workspace; one command per gesture; a created route is consumed once and never
   replayed into a replacement Mac.

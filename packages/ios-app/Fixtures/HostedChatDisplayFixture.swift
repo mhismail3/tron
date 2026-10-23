@@ -324,7 +324,6 @@ struct HostedHomeDashboardFixture: View {
             }
         }
         .preferredColorScheme(arguments.contains("-home-dark") ? .dark : .light)
-        .environment(\.accessibilityReduceMotion, arguments.contains("-usage-capture-reduced-motion"))
         .dynamicTypeSize(arguments.contains("-home-accessibility-type") ? .accessibility3 : .large)
         // Forward scene transitions as production does: background retires the
         // connection that a mounted Home sheet's identity names, and foreground reconnects.
@@ -1080,7 +1079,7 @@ private actor HostedHomeShellGateway {
             "layer": .string("global"), "applied": .bool(true), "badges": .array([]),
             "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")]), .object(["layer": .string("global")])]),
             "presentation": .object(["label": .string("Context window"), "help": .string("How many tokens the model receives."),
-                "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(false),
+                "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true),
                 "order": .number(30), "importance": .string("essential"), "control": .string("number"),
                 "optionsSource": .object(["name": .string("catalog.contextWindow"), "dependsOn": .array([])])]),
         ])
