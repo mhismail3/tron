@@ -15,7 +15,9 @@ unaffected by every rule here.
   `home-module.ts` (request/input/append/settled hooks), `home-input-admission.ts` (inbox budget/diagnostic), `tron-home-extension.ts` (tools/context/cache).
 - **Memory, research, profile:** `home-memory*.ts`, `home-research-tools.ts`, `home-profile.ts`.
 - **Tasks and wake inbox:** `home-task-*.ts`, `home-wake-inbox.ts`; contract in
-  [tasks.md](tasks.md). Also `home-diagnostic.ts`, `host-pressure.ts`,
+  [tasks.md](tasks.md). Generic subagent receipt/artifact proof belongs to
+  [kernel delegation](../../kernel/delegation/delegated-activity.md), not Home policy.
+  Also `home-diagnostic.ts`, `host-pressure.ts`,
   `locks/` (goldens).
 
 ## Contract

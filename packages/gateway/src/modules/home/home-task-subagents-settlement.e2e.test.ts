@@ -5,7 +5,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatch, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
 import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT } from "../../../test-support/home-task-subagent-child.js";
-import { HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "./home-task-subagents.js";
+import { HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "../../kernel/delegation/task-subagents.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { closeSubagentFixtures, bound, childModel, captureTimer, captureDeadline, launchResults, asyncState, holdingWorkflowLaunch, workflowChildRunId, holdingAsyncLaunch, waitBetweenTurns, toolResultText, type FauxContext } from "../../../test-support/home-task-subagents-support.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";

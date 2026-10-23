@@ -98,7 +98,7 @@ import {
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../modules/home/home-task-worker-choice.js";
-import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../modules/home/home-task-subagents.js";
+import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
 import { ModelQueueOwner, modelQueueKey, modelQueueProjectionPath, type ModelQueueRecord } from "../providers/model-queue.js";
 import type { ModelQueueRole } from "../providers/model-queue-extension.js";
 import { ProviderUsageOwner } from "../providers/provider-usage.js";

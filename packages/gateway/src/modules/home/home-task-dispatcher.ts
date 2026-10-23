@@ -18,7 +18,7 @@ import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHE
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, homeTaskOperationSpan, parseHomeTaskReport, type HomeTaskReport } from "../../kernel/delegation/task-report.js";
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
 import type { FixedSetting } from "../../kernel/settings/tool-contract.js";
-import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
+import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "../../kernel/delegation/task-subagents.js";
 import type { HomeTaskCheckin, HomeTaskCounts, HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../../protocol/types.js";
 import { basename } from "node:path";
 import { TRON_ASK_USER_INTERRUPTED } from "../../extensions/tron-ask-user-contract.js";

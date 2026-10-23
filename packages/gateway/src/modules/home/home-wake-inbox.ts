@@ -9,7 +9,7 @@ import { EpisodicMemoryError } from "../../episodic/episodic-contract.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import type { HomeTaskRecord, HomeTaskStore } from "./home-task-store.js";
 import type { HomeTaskCheckin } from "../../protocol/types.js";
-import type { HomeTaskSubagents } from "./home-task-subagents.js";
+import type { HomeTaskSubagents } from "../../kernel/delegation/task-subagents.js";
 
 export { HOME_TASK_RESULT_MESSAGE };
 export const HOME_TASK_PENDING_MESSAGE = "tron.home-task-pending.v1";

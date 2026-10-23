@@ -2,7 +2,8 @@
 
 How delegated subagent work and extension runs are attributed, projected and read back.
 Owners: `gateway/delegation` (`delegated-provider.ts`, `child-session-admission.ts`,
-`managed-subagents.ts`), `gateway/extension-activity` and `gateway/projection`
+`managed-subagents.ts`, `task-subagents.ts` for canonical task settlement receipts
+and bounded cold artifact proof), `gateway/extension-activity` and `gateway/projection`
 (`process-activity.ts`); RuntimeSlot keeps the exact process-to-child bindings.
 
 ## Session subagent activity
