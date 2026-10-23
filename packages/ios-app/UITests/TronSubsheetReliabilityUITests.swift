@@ -86,8 +86,8 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         let profileRow = element(app, "home-manage-profile")
         XCTAssertTrue(profileRow.waitForExistence(timeout: 8), app.debugDescription)
         profileRow.tap()
-        XCTAssertTrue(element(app, "home-profile-group-preference").waitForExistence(timeout: 8), app.debugDescription)
         let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'home-profile-item-'"))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 8), app.debugDescription)
         let ids = Array(rows.allElementsBoundByIndex.map(\.identifier).filter { !$0.contains("detail") }.prefix(2))
         XCTAssertEqual(ids.count, 2)
         let feedback = app.staticTexts["fixture.sheet-feedback"]
@@ -117,6 +117,86 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
             XCTAssertTrue(detail.waitForNonExistence(timeout: 8), "\(index) \(dismissal) closes")
         }
         XCTAssertEqual(feedback.label, "sheet-feedback:\(played)", "dismissal, swipe and foreground play nothing")
+    }
+
+    /// Fresh destinations must work without closing/reopening their parent or
+    /// retrying the row. These are production Manage Home presenters, not a
+    /// synthetic binding-only fixture.
+    @MainActor func testFirstTapInFreshManageHomeSubSheets() {
+        continueAfterFailure = false
+        let app = launchManageHome(); defer { app.terminate() }
+        element(app, "home-manage-profile").tap()
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'home-profile-item-'"))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 8))
+        rows.firstMatch.tap()
+        XCTAssertTrue(element(app, "home-profile-item-detail").waitForExistence(timeout: 8), app.debugDescription)
+        closeTopSheet(app)
+        closeTopSheet(app)
+
+        element(app, "home-manage-chapters").tap()
+        let chapter = element(app, "home-chapter-2")
+        XCTAssertTrue(chapter.waitForExistence(timeout: 8))
+        chapter.tap()
+        let detail = element(app, "home-chapter-detail")
+        XCTAssertTrue(detail.waitForExistence(timeout: 8), app.debugDescription)
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 15))
+        app.activate()
+        XCTAssertTrue(detail.waitForExistence(timeout: 10))
+        closeTopSheet(app)
+        XCTAssertTrue(detail.waitForNonExistence(timeout: 8))
+        chapter.tap()
+        XCTAssertTrue(detail.waitForExistence(timeout: 8), "Chapter reopens on one tap after foreground and dismissal")
+    }
+
+    @MainActor func testCanonicalTranscriptStartsAtMedium() {
+        continueAfterFailure = false
+        let app = launchManageHome(); defer { app.terminate() }
+        element(app, "home-manage-memory-browser").tap()
+        let row = element(app, "home-memory-row-39")
+        XCTAssertTrue(row.waitForExistence(timeout: 8))
+        row.tap()
+        let canonical = element(app, "home-memory-canonical-transcript")
+        XCTAssertTrue(canonical.waitForExistence(timeout: 8))
+        if !canonical.isHittable { app.swipeUp() }
+        canonical.tap()
+        XCTAssertTrue(element(app, "home-evidence-text").waitForExistence(timeout: 8))
+        let title = app.navigationBars.staticTexts["Canonical transcript"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 8))
+        let height = app.windows.firstMatch.frame.height
+        XCTAssertGreaterThan(title.frame.minY, height * 0.4,
+                             "Canonical transcript opens at the shared medium detent, not large")
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in title.frame.minY < height * 0.2 }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 10), .completed, "Canonical transcript expands to large")
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 15))
+        app.activate()
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertLessThan(title.frame.minY, height * 0.2, "Foreground retains the expanded transcript")
+        closeTopSheet(app)
+        XCTAssertTrue(title.waitForNonExistence(timeout: 8))
+        canonical.tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 8))
+        XCTAssertGreaterThan(title.frame.minY, height * 0.4, "A fresh presentation resets to medium")
+        let capture = XCTAttachment(screenshot: app.screenshot())
+        capture.name = "Canonical transcript reopened at medium"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
+    @MainActor private func launchManageHome() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        ring.tap()
+        XCTAssertTrue(element(app, "home-manage-profile").waitForExistence(timeout: 8))
+        return app
     }
 
     // MARK: - Helpers
