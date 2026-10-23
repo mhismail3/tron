@@ -5,18 +5,21 @@ final class TronMemoryRedesignPreviewTests: XCTestCase {
     @MainActor func testLightPreview() throws { try preview(dark: false) }
     @MainActor func testDarkPreview() throws { try preview(dark: true) }
 
-    @MainActor private func preview(dark: Bool) throws {
+    @MainActor func testLargeTypePreview() throws { try preview(dark: false, large: true) }
+
+    @MainActor private func preview(dark: Bool, large: Bool = false) throws {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-memory-redesign"] + (dark ? ["-home-dark"] : [])
+            + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
         app.launch(); defer { app.terminate() }
-        let mode = dark ? "dark" : "light"
+        let mode = large ? "large" : (dark ? "dark" : "light")
         try ready(app, "home-pinned-row"); shot("\(mode)-dashboard-subtext")
         app.buttons["home-pinned-row"].tap()
         try tap(app, "session-context-button")
         try ready(app, "home-manage-state")
         expand(app, done: "home-sheet-done-manage")
         shot("\(mode)-manage-subtext")
-        try tap(app, "home-manage-memory-browser")
+        try reveal(app, "home-manage-memory-browser"); try tap(app, "home-manage-memory-browser")
         try ready(app, "home-memory-row-39")
         expand(app, done: "home-sheet-done-memory")
         shot("\(mode)-memory-rows")

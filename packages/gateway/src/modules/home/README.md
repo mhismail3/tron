@@ -115,6 +115,9 @@ changes keep its store, cursors and spend.
   revision-bound cursors) and `home.memory.evidence` (canonical text pages ≤ 24,000 chars)
   are disposable reads that never admit compactor calls or prompts. Each read proves the
   frozen cut through cached per-chapter proofs (`HomeSourceProofs`); nothing partial returns.
+  Browser items carry optional canonical-derived display facts (tool name, short target, call count,
+  status); these are disposable client labels, never a persisted or model-facing memory schema.
+  Page admission reserves their bounded byte budget before canonical enrichment.
 - **Clients.** iOS and `tron-chat` (`/home`: `HOME_USAGE`) open `openSessionId`, send `home.prompt`.
 
 ## Invariants
