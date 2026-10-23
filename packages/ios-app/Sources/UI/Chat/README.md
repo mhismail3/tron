@@ -89,6 +89,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   only through the one **Activity** sheet.
 - **Subagents.** The composer's activity orb reflects admitted process rows only. Activity lists
   running, retained and recent work; Manage Session › Subagent History pages terminal receipts.
+  Its newest-first caption has eight points of extra top breathing room beneath the sheet chrome.
   A child transcript is a read-only `ReadOnlySubagentSessionStore` lease whose only mutation is the
   capability-gated stop (`process-transcript-abort.v1`).
 - **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing); Session
@@ -109,6 +110,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   cache-hit percentage. Normal sessions retain their own summary. Profile's Confirm pill alone
   opens bulk confirmation; Retire uses destructive styling throughout. Chapter summaries keep
   their message/reply/task counts in wrapping shared tags; Worker details use standard row subtext.
+  Memory summary counts live in their shared tag (“Summary of N messages”, singular for one),
+  not a duplicate subtext line; message attribution tags are unchanged. History Entry metadata
+  labels share the title’s leading edge past its icon; values stay trailing-aligned.
   Shared list previews measure and place at the same line-limited height, keeping task-card
   metadata insets balanced without changing other sheets' padding.
 - **New Session.** Settings, trust and Git preparation are fenced to the original profile,

@@ -375,6 +375,11 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             approvals.remove(at: index)
             decisions.append("\(approved ? "approved" : "declined"):\(requestID)")
             result = .object(["requestId": .string(requestID), "approved": .bool(approved)])
+        case "session.processHistory.list" where ProcessInfo.processInfo.arguments.contains("-history-long"):
+            try await Task.sleep(for: .milliseconds(750))
+            result = .object(["historyRevision": .string("fixture-history"),
+                            "activities": try JSONValue.encode(HostedSubagentParityFixture.historyProcesses(sequence: 1, stage: 6, resumed: false)),
+                            "nextCursor": .null])
         case "session.history.list" where HostedLargeHistory.enabled:
             result = try HostedLargeHistory.page(params, runtime: snapshot.runtimeGeneration)
         case "session.history.entry" where HostedLargeHistory.enabled:

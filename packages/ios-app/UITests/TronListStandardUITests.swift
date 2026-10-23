@@ -35,6 +35,31 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
+    /// Capture the nested Manage Session route, not only the direct fixture presenter.
+    @MainActor func testCaptureManagedSubagentHistory() {
+        for mode in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-manage-session-review", "-history-long",
+                                   "-fixture-appearance", mode]
+            app.launch()
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+            app.buttons["Stop session"].tap()
+            let open = app.buttons["Subagent History"]
+            for _ in 0..<12 where !open.isHittable { app.swipeUp() }
+            open.tap()
+            XCTAssertTrue(app.buttons["subagent-row-worker"].waitForExistence(timeout: 10), app.debugDescription)
+            shot("managed-subagent-initial-\(mode)")
+            expandSheet(app, title: "Subagent History")
+            shot("managed-subagent-large-\(mode)")
+            app.swipeUp()
+            app.navigationBars.containing(.staticText, identifier: "Subagent History").buttons["Done"].firstMatch.tap()
+            open.tap()
+            _ = app.buttons["subagent-row-worker"].waitForExistence(timeout: 5)
+            shot("managed-subagent-reopen-\(mode)")
+            app.terminate()
+        }
+    }
+
     /// Resources' per-kind section tints and an empty Subagent History (#1704), light and dark.
     @MainActor func testCaptureResourcesAndEmptySubagentHistory() {
         for mode in ["light", "dark"] {

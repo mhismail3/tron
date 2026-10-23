@@ -217,8 +217,7 @@ extension HomeMemoryPresentation {
         let kind = kind(line)
         return TronListRowContent(
             leading: .icon(kind.icon, kind.tone), title: SessionHistoryPreview.plain(text(line)), preview: true,
-            subtext: line.isSummary ? "Summary of \(line.span.formatted()) messages" : nil,
-            tags: [TronListTag(text: kind.label)],
+            tags: [TronListTag(text: line.isSummary ? title(line) : kind.label)],
             timestamp: line.isSummary ? HomeSheetTime.range(line.firstAt, line.lastAt) : TronListTime.short(iso: line.firstAt, now: now))
     }
 }

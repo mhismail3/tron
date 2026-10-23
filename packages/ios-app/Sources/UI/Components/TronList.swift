@@ -531,6 +531,9 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                 .scrollTargetLayout()
                 .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
             }
+            // Own the initial, size-change and short-content anchors together:
+            // a newest-first feed starts at its caption, not its first row or tail.
+            .defaultScrollAnchor(.top)
             // Name the scroll view itself; the floating chip keeps its own identifier.
             .accessibilityIdentifier(identifier)
             // The chip is an overlay: updating it never lays out the scroll view or
