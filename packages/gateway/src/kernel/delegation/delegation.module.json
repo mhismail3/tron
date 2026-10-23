@@ -25,6 +25,7 @@
     "subagent-parity.integration.test.ts",
     "task-checkin.ts",
     "task-report.ts",
+    "task-subagents.ts",
     "task-worker-extension.ts"
   ],
   "dependsOn": [
