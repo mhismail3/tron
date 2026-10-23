@@ -85,23 +85,18 @@ export function utf8Bytes(text: string): number {
   return Buffer.byteLength(text, "utf8");
 }
 
-/** Cut at a byte offset without splitting a UTF-8 character: the partial
- * character's replacement is dropped (gist §4.3). */
-export function cutBytes(text: string, maxBytes: number): string {
-  if (maxBytes <= 0) return "";
-  if (utf8Bytes(text) <= maxBytes) return text;
-  const cut = Buffer.from(text, "utf8").subarray(0, maxBytes).toString("utf8");
-  return cut.endsWith("\uFFFD") ? cut.slice(0, -1) : cut;
-}
-
 /** Cap one text at `capChars`, keeping head and tail with a marker naming what
  * was removed (gist §7; the recipe caps tool output the same way). The result is a
  * copy: a slice keeps its whole source string alive for as long as the capped text
  * is stored, and a stored record must not hold a multi-megabyte source. */
 export function capText(text: string, capChars: number, tailChars: number): { text: string; capped: boolean } {
   if (text.length <= capChars) return { text, capped: false };
-  const tail = Math.min(tailChars, Math.max(0, capChars - 1));
-  const head = capChars - tail;
+  let tail = Math.min(tailChars, Math.max(0, capChars - 1));
+  let head = capChars - tail;
+  // JS slices count UTF-16 units: move either cut past a split surrogate pair
+  // rather than converting that half of an astral character into U+FFFD.
+  if (/[\uD800-\uDBFF]/u.test(text[head - 1] ?? "") && /[\uDC00-\uDFFF]/u.test(text[head] ?? "")) head -= 1;
+  if (/[\uDC00-\uDFFF]/u.test(text[text.length - tail] ?? "") && /[\uD800-\uDBFF]/u.test(text[text.length - tail - 1] ?? "")) tail -= 1;
   const removed = text.length - head - tail;
   const capped = `${text.slice(0, head)}\n…[truncated ${removed} characters]…\n${text.slice(text.length - tail)}`;
   return { text: Buffer.from(capped, "utf8").toString("utf8"), capped: true };

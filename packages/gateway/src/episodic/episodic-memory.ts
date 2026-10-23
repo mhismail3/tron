@@ -14,7 +14,7 @@ import {
   type EpisodicSummarizer, type EpisodicUsage, type EpisodicViewPartStatus,
 } from "./episodic-contract.js";
 import {
-  EPISODIC_COMPACT_PROMPT, classifyReply, classifyThrown, compactorRequest, contextBlock,
+  EPISODIC_COMPACT_PROMPT, boundedSummary, classifyReply, classifyThrown, compactorRequest, contextBlock,
   emptyReplyDetail, leafStep, mergeStep, sizeFeedback, summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
 import { EpisodicSourceChangedError, episodicDigest, type EpisodicSourceDelta } from "./episodic-source.js";
@@ -555,6 +555,11 @@ export class EpisodicMemory {
         this.blocked = null;
         await this.saveState();
       }
+      // A failed ingest may have committed catalog edits but not their whole
+      // invalidation. Reuse open's reconciliation before text-identical replay
+      // can skip those edits and leave stale summaries live after resume.
+      await this.repairOrphanedDependencies();
+      await this.repairCatalogMismatch();
       await this.ingest();
     });
     void this.drain().catch(() => {});
@@ -1127,9 +1132,8 @@ export class EpisodicMemory {
       if (utf8Bytes(reply) <= this.limits.nodeBytes || attempt + 1 >= EPISODIC_TRIES) break;
       request = withFeedback(request, reply, sizeFeedback(reply, this.limits.nodeBytes));
     }
-    // Keep the shortest try (gist §4.3): a stubborn node keeps a line a few
-    // bytes over, which is fine because the view measures real sizes.
-    return tries.reduce((shortest, line) => utf8Bytes(line) < utf8Bytes(shortest) ? line : shortest, tries[0]!);
+    const shortest = tries.reduce((best, line) => utf8Bytes(line) < utf8Bytes(best) ? line : best, tries[0]!);
+    return boundedSummary(shortest, this.limits.nodeBytes);
   }
 
   private async compactCall(request: EpisodicCompactorRequest, stamp: BuildStamp): Promise<string> {

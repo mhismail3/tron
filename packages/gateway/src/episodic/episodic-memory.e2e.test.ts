@@ -330,12 +330,12 @@ function respond(context: TranscriptContext, nodeBytes: number, compactor: Fixtu
   const text = last && last.role === "user"
     ? typeof last.content === "string" ? last.content : last.content.map(part => part.type === "text" ? part.text : "").join("\n")
     : "";
-  if (text.includes("must end where it is cut here")) {
+  if (text.startsWith("That line is ")) {
     compactor.feedbackTurns += 1;
     return fauxAssistantMessage(pad("short", nodeBytes - 40));
   }
-  const leaf = /Compress this message into one line of content only, in at most \d+ bytes\. Do not add a role label; Tron attaches the canonical kind:\n([\s\S]*)$/u.exec(text);
-  const merge = /Merge these two lines into one, in at most \d+ bytes:\n([\s\S]*)$/u.exec(text);
+  const leaf = /Compress this message into one line of content only, in at most \d+ bytes\. Do not add a role label; Tron attaches the canonical kind:\n<stretch>\n([\s\S]*)\n<\/stretch>/u.exec(text);
+  const merge = /Merge these two lines into one, in at most \d+ bytes:\n<stretch>\n([\s\S]*)\n<\/stretch>/u.exec(text);
   const body = (leaf?.[1] ?? merge?.[1] ?? text).replace(/\s+/gu, " ").trim();
   if (leaf) compactor.levelZeroBodies.push(body);
   const overshoot = body.length % 5 === 0;
@@ -501,6 +501,61 @@ describe("episodic memory end to end", () => {
       expect(text).toBe("القرار يبقى مفتوحاً Issue #1723 未検証 👩🏽‍💻");
       expect(memory.renderView(2).text).toContain(text);
       expect(memory.status().blocked).toBeNull();
+    } finally { await memory.dispose(); }
+  });
+
+  it("reconciles an edited source after a later catalog record blocks ingestion, without restart", async () => {
+    const fx = await fixture("edit-before-block", { maxStoreLineBytes: 4_096, recordCapChars: 100_000 }, (context) =>
+      fauxAssistantMessage(JSON.stringify(context.messages.at(-1)).includes("new decision") ? "New decision remains open." : "Old decision remains open."));
+    const target = fx.manager.appendMessage(userMessage(`old decision ${"detail ".repeat(100)}`));
+    const memory = await openMemory(fx);
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      expect(memory.renderView(2).text).toContain("Old decision remains open.");
+      fx.manager.appendContextEdit(target, { content: `new decision ${"detail ".repeat(100)}` });
+      const oversized = fx.manager.appendMessage(userMessage("x".repeat(9_000)));
+      await memory.entriesCommitted(fx.sessionId);
+      expect(memory.status().blocked?.reason).toBe("permanent-failure");
+      fx.manager.appendContextEdit(oversized, null);
+      await memory.resumeIngested();
+      await memory.entriesCommitted(fx.sessionId);
+      expect(memory.status().blocked).toBeNull();
+      expect(memory.renderView(2).text).toContain("New decision remains open.");
+      expect(memory.renderView(2).text).not.toContain("Old decision remains open.");
+    } finally { await memory.dispose(); }
+  });
+
+  it.each(["user", "tool"])("keeps astral characters whole at both %s projection cap boundaries", async kind => {
+    const fx = await fixture("astral-caps");
+    const cap = kind === "tool" ? 30_000 : fx.limits.recordCapChars;
+    const head = cap - 4_000;
+    const source = `${"a".repeat(head - 1)}🚀${"b".repeat(5_000)}👩🏽‍💻${"z".repeat(3_999)}`;
+    const id = fx.manager.appendMessage(kind === "tool" ? toolResultMessage("cap-astral", source) : userMessage(source));
+    const memory = await openMemory(fx);
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      const record = [...latestCatalog(fx.catalogPath).values()].find(record => record.entryId === id)!;
+      expect(record.omissions).toContain("capped");
+      expect(record.text).not.toContain("\uFFFD");
+      expect(record.text).toContain("…[truncated ");
+      expect((record.text as string).endsWith("z".repeat(3_999))).toBe(true);
+      expect(Buffer.byteLength(JSON.stringify(record))).toBeLessThan(1_024 * 1_024);
+      expect(memory.status().blocked).toBeNull();
+    } finally { await memory.dispose(); }
+  });
+
+  it("stores a worst-case JSON-escaped paste below the one MiB record bound", async () => {
+    const fx = await fixture("escaped-record", {}, () => fauxAssistantMessage("Escaped evidence is capped; outcome remains open."));
+    fx.manager.appendMessage(userMessage(`start ${"\u0001".repeat(150_000)} end`));
+    const memory = await openMemory(fx);
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      expect(memory.status().blocked).toBeNull();
+      const record = latestCatalog(fx.catalogPath).get(1)!;
+      expect(Buffer.byteLength(JSON.stringify(record))).toBeLessThan(1_024 * 1_024);
+      expect(record.omissions).toContain("capped");
+      expect(record.text).toContain("start");
+      expect((record.text as string).endsWith("end")).toBe(true);
     } finally { await memory.dispose(); }
   });
 

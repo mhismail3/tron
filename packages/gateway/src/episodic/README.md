@@ -53,14 +53,20 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   is a message. Indices are never renumbered: off-branch, empty and null-edited
   entries become `[omitted]` free nodes never sent to a model. Credentials are
   removed by `redactCredentials` (`util/credential-redaction.ts`), deliberately not
-  `redactProcessText`. Text over `recordCapChars` keeps head and tail. Each message
+  `redactProcessText`. Text over `recordCapChars` keeps head and tail without
+  splitting UTF-16 surrogate pairs. Each message
   records `sourceDigest`, `projectedDigest`, omissions (`thinking`, `attachment`,
   `capped`, `credentials`, `context-edit`, `off-branch`, `empty`,
   `unsupported-part`) and a required `timestamp`.
 - **Tree and view** (gist §3–5). Node `(l, i)` covers `[i·2^l, (i+1)·2^l)`,
   addressed `start+n`. Free nodes (fit in `NODE` bytes) need no model. The compactor
   makes one call per node with the view's preceding lines in `<chat>` and the step,
-  then a size loop of up to `TRIES` that never splits UTF-8. The view is left alone
+  then up to `TRIES` size repairs. Replies are flattened across Unicode whitespace;
+  the shortest reply is retained. If it still exceeds `NODE`, whole whitespace-
+  delimited tokens fit within the budget with a visible `…` (a `.` for budgets
+  below three bytes); an oversized unbroken token leaves only that marker. Repairs
+  ask for a complete rewrite, never demonstrate a chopped prefix. The source and
+  children remain available by zoom. The view is left alone
   within `VIEW` bytes and, once over, fits down to seven eighths by merging built
   pairs by largest `due` (batched so cached heads stay stable, #491). The pump builds
   a node only when unbuilt, its children built and its context summarized; up to
@@ -74,11 +80,20 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   chunks); blocked is persisted with bounded retries; every record has a revision;
   null edits and navigation are both `[omitted]`; the prompt names Tron's four kinds;
   context lines are flattened to one line.
+- **Instructions.** One agent-first summary per node preserves concrete identifiers,
+  maintainer decisions/wording, outcomes and uncertainty in plain sentences. A
+  delimited stretch is the only subject; context only resolves references. Merges
+  keep distinct items and compress tool chatter first. Prompt changes do **not**
+  invalidate existing nodes: neither the prompt nor model identity is in their
+  source digest. Only missing or source-invalidated nodes use new instructions;
+  rebuilding old nodes is a separate maintainer decision, never automatic.
 - **Invalidation.** A changed leaf invalidates its ancestors, every node whose context
   includes an invalidated node, and their ancestors, to closure; `generation`
   increments and the pump rebuilds. An early edit in a long history invalidates
   nearly the whole tree. `open` also invalidates leaves whose `sourceDigest` no
   longer matches the catalog (a crash between catalog and invalidation writes).
+  Resume performs the same dependency/catalog reconciliation before replay, so
+  a failed ingest cannot leave an edited catalog under a stale summary.
 - **Pause.** Home's ledger owns pause through `isPaused`: ingestion continues, the
   pump admits no new nodes, started nodes finish; outstanding and new `whenReady`
   waits reject `paused`; resume re-reads and drains. Not a zero-spend promise.
