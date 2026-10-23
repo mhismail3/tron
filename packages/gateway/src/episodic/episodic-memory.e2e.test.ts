@@ -442,6 +442,68 @@ function sha(value: string): string {
 // ---- tests ---------------------------------------------------------------------
 
 describe("episodic memory end to end", () => {
+  it.each([
+    ["ASCII", "Manage Home polish #1723 remains", "unproven"],
+    ["emoji", "Verified 👨‍👩‍👧‍👦 👍🏽 deployment", "🚀"],
+    ["RTL", "قرار المشرف لم يثبت بعد", "معلومة"],
+    ["replacement character", "Preserve literal � evidence", "pending"],
+    ["unbroken token", "", "非常に長い識別子"],
+  ])("marks a stubborn oversized %s summary at a whole-word boundary across restart", async (_label, head, word) => {
+    const reply = `${head}${head ? " " : ""}${word.repeat(40)} still open`;
+    const fx = await fixture("whole-word", { nodeBytes: 64, viewBytes: 1_024 }, () => fauxAssistantMessage(reply));
+    fx.manager.appendMessage(userMessage(`canonical source ${"evidence ".repeat(100)}`));
+    const memory = await openMemory(fx);
+    let text: string;
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      const stored = liveNodes(fx).get(address(0, 1))!;
+      text = stored.text;
+      expect(text).toBe(`${head}…`);
+      expect(Buffer.byteLength(text)).toBeLessThanOrEqual(64);
+      expect(text).not.toContain("\uFFFD\uFFFD");
+      expect(memory.status().blocked).toBeNull();
+      expect(memory.zoomLines(1, 1)![0]).toContain("canonical source");
+      expect(fx.compactor.calls).toBe(5);
+    } finally { await memory.dispose(); }
+    const reopened = await openMemory(fx);
+    try {
+      await reopened.entriesCommitted(fx.sessionId);
+      expect(liveNodes(fx).get(address(0, 1))!.text).toBe(text);
+      expect(fx.compactor.calls).toBe(5);
+    } finally { await reopened.dispose(); }
+  });
+
+  it("does not teach the size-repair reply to copy a mid-word prefix", async () => {
+    const first = `Manage Home polish #1723 ${"detail ".repeat(5)}unproven outcome pending`;
+    const fx = await fixture("repair-copy", { nodeBytes: 64 }, (context) => {
+      const last = context.messages.at(-1)!;
+      const input = last.role === "user" && typeof last.content === "string" ? last.content : JSON.stringify(last.content);
+      // Reproduce a copy-prone model obeying the old feedback's cut example.
+      const cut = /cut here:\n([^|]*)\|/u.exec(input);
+      return fauxAssistantMessage(cut?.[1] ?? (input.startsWith("That line is") ? "Manage Home polish #1723 remains unproven." : first));
+    });
+    fx.manager.appendMessage(userMessage("source evidence ".repeat(100)));
+    const memory = await openMemory(fx);
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      expect(liveNodes(fx).get(address(0, 1))!.text).toBe("Manage Home polish #1723 remains unproven.");
+      expect(memory.status().blocked).toBeNull();
+    } finally { await memory.dispose(); }
+  });
+
+  it("stores a reply containing Unicode line separators as one readable summary line", async () => {
+    const fx = await fixture("line-separators", {}, () => fauxAssistantMessage("  القرار\u2028يبقى\u2029مفتوحاً\r\nIssue #1723\t未検証 👩🏽‍💻  "));
+    fx.manager.appendMessage(userMessage("source evidence ".repeat(100)));
+    const memory = await openMemory(fx);
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      const text = liveNodes(fx).get(address(0, 1))!.text;
+      expect(text).toBe("القرار يبقى مفتوحاً Issue #1723 未検証 👩🏽‍💻");
+      expect(memory.renderView(2).text).toContain(text);
+      expect(memory.status().blocked).toBeNull();
+    } finally { await memory.dispose(); }
+  });
+
   it("admits higher summaries only while the retained view exceeds its budget", async () => {
     // Constant provider replies keep the replay independent of model-call order.
     // They are too large to merge freely, so higher summaries really cost calls.
