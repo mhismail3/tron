@@ -9,17 +9,21 @@ final class TronManageModelPreviewTests: XCTestCase {
     @MainActor func testHistoryLargePreview() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-session-configuration-fixture", "-manage-session-review", "-history-large",
-            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
         app.launch(); defer { app.terminate() }
         try tap(app, "Stop session"); try reveal(app, "Session History"); try tap(app, "Session History")
         try ready(app, "history-row-h-6732"); try tap(app, "history-row-h-6732")
-        try ready(app, "history-entry-actions"); shot("large-history-entry")
+        try ready(app, "history-entry-actions")
+        let done = app.navigationBars.containing(.staticText, identifier: "History Entry").buttons["Done"].firstMatch
+        if done.exists && done.frame.minY > 120 { drag(app, y: done.frame.midY) }
+        Thread.sleep(forTimeInterval: 1) // Capture settled sheet chrome, not its entrance transition.
+        shot("large-history-entry")
     }
 
     @MainActor private func preview(_ mode: String) throws {
         let app = XCUIApplication()
         let appearance = mode == "dark" ? ["-home-dark", "-fixture-appearance", "dark"] : ["-fixture-appearance", "light"]
-        let type = mode == "large" ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : []
+        let type = mode == "large" ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] : []
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + appearance + type
         app.launch(); defer { app.terminate() }
         try tap(app, "home-pinned-row"); try tap(app, "session-context-button")

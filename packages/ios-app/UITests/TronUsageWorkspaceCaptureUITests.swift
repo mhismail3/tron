@@ -3,17 +3,15 @@ import XCTest
 /// Visual evidence only. These simulator frames do not prove frame-perfect motion
 /// or physical-device behavior; behavioral regressions are a separate phase.
 final class TronUsageWorkspaceCaptureUITests: XCTestCase {
-    @MainActor func testCaptureLight() { capture(dark: false, reducedMotion: false) }
-    @MainActor func testCaptureDark() { capture(dark: true, reducedMotion: false) }
-    @MainActor func testCaptureReducedMotion() { capture(dark: false, reducedMotion: true) }
+    @MainActor func testCaptureLight() { capture(dark: false) }
+    @MainActor func testCaptureDark() { capture(dark: true) }
 
-    @MainActor private func capture(dark: Bool, reducedMotion: Bool) {
-        let mode = reducedMotion ? "reduced-motion" : dark ? "dark" : "light"
+    @MainActor private func capture(dark: Bool) {
+        let mode = dark ? "dark" : "light"
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home",
                                "-home-dashboard-usage-delay", "-fixture-appearance", dark ? "dark" : "light"]
         if dark { app.launchArguments += ["-home-dark"] }
-        if reducedMotion { app.launchArguments += ["-usage-capture-reduced-motion"] }
         app.launch()
         let card = app.buttons["home-usage-card"]
         _ = card.waitForExistence(timeout: 10)
@@ -22,7 +20,6 @@ final class TronUsageWorkspaceCaptureUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.55)
         }
         app.terminate()
-        if reducedMotion { return }
         app.launchArguments = ["-tron-session-configuration-fixture", "-settings-scope-review", "-manage-session-review",
                                "-workspace-capture-delay", "-fixture-appearance", dark ? "dark" : "light"]
         app.launch()

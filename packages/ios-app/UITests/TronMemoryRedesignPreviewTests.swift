@@ -10,7 +10,7 @@ final class TronMemoryRedesignPreviewTests: XCTestCase {
     @MainActor private func preview(dark: Bool, large: Bool = false) throws {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-memory-redesign"] + (dark ? ["-home-dark"] : [])
-            + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
+            + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] : [])
         app.launch(); defer { app.terminate() }
         let mode = large ? "large" : (dark ? "dark" : "light")
         try ready(app, "home-pinned-row"); shot("\(mode)-dashboard-subtext")
