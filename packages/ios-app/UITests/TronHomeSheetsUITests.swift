@@ -134,9 +134,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         expand(app, done: "home-sheet-done-tasks")
         for id in ["active", "terminal"] {
             let card = element(app, "home-task-card-\(id)-container")
-            let title = element(app, "home-task-card-\(id)-title")
-            let status = element(app, "home-task-card-\(id)-status")
-            let footer = element(app, "home-task-card-\(id)-metadata")
+            let title = element(app, "home-task-\(id)-title")
+            let status = element(app, "home-task-\(id)-status")
+            let footer = element(app, "home-task-\(id)-metadata")
             XCTAssertTrue(card.exists && title.exists && status.exists && footer.exists)
             let top = min(title.frame.minY, status.frame.minY) - card.frame.minY
             let bottom = card.frame.maxY - footer.frame.maxY
@@ -147,8 +147,8 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory-polish")
         expand(app, done: "home-sheet-done-memory")
         let card = element(app, "home-memory-card-39-container")
-        let title = element(app, "home-memory-card-39-title")
-        let footer = element(app, "home-memory-card-39-metadata")
+        let title = element(app, "home-memory-row-39-title")
+        let footer = element(app, "home-memory-row-39-metadata")
         XCTAssertTrue(card.exists && title.exists && footer.exists)
         XCTAssertEqual(title.frame.minY - card.frame.minY, card.frame.maxY - footer.frame.maxY, accuracy: 0.5,
                        "The shared row still hugs a Memory preview and its metadata")
@@ -163,91 +163,43 @@ final class TronHomeSheetsUITests: XCTestCase {
         for ordinal in [2, 1] {
             open(app, element(app, "home-chapter-\(ordinal)"), ready: "home-chapter-detail", name: "chapter-polish")
             expand(app, done: "home-sheet-done-chapter")
-            let header = element(app, "home-chapter-header"), stats = element(app, "home-chapter-stats")
-            XCTAssertTrue(stats.exists, "Active and sealed chapter counts belong to the summary, not a separate rows card")
-            let tags = stats.staticTexts.allElementsBoundByIndex
-            XCTAssertEqual(tags.count, 3)
-            for phrase in ["user message", "Home repl", "task"] { XCTAssertTrue(tags.contains { $0.label.contains(phrase) }) }
-            XCTAssertGreaterThanOrEqual(stats.frame.minY, element(app, "home-chapter-size").frame.maxY)
-            XCTAssertLessThanOrEqual(stats.frame.maxY, header.frame.maxY)
-            for tag in tags {
-                XCTAssertGreaterThanOrEqual(tag.frame.minX, header.frame.minX)
-                XCTAssertLessThanOrEqual(tag.frame.maxX, header.frame.maxX)
-            }
+            _ = assertChapterSummaryStats(app)
             shot("1723-chapter-\(ordinal)-stats-inside-header")
             app.buttons["home-sheet-done-chapter"].tap()
         }
     }
 
-    @MainActor func testPolishTaskPaddingReview() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-task-padding-review", "-home-dark"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
-        app.buttons["home-pinned-row"].tap()
-        let context = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(context, "enabled == true"))
-        open(app, context, ready: "home-manage-state", name: "review-manage")
-        expand(app, done: "home-sheet-done-manage")
-        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "review-tasks")
-        expand(app, done: "home-sheet-done-tasks")
-        shot("polish-long-tasks")
-        var lines: [String] = []
-        for id in ["active", "terminal"] {
-            let row = element(app, "home-task-\(id)")
-            let card = element(app, "home-task-card-\(id)-container")
-            let title = element(app, "home-task-\(id)-title")
-            let status = element(app, "home-task-\(id)-status")
-            let metadata = element(app, "home-task-\(id)-metadata")
-            lines.append("\(id): row=\(row.frame), card=\(card.frame), title=\(title.frame), status=\(status.frame), metadata=\(metadata.frame), top=\(min(title.frame.minY, status.frame.minY) - card.frame.minY), bottom=\(card.frame.maxY - metadata.frame.maxY)")
+    @MainActor private func assertChapterSummaryStats(_ app: XCUIApplication) -> [XCUIElement] {
+        let header = element(app, "home-chapter-header"), stats = element(app, "home-chapter-stats")
+        XCTAssertTrue(stats.exists, "Active and sealed chapter counts belong to the summary, not a separate rows card")
+        let tags = stats.staticTexts.allElementsBoundByIndex
+        XCTAssertEqual(tags.count, 3)
+        for phrase in ["user message", "Home repl", "task"] { XCTAssertTrue(tags.contains { $0.label.contains(phrase) }) }
+        XCTAssertGreaterThanOrEqual(stats.frame.minY, element(app, "home-chapter-size").frame.maxY)
+        XCTAssertLessThanOrEqual(stats.frame.maxY, header.frame.maxY)
+        for tag in tags {
+            XCTAssertGreaterThanOrEqual(tag.frame.minX, header.frame.minX)
+            XCTAssertLessThanOrEqual(tag.frame.maxX, header.frame.maxX)
         }
-        let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
-        attachment.name = "task-row-geometry"; attachment.lifetime = .keepAlways; add(attachment)
+        return tags
     }
 
-    // Native visual review journey; behavioral regressions are added after approval.
-    @MainActor func testPolishReviewLight() { polishReview(arguments: [], name: "light") }
-    @MainActor func testPolishReviewDark() { polishReview(arguments: ["-home-dark"], name: "dark") }
-    @MainActor func testPolishReviewXXXL() {
-        polishReview(arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"], name: "xxxl", summaryOnly: true)
-    }
-    @MainActor private func polishReview(arguments: [String], name: String, summaryOnly: Bool = false) {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + arguments
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
-        app.buttons["home-pinned-row"].tap()
-        let context = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(context, "enabled == true"))
-        open(app, context, ready: "home-manage-state", name: "review-manage")
-        expand(app, done: "home-sheet-done-manage")
-        shot("polish-\(name)-summary")
-        open(app, element(app, "home-manage-chapters"), ready: "home-chapter-list", name: "review-chapters")
+    @MainActor func testSummaryAndChapterTagsFitAtXXXL() {
+        let app = launchPolishManage(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"])
+        defer { app.terminate() }
+        assertCompactHomeSummary(app, workers: "0 workers", level: "Normal")
+        let summary = element(app, "home-context-summary")
+        for id in ["home-context-ring", "home-context-detail"] {
+            XCTAssertTrue(summary.frame.contains(element(app, id).frame), "\(id) stays inside the compact summary at XXXL")
+        }
+        shot("1723-summary-xxxl")
+        open(app, element(app, "home-manage-chapters"), ready: "home-chapter-list", name: "chapters-xxxl")
         expand(app, done: "home-sheet-done-chapters")
-        open(app, element(app, "home-chapter-2"), ready: "home-chapter-detail", name: "review-chapter")
+        open(app, element(app, "home-chapter-2"), ready: "home-chapter-detail", name: "chapter-xxxl")
         expand(app, done: "home-sheet-done-chapter")
-        shot("polish-\(name)-chapter")
-        app.buttons["home-sheet-done-chapter"].tap()
-        app.buttons["home-sheet-done-chapters"].tap()
-        if summaryOnly { return }
-        open(app, element(app, "home-manage-profile"), ready: "home-profile-items", name: "review-profile")
-        expand(app, done: "home-sheet-done-profile")
-        shot("polish-\(name)-profile")
-        let item = element(app, "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
-        open(app, item, ready: "home-profile-item-detail", name: "review-profile-item")
-        expand(app, done: "home-sheet-done-profile-item")
-        shot("polish-\(name)-retire")
-        app.buttons["home-sheet-done-profile-item"].tap()
-        app.buttons["home-sheet-done-profile"].tap()
-        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "review-tasks")
-        expand(app, done: "home-sheet-done-tasks")
-        shot("polish-\(name)-tasks")
-        open(app, element(app, "home-task-active"), ready: "home-task-detail", name: "review-worker")
-        expand(app, done: "home-sheet-done-task")
-        app.swipeUp()
-        shot("polish-\(name)-worker")
+        let tags = assertChapterSummaryStats(app)
+        XCTAssertGreaterThan(Set(tags.map { $0.frame.minY.rounded() }).count, 1, "Tags wrap rather than clip at XXXL")
+        shot("1723-chapter-xxxl-wrapping")
     }
 
     @MainActor

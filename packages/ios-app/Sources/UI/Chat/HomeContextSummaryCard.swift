@@ -49,6 +49,7 @@ struct HomeContextSummaryCard: View {
         .foregroundStyle(Color.tronTextPrimary)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(usage.accessibilityLabel)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home-context-summary")
     }
 
