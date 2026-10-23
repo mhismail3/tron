@@ -1,4 +1,5 @@
 import type { ContextPolicyLifecycle, ModuleDescriptor } from "../kernel/host/module-host.js";
+import type { OpenAIModelEligibility } from "./openai-model-eligibility.js";
 import { existsSync } from "node:fs";
 import type { Model } from "../kernel/pi/ai.js";
 import { estimateTokens, type AgentSession, type ExtensionFactory, type ModelRuntime, type SessionEntry, type SessionManager } from "../kernel/pi/coding-agent.js";
@@ -254,13 +255,15 @@ export class SessionContextWindowPolicy {
   }
 }
 
-export const contextWindowModule: ModuleDescriptor = {
+export const createContextWindowModule = (eligibility: () => OpenAIModelEligibility): ModuleDescriptor => ({
   name: "tron-context-window",
   purpose: "Keeps the session's model context window applied as the model changes.",
-  tools: [],
-  commands: [],
-  start: () => ({ extension: (session) => contextWindowExtension(() => session.contextPolicy()) }),
-};
+  tools: [], commands: [],
+  start: () => ({
+    hooks: { modelRuntimeInstalled: runtime => eligibility().attachRuntime(runtime) },
+    extension: session => contextWindowExtension(() => session.contextPolicy()),
+  }),
+});
 
 /** Hook the owner, not SDK private lifecycle fields. Factories survive resource
  * reload; each replacement session receives a distinct policy closure. */

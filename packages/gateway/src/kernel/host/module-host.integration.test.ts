@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../../admin/trust-service.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
+import { OpenAIModelEligibility } from "../../providers/openai-model-eligibility.js";
 import { gatewayModules } from "../../main/modules.js";
 import { ORDINARY_SESSION_PROFILE } from "./session-profile.js";
 import { ModuleHost, type KernelHooks, type ModuleDescriptor, type ModuleInstance } from "./module-host.js";
@@ -118,7 +119,8 @@ describe("kernel/host module host", () => {
     roots.push(root);
     const tronHome = join(root, "tron");
     const trust = new TrustService(join(root, "agent"));
-    const modules = await ModuleHost.start(gatewayModules(() => ({ registry, home: { tronHome, agentDir: join(root, "agent"), trust } })).modules, { tronHome, log });
+    const openAIModelEligibility = new OpenAIModelEligibility();
+    const modules = await ModuleHost.start(gatewayModules(() => ({ registry, openAIModelEligibility, home: { tronHome, agentDir: join(root, "agent"), trust } })).modules, { tronHome, log });
     const registry = new RuntimeRegistry({
       modules, agentDir: join(root, "agent"), tronHome, idleRuntimeMs: 60_000, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

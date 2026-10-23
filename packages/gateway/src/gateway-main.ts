@@ -281,7 +281,7 @@ const homeComposition: HomeComposition = {
   homeTaskDiagnostic,
 };
 const { modules, home } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
-  () => ({ registry: sessions, home: homeComposition, connections, scheduleToolOperations, sessionSearch }));
+  () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch }));
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),
   agentDir: config.agentDir,
@@ -322,7 +322,6 @@ const sessions = new RuntimeRegistry({
   mcpAuth: { openUrl: (operationId, url, sessionId, server) => auth.openMcpAuthorizationUrl(operationId, url, sessionId, server) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
-  openAIModelEligibility,
   trust,
   broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),

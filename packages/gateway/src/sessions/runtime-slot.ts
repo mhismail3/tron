@@ -58,7 +58,7 @@ import type { SessionLineageState } from "../kernel/host/session-lineage.js";
 import type { HomeMaterializationAuthority } from "../modules/home/home-append-guard.js";
 import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
-import { openAIModelEligibility, type OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../kernel/delegation/task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../modules/home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
@@ -340,7 +340,6 @@ export interface RuntimeSlotDependencies {
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
   createModelRuntime: () => Promise<ModelRuntime>;
-  openAIModelEligibility: OpenAIModelEligibility;
   trust: TrustService;
   blobs: BlobStore;
   exports: BlobStore;
@@ -1626,7 +1625,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       // Only the ModelRuntime owner installs filters. Home's borrowed view reads
       // the Gateway's installation without wrapping its providers on rebuild.
       const detachOpenAIEligibility = binding.ownership === "owned"
-        ? this.dependencies.openAIModelEligibility.attachRuntime(modelRuntime)
+        ? this.dependencies.modules.policy("modelRuntimeInstalled")?.(modelRuntime)
         : undefined;
       this.detachOpenAIEligibility?.();
       this.detachOpenAIEligibility = detachOpenAIEligibility;

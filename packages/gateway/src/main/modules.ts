@@ -1,6 +1,7 @@
 import { ModuleHost, type GatewayHost, type ModuleDescriptor } from "../kernel/host/module-host.js";
 import { settlementModule } from "../kernel/host/settlement-module.js";
-import { contextWindowModule } from "../providers/context-window-policy.js";
+import { createContextWindowModule } from "../providers/context-window-policy.js";
+import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { compactionPolicyModule } from "../kernel/run/compaction-policy.js";
 import { initTheme } from "../kernel/pi/adapters.js";
 import { settingsModule } from "../admin/settings-module.js";
@@ -24,6 +25,7 @@ import type { SessionSearchService } from "../sessions/session-search-service.js
 export interface ModuleOwners {
   registry: Pick<RuntimeRegistry, "knowledge" | "displayModuleServices" | "notifyModuleServices" | "homeKernel">;
   home: HomeComposition;
+  openAIModelEligibility: OpenAIModelEligibility;
   connections?: ConnectionOwner | undefined;
   scheduleToolOperations?: ScheduleToolOperations | undefined;
   sessionSearch?: SessionSearchService | undefined;
@@ -40,7 +42,7 @@ export function gatewayModules(owners: () => ModuleOwners): { modules: readonly 
   return { home: home.owner, modules: [
     workspaceModule,
     settlementModule,
-    contextWindowModule,
+    createContextWindowModule(() => owners().openAIModelEligibility),
     compactionPolicyModule,
     createCoreModule(() => ({ knowledge: registry().knowledge, connections: owners().connections })),
     settingsModule,

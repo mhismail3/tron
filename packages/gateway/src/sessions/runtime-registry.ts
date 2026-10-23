@@ -20,7 +20,7 @@ import {
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
-import { OpenAIModelEligibility, sessionRuntimeView } from "../providers/openai-model-eligibility.js";
+import { sessionRuntimeView } from "../providers/openai-model-eligibility.js";
 import { applyJevModelPricing } from "../providers/jev-model-pricing.js";
 import type {
   AdministrativeDrainBlockerCategory,
@@ -503,7 +503,6 @@ class RequestSpanLane extends AsyncMutex {
 
 export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
-  private readonly openAIModelEligibility: OpenAIModelEligibility;
   /** Live-only generated sessions are bound to the exact Automation operation
    * until Pi persists their first user or assistant message. Weak ownership cannot outlive
    * the RuntimeSlot and is never a second session catalog. */
@@ -654,7 +653,6 @@ export class RuntimeRegistry {
       idleRuntimeMs: number;
       maximumLiveRuntimes?: number;
       modelRuntimeFactory?: () => Promise<ModelRuntime>;
-      openAIModelEligibility?: OpenAIModelEligibility;
       trust: TrustService;
       broadcast: SessionBroadcast;
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
@@ -724,7 +722,6 @@ export class RuntimeRegistry {
       homeTaskDiagnostic?: (record: import("../modules/home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
     },
   ) {
-    this.openAIModelEligibility = options.openAIModelEligibility ?? new OpenAIModelEligibility();
     this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
@@ -1736,7 +1733,6 @@ export class RuntimeRegistry {
       ...(this.modelQueue ? { modelQueue: this.modelQueue } : {}),
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
-      openAIModelEligibility: this.openAIModelEligibility,
       createModelRuntime: async () => {
         const runtime = applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
           authPath: join(this.options.agentDir, "auth.json"),
