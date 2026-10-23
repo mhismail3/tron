@@ -71,7 +71,9 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
   owner; borrowed Home views never attach. Slots retain and release their exact attachment.
   The same policy owns `initialModel`: new runtimes refresh eligibility before accepting a
   saved default or selecting the first eligible fallback; existing transcripts never use it.
-  The concrete session policy remains the sole owner of budgets and canonical overrides.
+  Its `contextPolicy` factory constructs the concrete session policy after SDK creation;
+  the runtime keeps only the neutral `ContextPolicy` port and exact-session binding.
+  The provider policy remains the sole owner of budgets and canonical overrides.
 - **Model recency.** The provider descriptor owns `RecentModelStore`, `model.recent`
   and the `modelUsed` hook. Only admitted user-input runs record usage; preference
   writes stay off the run path, failures diagnose, and shutdown drains writes before

@@ -57,7 +57,6 @@ import { HomeChapterIdentityReplacementError } from "../modules/home/home-chapte
 import type { SessionLineageState } from "../kernel/host/session-lineage.js";
 import type { HomeMaterializationAuthority } from "../modules/home/home-append-guard.js";
 import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js";
-import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { createHomeTaskWorkerExtension } from "../kernel/delegation/task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../kernel/delegation/task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
@@ -152,7 +151,7 @@ import { projectAgentInstructions, type AgentInstructions } from "./agent-instru
 import type { ToolDisplayProjection } from "../kernel/projection/tool-result.js";
 import { trustedExtensionOriginKind } from "../kernel/projection/extension-origin.js";
 import { DirectBashProcessOwner } from "../kernel/run/direct-bash-process-owner.js";
-import type { ModuleHost, SessionContext } from "../kernel/host/module-host.js";
+import type { ContextPolicy, ModuleHost, SessionContext } from "../kernel/host/module-host.js";
 import { projectHookRegistrations } from "../kernel/projection/hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
 import { skillTitle } from "./skill-title.js";
@@ -408,7 +407,7 @@ function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefin
 }
 
 export class RuntimeSlot extends RunOperations<FixedSetting> {
-  public readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
+  public readonly contextPolicies = new WeakMap<AgentSession, ContextPolicy>();
   private readonly newSettingsSessions = new WeakSet<AgentSession>();
   public readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
   /** The open Home activation of the live runtime, undefined for every ordinary
@@ -1608,7 +1607,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         : undefined;
       this.detachOpenAIEligibility?.();
       this.detachOpenAIEligibility = detachOpenAIEligibility;
-      let contextPolicy: SessionContextWindowPolicy | undefined;
+      let contextPolicy: ContextPolicy | undefined;
       let compactionPolicy: CompactionOperationPolicy | undefined;
       this.resourceReloadOptions = {
         // Reload must re-read the canonical decision. Capturing the value from
@@ -1844,8 +1843,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         } : {}),
       });
       this.compactionPolicies.set(created.session, compactionPolicy);
-      contextPolicy = new SessionContextWindowPolicy(created.session);
-      this.contextPolicies.set(created.session, contextPolicy);
+      contextPolicy = modelRuntimePolicy?.contextPolicy(created.session);
+      if (contextPolicy) this.contextPolicies.set(created.session, contextPolicy);
       return { ...created, services, diagnostics: services.diagnostics };
     };
   }

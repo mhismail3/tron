@@ -1,4 +1,4 @@
-import type { ContextPolicyLifecycle, ModuleDescriptor } from "../kernel/host/module-host.js";
+import type { ContextPolicy, ModuleDescriptor } from "../kernel/host/module-host.js";
 import { RecentModelStore, type RecentModelSignals } from "./recent-models.js";
 import { safeJson } from "../kernel/projection/projection.js";
 import { initialModel, type OpenAIModelEligibility } from "./openai-model-eligibility.js";
@@ -267,7 +267,7 @@ export const createContextWindowModule = (eligibility: () => OpenAIModelEligibil
       contract: recents,
       rpc: { "model.recent": { kind: "read", handle: async () => safeJson({ models: recents.entries() }) } },
       hooks: {
-        modelRuntimeInstalled: () => ({ attach: runtime => eligibility().attachRuntime(runtime), initialModel }),
+        modelRuntimeInstalled: () => ({ attach: runtime => eligibility().attachRuntime(runtime), initialModel, contextPolicy: session => new SessionContextWindowPolicy(session) }),
         modelUsed: (sessionId, model) => {
           void recents.record(model.provider, model.id).then(changed => {
             if (changed) signals().recentModelsChanged?.();
@@ -282,7 +282,7 @@ export const createContextWindowModule = (eligibility: () => OpenAIModelEligibil
 
 /** Hook the owner, not SDK private lifecycle fields. Factories survive resource
  * reload; each replacement session receives a distinct policy closure. */
-export function contextWindowExtension(policy: () => ContextPolicyLifecycle | undefined): ExtensionFactory {
+export function contextWindowExtension(policy: () => ContextPolicy | undefined): ExtensionFactory {
   return pi => {
     pi.on("session_start", () => { policy()?.restore(); });
     pi.on("session_tree", () => { policy()?.restore(); });

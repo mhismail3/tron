@@ -1,9 +1,9 @@
 import type { SessionLineagePolicy } from "./session-lineage.js";
 import type { KernelLifecycleObserver, TaskLedgerPolicy } from "./kernel-lifecycle.js";
 import type { Model } from "../pi/ai.js";
-import type { ExtensionFactory, ModelRuntime, SettingsManager, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
+import type { AgentSession, ExtensionFactory, ModelRuntime, SettingsManager, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
 import type { SettingsToolAccess } from "../settings/tool-contract.js";
-import type { JsonValue, TronModuleSummary } from "../../protocol/types.js";
+import type { ContextWindowPolicy, ModelRef, JsonValue, TronModuleSummary } from "../../protocol/types.js";
 import type { ToolResultProjection } from "../projection/tool-result.js";
 import type { RequestPolicyHook } from "./request-policy.js";
 import type { InputAdmissionPolicy } from "./input-admission.js";
@@ -35,10 +35,11 @@ export interface RunSettledPolicy {
   idle(sessionId: string, by: "user" | "wake"): void;
 }
 
-/** Provider operations for owned runtime attachment and a new runtime's saved default. */
+/** Provider operations for runtime models and per-session context policy creation. */
 export interface ModelRuntimePolicy {
   attach(runtime: ModelRuntime): () => void;
   initialModel(runtime: ModelRuntime, settings: Pick<SettingsManager, "getDefaultProvider" | "getDefaultModel">): Promise<Model<never> | undefined>;
+  contextPolicy(session: AgentSession): ContextPolicy;
 }
 
 /** One log line from a module, in the Gateway logger's shape. */
@@ -56,10 +57,12 @@ export interface GatewayHost {
   contract<C>(module: ModuleDescriptor<C>): C;
 }
 
-/** Lifecycle operations used by the context extension, not its concrete owner. */
-export interface ContextPolicyLifecycle {
+/** Context operations shared by the runtime and extension, not their concrete owner. */
+export interface ContextPolicy {
   restore(): void;
   apply(): void;
+  snapshot(): ContextWindowPolicy | undefined;
+  set(model: ModelRef, raw: unknown): void;
 }
 
 /** Lifecycle operations used by the compaction extension. */
@@ -81,7 +84,7 @@ export interface SessionContext {
   joinTerminalReceiptWrites(): Promise<void>;
   /** The current session actor and target; installed settings stay late-bound. */
   settings(): SettingsToolAccess | undefined;
-  contextPolicy(): ContextPolicyLifecycle | undefined;
+  contextPolicy(): ContextPolicy | undefined;
   compaction: {
     policy(): CompactionPolicyLifecycle | undefined;
     stopped(event: SessionBeforeCompactEvent): boolean;

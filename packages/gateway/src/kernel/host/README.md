@@ -65,6 +65,9 @@ delivery state and budgeting remain module-owned.
   `inputAdmission` runs in the session lane before SDK admission. Its module owns
   the envelope/slow diagnostic, releases an unpersisted trigger before terminal
   settlement, and settles deliveries only after the canonical terminal receipt.
+  `modelRuntimeInstalled` supplies owned-runtime model attachment, saved-default
+  eligibility and per-session `ContextPolicy` construction. The runtime binds the
+  returned policy after SDK creation; providers own its budgets and overrides.
 - **Fail at start.** A module composed twice, an unknown hook, a second policy
   implementer, duplicate/reserved profile or an RPC method served twice refuses `start`; modules
   already started are stopped.
