@@ -248,7 +248,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       beforeSessionRekey: (previousId: string, nextId: string) => automations!.rekeySessionTarget(previousId, nextId),
       beforeSessionDelete: (sessionId: string) => automations!.blockSessionTarget(sessionId),
       scheduleToolOperations: { execute: (sessionId, toolCallId, request) => scheduleTool!.execute(sessionId, toolCallId, request) },
-    } satisfies Partial<ConstructorParameters<typeof RuntimeRegistry>[0]> : {}),
+    } satisfies Partial<Parameters<typeof createTestRegistry>[0]> : {}),
     ...(options.maximumLiveRuntimes === undefined ? {} : { maximumLiveRuntimes: options.maximumLiveRuntimes }),
     runtimeLifecycleRecord: (entry) => { runtimeLifecycle.push(entry); },
     // Mirrors gateway-main: slot events reach subscribed sockets.

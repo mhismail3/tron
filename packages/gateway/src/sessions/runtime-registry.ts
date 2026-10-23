@@ -73,7 +73,6 @@ import { scanReservedHomeSession } from "../home/home-session-recovery.js";
 import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
 import { syncDurably } from "../util/durable-json.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
-import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import {
   invocationProjection,
@@ -116,7 +115,6 @@ import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { applyHomeCacheRetention, type HomeRequestRecord } from "../home/home-request-policy.js";
 import { homeModuleServices } from "../home/home-module.js";
-import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { SessionSearchForkBoundary } from "./session-search-contract.js";
 import { validateSearchBranch } from "./session-search-text.js";
 import {
@@ -727,8 +725,6 @@ export class RuntimeRegistry {
        * examined by a later pass; the report keeps the stop visible. */
       artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
       extensionArtifactWarning?: (warning: { reason: import("../kernel/projection/extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
-      scheduleToolOperations?: ScheduleToolOperations;
-      connections?: ConnectionOwner;
       /** One Home designation lifecycle outcome, for the Gateway log. */
       homeDiagnostic?: HomeDiagnostic;
       /** Home memory's compactor calls. Production omits it: they run on the
@@ -892,9 +888,8 @@ export class RuntimeRegistry {
   /** The composition's one workspace (`workspaceModule`), shared by capability stores. */
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
   get moduleHost(): ModuleHost { return this.options.modules; }
-  coreModuleServices() { return { knowledge: this.knowledgeService, connections: this.options.connections }; }
+  get knowledge(): KnowledgeService | undefined { return this.knowledgeService; }
   displayModuleServices() { return { artifacts: this.displayArtifacts, liveViews: this.options.browserLiveViews }; }
-  scheduleModuleOperations() { return this.options.scheduleToolOperations; }
   notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
   homeModuleServices() { return homeModuleServices(this.home, this.options, {
       runtime: async () => ({

@@ -58,6 +58,7 @@ import { logAutomationDiagnostic } from "./automations/automation-diagnostic.js"
 import { AutomationService } from "./automations/automation-service.js";
 import { GatewayAutomationExecutor } from "./automations/automation-executor.js";
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
+import type { ScheduleToolOperations } from "./automations/tron-schedule-extension.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
 import { HomeProfileItems } from "./home/home-profile.js";
@@ -227,7 +228,8 @@ const auth = new AuthBroker(
     log: (level, message, event) => logger.log(level, message, { event, source: "auth" }),
   },
 );
-const modules = await startGatewayModules({ tronHome: config.tronHome, log: logger }, () => sessions);
+const modules = await startGatewayModules({ tronHome: config.tronHome, log: logger },
+  () => ({ registry: sessions, connections, scheduleToolOperations }));
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),
   agentDir: config.agentDir,
@@ -247,6 +249,9 @@ const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
 const jevClient = new JevDecisionClient(modelRuntime);
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
+const scheduleToolOperations: ScheduleToolOperations = {
+  execute: (sessionId, toolCallId, request) => automationToolOperations.execute(sessionId, toolCallId, request),
+};
 // One sampler for the process: the transport records its own traffic and logs
 // the record, the registry reports catalog walks and answers its inventory.
 const resourceSampler: ResourceSampler = new ResourceSampler({
@@ -399,10 +404,6 @@ const sessions = new RuntimeRegistry({
   notifications,
   browserLiveViews,
   workRegistry,
-  connections,
-  scheduleToolOperations: {
-    execute: (sessionId, toolCallId, request) => automationToolOperations.execute(sessionId, toolCallId, request),
-  },
   extensionArtifactWarning: ({ reason, owner }) => logger.log(
     "warning",
     `Extension lifecycle artifact rejected (${reason}; owner ${owner})`,

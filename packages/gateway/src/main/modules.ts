@@ -14,25 +14,34 @@ import { createScheduleModule } from "../automations/schedule-module.js";
 import { createNotifyModule } from "../notifications/notify-module.js";
 import { createHomeModule, createHomeResearchModule } from "../home/home-module.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { ConnectionOwner } from "../integrations/connection-owner.js";
+import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 
-type ModuleOwners = Pick<RuntimeRegistry, "coreModuleServices" | "displayModuleServices" | "scheduleModuleOperations" | "notifyModuleServices" | "homeModuleServices">;
+/** The owners modules read per runtime: the registry's own services and the
+ * composition's, which never pass through the registry. */
+export interface ModuleOwners {
+  registry: Pick<RuntimeRegistry, "knowledge" | "displayModuleServices" | "notifyModuleServices" | "homeModuleServices">;
+  connections?: ConnectionOwner | undefined;
+  scheduleToolOperations?: ScheduleToolOperations | undefined;
+}
 
 /** One production composition. Callbacks may close over the not-yet-constructed
  * registry: start only captures them; extension assembly resolves the live owner. */
-export function gatewayModules(registry: () => ModuleOwners): readonly ModuleDescriptor<unknown>[] {
+export function gatewayModules(owners: () => ModuleOwners): readonly ModuleDescriptor<unknown>[] {
+  const registry = () => owners().registry;
   return [
     workspaceModule,
     settlementModule,
     contextWindowModule,
     compactionPolicyModule,
-    createCoreModule(() => registry().coreModuleServices()),
+    createCoreModule(() => ({ knowledge: registry().knowledge, connections: owners().connections })),
     settingsModule,
     askUserModule,
     createDisplayModule(() => registry().displayModuleServices()),
     appsModule,
     createNativeCaptureModule(() => registry().displayModuleServices()),
     computerModule,
-    createScheduleModule(() => registry().scheduleModuleOperations()),
+    createScheduleModule(() => owners().scheduleToolOperations),
     createNotifyModule(() => registry().notifyModuleServices()),
     createHomeModule(() => registry().homeModuleServices()),
     createHomeResearchModule(() => registry().homeModuleServices()),
@@ -40,7 +49,7 @@ export function gatewayModules(registry: () => ModuleOwners): readonly ModuleDes
 }
 
 /** Pi's process-global theme must precede every extension resource load. */
-export function startGatewayModules(platform: Omit<GatewayHost, "contract">, registry: () => ModuleOwners): Promise<ModuleHost> {
+export function startGatewayModules(platform: Omit<GatewayHost, "contract">, owners: () => ModuleOwners): Promise<ModuleHost> {
   initTheme();
-  return ModuleHost.start(gatewayModules(registry), platform);
+  return ModuleHost.start(gatewayModules(owners), platform);
 }
