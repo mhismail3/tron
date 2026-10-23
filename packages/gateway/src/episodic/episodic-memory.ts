@@ -551,15 +551,15 @@ export class EpisodicMemory {
   async resumeIngested(): Promise<void> {
     this.assertOpen();
     await this.mutex.run(async () => {
+      // A failed ingest may have committed catalog edits but not their whole
+      // invalidation. Reconcile before replay can skip text-identical edits,
+      // and keep the durable block until that reconciliation succeeds.
+      await this.repairOrphanedDependencies();
+      await this.repairCatalogMismatch();
       if (this.blocked) {
         this.blocked = null;
         await this.saveState();
       }
-      // A failed ingest may have committed catalog edits but not their whole
-      // invalidation. Reuse open's reconciliation before text-identical replay
-      // can skip those edits and leave stale summaries live after resume.
-      await this.repairOrphanedDependencies();
-      await this.repairCatalogMismatch();
       await this.ingest();
     });
     void this.drain().catch(() => {});

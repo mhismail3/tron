@@ -121,9 +121,7 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
   return async (request) => {
     state.calls += 1;
     state.entered += 1;
-    const text = request.turns.map((turn) => turn.text).join("\n");
     if (request.turns.length === 1 && state.gate) await state.gate;
-    if (text.includes("must end where it is cut here")) return fauxAssistantMessage(`${SUMMARY_MARKER} ${state.calls} shortened`);
     return fauxAssistantMessage(`${SUMMARY_MARKER} ${state.calls} ${"s".repeat(64)}`);
   };
 }

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { singleModelSummarizer } from "../../test-support/settings-dependencies.js";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -523,6 +523,24 @@ describe("episodic memory end to end", () => {
       expect(memory.renderView(2).text).toContain("New decision remains open.");
       expect(memory.renderView(2).text).not.toContain("Old decision remains open.");
     } finally { await memory.dispose(); }
+  });
+
+  it("retains the durable block when resume cannot publish a pending invalidation", async () => {
+    const fx = await fixture("resume-repair-refused", { maxStoreLineBytes: 4_096, recordCapChars: 100_000 }, () => fauxAssistantMessage("Old decision remains open."));
+    const target = fx.manager.appendMessage(userMessage("old evidence ".repeat(100)));
+    const memory = await openMemory(fx);
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      fx.manager.appendContextEdit(target, { content: "new evidence ".repeat(100) });
+      fx.manager.appendMessage(userMessage("x".repeat(9_000)));
+      await memory.entriesCommitted(fx.sessionId);
+      expect(memory.status().blocked?.reason).toBe("permanent-failure");
+      await chmod(fx.nodesPath, 0o644);
+      await expect(memory.resumeIngested()).rejects.toMatchObject({ kind: "unsafe-store" });
+      expect(memory.status().blocked?.reason).toBe("permanent-failure");
+      const state = JSON.parse(await readFile(join(fx.home, "workspace", "state", "episodic", fx.sessionId, "state.json"), "utf8"));
+      expect(state.blocked.reason).toBe("permanent-failure");
+    } finally { await chmod(fx.nodesPath, 0o600); await memory.dispose(); }
   });
 
   it.each(["user", "tool"])("keeps astral characters whole at both %s projection cap boundaries", async kind => {

@@ -9,7 +9,8 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { fileURLToPath } from "node:url";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { COMPACTOR_MAX_TOKENS, compactorRequest, EPISODIC_COMPACT_PROMPT } from "./episodic-compactor.js";
+import { COMPACTOR_MAX_TOKENS, compactorRequest, createQueueSummarizer, EPISODIC_COMPACT_PROMPT } from "./episodic-compactor.js";
+import { ModelQueueOwner } from "../providers/model-queue.js";
 import { EpisodicMemory } from "./episodic-memory.js";
 import { EpisodicStore } from "./episodic-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -20,9 +21,9 @@ import { waitFor } from "../../test-support/wait-for.js";
 // endpoint records every request body.
 
 import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
-type Reply = "line" | "reasoning-only" | "copy-example";
+type Reply = "line" | "reasoning-only" | "copy-example" | "limit";
 
-async function endpoint(reply: () => Reply) {
+async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
   const bodies: Array<Record<string, unknown>> = [];
   const server: Server = createServer((request, response) => {
     let raw = "";
@@ -30,12 +31,18 @@ async function endpoint(reply: () => Reply) {
     request.on("end", () => {
       const body = JSON.parse(raw) as Record<string, unknown>;
       bodies.push(body);
+      const selected = reply(body);
+      if (selected === "limit") {
+        response.writeHead(429, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "subscription_sharing_usage_limit_exceeded: plan usage limit reached" } }));
+        return;
+      }
       const chunk = (delta: Record<string, unknown>, finish: string | null, usage?: Record<string, number>) =>
         `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 0, model: "m",
           choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })}\n\n`;
       const usage = { prompt_tokens: 40, completion_tokens: 20, total_tokens: 60 };
       response.writeHead(200, { "content-type": "text/event-stream" });
-      if (reply() === "copy-example") {
+      if (selected === "copy-example") {
         // A deterministic copy-prone provider, not a claim about live-model
         // fidelity: any factual size demonstration competes with real sources.
         const messages = body.messages as Array<{ role: string; content: unknown }>;
@@ -48,7 +55,7 @@ async function endpoint(reply: () => Reply) {
         response.end(chunk({ role: "assistant", content: line }, null) + chunk({}, "stop", usage) + "data: [DONE]\n\n");
         return;
       }
-      response.end(reply() === "line"
+      response.end(selected === "line"
         ? chunk({ role: "assistant", reasoning_content: "thinking briefly" }, null)
           + chunk({ content: "user: a summarized line" }, null) + chunk({}, "stop", usage) + "data: [DONE]\n\n"
         : chunk({ role: "assistant", reasoning_content: "thinking ".repeat(50) }, null) + chunk({}, "length", usage) + "data: [DONE]\n\n");
@@ -80,7 +87,7 @@ afterAll(async () => {
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function fixture(reply: () => Reply) {
+async function fixture(reply: (body: Record<string, unknown>) => Reply) {
   const root = await mkdtemp(join(tmpdir(), "tron-episodic-reasoning-"));
   const local = await endpoint(reply);
   cleanups.push(async () => {
@@ -106,6 +113,33 @@ async function fixture(reply: () => Reply) {
 }
 
 describe("the episodic summarizer on a reasoning model", () => {
+  it("finishes a real memory tree when the background model becomes plan-limited after its first leaves", async () => {
+    let plainCalls = 0;
+    const f = await fixture(body => body.model === "plain" && ++plainCalls > 2 ? "limit" : "line");
+    const cwd = join(f.root, "project"), sessions = join(f.root, "sessions");
+    await Promise.all([mkdir(cwd), mkdir(sessions)]);
+    const manager = SessionManager.create(cwd, sessions);
+    for (let index = 0; index < 4; index++) manager.appendMessage({ role: "user", content: `message ${index} ${"detail ".repeat(100)}`, timestamp: Date.now() });
+    const workspace = new TronWorkspace(join(f.root, "home"));
+    cleanups.push(async () => { await workspace.dispose(); });
+    const queue = new ModelQueueOwner({ runtime: f.runtime, usage: { read: async () => ({ providers: [] }) },
+      queue: async () => ["local-openai/plain", "local-openai/reasoner"] });
+    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(),
+      sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!),
+      summarizer: createQueueSummarizer(queue), limits: { nodeBytes: 32, viewBytes: 40, jobs: 1 } });
+    cleanups.push(async () => { await memory.dispose(); });
+    await memory.entriesCommitted(manager.getSessionId());
+    await memory.whenReady(4);
+    const stored = await new EpisodicStore(workspace, manager.getSessionId(), 1_024 * 1_024).read();
+    expect(plainCalls).toBe(3);
+    expect(f.bodies.some(body => body.model === "reasoner")).toBe(true);
+    expect([...stored.nodes.values()].filter(node => node.level === 0)).toHaveLength(4);
+    expect([...stored.nodes.values()].some(node => node.level === 2 && node.kind === "summary")).toBe(true);
+    expect(memory.status().blocked).toBeNull();
+    await mkdir(join(GATEWAY_ROOT, "test-results/episodic-reasoning-model"), { recursive: true });
+    await writeFile(join(GATEWAY_ROOT, "test-results/episodic-reasoning-model/fallback.json"), JSON.stringify({ models: f.bodies.map(body => body.model), status: memory.status() }, null, 2) + "\n");
+  });
+
   // B1, B2 and B4, and #485: reasoning off wherever a model supports it, else its
   // least; no reasoning parameter for a plain model; a ceiling with room for any
   // reasoning plus the line.

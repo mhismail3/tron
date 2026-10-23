@@ -148,7 +148,6 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
   return async (request) => {
     state.calls += 1;
     state.entered += 1;
-    const text = request.turns.map((turn) => turn.text).join("\n");
     if (request.turns.length === 1 && state.gate) {
       // A real compactor call honors the signal it was given, so a test that
       // holds one must not be able to wedge a dispose (or a reconfiguration).
@@ -160,9 +159,7 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
     // A permanent provider refusal: the memory blocks rather than retrying, and
     // the cause is the model, which a resume or a different model addresses.
     if (state.failing) return fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid_request_error: unsupported message" });
-    const line = text.includes("must end where it is cut here")
-      ? `${SUMMARY_MARKER} ${state.calls} shortened`
-      : `${SUMMARY_MARKER} ${state.calls} ${"s".repeat(64)}`;
+    const line = `${SUMMARY_MARKER} ${state.calls} ${"s".repeat(64)}`;
     return { ...await fauxAssistantMessage(line), usage: state.runawayUsage
       ? { ...COMPACTOR_USAGE, totalTokens: state.runawayUsage }
       : COMPACTOR_USAGE };
