@@ -98,8 +98,8 @@ final class TronNotificationInboxUITests: XCTestCase {
     }
 
     /// Mark Read on Unread removes the rows once: the empty state replaces them
-    /// and stays while the reconciling refresh (a real round trip) runs. The
-    /// refresh never swaps the settled list for the loading pulse and back.
+    /// and stays while the reconciling refreshes (real round trips) run. A
+    /// refresh never hides the sheet's content under the loading pulse.
     @MainActor func testMarkReadOnUnreadSettlesOnceWhileTheRefreshRuns() throws {
         continueAfterFailure = false
         let app = launch("mixed", arguments: ["-notification-inbox-list-latency"]); defer { app.terminate() }
@@ -110,20 +110,23 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertTrue(waitFor { !pulse.exists }, "the first load never settled: \(app.debugDescription)")
         try capture(app, "unread-before-mark-read")
 
-        app.buttons["Mark all notifications read"].tap()
+        let filter = app.buttons["Unread"]
         let empty = app.staticTexts["No unread notifications"]
-        XCTAssertTrue(empty.waitForExistence(timeout: 10), app.debugDescription)
-        // Mark-all reconciliation plus the Gateway's change event: two list
-        // round trips at the fixture's latency, observed with margin.
-        let observeUntil = Date().addingTimeInterval(4)
+        app.buttons["Mark all notifications read"].tap()
+        // From the tap through the mark-all reconciliation and the Gateway's
+        // change event (two list round trips at the fixture's latency): the
+        // sheet keeps its content and goes from rows to the empty state once.
+        let observeUntil = Date().addingTimeInterval(5)
         var transitions: [String] = []
         while Date() < observeUntil {
-            let state = pulse.exists ? "pulse" : empty.exists ? "empty" : ask.exists ? "rows" : "blank"
+            let state = pulse.exists ? "pulse" : !filter.exists ? "hidden"
+                : empty.exists ? "empty" : ask.exists ? "rows" : "blank"
             guard transitions.last != state else { continue }
             transitions.append(state)
-            if state != "empty" { try capture(app, "unread-after-mark-read-\(transitions.count)-\(state)") }
+            if state != "empty" && state != "rows" { try capture(app, "unread-after-mark-read-\(transitions.count)-\(state)") }
         }
-        XCTAssertEqual(transitions, ["empty"], "Mark Read must settle the Unread list once, not reload it")
+        XCTAssertEqual(Array(transitions.drop { $0 == "rows" }), ["empty"],
+                       "Mark Read must settle the Unread list once, not reload it: \(transitions)")
         XCTAssertFalse(ask.exists)
         try capture(app, "unread-after-mark-read-settled")
     }
