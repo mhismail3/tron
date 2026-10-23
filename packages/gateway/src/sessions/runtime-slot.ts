@@ -347,7 +347,7 @@ export interface RuntimeSlotDependencies {
   /** Disposable observer registrations; browser state remains provider-owned. */
   browserLiveViews?: BrowserLiveViewRegistry;
   modules: ModuleHost; // started modules whose extensions this runtime registers
-  /** The settings model and its one change path, late-bound like session search:
+  /** The settings model and its one change path, late-bound:
    * installed on the registry after construction (docs/settings-model.md 5.1). */
   settings: () => { model: SettingsModel; changes: SettingsChangePath } | undefined;
   workspace: TronWorkspace;
