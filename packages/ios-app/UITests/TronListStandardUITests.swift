@@ -386,6 +386,90 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
+    /// The position chip floats bottom-centred over the stacked Memory sheet: its
+    /// whole 44-pt target takes every touch (never the row beneath), rows beside it
+    /// stay live, and the end of the feed scrolls clear of it.
+    @MainActor func testBottomChipTakesItsTouchesAndClearsTheLastRow() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-paging", "-home-browser-paging"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        ring.tap()
+        let memory = element(app, "home-manage-memory-browser")
+        XCTAssertTrue(memory.waitForExistence(timeout: 10), app.debugDescription)
+        expandSheet(app, title: "Manage Home")
+        memory.tap()
+        let newest = app.buttons["home-memory-row-39"]
+        XCTAssertTrue(newest.waitForExistence(timeout: 10), app.debugDescription)
+        expandSheet(app, title: "Memory")
+        let viewport = element(app, "home-memory-viewport")
+        let chip = app.buttons["feed-position-chip"]
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'home-memory-row-' OR identifier BEGINSWITH 'home-memory-summary-'"))
+        let detail = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'home-sheet-done-memory-'"))
+        let window = app.windows.firstMatch.frame
+        let end = element(app, "feed-end")
+        /// Scrolls a little at a time, away from whichever edge is in view, until a
+        /// row lies under the chip.
+        func rowUnderChip() -> XCUIElement {
+            for _ in 0..<8 {
+                Thread.sleep(forTimeInterval: 1)
+                if chip.exists, let row = rows.allElementsBoundByIndex.first(where: { $0.frame.intersects(chip.frame) }) { return row }
+                let (from, to) = newest.isHittable ? (0.6, 0.4) : (0.4, 0.6)
+                viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: from))
+                    .press(forDuration: 0.05, thenDragTo: viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: to)))
+            }
+            XCTFail("No row scrolled under the chip\n\(app.debugDescription)")
+            return chip
+        }
+
+        for _ in 0..<2 { viewport.swipeUp() }
+        XCTAssertTrue(chip.waitForExistence(timeout: 5), "A long feed shows its position chip\n\(app.debugDescription)")
+        let covered = rowUnderChip()
+        XCTAssertEqual(chip.frame.midX, window.midX, accuracy: 2, "The chip is centred")
+        XCTAssertGreaterThan(chip.frame.minY, window.midY, "The chip sits at the bottom of the sheet, not under its toolbar")
+        XCTAssertGreaterThan(chip.frame.maxY, window.maxY - 80, "The chip sits just above the home indicator")
+        XCTAssertLessThanOrEqual(chip.frame.maxY, window.maxY - 20, "The chip stays above the home indicator")
+        XCTAssertGreaterThanOrEqual(chip.frame.height, 44, "The chip's target is at least 44 pt")
+        XCTAssertTrue(covered.frame.intersects(chip.frame))
+
+        // A long press at the target's top edge, outside the drawn capsule, is the chip's.
+        chip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).press(forDuration: 1.0)
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(detail.count, 0, "A long press on the chip never reaches the row beneath\n\(app.debugDescription)")
+        // So is a tap at its corner: it jumps to the newest entry and opens nothing.
+        _ = rowUnderChip()
+        chip.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.94)).tap()
+        XCTAssertTrue(waitFor(newest, "hittable == true", timeout: 5), "A tap anywhere on the chip jumps to the newest entry")
+        XCTAssertEqual(detail.count, 0, "A tap on the chip never reaches the row beneath\n\(app.debugDescription)")
+
+        // Beside the chip, the same row still takes taps.
+        let beside = rowUnderChip()
+        XCTAssertLessThan(beside.frame.minX + 16, chip.frame.minX - 8)
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: beside.frame.minX + 16, dy: chip.frame.midY)).tap()
+        XCTAssertTrue(detail.firstMatch.waitForExistence(timeout: 8), "A row beside the chip opens its detail\n\(app.debugDescription)")
+        detail.firstMatch.tap()
+        XCTAssertTrue(waitFor(detail.firstMatch, "exists == false", timeout: 8))
+
+        // The end of the feed scrolls fully clear of the chip, and its last row opens.
+        let retry = app.buttons["feed-retry"]
+        for _ in 0..<14 where !end.exists {
+            if retry.exists && retry.isHittable { retry.tap() }
+            viewport.swipeUp(velocity: .fast)
+        }
+        XCTAssertTrue(end.waitForExistence(timeout: 5), "The feed reaches its end\n\(app.debugDescription)")
+        for _ in 0..<2 { viewport.swipeUp() }
+        Thread.sleep(forTimeInterval: 1)
+        let last = rows.allElementsBoundByIndex.max { $0.frame.maxY < $1.frame.maxY }!
+        XCTAssertLessThanOrEqual(last.frame.maxY, chip.frame.minY, "The last row scrolls clear of the chip")
+        XCTAssertLessThanOrEqual(end.frame.maxY, chip.frame.minY, "The end line scrolls clear of the chip")
+        last.tap()
+        XCTAssertTrue(detail.firstMatch.waitForExistence(timeout: 8), "The last row stays reachable\n\(app.debugDescription)")
+    }
+
     @MainActor private func openLargeHistory() -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
