@@ -124,7 +124,7 @@ async function fixture() {
     replaceRuntimeForProfile: async (_id, commit) => commit(),
     retireHomeRuntimes: async () => {},
   };
-  const owner = new HomeOwner({ tronHome, trust, workspace, sessions, taskSessions: {} as RuntimeRegistry, memoryModels: async () => [], memorySummarizer: () => async () => { throw new Error("unused"); } });
+  const owner = new HomeOwner({ tronHome, trust, workspace, sessions, taskSessions: {} as RuntimeRegistry, runtimes: {} as never, memoryModels: async () => [], memorySummarizer: () => async () => { throw new Error("unused"); } });
   await owner.initialize();
   const flushConversation = () => {
     manager.appendThinkingLevelChange("off");
