@@ -1,11 +1,11 @@
 import { homeSessionProfile, type HomeSessionProfileServices } from "./home-session-profile.js";
-import type { ModuleDescriptor, RunSettledPolicy, SessionContext } from "../kernel/host/module-host.js";
+import type { GatewayHost, ModuleDescriptor, RunSettledPolicy, SessionContext } from "../kernel/host/module-host.js";
 import { createTronHomeExtension } from "./tron-home-extension.js";
 import { homeResearchTools, type HomeResearchTransport } from "./home-research-tools.js";
 import type { HomeMemoryToolAccess } from "./home-memory.js";
 import type { HomeProfileChangeAccess } from "./home-profile.js";
 import type { SettingsChangePath } from "../admin/settings-model.js";
-import type { HomeOwner } from "./home-owner.js";
+import { HomeOwner, type HomeOwnerOptions } from "./home-owner.js";
 import { homeAppendGuardHook, type HomeAppendGuardServices } from "./home-append-guard.js";
 import type { HomeDiagnostic } from "./home-diagnostic.js";
 import { HomeRequestPolicyError } from "./home-request-policy.js";
@@ -18,7 +18,14 @@ import { homeInputAdmission } from "./home-input-admission.js";
 import { dispatchWithWorkerChoice, type HomeWorkerChoicePort } from "./home-task-worker-choice.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { HomeTaskDiagnostic, HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
-import type { HomeSessionReader } from "./home-session-read.js";
+import { readHomeSessionEntry, type HomeSessionReader } from "./home-session-read.js";
+import type { HomeMemoryDiagnostic } from "./home-memory.js";
+import type { HomeRequestRecord } from "./home-request-policy.js";
+import type { NotificationService } from "../notifications/notification-service.js";
+import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
+import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { TronWorkspace } from "../workspace/tron-workspace.js";
+import { workspaceModule } from "../workspace/workspace-module.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/session-search-contract.js";
 
@@ -42,14 +49,60 @@ export interface HomeModuleServices {
   transport?: HomeResearchTransport;
 }
 
-/** Home owns its extension closures; registry supplies only the kernel-side
- * operations and reads of owners installed after registry construction. */
-export function homeModuleServices(owner: HomeOwner,
-  platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport; homeDiagnostic?: HomeDiagnostic; homeTaskDiagnostic?: (record: HomeTaskDiagnostic) => void; },
-  ports: Pick<HomeModuleServices, "knowledge" | "read"> & { workerChoice: HomeWorkerChoicePort; changes(): SettingsChangePath | undefined; runtime: HomeSessionProfileServices["runtime"] },
-): Omit<HomeModuleServices, "search"> {
+/** The composition's Home inputs: platform owners and log sinks, never the registry. */
+export interface HomeComposition {
+  tronHome: string;
+  agentDir: string;
+  trust: TrustService;
+  notifications?: NotificationService | undefined;
+  machineId?: string | undefined;
+  homeDiagnostic?: HomeDiagnostic | undefined;
+  homeMemoryDiagnostic?: ((record: HomeMemoryDiagnostic) => void) | undefined;
+  homeRequestDiagnostic?: ((record: HomeRequestRecord) => void) | undefined;
+  homeTaskDiagnostic?: ((record: HomeTaskDiagnostic) => void) | undefined;
+  /** Home memory's compactor calls; production omits it and uses the background model queue. */
+  homeMemorySummarizer?: (() => EpisodicSummarizer) | undefined;
+  /** Transport injection for Home's web research tools; production uses the pinned DNS-safe transport. */
+  homeWebTransport?: HomeResearchTransport | undefined;
+}
+
+/** The registry's generic operations and reads Home is built over (k0-kernel.md §5). */
+export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "sessions" | "runtimes" | "taskSessions" | "memoryModels" | "memorySummarizer" | "knowledge"> {
+  readSearchCut: Pick<RuntimeRegistry, "readSearchCut">["readSearchCut"];
+  runtime: HomeSessionProfileServices["runtime"];
+  changes(): SettingsChangePath | undefined;
+  workerChoice: HomeWorkerChoicePort;
+}
+
+/** Home's one owner, built on first use over the composition and the registry's ports. */
+export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeComposition, kernel: () => HomeKernelPorts): () => HomeOwner {
+  let owner: HomeOwner | undefined;
+  return () => {
+    if (owner) return owner;
+    const composition = inputs();
+    const ports = kernel();
+    owner = new HomeOwner({
+      tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
+      sessions: ports.sessions, runtimes: ports.runtimes,
+      ...(composition.homeDiagnostic ? { diagnostic: composition.homeDiagnostic } : {}),
+      workspace, memoryModels: ports.memoryModels,
+      memorySummarizer: composition.homeMemorySummarizer ?? ports.memorySummarizer,
+      ...(composition.homeMemoryDiagnostic ? { memoryDiagnostic: composition.homeMemoryDiagnostic } : {}),
+      ...(composition.homeRequestDiagnostic ? { requestDiagnostic: composition.homeRequestDiagnostic } : {}),
+      taskSessions: ports.taskSessions,
+      ...(composition.notifications ? { notifications: composition.notifications } : {}),
+      ...(composition.machineId ? { machineId: composition.machineId } : {}),
+      ...(composition.homeTaskDiagnostic ? { taskDiagnostic: composition.homeTaskDiagnostic } : {}),
+      knowledge: ports.knowledge,
+    });
+    return owner;
+  };
+}
+
+/** Home owns its extension closures; the registry supplies only generic operations. */
+export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, ports: HomeKernelPorts): Omit<HomeModuleServices, "search"> {
   return {
-    knowledge: ports.knowledge, read: ports.read,
+    knowledge: ports.knowledge(), read: (request, signal) => readHomeSessionEntry(ports, owner, request, signal),
     delegate: (sessionId, request, signal) => dispatchWithWorkerChoice(owner, ports.workerChoice, sessionId, request, signal),
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
     lifecycle: {
@@ -107,12 +160,37 @@ export function homeProfileChanges(session: SessionContext, changes: SettingsCha
   }) };
 }
 
-export function createHomeModule(services: () => HomeModuleServices): ModuleDescriptor {
+/** What Home's two modules read per runtime: the composition's inputs, the
+ * registry's generic ports and the search owner, resolved at each call. */
+export interface HomeModuleOwners {
+  composition: HomeComposition;
+  kernel(): HomeKernelPorts;
+  search: HomeModuleServices["search"];
+}
+
+/** Home's module and its research module over one owner, which the composition
+ * reads through `owner` (transport, recovery, notifications). */
+export function createHomeModules(owners: () => HomeModuleOwners): { home: ModuleDescriptor; research: ModuleDescriptor; owner: () => HomeOwner } {
+  let owner: (() => HomeOwner) | undefined;
+  const homeOwner = () => {
+    if (!owner) throw new Error("Tron Home has not started");
+    return owner();
+  };
+  const services = (): HomeModuleServices => {
+    const current = owners();
+    return { ...homeModuleServices(homeOwner(), current.composition, current.kernel()), search: current.search };
+  };
+  return { owner: homeOwner, research: createHomeResearchModule(services), home: createHomeModule(services, host => {
+    owner = homeOwnerFactory(host.contract(workspaceModule), () => owners().composition, () => owners().kernel());
+  }) };
+}
+
+function createHomeModule(services: () => HomeModuleServices, started: (host: GatewayHost) => void): ModuleDescriptor {
   return {
     name: "tron-home",
     purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
-    tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"], commands: [],
-    start: () => ({ profiles: [homeSessionProfile(() => services().profile)], hooks: {
+    tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"], commands: [], dependsOn: [workspaceModule],
+    start: host => { started(host); return { profiles: [homeSessionProfile(() => services().profile)], hooks: {
       profileDecision: (sessionId, cwd) => { const name = services().profile.decision(sessionId, cwd); return name === "unnamed" ? "unrecorded" : name; },
       runSettled: () => services().runSettled, sessionLineage: () => services().lineage, kernelLifecycle: () => services().lifecycle, taskLedger: () => services().taskLedger, requestPolicy: () => services().requestPolicy,
       inputAdmission: () => services().inputAdmission, appendGuard: homeAppendGuardHook(() => services().appendGuard) }, extension: session => {
@@ -121,11 +199,11 @@ export function createHomeModule(services: () => HomeModuleServices): ModuleDesc
         (request, signal) => owners.delegate(session.sessionId(), request, signal),
         request => owners.task(session.sessionId(), request),
         () => owners.knowledge, () => owners.profileChanges(session));
-    } }),
+    } }; },
   };
 }
 
-export function createHomeResearchModule(services: () => HomeModuleServices): ModuleDescriptor {
+function createHomeResearchModule(services: () => HomeModuleServices): ModuleDescriptor {
   return {
     name: "tron-home-research",
     purpose: "Adds Home's read-only research tools: web search and fetch, session search and cited-entry reading, Knowledge lookup and trusted-project file reading.",

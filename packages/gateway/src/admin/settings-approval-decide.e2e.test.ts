@@ -9,6 +9,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 /**
  * Settings decisions and submissions at the Gateway RPC boundary (#1642), with
@@ -38,11 +39,11 @@ const textOf = (message: { content: unknown }) => typeof message.content === "st
 async function gateway() {
   const f = await homeTaskFixture();
   const { settingsModel, settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway,
-    sessions: f.registry, home: () => f.registry.homeOwner(), registry: f.registry });
+    sessions: f.registry, home: () => homeOwnerOf(f.registry), registry: f.registry });
   await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
-    modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry, home: f.registry.homeOwner(),
+    modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry, home: homeOwnerOf(f.registry),
     receipts: new CommandReceiptStore(f.tronHome), uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES),
     notifications: { enqueue: async () => "queued" }, broadcast: () => {},
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
@@ -77,9 +78,9 @@ describe("settings approval decisions", () => {
       return result;
     };
     await homeSays("Delegate settled-worker", "delegate", { taskId: "settled-worker", title: "Settled worker", intent: "Report at once", target: f.cwd });
-    await waitFor(async () => (await f.registry.homeOwner().taskResult("settled-worker").catch(() => undefined) as { wake?: { state?: string } } | undefined)?.wake?.state === "acknowledged" || undefined, "result wake acknowledged");
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskResult("settled-worker").catch(() => undefined) as { wake?: { state?: string } } | undefined)?.wake?.state === "acknowledged" || undefined, "result wake acknowledged");
     await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home settled after the result");
-    const workerSessionId = (await f.registry.homeOwner().taskStatus("settled-worker")).sessionId!;
+    const workerSessionId = (await homeOwnerOf(f.registry).taskStatus("settled-worker")).sessionId!;
 
     // The maintainer raised thinking's floor, so Home's model and thinking change waits for his tap.
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },

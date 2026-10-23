@@ -15,6 +15,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import type { RuntimeSlot } from "../sessions/runtime-slot.js";
 import { disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 const PROVIDER = "local-anthropic";
 const MODEL_ID = "home-wire";
@@ -123,7 +124,7 @@ describe("Home's task tool on the wire (#961)", () => {
         return fauxAssistantMessage("Control handled");
       },
     ]);
-    const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "race-worker", intent: "Finite work", target: f.cwd });
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "race-worker", intent: "Finite work", target: f.cwd });
     try {
       await promptHomeControl(home, "Inspect race-worker", async () => {
         finishWorker.open();
@@ -141,7 +142,7 @@ describe("Home's task tool on the wire (#961)", () => {
     const entries = home.canonicalSessionEntries();
     expect(entries.filter(entry => entry.type === "message" && entry.message.role === "user")).toHaveLength(1);
     expect(entries.filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
-    expect((await f.registry.homeOwner().taskResult("race-worker")).wake?.state).toBe("acknowledged");
+    expect((await homeOwnerOf(f.registry).taskResult("race-worker")).wake?.state).toBe("acknowledged");
     evidence.push({ case: "idle-to-prompt-wake-race", inputs, results });
   });
   it("lists, steers, stops a worker stuck in a long command, resumes it in place and steers it again with minimal calls", async () => {
@@ -244,7 +245,7 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(worker.snapshot().phase).toBe("running");
     expect(worker.canonicalSessionEntries().filter(entry => entry.type === "session_info").map(entry => (entry as { name?: string }).name))
       .toEqual(["Wire worker", "Renamed wire worker"]);
-    expect((await f.registry.homeOwner().taskStatus("wire-worker")).intent.text).toContain("Finite work");
+    expect((await homeOwnerOf(f.registry).taskStatus("wire-worker")).intent.text).toContain("Finite work");
     // Invalid inputs and targets are refused with the fix named; nothing is renamed.
     const blank = await homeCalls("task", { action: "rename", taskId: "wire-worker", title: "   " });
     expect(blank.isError).toBe(true);
@@ -256,7 +257,7 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(unknownTask.isError).toBe(true);
     expect(unknownTask.text).toMatch(/no task "wire-wroker"/u);
     // Only Home's own session holds task control: the worker's session naming itself as Home is refused.
-    await expect(f.registry.homeOwner().taskTool(workerSession, { action: "rename", taskId: "wire-worker", title: "Hijacked" }))
+    await expect(homeOwnerOf(f.registry).taskTool(workerSession, { action: "rename", taskId: "wire-worker", title: "Hijacked" }))
       .rejects.toThrow(/Home task control is unavailable/u);
     expect(await sessionName()).toBe("Renamed wire worker");
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "rename", disposition: "accepted" }));
@@ -270,15 +271,15 @@ describe("Home's task tool on the wire (#961)", () => {
     await waitFor(async () => { try { return alive(Number(await readFile(pidFile, "utf8"))); } catch { return false; } }, "the stuck command running");
     const stuckPid = Number(await readFile(pidFile, "utf8"));
     expect(seen.some(text => text.includes("STEER-ONE"))).toBe(true);
-    expect((await f.registry.homeOwner().taskStatus("wire-worker")).lifecycle).toBe("active");
+    expect((await homeOwnerOf(f.registry).taskStatus("wire-worker")).lifecycle).toBe("active");
 
     // 4. Stop with only taskId ends the worker stuck in the command and kills it.
     const stopStarted = Date.now();
     const stopped = await homeCalls("task", { action: "stop", taskId: "wire-worker" });
     expect(stopped.isError, stopped.text).toBe(false);
-    await waitFor(async () => (await f.registry.homeOwner().taskStatus("wire-worker")).lifecycle === "terminal", "the stopped task settling");
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("wire-worker")).lifecycle === "terminal", "the stopped task settling");
     const stopMs = Date.now() - stopStarted;
-    expect((await f.registry.homeOwner().taskStatus("wire-worker")).terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
+    expect((await homeOwnerOf(f.registry).taskStatus("wire-worker")).terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
     await waitFor(() => !alive(stuckPid), "the stuck command's process to end");
     expect(stopMs).toBeLessThan(30_000);
     evidence.push({ stuckPid, stopMs });
@@ -295,15 +296,15 @@ describe("Home's task tool on the wire (#961)", () => {
     await waitFor(() => turns > 0 && seen.at(-1)!.includes("Continue Home task"), "the resumed worker's turn");
     // The explicit rename survives the stop and the in-place resume: no delegate title is reapplied.
     expect(await sessionName()).toBe("Renamed wire worker");
-    expect((await f.registry.homeOwner().taskStatus("wire-worker.resume-1")).title).toBe("Renamed wire worker");
+    expect((await homeOwnerOf(f.registry).taskStatus("wire-worker.resume-1")).title).toBe("Renamed wire worker");
 
     // 6. Steer again by the original taskId: it reaches the worker's current, resumed task.
     const again = await homeCalls("task", { action: "steer", taskId: "wire-worker", text: "STEER-TWO" });
     expect(again.isError, again.text).toBe(false);
     expect(again.json()).toMatchObject({ accepted: true, taskId: "wire-worker.resume-1", resolvedFrom: "wire-worker", sessionId: workerSession });
     resumedTurn.open();
-    await waitFor(async () => (await f.registry.homeOwner().taskStatus("wire-worker.resume-1")).lifecycle === "terminal", "the resumed task reporting");
-    expect((await f.registry.homeOwner().taskStatus("wire-worker.resume-1")).terminalEvidence).toMatchObject({ outcome: "final" });
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("wire-worker.resume-1")).lifecycle === "terminal", "the resumed task reporting");
+    expect((await homeOwnerOf(f.registry).taskStatus("wire-worker.resume-1")).terminalEvidence).toMatchObject({ outcome: "final" });
     // The persisted title is read from the canonical session file once the runtime is released.
     const file = (await readdir(join(f.root, "sessions"), { recursive: true })).map(String).find(name => name.endsWith(".jsonl") && name.includes(workerSession));
     const persisted = (await readFile(join(f.root, "sessions", file!), "utf8")).split("\n").filter(Boolean).map(line => JSON.parse(line) as { type: string; name?: string })
@@ -343,21 +344,21 @@ describe("Stop of a worker blocked in a tool that ignores cancellation (#961)", 
       () => { entered = true; return fauxAssistantMessage([fauxToolCall("hang", {}, { id: "hang-1" })], { stopReason: "toolUse" }); },
       (context: Context) => { seen.push(lastUser(context)); return fauxAssistantMessage([reportCall("after-hang", "Continued after the stuck tool")], { stopReason: "toolUse" }); },
     ]);
-    const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "hung", intent: "Finite work", target: f.cwd });
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "hung", intent: "Finite work", target: f.cwd });
     const worker = await f.registry.acquire(run.sessionId!);
     await waitFor(() => entered && worker.snapshot().phase === "running", "the worker blocked in its tool");
     const started = Date.now();
-    expect(await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "stop", taskId: "hung" })).toMatchObject({ accepted: true, taskId: "hung" });
+    expect(await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "stop", taskId: "hung" })).toMatchObject({ accepted: true, taskId: "hung" });
     const stopMs = Date.now() - started;
     expect((await run.completion).terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
     const abandoned = worker.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "hang");
     expect(JSON.stringify(abandoned)).toMatch(/Tool hang did not stop within 2000 ms of cancellation/u);
     expect(stopMs).toBeLessThan(10_000);
 
-    const resumed = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "resume", taskId: "hung", text: "Skip the stuck tool" }) as { taskId: string; sessionId: string };
+    const resumed = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "resume", taskId: "hung", text: "Skip the stuck tool" }) as { taskId: string; sessionId: string };
     expect(resumed).toMatchObject({ taskId: "hung.resume-1", sessionId: run.sessionId });
-    await waitFor(async () => (await f.registry.homeOwner().taskStatus("hung.resume-1")).lifecycle === "terminal", "the resumed task settling");
-    expect((await f.registry.homeOwner().taskStatus("hung.resume-1")).terminalEvidence).toMatchObject({ outcome: "final" });
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("hung.resume-1")).lifecycle === "terminal", "the resumed task settling");
+    expect((await homeOwnerOf(f.registry).taskStatus("hung.resume-1")).terminalEvidence).toMatchObject({ outcome: "final" });
     expect(seen[0]).toMatch(/Skip the stuck tool/u);
     evidence.push({ case: "stop-abandons-tool-ignoring-cancellation", stopMs, resumed: resumed.taskId, sessionId: resumed.sessionId });
   }, 60_000);
@@ -396,14 +397,14 @@ wait
         return fauxAssistantMessage([reportCall("after-interrupt", "Interrupted and continued")], { stopReason: "toolUse" });
       },
     ]);
-    const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "lander", intent: "Finite work", target: f.cwd });
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "lander", intent: "Finite work", target: f.cwd });
     const pid = async (name: string) => { try { return Number(await readFile(join(f.cwd, name), "utf8")); } catch { return 0; } };
     await waitFor(async () => (await pid("shell.pid")) > 0 && (await pid("session-child.pid")) > 0 && (await pid("group-child.pid")) > 0, "the command and its children running");
     const pids = { shell: await pid("shell.pid"), groupChild: await pid("group-child.pid"), sessionChild: await pid("session-child.pid") };
     for (const value of Object.values(pids)) expect(alive(value)).toBe(true);
 
     const started = Date.now();
-    const interrupted = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "interrupt", taskId: "lander", text: "INTERRUPT-STEER skip the land" });
+    const interrupted = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "interrupt", taskId: "lander", text: "INTERRUPT-STEER skip the land" });
     expect(interrupted).toMatchObject({ accepted: true, action: "interrupt", taskId: "lander", sessionId: run.sessionId, interrupted: ["bash"] });
     await waitFor(() => Object.values(pids).every(value => !alive(value)), "the command's whole process tree to end");
     const killMs = Date.now() - started;
@@ -413,14 +414,14 @@ wait
     expect(await readFile(join(f.cwd, "terminated"), "utf8")).toBe("terminated");
 
     expect(killMs).toBeLessThan(5_000);
-    expect((await f.registry.homeOwner().taskStatus("lander")).lifecycle).toBe("active");
+    expect((await homeOwnerOf(f.registry).taskStatus("lander")).lifecycle).toBe("active");
 
     // The maintainer's interrupt escalates to SIGKILL for a command that ignores SIGINT and SIGTERM.
     await waitFor(async () => (await pid("stubborn.pid")) > 0, "the stubborn command running");
     const stubborn = await pid("stubborn.pid");
-    const operationId = (await f.registry.homeOwner().taskStatus("lander")).operationId!;
+    const operationId = (await homeOwnerOf(f.registry).taskStatus("lander")).operationId!;
     const escalation = Date.now();
-    expect(await f.registry.homeOwner().interruptTask({ taskId: "lander", operationId })).toEqual({ interrupted: ["bash"] });
+    expect(await homeOwnerOf(f.registry).interruptTask({ taskId: "lander", operationId })).toEqual({ interrupted: ["bash"] });
     // The escalation itself takes 10 s (SIGINT, 5 s, SIGTERM, 5 s, SIGKILL), over the shared bound.
     await waitFor(() => !alive(stubborn), "the stubborn command to be killed", { boundMs: 20_000 });
     const escalationMs = Date.now() - escalation;
@@ -436,6 +437,6 @@ wait
     evidence.push({ case: "interrupt-in-flight-command", pids, killMs, escalationMs, results: results.map(text => text.slice(0, 400)), steer: seen[0] });
 
     // Interrupt applies only to a running worker.
-    await expect(f.registry.homeOwner().taskTool(f.home.sessionId, { action: "interrupt", taskId: "lander" })).rejects.toThrow(/is settled .*so interrupt does not apply/u);
+    await expect(homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "interrupt", taskId: "lander" })).rejects.toThrow(/is settled .*so interrupt does not apply/u);
   }, 60_000);
 });

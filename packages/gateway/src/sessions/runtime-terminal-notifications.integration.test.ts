@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -279,7 +279,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     let gateway: GatewayServer | undefined;
     const notifications = new NotificationService(store, relay, Date.now,
       payload => gateway?.broadcast("notification.inbox.changed", payload), undefined, undefined,
-      (sessionId) => registry?.homeOwner().chapterStateFor(sessionId).homeId !== undefined);
+      (sessionId) => (registry ? homeOwnerOf(registry) : undefined)?.chapterStateFor(sessionId).homeId !== undefined);
     cleanup.push(async () => notifications.dispose());
     await notifications.initialize();
     await notifications.upsertGrant({ deviceId: "device_abcdefgh", installationId: "install_abcdefgh",
@@ -291,7 +291,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     ], { notifications });
     registry = value.registry;
     const model = value.faux.getModel();
-    const designation = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } }, () => model);
+    const designation = await homeOwnerOf(registry).designate({ model: { provider: model.provider, id: model.id } }, () => model);
     const home = await registry.acquire(designation.sessionId);
     await home.rename("Generated Home conversation title");
     await value.slot.rename("Ordinary project title");
@@ -398,10 +398,10 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     // Real canonical growth crosses the actual rollover limit; no mocked Home
     // record, chapter metrics or alternate notification admission path.
     homeManager.appendCustomEntry("fixture-chapter-growth", { padding: "x".repeat(HOME_SOFT_BYTES) });
-    await registry.homeOwner().chapterQuiescent(home.id);
-    const successorId = (await registry.homeOwner().status()).sessionId!;
+    await homeOwnerOf(registry).chapterQuiescent(home.id);
+    const successorId = (await homeOwnerOf(registry).status()).sessionId!;
     expect(successorId).not.toBe(home.id);
-    const successor = await registry.homeOwner().materializer.materialize(successorId);
+    const successor = await homeOwnerOf(registry).materializer.materialize(successorId);
     (successor as unknown as { sessionManager: SessionManager }).sessionManager
       .appendMessage(fauxAssistantMessage("Successor Home completion"));
     await notifications.enqueue({ sessionId: successorId, sourceId: "successor-completion", kind: "agent_finished", message: "The agent finished responding.",

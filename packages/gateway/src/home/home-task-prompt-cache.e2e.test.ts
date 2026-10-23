@@ -15,6 +15,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 const PROVIDER = "local-openai";
 const MODEL_ID = "worker-wire";
@@ -79,7 +80,7 @@ describe("Home task worker prompt cache on the wire", { concurrent: false }, () 
       baseUrl: `http://127.0.0.1:${wire.port}`, api: "openai-responses", apiKey: "local-test-key",
       models: [{ id: MODEL_ID, name: "Worker (local wire)", reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 4_096 }],
     } } });
-    const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, {
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, {
       taskId: "cache-worker", intent: "Finite work", target: f.cwd, model: { provider: PROVIDER, id: MODEL_ID } });
     const final = await run.completion;
     expect(final.terminalEvidence?.outcome).toBe("final");

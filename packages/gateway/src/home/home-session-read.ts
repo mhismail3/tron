@@ -2,6 +2,7 @@ import { GatewayError } from "../errors.js";
 import { EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS, EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import { parseEntry, projectBranch } from "../episodic/episodic-source.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { HomeOwner } from "./home-owner.js";
 import { validateSearchBranch } from "../sessions/session-branch.js";
 
 export interface HomeSessionReadRequest {
@@ -26,11 +27,11 @@ function boundedPassage(text: string, budget: number): string {
 /** Read through canonical root-session/selected-branch admission, never a caller
  * path or a second runtime. Projection owns edits, thinking and credential rules. */
 export async function readHomeSessionEntry(
-  sessions: Pick<RuntimeRegistry, "readSearchCut" | "homeOwner">,
+  sessions: Pick<RuntimeRegistry, "readSearchCut">,
+  home: Pick<HomeOwner, "routeBinding" | "assertRouteBinding" | "isHomeChapter">,
   request: HomeSessionReadRequest,
   signal?: AbortSignal,
 ): Promise<string> {
-  const home = sessions.homeOwner();
   // Unlike a membership query, the existing route authority fails closed when
   // the ledger is absent/unavailable, disabled or replaced during this read.
   const binding = home.routeBinding();

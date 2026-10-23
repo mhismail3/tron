@@ -1,4 +1,4 @@
-import { createTestRegistry } from "./gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "./gateway-registry.js";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -202,8 +202,8 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   const owned = { registry, root };
   fixtures.push(owned);
   await bringUpToReadiness(registry);
-  await registry.homeOwner().recoverTasks();
-  const home = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } }, () => model);
+  await homeOwnerOf(registry).recoverTasks();
+  const home = await homeOwnerOf(registry).designate({ model: { provider: model.provider, id: model.id } }, () => model);
   // Readiness only: task recovery runs after listen, as in gateway-main.
   const restartToReadiness = async () => {
     // Production installs the settings owners on every start (gateway-main); a restarted
@@ -214,7 +214,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     owned.registry = await createRegistry();
     if (hadSettings) {
       const restarted = owned.registry;
-      settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, registry: restarted, home: () => restarted.homeOwner(),
+      settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, registry: restarted, home: () => homeOwnerOf(restarted),
         knowledge: () => (restarted as unknown as { knowledgeService?: KnowledgeService }).knowledgeService });
     }
     await bringUpToReadiness(owned.registry);
@@ -223,7 +223,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   return { root, registry, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, queueDiagnostics, agentDir, trust, restartToReadiness,
     restart: async () => {
       const cold = await restartToReadiness();
-      await cold.homeOwner().recoverTasks();
+      await homeOwnerOf(cold).recoverTasks();
       return cold;
     } };
 }
@@ -235,5 +235,5 @@ async function bringUpToReadiness(registry: RuntimeRegistry): Promise<void> {
 
 export const reportCall = (id = "report-one", text = "Verified result") => fauxToolCall("report", { resultId: id, outcome: "final", text, evidence: ["focused check passed"] }, { id: `call-${id}` });
 export async function dispatch(f: Awaited<ReturnType<typeof fixture>>, taskId = "task-one") {
-  return f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent: "Finite work", target: f.cwd });
+  return homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId, intent: "Finite work", target: f.cwd });
 }

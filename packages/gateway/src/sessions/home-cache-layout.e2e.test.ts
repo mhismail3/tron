@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { homeMemoryChange } from "../../test-support/session-settings-change.js";
@@ -144,10 +144,10 @@ async function fixture(responses = false) {
   });
   disposals.push(async () => { await registry.dispose(); });
   const service = new GatewayService({
-    config: { tronHome } as unknown as GatewayConfig, modelRuntime: runtime, sessions: registry, home: registry.homeOwner(),
+    config: { tronHome } as unknown as GatewayConfig, modelRuntime: runtime, sessions: registry, home: homeOwnerOf(registry),
     receipts: new CommandReceiptStore(join(tronHome, "receipts")),
     broadcast: () => {},
-    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => registry.homeOwner(), registry }),
+    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => homeOwnerOf(registry), registry }),
     trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
   await registry.initialize();
@@ -459,7 +459,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "refused-memory", model: MODEL }));
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const quiescent = owner.chapterQuiescent.bind(owner);
     let release!: () => void;
     let held = false;

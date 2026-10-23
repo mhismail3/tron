@@ -6,6 +6,7 @@ import { projectTranscriptPage } from "../kernel/projection/projection.js";
 import { disposeFixtures, dispatch, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import type { GatewayError } from "../errors.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -41,7 +42,7 @@ async function configure(f: Fixture): Promise<void> {
   await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
 }
 async function settledTask(f: Fixture, taskId: string) {
-  return (await f.registry.homeOwner().taskResult(taskId));
+  return (await homeOwnerOf(f.registry).taskResult(taskId));
 }
 async function waitAcknowledged(f: Fixture, taskId: string): Promise<void> {
   await waitFor(async () => (await settledTask(f, taskId)).wake?.state === "acknowledged", `wake of ${taskId} acknowledged`);
@@ -61,7 +62,7 @@ describe("Home wakes on its own task results (#749)", () => {
   it("wakes for a worker blocker without ending it, rate limits across resume, and preserves the separate final result", async () => {
     const f = await fixture();
     await configure(f);
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const home = await f.registry.acquire(f.home.sessionId);
     let workerTurns = 0;
     let homeTurns = 0;
@@ -177,7 +178,7 @@ describe("Home wakes on its own task results (#749)", () => {
     await configure(f);
     f.faux.setResponses([fauxAssistantMessage([reportCall("ra", "Verified result")], { stopReason: "toolUse" }),
       fauxAssistantMessage("Summary for the maintainer")]);
-    const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, {
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, {
       taskId: "task-wake", intent: "Finite work", target: f.cwd, title: "Review chip labels",
     });
     await run.completion;
@@ -191,7 +192,7 @@ describe("Home wakes on its own task results (#749)", () => {
     // Additive display metadata comes from the canonical worker name, not the
     // brief or report prose; title-less historical deliveries remain readable.
     expect(delivered.details.taskTitle).toBe("Review chip labels");
-    expect((await f.registry.homeOwner().taskStatus("task-wake")).title).toBe(delivered.details.taskTitle);
+    expect((await homeOwnerOf(f.registry).taskStatus("task-wake")).title).toBe(delivered.details.taskTitle);
     expect(delivered.content).toMatch(/^Home task: Finite work \| outcome: final \| subagents: 0 started, 0 stopped at end \| duration: \d+ms\n\nVerified result\n\nEvidence:\n- focused check passed$/);
     expect(delivered.content).not.toContain("task-wake");
     expect(delivered.content).not.toContain('"taskId"');
@@ -297,7 +298,7 @@ describe("Home wakes on its own task results (#749)", () => {
     const hold = gate();
     f.faux.setResponses([async () => { await hold.wait; return fauxAssistantMessage([reportCall("rp", "Paused result")], { stopReason: "toolUse" }); }]);
     const run = await dispatch(f, "task-paused");
-    await f.registry.homeOwner().pauseMemory();
+    await homeOwnerOf(f.registry).pauseMemory();
     hold.open();
     const task = await run.completion;
     await waitFor(async () => (await settledTask(f, "task-paused")).wake?.push === "decided", "task-finished push decided");
@@ -307,7 +308,7 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(f.notifications.filter(isWakePush)).toHaveLength(0);
     // Resuming delivers the waiting result at once (#1279), not at the user's next message.
     f.faux.setResponses([fauxAssistantMessage("Reviewed after resume")]);
-    await f.registry.homeOwner().resumeMemory();
+    await homeOwnerOf(f.registry).resumeMemory();
     await waitAcknowledged(f, "task-paused");
     const entries = (await f.registry.acquire(f.home.sessionId)).canonicalSessionEntries() as Entry[];
     expect(results(entries)).toHaveLength(1);
@@ -320,7 +321,7 @@ describe("Home wakes on its own task results (#749)", () => {
     const hold = gate();
     f.faux.setResponses([async () => { await hold.wait; return fauxAssistantMessage([reportCall("rd", "Disabled result")], { stopReason: "toolUse" }); }]);
     const run = await dispatch(f, "task-disabled");
-    const disable = f.registry.homeOwner().disable();
+    const disable = homeOwnerOf(f.registry).disable();
     hold.open();
     await disable;
     const task = await run.completion;
@@ -338,11 +339,11 @@ describe("Home wakes on its own task results (#749)", () => {
     await (await f.registry.acquire(f.home.sessionId)).prompt("hello");
     await waitFor(async () => (await f.registry.acquire(f.home.sessionId)).snapshot().operation === undefined, "hello settled");
     f.faux.setResponses([fauxAssistantMessage([reportCall("rr", "Restart result")], { stopReason: "toolUse" })]);
-    await f.registry.homeOwner().pauseMemory();
+    await homeOwnerOf(f.registry).pauseMemory();
     await (await dispatch(f, "task-restart")).completion;
     await waitFor(async () => (await settledTask(f, "task-restart")).wake?.push === "decided", "paused push decided");
     const beforeRestart = f.faux.state.callCount;
-    await f.registry.homeOwner().resumeMemory();
+    await homeOwnerOf(f.registry).resumeMemory();
     f.faux.setResponses([fauxAssistantMessage("Restart wake reply")]);
     f.registry = await f.restart();
     await waitAcknowledged(f, "task-restart");
@@ -378,13 +379,13 @@ describe("Home wakes on its own task results (#749)", () => {
     const f = await fixture();
     await configure(f);
     const home = await f.registry.acquire(f.home.sessionId);
-    await f.registry.homeOwner().pauseMemory();
+    await homeOwnerOf(f.registry).pauseMemory();
     f.faux.setResponses([fauxAssistantMessage([reportCall("drained-report", "Drained result")], { stopReason: "toolUse" })]);
     await (await dispatch(f, "drained")).completion;
     f.faux.setResponses([fauxAssistantMessage("Reply to the maintainer")]);
     const eventsBeforeDrain = f.events.length;
     // Resume and user input race through the same admission owner.
-    await f.registry.homeOwner().resumeMemory();
+    await homeOwnerOf(f.registry).resumeMemory();
     await home.prompt("hello");
     await waitAcknowledged(f, "drained");
     expect(f.events.slice(eventsBeforeDrain).filter(event => event.topic === "session.extensionError")).toEqual([]);
@@ -400,7 +401,7 @@ describe("Home wakes on its own task results (#749)", () => {
     const hold = gate();
     f.faux.setResponses([async () => { await hold.wait; return fauxAssistantMessage([reportCall("rf", "Refused delivery result")], { stopReason: "toolUse" }); }]);
     const run = await dispatch(f, "task-refused-delivery");
-    await f.registry.homeOwner().pauseMemory();
+    await homeOwnerOf(f.registry).pauseMemory();
     hold.open();
     await run.completion;
     await waitFor(async () => (await settledTask(f, "task-refused-delivery")).wake?.push === "decided", "task-finished push decided");
@@ -411,7 +412,7 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(home.snapshot()).toMatchObject({ phase: "idle", configurationBlocker: null });
     expect(home.snapshot().operation).toBeUndefined();
 
-    await f.registry.homeOwner().resumeMemory();
+    await homeOwnerOf(f.registry).resumeMemory();
     f.faux.setResponses([fauxAssistantMessage("Answered after resume")]);
     await home.prompt("after resume");
     await waitFor(() => home.snapshot().configurationBlocker === null, "second prompt settled");
@@ -437,7 +438,7 @@ describe("Home wakes on its own task results (#749)", () => {
     const home = await f.registry.acquire(f.home.sessionId);
     // A message over the memory's node size is summarized (a short one is kept verbatim).
     await home.prompt(`first turn for the limit ${"first detail ".repeat(200)}`);
-    await waitFor(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "usage-limit", "memory blocked by the limit");
+    await waitFor(async () => (await homeOwnerOf(f.registry).memoryStatus()).blocked === "usage-limit", "memory blocked by the limit");
     const run = await dispatch(f, "task-limited-result");
     hold.open();
     await run.completion;
@@ -477,10 +478,10 @@ describe("Home wakes on its own task results (#749)", () => {
     const home = await f.registry.acquire(f.home.sessionId);
     // A message over the memory's node size is summarized (a short one is kept verbatim).
     await home.prompt(`first turn ${"first detail ".repeat(200)}`);
-    await waitFor(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "permanent-failure", "memory blocked");
+    await waitFor(async () => (await homeOwnerOf(f.registry).memoryStatus()).blocked === "permanent-failure", "memory blocked");
 
     // The cause persists: the wake re-arms, blocks again and is refused before admitting the result.
-    const first = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "task-first", intent: "worker-first", target: f.cwd });
+    const first = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "task-first", intent: "worker-first", target: f.cwd });
     work.first!.open();
     await first.completion;
     await waitFor(async () => (await settledTask(f, "task-first")).wake?.push === "decided", "first result push decided");
@@ -491,7 +492,7 @@ describe("Home wakes on its own task results (#749)", () => {
 
     // The cause clears. Nobody resumes memory: the next result's wake heals it and delivers both.
     memoryFails = false;
-    const second = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "task-second", intent: "worker-second", target: f.cwd });
+    const second = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "task-second", intent: "worker-second", target: f.cwd });
     work.second!.open();
     await second.completion;
     await waitAcknowledged(f, "task-first");
@@ -503,7 +504,7 @@ describe("Home wakes on its own task results (#749)", () => {
       // The refused wake still tells the user a result is waiting.
       pushesWhileFailing,
       delivered: results(home.canonicalSessionEntries() as Entry[]).length,
-      blockedAfter: (await f.registry.homeOwner().memoryStatus()).blocked ?? null,
+      blockedAfter: (await homeOwnerOf(f.registry).memoryStatus()).blocked ?? null,
     };
     checkinEvidence.push({ case: "wake-heals-blocked-memory", ...row });
     expect(row.pendingWhileFailing).toBe("pending");

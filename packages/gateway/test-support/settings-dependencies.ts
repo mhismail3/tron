@@ -7,8 +7,10 @@ import { SettingsChangeRecord } from "../src/admin/settings-record.js";
 import { SettingsApprovals } from "../src/admin/settings-approvals.js";
 import type { TrustService } from "../src/admin/trust-service.js";
 import type { HomeOwner } from "../src/home/home-owner.js";
+import type { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { HomeProfileItems } from "../src/home/home-profile.js";
 import type { KnowledgeService } from "../src/knowledge/knowledge-service.js";
+import { homeOwnerOf } from "./gateway-registry.js";
 
 /** The real settings model and change path a fixture Gateway needs, wired the
  * way gateway-main wires them (docs/settings-model.md). */
@@ -49,11 +51,11 @@ export function settingsDependencies(input: {
  * on the registry first when the fixture has none. Home's memory and Knowledge
  * run on the background queue. */
 export async function setModelQueue(input: {
-  registry: { setSettings(model: SettingsModel, changes: SettingsChangePath): void; homeOwner(): HomeOwner };
+  registry: RuntimeRegistry;
   agentDir: string; tronHome: string; trust: TrustService; modelRuntime: ModelRuntime;
 }, role: "worker" | "subagent" | "background", models: readonly (string | { provider: string; id: string })[]): Promise<void> {
   const installed = (input.registry as unknown as { settingsOwners?: { changes: SettingsChangePath } }).settingsOwners;
-  const changes = installed?.changes ?? settingsDependencies({ ...input, home: () => input.registry.homeOwner() }).settingsChanges;
+  const changes = installed?.changes ?? settingsDependencies({ ...input, home: () => homeOwnerOf(input.registry) }).settingsChanges;
   const value = models.map(model => typeof model === "string" ? model : `${model.provider}/${model.id}`);
   await changes.change({ kind: "home" }, [{ key: `model.queue[role=${role}]`, layer: "session", op: "set", value }],
     { actor: { kind: "ui", id: "fixture" }, commandId: randomUUID() });
@@ -61,7 +63,7 @@ export async function setModelQueue(input: {
 
 /** Home memory's models, set the way the iPhone sets them: the background model
  * queue through the settings change path, on a registry built with a Gateway model runtime. */
-export async function setHomeMemoryModels(registry: { setSettings(model: SettingsModel, changes: SettingsChangePath): void; homeOwner(): HomeOwner },
+export async function setHomeMemoryModels(registry: RuntimeRegistry,
   models: readonly (string | { provider: string; id: string })[]): Promise<void> {
   const internals = registry as unknown as {
     options: { agentDir: string; tronHome: string; trust: TrustService; gatewayModelRuntime?: ModelRuntime };

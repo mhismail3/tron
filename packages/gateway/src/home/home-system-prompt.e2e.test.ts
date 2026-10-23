@@ -8,6 +8,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -69,7 +70,7 @@ describe("Home system prompt at the request seam", () => {
     // A trust transition reload is the strongest admission path for project resources.
     await home.reload(true);
 
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
       uploads: new UploadStore(join(f.root, "composer-uploads"), 1024),
       receipts: new CommandReceiptStore(join(f.root, "composer-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "composer-client", identity: "device:composer-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;

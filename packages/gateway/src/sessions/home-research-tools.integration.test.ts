@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's curated read-only research tools (#724), end to end: `web_search`,
  * `web_fetch`, `session_search`, `session_read`, `knowledge` and `read_file` registered by the
@@ -191,7 +191,7 @@ async function fixture(
   indexes.push(index);
   search = new SessionSearchService(registry, index);
 
-  const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
+  const designation = await homeOwnerOf(registry).designate({ model: MODEL }, () => MODEL);
   await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);
   return {
@@ -486,15 +486,15 @@ describe("Tron Home research tools", () => {
       { name: "session_search", args: { query: "HOME-NATIVE-HISTORY-ONLY", maxResults: 5 } },
     ]);
     expect(search!.details).toMatchObject({ status: "ok", hits: [] });
-    expect(f.registry.homeOwner().isHomeChapter(f.sessionId)).toBe(true);
+    expect(homeOwnerOf(f.registry).isHomeChapter(f.sessionId)).toBe(true);
     // A settled Home turn dirties the catalog too; it must not become a
     // spurious omission when coverage is recomputed on the next search.
     const refreshed = await f.search.search({ query: "HOME-NATIVE-HISTORY-ONLY" });
     expect(refreshed.results).toEqual([]);
     expect(refreshed.coverage).toMatchObject({ sessionsTotal: 0, sessionsIndexed: 0, omittedSessions: 0, state: "complete" });
     expect(refusals(f)).toEqual([]);
-    await f.registry.homeOwner().disable();
-    expect(f.registry.homeOwner().isHomeChapter(f.sessionId)).toBe(true);
+    await homeOwnerOf(f.registry).disable();
+    expect(homeOwnerOf(f.registry).isHomeChapter(f.sessionId)).toBe(true);
     const disabled = await f.search.search({ query: "HOME-NATIVE-HISTORY-ONLY" });
     expect(disabled.results).toEqual([]);
     expect(disabled.coverage).toMatchObject({ sessionsTotal: 0, omittedSessions: 0 });
@@ -738,7 +738,7 @@ describe("Tron Home research tools", () => {
       const entry = f.slot.canonicalSessionEntries().find(item => item.type === "message" && item.message.role === "user");
       if (!entry) throw new Error("fixture Home activation was not persisted");
       await rm(join(f.tronHome, "gateway", "home", "home.json"));
-      await f.registry.homeOwner().initialize();
+      await homeOwnerOf(f.registry).initialize();
       return fauxAssistantMessage(fauxToolCall("session_read", { sessionId: f.sessionId, entryId: entry.id }));
     }]);
     await f.slot.prompt("HOME-LEDGER-PRIVATE-CONTENT");

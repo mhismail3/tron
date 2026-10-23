@@ -34,6 +34,8 @@ import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { logHomeDiagnostic } from "./home/home-diagnostic.js";
+import type { HomeComposition } from "./home/home-module.js";
+import type { HomeTaskDiagnostic } from "./home/home-task-dispatcher.js";
 import { homeWorkspaceDirectory } from "./home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
@@ -174,7 +176,7 @@ const notifications: NotificationService = new NotificationService(
     `Push notification ${outcome}`,
     { event: `notification.push.${outcome.replaceAll("_", "-")}`, source: "notifications", kind, outcome, reason: relayReason },
   ),
-  (sessionId) => sessions.homeOwner().chapterStateFor(sessionId).homeId !== undefined,
+  (sessionId) => home().chapterStateFor(sessionId).homeId !== undefined,
 );
 await notifications.initialize();
 startupCheckpoint("notifications");
@@ -229,8 +231,57 @@ const auth = new AuthBroker(
     log: (level, message, event) => logger.log(level, message, { event, source: "auth" }),
   },
 );
-const modules = await startGatewayModules({ tronHome: config.tronHome, log: logger },
-  () => ({ registry: sessions, connections, scheduleToolOperations, sessionSearch }));
+const homeTaskDiagnostic = (record: HomeTaskDiagnostic) => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
+    || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused" || record.event === "home.inbox.admission-slow"
+    || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.state === "critical")
+    || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
+    "Home task lifecycle", { source: "home", ...record });
+const homeComposition: HomeComposition = {
+  tronHome: config.tronHome, agentDir: config.agentDir, trust, notifications, machineId: config.machineId,
+  homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
+  homeMemoryDiagnostic: (record) => {
+    if (record.event === "home.memory-ingest") {
+      // A code, never the failure's own message: an episodic ingest failure can
+      // name the canonical session path.
+      logger.log("warning", "Home memory could not ingest committed entries", {
+        event: "home.memory-ingest", source: "home", reason: record.reason,
+      });
+      return;
+    }
+    logger.log(record.level, "Tron Home memory diagnostic", {
+      event: record.event, source: "home",
+      ...(record.reason === undefined ? {} : { reason: record.reason }),
+      ...(record.counts === undefined ? {} : { counts: record.counts }),
+    });
+  },
+  // Home is used deliberately, one turn at a time, so one line per activation is
+  // both affordable and the only place a turn's effective size and the readiness
+  // wait it took are visible. No message text, entry id or nonce is included.
+  homeRequestDiagnostic: (record) => {
+    if (record.event === "activation") {
+      logger.log("info", "Tron Home activation", {
+        event: "home.activation", source: "home",
+        counts: {
+          effectiveTokens: record.effectiveTokens,
+          contextWindow: record.contextWindow,
+          viewLines: record.viewLines,
+          viewBytes: record.viewBytes,
+          excludedMessages: record.excludedMessages,
+        },
+        durationMs: record.waitedMs,
+      });
+      return;
+    }
+    logger.log("warning", "Tron Home activation refused", {
+      event: "home.activation-refused", source: "home", reason: record.reason,
+      ...(record.detail.length > 200 ? { detail: `${record.detail.slice(0, 200)}…` } : { detail: record.detail }),
+      ...(record.effectiveTokens === undefined ? {} : { counts: { effectiveTokens: record.effectiveTokens, contextWindow: record.contextWindow ?? 0 } }),
+    });
+  },
+  homeTaskDiagnostic,
+};
+const { modules, home } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
+  () => ({ registry: sessions, home: homeComposition, connections, scheduleToolOperations, sessionSearch }));
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),
   agentDir: config.agentDir,
@@ -306,45 +357,6 @@ const sessions = new RuntimeRegistry({
       `Child model queue from ${record.scope}: ${record.status === "published" ? record.models.join(", ") || "empty" : `publication failed (${record.reason})`}`,
       { event: record.event, source: "models", code: record.role, ...(record.sessionId ? { sessionId: record.sessionId } : {}) });
   },
-  homeMemoryDiagnostic: (record) => {
-    if (record.event === "home.memory-ingest") {
-      // A code, never the failure's own message: an episodic ingest failure can
-      // name the canonical session path.
-      logger.log("warning", "Home memory could not ingest committed entries", {
-        event: "home.memory-ingest", source: "home", reason: record.reason,
-      });
-      return;
-    }
-    logger.log(record.level, "Tron Home memory diagnostic", {
-      event: record.event, source: "home",
-      ...(record.reason === undefined ? {} : { reason: record.reason }),
-      ...(record.counts === undefined ? {} : { counts: record.counts }),
-    });
-  },
-  // Home is used deliberately, one turn at a time, so one line per activation is
-  // both affordable and the only place a turn's effective size and the readiness
-  // wait it took are visible. No message text, entry id or nonce is included.
-  homeRequestDiagnostic: (record) => {
-    if (record.event === "activation") {
-      logger.log("info", "Tron Home activation", {
-        event: "home.activation", source: "home",
-        counts: {
-          effectiveTokens: record.effectiveTokens,
-          contextWindow: record.contextWindow,
-          viewLines: record.viewLines,
-          viewBytes: record.viewBytes,
-          excludedMessages: record.excludedMessages,
-        },
-        durationMs: record.waitedMs,
-      });
-      return;
-    }
-    logger.log("warning", "Tron Home activation refused", {
-      event: "home.activation-refused", source: "home", reason: record.reason,
-      ...(record.detail.length > 200 ? { detail: `${record.detail.slice(0, 200)}…` } : { detail: record.detail }),
-      ...(record.effectiveTokens === undefined ? {} : { counts: { effectiveTokens: record.effectiveTokens, contextWindow: record.contextWindow ?? 0 } }),
-    });
-  },
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
   // Load and eviction are transitions at info: the byte budget's decisions have
   // to be attributable to one session from the log alone, and the reason has to
@@ -395,12 +407,7 @@ const sessions = new RuntimeRegistry({
     `Codemode execution ${diagnostic.outcome}`,
     { event: "codemode.execution.completed", source: "session", ...diagnostic },
   ),
-  homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
-  homeTaskDiagnostic: record => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
-    || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused" || record.event === "home.inbox.admission-slow"
-    || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.state === "critical")
-    || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
-    "Home task lifecycle", { source: "home", ...record }),
+  homeTaskDiagnostic,
   machineId: config.machineId,
   notifications,
   browserLiveViews,
@@ -849,7 +856,7 @@ const service = new GatewayService({
   automations,
   knowledge,
   connections,
-  home: sessions.homeOwner(),
+  home: home(),
   mcpAdmin: new McpAdminService(
     config.agentDir,
     piCliBundle(),
@@ -973,7 +980,7 @@ await transport.listen(async () => {
 // Serving already; these records account for post-listen recovery work.
 await sessions.recoverCanonicalAttention();
 startupCheckpoint("attention-recovery");
-await sessions.homeOwner().recoverTasks();
+await home().recoverTasks();
 startupCheckpoint("home-task-recovery");
 const maintainStorage = async (): Promise<void> => {
   try {

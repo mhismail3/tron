@@ -11,6 +11,7 @@ import { setModelQueue, settingsDependencies } from "../../test-support/settings
 import { waitFor } from "../../test-support/wait-for.js";
 import { closeSubagentFixtures, launchResults } from "../../test-support/home-task-subagents-support.js";
 import { modelQueueProjectionPath } from "../providers/model-queue.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 /** A scripted OpenAI-compatible provider with two models: `limited` answers every
  * request with OpenCode Go's plan-limit 429, `fallback` answers `CHILD-DONE`. */
@@ -67,7 +68,7 @@ describe("Home task subagents: the subagent model queue", () => {
     await mkdir(join(f.cwd, ".pi", "agents"), { recursive: true });
     await writeFile(join(f.cwd, ".pi", "agents", "queue-child.md"),
       "---\nname: queue-child\ndescription: Scripted queue child\nmodel: tron/subagent\ntools: read\n---\nComplete the scripted task.\n");
-    const settings = settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => f.registry.homeOwner() });
+    const settings = settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => homeOwnerOf(f.registry) });
     await setModelQueue({ registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway },
       "subagent", ["queue-child/limited", "queue-child/fallback"]);
     await settings.settingsChanges.change({ kind: "global" }, [{ key: "model.queue[role=subagent]", layer: "global", op: "set", value: ["queue-child/mac"] }],
@@ -82,7 +83,7 @@ describe("Home task subagents: the subagent model queue", () => {
         profile.modelQueue.subagent = ["queue-child/mac"];
         writeFileSync(settings.settingsModel.profilePath, JSON.stringify(profile));
         if (blocked) {
-          const task = await f.registry.homeOwner().taskStatus("task-one");
+          const task = await homeOwnerOf(f.registry).taskStatus("task-one");
           if (!task.sessionId) throw new Error("Worker must be admitted before its first request");
           blockedProjection = join(projectionDirectory, `${createHash("sha256").update(task.sessionId).digest("hex")}.json`);
           blockedProjections.push(blockedProjection);

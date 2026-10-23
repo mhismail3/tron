@@ -1,4 +1,4 @@
-import { createTestRegistry } from "./gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "./gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -298,7 +298,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const service = new GatewayService({
     config: { machineId: "lock-machine", machineGroupID: "lock-group", machineName: "Lock Mac", tronHome, agentDir },
     modelRuntime, devices, sessions: registry, modules: registry.moduleHost, trust, settingsModel, settingsChanges, receipts,
-    ...(options.home ? { home: registry.homeOwner() } : {}),
+    ...(options.home ? { home: homeOwnerOf(registry) } : {}),
     ...(automations ? { automations } : {}),
     notifications: notificationService
       ?? { enqueue: async (push: unknown) => { notifications.push(normalizeTraceValue(push, normalization)); } },
@@ -335,7 +335,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   await server.listen();
   await automations?.initialize();
   // gateway-main recovers Home tasks once serving; until then task reads and dispatch refuse.
-  if (options.home) await registry.homeOwner().recoverTasks();
+  if (options.home) await homeOwnerOf(registry).recoverTasks();
   const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
 
   const exchanges: Array<{ client: string; method: string; params: unknown; response: unknown }> = [];

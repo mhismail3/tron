@@ -7,6 +7,7 @@ import { OwnedSessionDispatch } from "../kernel/delegation/owned-session-dispatc
 import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../sessions/session-settings.js";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -25,7 +26,7 @@ const queueOwners = (f: Awaited<ReturnType<typeof fixture>>) =>
   ({ registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway });
 
 function installSettings(f: Awaited<ReturnType<typeof fixture>>) {
-  return settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => f.registry.homeOwner(), registry: f.registry }).settingsModel;
+  return settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => homeOwnerOf(f.registry), registry: f.registry }).settingsModel;
 }
 
 function textOf(message: { content: unknown }): string {
@@ -79,7 +80,7 @@ async function delegateThroughHome(f: Awaited<ReturnType<typeof fixture>>, deleg
 }
 
 const taskIsTerminal = (f: Awaited<ReturnType<typeof fixture>>, taskId: string) =>
-  waitFor(async () => (await f.registry.homeOwner().taskStatus(taskId)).lifecycle === "terminal", `task ${taskId} terminal`);
+  waitFor(async () => (await homeOwnerOf(f.registry).taskStatus(taskId)).lifecycle === "terminal", `task ${taskId} terminal`);
 
 async function refusalOf(attempt: Promise<unknown>): Promise<Error> {
   const refusal = await attempt.then(() => undefined, (error: Error) => error);
@@ -95,7 +96,7 @@ function validModelList(refusal: Error): string[] {
 describe("Home delegation chooses the worker's model and thinking level", () => {
   it("keeps ordinary subagent and Knowledge queues independent of Home profile", async () => {
     const f = await fixture();
-    const owners = settingsDependencies({ ...queueOwners(f), home: () => f.registry.homeOwner() });
+    const owners = settingsDependencies({ ...queueOwners(f), home: () => homeOwnerOf(f.registry) });
     const mac = `${f.model.provider}/${f.model.id}`;
     const home = `${f.model.provider}/${TASK_REASONING_MODEL_ID}`;
     for (const role of ["subagent", "background"] as const) {
@@ -114,7 +115,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
       model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, thinking: "high", reason: "Reasoning is needed for this task" });
     await taskIsTerminal(f, "model-thinking");
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
-    expect((await f.registry.homeOwner().taskStatus("model-thinking")).workerModel)
+    expect((await homeOwnerOf(f.registry).taskStatus("model-thinking")).workerModel)
       .toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
   });
 
@@ -127,7 +128,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const { workerContexts, refusals } = await delegateThroughHome(f, { taskId: "brief-model", intent, target: f.cwd });
     expect(refusals).toEqual([]);
     await taskIsTerminal(f, "brief-model");
-    const task = await f.registry.homeOwner().taskStatus("brief-model");
+    const task = await homeOwnerOf(f.registry).taskStatus("brief-model");
     briefEvidence.push({ explicit, intent: task.intent.text, providerContext: workerContexts[0] });
     expect(workerContexts).toHaveLength(1);
     const prompt = workerContexts[0]!;
@@ -146,7 +147,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const { observed } = await delegateThroughHome(f, { taskId: "profile-model", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "profile-model");
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
-    const task = await f.registry.homeOwner().taskStatus("profile-model");
+    const task = await homeOwnerOf(f.registry).taskStatus("profile-model");
     expect(task.intent.text).toContain("Worker choice: model");
     expect(task.intent.text).toContain("worker queue");
     expect(task.intent.text).toContain("max clamped to high");
@@ -187,7 +188,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(refusals).toEqual([]);
     await taskIsTerminal(f, "explicit-clamp");
     expect(observed).toEqual([{ model: f.model.id, reasoning: undefined }]);
-    const task = await f.registry.homeOwner().taskStatus("explicit-clamp");
+    const task = await homeOwnerOf(f.registry).taskStatus("explicit-clamp");
     expect(task.intent.text).toContain("Worker choice: model");
     expect(task.intent.text).toContain("high clamped to off");
     expect(readSessionFixedSettings(await f.registry.readTaskEvidence(task.sessionId!))["model.thinking[role=chat]"]).toMatchObject({ from: "delegate", value: "off" });
@@ -207,7 +208,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const { observed } = await delegateThroughHome(f, { taskId: "queue-skips", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "queue-skips");
     expect(observed).toEqual([{ model: f.model.id, reasoning: undefined }]);
-    const task = await f.registry.homeOwner().taskStatus("queue-skips");
+    const task = await homeOwnerOf(f.registry).taskStatus("queue-skips");
     expect(task.intent.text).toContain(`${f.model.provider}/removed-model skipped: not registered`);
     expect(task.intent.text).toContain("usage-full/full skipped: Weekly usage 97%");
     const home = await f.registry.acquire(f.home.sessionId);
@@ -222,7 +223,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     await writeFile(settings.profilePath, JSON.stringify({ modelQueue: { worker: [`${f.model.provider}/gone-a`, `${f.model.provider}/gone-b`] } }));
     const { refusals } = await delegateThroughHome(f, { taskId: "queue-exhausted", intent: "Finite work", target: f.cwd });
     expect(refusals).toEqual([expect.stringContaining(`All worker models are unavailable: ${f.model.provider}/gone-a — not registered; ${f.model.provider}/gone-b — not registered.`)]);
-    await expect(f.registry.homeOwner().taskStatus("queue-exhausted")).rejects.toThrow();
+    await expect(homeOwnerOf(f.registry).taskStatus("queue-exhausted")).rejects.toThrow();
   });
 
   it("moves a worker to the next queue model on a usage-limit error and retries the same request there", async () => {
@@ -245,7 +246,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     await waitFor(() => home.snapshot().configurationBlocker === null, "Home delegation turn");
     expect(refusals).toEqual([]);
     await taskIsTerminal(f, "usage-limit");
-    const task = await f.registry.homeOwner().taskStatus("usage-limit");
+    const task = await homeOwnerOf(f.registry).taskStatus("usage-limit");
     expect(task.terminalEvidence?.outcome).toBe("final");
     // The same request ran again, on the next model of the queue.
     expect(observed.map(request => request.model)).toEqual([f.model.id, TASK_REASONING_MODEL_ID]);
@@ -267,7 +268,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     await taskIsTerminal(f, "live-home-model");
     // The worker runs Home's own live thinking, which Home's saved settings resolve.
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: home.snapshot().thinkingLevel }]);
-    const direct = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "ordinary-default-control", intent: "Finite work", target: f.cwd });
+    const direct = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "ordinary-default-control", intent: "Finite work", target: f.cwd });
     await direct.completion;
     const worker = await f.registry.acquire(direct.sessionId);
     expect(worker.snapshot().model).toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
@@ -284,7 +285,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const { observed, homeContexts } = await delegateThroughHome(f, { taskId: "default-model", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "default-model");
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
-    expect((await f.registry.homeOwner().taskStatus("default-model")).workerModel)
+    expect((await homeOwnerOf(f.registry).taskStatus("default-model")).workerModel)
       .toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
     expect(homeContexts[0]).toContain(`Current Home chat model: ${f.model.provider}/${TASK_REASONING_MODEL_ID}`);
     expect(homeContexts[0]).toContain("Current Home thinking level: high");
@@ -316,13 +317,13 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
 
   it("distinguishes an unknown task from a changed identity", async () => {
     const f = await fixture();
-    await expect(f.registry.homeOwner().taskTool(f.home.sessionId, { action: "status", taskId: "unknown-task" }))
+    await expect(homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "status", taskId: "unknown-task" }))
       .rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/^task status: no task "unknown-task"\./u) });
   });
 
   it("refuses each invalid choice before any task record or worker session exists", async () => {
     const f = await fixture();
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const create = vi.spyOn(f.registry, "create");
     const cases: Array<{ name: string; choice: Record<string, unknown>; reason: string; message: string }> = [
       { name: "unregistered model", choice: { model: { provider: f.model.provider, id: "no-such-model" } },
@@ -348,7 +349,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
 
   it("names only fixed, usable models when the named model is unregistered", async () => {
     const f = await fixture();
-    const error = await refusalOf(f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "fixed-list", intent: "Finite work", target: f.cwd,
+    const error = await refusalOf(homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "fixed-list", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: "no-such-model" } }));
     // The fixture's usable models are the default and reasoning models; its virtual router is usable but never a worker choice.
     expect(validModelList(error)).toEqual([`${f.model.provider}/${f.model.id}`, `${f.model.provider}/${TASK_REASONING_MODEL_ID}`].sort());
@@ -360,9 +361,9 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     f.gateway.registerNativeProvider(bulk.provider);
     vi.spyOn(f.gateway, "checkAuth").mockImplementation(async provider => provider === "tron-task-bulk" ? undefined : { type: "api_key" });
     const create = vi.spyOn(f.registry, "create");
-    await expect(f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "no-credentials", intent: "Finite work", target: f.cwd,
+    await expect(homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "no-credentials", intent: "Finite work", target: f.cwd,
       model: { provider: "tron-task-bulk", id: "bulk-0" } })).rejects.toMatchObject({ code: "invalid_request", details: { reason: "unavailable-model" } });
-    expect((await f.registry.homeOwner().taskList({})).items).toEqual([]);
+    expect((await homeOwnerOf(f.registry).taskList({})).items).toEqual([]);
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -370,7 +371,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const f = await fixture();
     const bulk = fauxProvider({ provider: "tron-task-bulk", models: Array.from({ length: 22 }, (_, index) => ({ id: `bulk-${index}` })) });
     f.gateway.registerNativeProvider(bulk.provider);
-    const listed = validModelList(await refusalOf(f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "bounded-list", intent: "Finite work", target: f.cwd,
+    const listed = validModelList(await refusalOf(homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "bounded-list", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: "no-such-model" } })));
     expect(listed).toHaveLength(20);
     for (const reference of listed) {
@@ -384,7 +385,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const { refusals } = await delegateThroughHome(f, { taskId: "refused-by-home", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: TASK_VIRTUAL_MODEL_ID }, reason: "Testing invalid routing refusal" });
     expect(refusals).toEqual([expect.stringContaining("is virtual")]);
-    expect((await f.registry.homeOwner().taskList({})).items).toEqual([]);
+    expect((await homeOwnerOf(f.registry).taskList({})).items).toEqual([]);
   });
 
   it("shows the worker's chosen model in status while the worker is still running", async () => {
@@ -392,7 +393,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     f.faux.setResponses([async () => { await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     try {
       const { completion } = await owner.dispatchTask(f.home.sessionId, { taskId: "live-status", intent: "Finite work", target: f.cwd,
         model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, thinking: "medium" });
@@ -413,12 +414,12 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
       vi.spyOn((lease.slot as any).runtime.session, "prompt").mockRejectedValue(new Error("preflight refused"));
       return lease;
     });
-    const { completion } = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "no-conversation", intent: "Finite work", target: f.cwd,
+    const { completion } = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "no-conversation", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, thinking: "low" });
     await expect(completion).resolves.toMatchObject({ lifecycle: "terminal", terminalEvidence: { reason: "evidence-unavailable" } });
     vi.restoreAllMocks();
     const cold = await f.restart();
-    await expect(cold.homeOwner().taskStatus("no-conversation")).resolves.toMatchObject({ lifecycle: "terminal", workerModel: null });
+    await expect(homeOwnerOf(cold).taskStatus("no-conversation")).resolves.toMatchObject({ lifecycle: "terminal", workerModel: null });
   });
 
   it("keeps worker model and read-only launch queues after settling and Gateway restart", async () => {
@@ -427,12 +428,12 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     await setModelQueue(queueOwners(f), "worker", captured);
     await setModelQueue(queueOwners(f), "subagent", captured);
     f.faux.setResponses([fauxAssistantMessage([reportCall("settled-model")], { stopReason: "toolUse" })]);
-    const { completion } = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "settled-model", intent: "Finite work", target: f.cwd,
+    const { completion } = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "settled-model", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, thinking: "low" });
     await completion;
     await setModelQueue(queueOwners(f), "subagent", [`${f.model.provider}/${f.model.id}`]);
     const cold = await f.restart();
-    const task = await cold.homeOwner().taskStatus("settled-model");
+    const task = await homeOwnerOf(cold).taskStatus("settled-model");
     expect(task.workerModel).toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
     const worker = await cold.acquire(task.sessionId!);
     const owners = (cold as unknown as { settingsOwners: {
@@ -494,7 +495,7 @@ describe("Background model queue", () => {
     // One failed request on the limited model; every later summary went straight to the next one.
     expect(summaries[0]).toBe(f.model.id);
     expect(summaries.filter(id => id === f.model.id)).toHaveLength(1);
-    expect((await f.registry.homeOwner().memoryStatus()).blocked).toBeUndefined();
+    expect((await homeOwnerOf(f.registry).memoryStatus()).blocked).toBeUndefined();
   });
 });
 
@@ -503,7 +504,7 @@ describe("Home task budget", () => {
   const turn = (output: number, id: string) => fauxAssistantMessage([fauxToolCall("read", { path: "missing" }, { id })],
     { stopReason: "toolUse", usage: { input: 2, output, cacheRead: 0, cacheWrite: 0 } } as never);
   const install = (f: Awaited<ReturnType<typeof fixture>>) =>
-    settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => f.registry.homeOwner(), registry: f.registry }).settingsChanges;
+    settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => homeOwnerOf(f.registry), registry: f.registry }).settingsChanges;
   const setBudget = (changes: ReturnType<typeof install>, value: Record<string, number> | undefined, context: Parameters<ReturnType<typeof install>["change"]>[2] = ui) =>
     changes.change({ kind: "home" }, [{ key: "permissions.budget.task", layer: "session", op: value ? "set" : "unset", ...(value ? { value } : {}) }], context);
 
@@ -514,7 +515,7 @@ describe("Home task budget", () => {
     let calls = 0;
     f.faux.setResponses([() => { calls++; return turn(6, "one"); }, () => { calls++; return turn(6, "two"); },
       () => { calls++; return fauxAssistantMessage("must never be requested"); }]);
-    const { completion } = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "budgeted", intent: "Finite work", target: f.cwd });
+    const { completion } = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "budgeted", intent: "Finite work", target: f.cwd });
     const task = await completion;
     expect(task).toMatchObject({ budget: { outputTokens: 10 }, spend: { outputTokens: 12 },
       terminalEvidence: { outcome: "limited", reason: "budget" } });
@@ -522,7 +523,7 @@ describe("Home task budget", () => {
     // Negative control: the same work without a budget runs to its report.
     await setBudget(changes, undefined);
     f.faux.setResponses([turn(6, "three"), turn(6, "four"), fauxAssistantMessage([reportCall("unbudgeted")], { stopReason: "toolUse" })]);
-    const free = await (await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "unbudgeted", intent: "Finite work", target: f.cwd })).completion;
+    const free = await (await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "unbudgeted", intent: "Finite work", target: f.cwd })).completion;
     expect(free.budget).toBeUndefined();
     expect(free.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
   });
@@ -537,7 +538,7 @@ describe("Home task budget", () => {
     let calls = 0;
     f.faux.setResponses([() => { calls++; return turn(6, "a"); }, async () => { calls++; entered = true; await gate; return turn(6, "b"); },
       () => { calls++; return fauxAssistantMessage("must never be requested"); }]);
-    const lowered = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "lowered", intent: "Finite work", target: f.cwd });
+    const lowered = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "lowered", intent: "Finite work", target: f.cwd });
     await waitFor(() => entered, "second worker turn");
     // Lowering narrows: the maintainer's tap applies quietly and reaches the running task.
     expect((await setBudget(changes, { outputTokens: 5 })).status).toBe("applied");
@@ -554,7 +555,7 @@ describe("Home task budget", () => {
     gate = new Promise<void>(resolve => { release = resolve; });
     f.faux.setResponses([async () => { calls++; entered = true; await gate; return turn(6, "c"); }, () => { calls++; return turn(6, "d"); },
       () => { calls++; return fauxAssistantMessage("must never be requested"); }]);
-    const raised = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "raised", intent: "Finite work", target: f.cwd });
+    const raised = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "raised", intent: "Finite work", target: f.cwd });
     await waitFor(() => entered, "first worker turn");
     expect((await setBudget(changes, { outputTokens: 1_000 })).status).toBe("applied");
     release();

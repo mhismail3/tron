@@ -8,6 +8,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 import { UploadStore } from "../machine/upload-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 afterEach(disposeFixtures);
 
@@ -21,7 +22,7 @@ afterAll(async () => {
 describe("Home chapters in the dashboard session list", () => {
   it("omits the current and sealed Home chapters from session.list, keeps catalog membership, and still opens Home by id", async () => {
     const f = await fixture();
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const predecessor = f.home.sessionId;
@@ -100,7 +101,7 @@ describe("Home chapters in the dashboard session list", () => {
     await (await f.registry.acquire(worker)).rename("Ordinary-looking session");
 
     const rows = async (registry = f.registry) => {
-      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: registry, home: registry.homeOwner(),
+      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: registry, home: homeOwnerOf(registry),
         uploads: new UploadStore(join(f.root, "worker-uploads"), 1024),
         receipts: new CommandReceiptStore(join(f.root, "worker-receipts")) } as unknown as GatewayServiceDependencies);
       const client = { id: "worker-client", identity: "device:worker-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
@@ -130,10 +131,10 @@ describe("Home chapters in the dashboard session list", () => {
 
     // A resumed worker reuses its session and settles read again.
     f.faux.setResponses([fauxAssistantMessage([reportCall("report-two")], { stopReason: "toolUse" })]);
-    const resumed = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "resume", taskId: task.taskId, operationId: task.operationId }) as
+    const resumed = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "resume", taskId: task.taskId, operationId: task.operationId }) as
       { taskId: string; sessionId: string };
     expect(resumed.sessionId).toBe(worker);
-    await waitFor(async () => (await f.registry.homeOwner().taskStatus(resumed.taskId)).lifecycle === "terminal", "resumed worker settles");
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus(resumed.taskId)).lifecycle === "terminal", "resumed worker settles");
     await waitFor(async () => ((await rows()).byId.get(worker)?.completionRevision ?? 0) >= 2, "resumed worker records its completion");
     expect((await rows()).byId.get(worker)).toMatchObject({ homeTaskId: "worker-row", isUnread: false });
 

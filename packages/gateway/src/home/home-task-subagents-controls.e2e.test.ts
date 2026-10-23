@@ -9,6 +9,7 @@ import { HOME_TASK_PRODUCER_REFUSAL_REASON } from "../kernel/delegation/task-wor
 import { HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "./home-task-subagents.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { closeSubagentFixtures, bound, childModel, captureTimer, captureDeadline, launchResults, asyncState, holdingWorkflowLaunch, workflowChildRunId, holdingAsyncLaunch, waitBetweenTurns, toolResultText, launchedAsyncDir, type FauxContext } from "../../test-support/home-task-subagents-support.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 afterEach(closeSubagentFixtures);
 
@@ -39,7 +40,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.subagents", started: 1, stoppedAtEnd: 0, noticesUndelivered: 1 }));
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
   it("lists a live subagent run in task status until settlement, then lists none", async () => {
@@ -51,7 +52,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
       async (context: FauxContext) => {
         await waitFor(() => child.heldRequests() === 1, "async child live", bound);
         seen.runId = basename(launchedAsyncDir(context, "async-launch"));
-        seen.live = await f.registry.homeOwner().taskStatus("task-one");
+        seen.live = await homeOwnerOf(f.registry).taskStatus("task-one");
         child.releaseHeld();
         const slot = await f.registry.acquire(run.sessionId);
         await waitFor(() => !slot.catalogHasActiveSubagents, "async run ended before the report", bound);
@@ -63,7 +64,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     expect(seen.live).toMatchObject({ subagentRuns: { total: 1, runs: [
       { runId: seen.runId, agent: "task-child", state: "running", startedAt: expect.any(String) },
     ] } });
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagentRuns: { total: 0, runs: [] } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagentRuns: { total: 0, runs: [] } });
   }, 60_000);
   it("waits between turns for a live async run, and the run's completion starts the task's next turn", async () => {
     const f = await fixture(false, false, undefined, true);
@@ -85,7 +86,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "async-launch");
     expect(await asyncState(launch!.details!.asyncDir as string)).toBe("complete");
     expect(child.abortedRequests()).toBe(0);
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
   it("continues the waiting task from Home's steering and the maintainer's message in one ordered lane (#929)", async () => {
@@ -107,7 +108,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => child.heldRequests() === 1, "async child live", bound);
     await waitBetweenTurns(slot);
-    await f.registry.homeOwner().steerTask(f.home.sessionId, { taskId: run.taskId, operationId: run.operationId, text: "Home between turns" });
+    await homeOwnerOf(f.registry).steerTask(f.home.sessionId, { taskId: run.taskId, operationId: run.operationId, text: "Home between turns" });
     await waitFor(() => turns.length === 1, "Home's steering starts the task's next turn", bound);
     await waitFor(() => (slot as unknown as { runTerminal: { taskWait?: { wakeOperationId?: string } } }).runTerminal.taskWait?.wakeOperationId === undefined
       && (slot as unknown as { runTerminal: { taskWait?: unknown } }).runTerminal.taskWait !== undefined, "task waits again", bound);
@@ -141,10 +142,10 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     await waitBetweenTurns(slot);
     child.releaseHeld();
     await waitFor(() => wakeTurnStarted, "the completion wake starts a turn", bound);
-    await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
+    await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
   it("steers and interrupts a long bash command inside a provider wake's turn, and seals its report over a queued steer (#1251)", async () => {
@@ -182,17 +183,17 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     await waitFor(async () => { const value = await pid(); return value > 0 && alive(value); }, "the wake turn's command running", bound);
     const commandPid = await pid();
 
-    const steered = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, text: "STEER-DURING-WAKE" });
+    const steered = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, text: "STEER-DURING-WAKE" });
     expect(steered).toMatchObject({ accepted: true, taskId: run.taskId });
-    const interrupted = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "interrupt", taskId: run.taskId });
+    const interrupted = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "interrupt", taskId: run.taskId });
     expect(interrupted).toMatchObject({ accepted: true, interrupted: ["bash"] });
     await waitFor(() => !alive(commandPid), "the wake turn's command to end", bound);
     await waitFor(() => reportTurnStarted, "the turn that reads the steer", bound);
     expect(seen.join("\n")).toMatch(/STEER-DURING-WAKE/u);
     // A control the owner refuses is recorded with its reason, and only hashed identifiers leave the Gateway.
-    await expect(f.registry.homeOwner().steerTask(f.home.sessionId, { taskId: run.taskId, operationId: "stale-operation", text: "late" })).rejects.toThrow(/Stale or terminal task operation/u);
+    await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { taskId: run.taskId, operationId: "stale-operation", text: "late" })).rejects.toThrow(/Stale or terminal task operation/u);
     // The tool's earlier operation guard must be observable too, without logging its user-supplied ID.
-    await expect(f.registry.homeOwner().taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, operationId: "private-wrong-operation", text: "late" })).rejects.toThrow(/operationId guard/u);
+    await expect(homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, operationId: "private-wrong-operation", text: "late" })).rejects.toThrow(/operationId guard/u);
     const refused = f.signals.filter(record => record.event === "home.task.control" && record.disposition === "refused");
     expect(refused).toEqual([
       expect.objectContaining({ action: "steer", reason: "stale-operation" }),
@@ -202,11 +203,11 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     expect(JSON.stringify(refused)).not.toContain("private-wrong-operation");
 
     // A steer queued while the report's turn streams is still undelivered when the report seals the task.
-    await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, text: "STEER-AFTER-REPORT" });
+    await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, text: "STEER-AFTER-REPORT" });
     openReportTurn();
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
-    await expect(f.registry.homeOwner().taskTool(f.home.sessionId, { action: "stop", taskId: run.taskId })).rejects.toThrow(/stop does not apply/u);
+    await expect(homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "stop", taskId: run.taskId })).rejects.toThrow(/stop does not apply/u);
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "stop", disposition: "refused", reason: "action-unavailable" }));
     const reportPath = join(process.cwd(), "test-results", "home-task-control-wake.json");
     await mkdir(dirname(reportPath), { recursive: true });
@@ -232,7 +233,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "async-launch");
     expect(await asyncState(launch!.details!.asyncDir as string)).toBe("stopped");
     await waitFor(() => child.abortedRequests() === 1, "stopped async child request closed", bound);
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
   it("reminds once after a normal end with no live run, then settles without another turn", async () => {
@@ -277,7 +278,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     expect(seen.resume).toMatchObject({ isError: false });
     expect(seen.resume?.text).not.toBe(HOME_TASK_PRODUCER_REFUSAL_REASON);
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 2, stoppedAtEnd: 0 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 2, stoppedAtEnd: 0 } });
   }, 60_000);
 
   it("stops a child of its owned workflow through the workflow's run, and the workflow's child ends", async () => {
@@ -385,7 +386,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     const setTimer = globalThis.setTimeout;
     vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) =>
       setTimer(callback, new Error().stack?.includes("waitForImportedAsyncRoot") ? 3_000 : delay, ...args)) as typeof setTimeout);
-    await f.registry.homeOwner().stopTask({ taskId: first.taskId, operationId: first.operationId });
+    await homeOwnerOf(f.registry).stopTask({ taskId: first.taskId, operationId: first.operationId });
     expect((await first.completion).terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
     const mission = JSON.parse(await readFile(launch!.details!.missionPath as string, "utf8")) as { workflowChildren?: Array<{ key: string; status: string }> };
     expect(mission.workflowChildren?.find(entry => entry.key === "hold")?.status).not.toBe("running");

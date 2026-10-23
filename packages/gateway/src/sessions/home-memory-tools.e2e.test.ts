@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's memory tools end to end: `zoom`, `date` and `memory_search`
  * registered by the real `tron-home` module, called by a faux model inside a real
@@ -208,12 +208,12 @@ async function attach(f: Fixture, options: { configure?: boolean } = {}): Promis
   const hasCut = (): boolean => (registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
   await waitUntil(hasCut, 30_000);
   await registry.catalog("all");
-  const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
+  const designation = await homeOwnerOf(registry).designate({ model: MODEL }, () => MODEL);
   if (options.configure !== false) {
     await setHomeMemoryModels(registry, [MEMORY_MODEL]);
     // The store opens at the first memory read (an activation or the browser),
     // from the background queue; open it now so the tools serve outside a turn.
-    await registry.homeOwner().readMemoryView({ limit: 1 }).catch(() => undefined);
+    await homeOwnerOf(registry).readMemoryView({ limit: 1 }).catch(() => undefined);
   }
   f.sessionId = designation.sessionId;
   f.homeId = designation.homeId;
@@ -228,7 +228,7 @@ function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 12_0
 }
 
 async function memoryStatus(f: Fixture): Promise<HomeMemoryStatus> {
-  return await f.registry.homeOwner().memoryStatus();
+  return await homeOwnerOf(f.registry).memoryStatus();
 }
 
 /** Every view line the memory would send is a built summary. */
@@ -702,7 +702,7 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     // failed rebuild. A fresh prompt need not require compaction immediately.
     const first = await entryForMessageText(f, longInput("blocked first"));
     managerOf(f).appendContextEdit(first.id, { content: longInput("changed blocked first") });
-    f.registry.homeOwner().noteEntriesCommitted(f.sessionId);
+    homeOwnerOf(f.registry).noteEntriesCommitted(f.sessionId);
     await waitUntil(async () => (await memoryStatus(f)).blocked === "permanent-failure");
     const requestsBefore = f.requests.length;
     await f.slot.prompt(longInput("blocked second"));
@@ -787,9 +787,9 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     await attach(f, { configure: false });
     // Opening the store refuses the record that has no instant.
     await setHomeMemoryModels(f.registry, [MEMORY_MODEL]);
-    await expect(f.registry.homeOwner().readMemoryView({ limit: 1 })).rejects.toThrow(/unavailable/);
+    await expect(homeOwnerOf(f.registry).readMemoryView({ limit: 1 })).rejects.toThrow(/unavailable/);
     const status = await memoryStatus(f);
-    const access = f.registry.homeOwner().memoryToolsFor(f.sessionId)!;
+    const access = homeOwnerOf(f.registry).memoryToolsFor(f.sessionId)!;
     const answers = [await access.zoom(0, 1), await access.date(0), await access.date(2)];
     report.cases.push({ case: "home-missing-instants", open: status.open, answers, refusals: refusalsOf(f) });
     expect(status.open).toBe(false);
@@ -807,7 +807,7 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     await rewriteCatalog(f, (record) => { record.timestamp = "not a date"; });
     await attach(f);
     const status = await memoryStatus(f);
-    const access = f.registry.homeOwner().memoryToolsFor(f.sessionId)!;
+    const access = homeOwnerOf(f.registry).memoryToolsFor(f.sessionId)!;
     const answers = [await access.zoom(0, 1), await access.date(0), await access.date(2)];
     report.cases.push({ case: "home-unreadable-instants", open: status.open, answers });
     expect(status.open).toBe(true);
@@ -820,7 +820,7 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     // accessor is the only place this state is reachable: the real owner, asked
     // for a foreign session id, answers with no memory at all.
     const f = await fixture("foreign");
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const home = owner.memoryToolsFor(f.sessionId);
     report.cases.push({ case: "foreign", foreign: owner.memoryToolsFor("some-other-session") ?? null, home: home ? "accessor" : null });
     expect(owner.memoryToolsFor("some-other-session")).toBeUndefined();
@@ -834,7 +834,7 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     // accessor, before any activation could exist.
     const f = await fixture("unconfigured", { configure: false });
     const status = await memoryStatus(f);
-    const access = f.registry.homeOwner().memoryToolsFor(f.sessionId)!;
+    const access = homeOwnerOf(f.registry).memoryToolsFor(f.sessionId)!;
     const answers = [await access.zoom(0, 1), await access.date(0), await access.search("anything", undefined, undefined)];
     report.cases.push({ case: "unconfigured", configured: status.configured, open: status.open, answers });
     expect(status.configured).toBe(false);
@@ -904,10 +904,10 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
           // the reconfiguration closes and reopens a store that is still being
           // written.
           for (let index = 0; index < 200; index += 1) managerOf(f).appendMessage(userMessage(`bulk ${index}`));
-          f.registry.homeOwner().noteEntriesCommitted(f.sessionId);
+          homeOwnerOf(f.registry).noteEntriesCommitted(f.sessionId);
           // A changed background queue reopens the store at the next memory read.
           reconfigured = await setHomeMemoryModels(f.registry, [OTHER_MEMORY_MODEL])
-            .then(() => f.registry.homeOwner().readMemoryView({ limit: 1 }))
+            .then(() => homeOwnerOf(f.registry).readMemoryView({ limit: 1 }))
             .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
           // Read the store the reconfiguration reopened, before anything else
           // touches it.

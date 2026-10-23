@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import type { RunPersistence } from "../kernel/run/run-persistence.js";
 /**
  * Tron Home's request seam inside the real Gateway runtime (`RuntimeRegistry` +
@@ -209,7 +209,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
   const modelRef = { provider: PROVIDER, id: MODEL_ID };
   let homeSessionId: string | undefined;
   if (options.home) {
-    homeSessionId = (await registry.homeOwner().designate({ model: modelRef }, () => modelRef)).sessionId;
+    homeSessionId = (await homeOwnerOf(registry).designate({ model: modelRef }, () => modelRef)).sessionId;
     if (options.memory) {
       await setHomeMemoryModels(registry, [MEMORY_MODEL]);
     }
@@ -225,10 +225,10 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
   return {
     root, agentDir, cwd, tronHome, registry, slot, session, faux, requests, snapshots, diagnostics, compactor,
     homeSessionId,
-    policy: () => homeSessionId === undefined ? undefined : registry.homeOwner().requestPolicyFor(homeSessionId),
+    policy: () => homeSessionId === undefined ? undefined : homeOwnerOf(registry).requestPolicyFor(homeSessionId),
     /** The refusals the seam reported through this registry, oldest first. */
     refusals: () => requestRecords.flatMap(record => record.event === "refused" ? [record] : []),
-    memoryStatus: async () => await registry.homeOwner().memoryStatus(),
+    memoryStatus: async () => await homeOwnerOf(registry).memoryStatus(),
     response,
     /** One more session in this registry, in its own directory under the
      * fixture, or in an existing one (`cwd`) so two sessions can share a working
@@ -270,7 +270,7 @@ afterAll(async () => {
 
 /** Whether the Home's activation is open, as `home.context` reports it. */
 function activationOpen(registry: RuntimeRegistry): boolean {
-  const context = registry.homeOwner().contextStatus();
+  const context = homeOwnerOf(registry).contextStatus();
   return context.available && context.activationOpen;
 }
 
@@ -283,7 +283,7 @@ async function open(label: string, options: FixtureOptions = {}) {
 
 /** Control the real Home state producer, not a retired slot dependency. */
 function sealChapterState(item: Awaited<ReturnType<typeof homeFixture>>): void {
-  const owner = item.registry.homeOwner(), read = owner.chapterStateFor.bind(owner);
+  const owner = homeOwnerOf(item.registry), read = owner.chapterStateFor.bind(owner);
   const state = vi.spyOn(owner, "chapterStateFor").mockImplementation(id => ({ ...read(id), sealed: true }));
   disposals.push(async () => { state.mockRestore(); });
 }
@@ -293,7 +293,7 @@ function sealChapterState(item: Awaited<ReturnType<typeof homeFixture>>): void {
 describe("Home request seam inside the Gateway runtime", { concurrent: false }, () => {
   it("single-flights a reserved Home materialization and records its path before returning", async () => {
     const item = await open("reserved-materialization-single-flight", { home: true });
-    const owner = item.registry.homeOwner() as unknown as {
+    const owner = homeOwnerOf(item.registry) as unknown as {
       writeLocked(record: HomeRecord): Promise<void>;
       claimReservedChapter(sessionId: string, attemptId: string): Promise<unknown>;
     };
@@ -320,9 +320,9 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       return originalClaim(sessionId, attemptId);
     };
 
-    const first = item.registry.homeOwner().materializer.materialize(reservedId);
+    const first = homeOwnerOf(item.registry).materializer.materialize(reservedId);
     await claimEntered;
-    const second = item.registry.homeOwner().materializer.materialize(reservedId);
+    const second = homeOwnerOf(item.registry).materializer.materialize(reservedId);
     releaseClaim();
     const [firstSlot, secondSlot] = await Promise.all([first, second]);
     expect(claims).toBe(1);
@@ -338,7 +338,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
 
     // A contender arriving after the shared construction promise resolves, but
     // before the first canonical flush, must still join the live owner.
-    const afterReturn = await item.registry.homeOwner().materializer.materialize(reservedId);
+    const afterReturn = await homeOwnerOf(item.registry).materializer.materialize(reservedId);
     const afterReturnRecord = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     expect(afterReturn).toBe(firstSlot);
     expect(afterReturn.sessionFile).toBe(firstSlot.sessionFile);
@@ -346,7 +346,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       state: "materializing", attemptId: stored.chapters[1]!.attemptId,
       expectedPath: stored.chapters[1]!.expectedPath,
     });
-    const home = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const home = homeOwnerOf(item.registry) as unknown as { writeLocked(record: HomeRecord): Promise<void> };
     const authoritative = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     for (const mismatch of [
       { attemptId: "different-attempt", expectedPath: stored.chapters[1]!.expectedPath },
@@ -372,7 +372,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
 
   it("blocks Registry materialization on uncertain scan evidence without creating a runtime", async () => {
     const item = await open("reserved-materialization-scan-block", { home: true });
-    const owner = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const owner = homeOwnerOf(item.registry) as unknown as { writeLocked(record: HomeRecord): Promise<void> };
     const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     const reservedId = "reserved-scan-block";
     await owner.writeLocked({
@@ -386,15 +386,15 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const unknownBytes = "{partial";
     await writeFile(unknownPath, unknownBytes);
 
-    await expect(item.registry.homeOwner().materializer.materialize(reservedId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(homeOwnerOf(item.registry).materializer.materialize(reservedId)).rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(unknownPath, "utf8")).toBe(unknownBytes);
     expect(item.faux.state.callCount).toBe(0);
-    expect(await item.registry.homeOwner().status()).toMatchObject({ sessionId: reservedId, live: false });
+    expect(await homeOwnerOf(item.registry).status()).toMatchObject({ sessionId: reservedId, live: false });
   });
 
   it("does not publish or dispatch when the durable expected-path barrier fails", async () => {
     const item = await open("reserved-materialization-path-failure", { home: true });
-    const owner = item.registry.homeOwner() as unknown as {
+    const owner = homeOwnerOf(item.registry) as unknown as {
       writeLocked(record: HomeRecord): Promise<void>;
       recordReservedChapterPath(sessionId: string, attemptId: string, path: string): Promise<void>;
     };
@@ -410,10 +410,10 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const refused = owner.recordReservedChapterPath.bind(owner);
     owner.recordReservedChapterPath = async () => { throw new Error("injected path persistence failure"); };
 
-    await expect(item.registry.homeOwner().materializer.materialize(reservedId)).rejects.toThrow("injected path persistence failure");
+    await expect(homeOwnerOf(item.registry).materializer.materialize(reservedId)).rejects.toThrow("injected path persistence failure");
     owner.recordReservedChapterPath = refused;
     expect(item.faux.state.callCount).toBe(0);
-    expect(await item.registry.homeOwner().status()).toMatchObject({ sessionId: reservedId, live: false });
+    expect(await homeOwnerOf(item.registry).status()).toMatchObject({ sessionId: reservedId, live: false });
   });
 
   it("continues refusing sealed physical mutations after Home is disabled", async () => {
@@ -421,8 +421,8 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     item.faux.setResponses([item.response("canonical baseline")]);
     await item.slot.prompt("canonical baseline input");
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
-    await item.registry.homeOwner().disable();
-    const owner = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    await homeOwnerOf(item.registry).disable();
+    const owner = homeOwnerOf(item.registry) as unknown as { writeLocked(record: HomeRecord): Promise<void> };
     const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     await owner.writeLocked({
       ...current,
@@ -433,8 +433,8 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
         { sessionId: "reserved-successor", ordinal: current.chapters.length + 1, state: "reserved", activationStarted: false, createdAt: new Date().toISOString() },
       ],
     });
-    expect(item.registry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
-    expect(item.registry.homeOwner().chapterStateFor(item.slot.id)).toMatchObject({ sessionId: item.slot.id, sealed: true, ordinal: 1 });
+    expect(homeOwnerOf(item.registry).profileFor(item.slot.id)).toBe("ordinary");
+    expect(homeOwnerOf(item.registry).chapterStateFor(item.slot.id)).toMatchObject({ sessionId: item.slot.id, sealed: true, ordinal: 1 });
     const oldBytes = await item.jsonl();
     await item.registry.dispose();
 
@@ -454,7 +454,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     disposals.push(() => coldRegistry.dispose());
     await coldRegistry.initialize();
     await coldRegistry.recoverCanonicalAttention();
-    expect(coldRegistry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
+    expect(homeOwnerOf(coldRegistry).profileFor(item.slot.id)).toBe("ordinary");
     const callsBefore = item.faux.state.callCount;
     // Disabled changes the profile, not sealed evidence ownership. A cold sealed
     // chapter opens read-only (#911): the catalog header proved its tail complete
@@ -798,7 +798,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     item.faux.setResponses([item.response("identity baseline")]);
     await item.slot.prompt("identity baseline input");
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
-    if (!enabled) await item.registry.homeOwner().disable();
+    if (!enabled) await homeOwnerOf(item.registry).disable();
     const manager = (item.slot as unknown as { sessionManager: AgentSession["sessionManager"] }).sessionManager;
     const originalId = item.slot.id;
     const originalPath = item.slot.sessionFile;
@@ -1168,7 +1168,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       providerRequests: item.requests.length,
       roleSequences: item.requests.map((request) => request.roles),
       secondIncludesPrior: item.requests[1]!.blob.includes("C11 first activation input"),
-      ordinaryPolicy: item.registry.homeOwner().requestPolicyFor(ordinary.slot.id) ?? null,
+      ordinaryPolicy: homeOwnerOf(item.registry).requestPolicyFor(ordinary.slot.id) ?? null,
     };
     item.record("C11", row);
     expect(row.ordinaryPolicy).toBeNull();
@@ -1219,7 +1219,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       requestsAfterReload: afterReload.length,
       reloadedRequestExcludesPrior: afterReload.every((request) => !request.blob.includes("C13 first activation input")),
       reloadedRequestContainsMemory: afterReload.every((request) => request.blob.includes(HOME_MEMORY_VIEW_MARKER)),
-      samePolicyAfterReload: item.policy() === item.registry.homeOwner().requestPolicyFor(item.slot.id),
+      samePolicyAfterReload: item.policy() === homeOwnerOf(item.registry).requestPolicyFor(item.slot.id),
     };
     item.record("C13", row);
     expect(row.requestsAfterReload).toBe(1);
@@ -1426,7 +1426,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     await before.slot.prompt("negative control input");
     await waitUntil(() => before.slot.snapshot().configurationBlocker === null);
     const modelRef = { provider: PROVIDER, id: MODEL_ID };
-    await item.registry.homeOwner().designate({ model: modelRef }, () => modelRef);
+    await homeOwnerOf(item.registry).designate({ model: modelRef }, () => modelRef);
     await setHomeMemoryModels(item.registry, [MEMORY_MODEL]);
     const requestsBefore = [...item.requests];
     item.requests.length = 0;
@@ -1440,9 +1440,9 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       requestsAfter: requestsAfter.map((request) => request.roles),
       byteIdentical: JSON.stringify(requestsBefore) === JSON.stringify(requestsAfter),
       beforeDiffersFromAfter: requestsBefore[0]!.blob === requestsAfter[0]!.blob ? [] : [requestsBefore[0]!.blob, requestsAfter[0]!.blob],
-      policyForBefore: item.registry.homeOwner().requestPolicyFor(before.slot.id) ?? null,
-      policyForAfter: item.registry.homeOwner().requestPolicyFor(after.slot.id) ?? null,
-      homeDesignated: (await item.registry.homeOwner().status()).enabled,
+      policyForBefore: homeOwnerOf(item.registry).requestPolicyFor(before.slot.id) ?? null,
+      policyForAfter: homeOwnerOf(item.registry).requestPolicyFor(after.slot.id) ?? null,
+      homeDesignated: (await homeOwnerOf(item.registry).status()).enabled,
     };
     item.record("negative-control", row);
     expect(row.requestsBefore).toEqual([["system", "user"]]);

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 const evidence: unknown[] = [];
 afterEach(async () => { vi.restoreAllMocks(); await disposeFixtures(); });
@@ -15,14 +16,14 @@ type Tools = { availableTools: { name: string }[] };
 it("uses an explicit creation profile once, then reconstructs an unrecorded session as ordinary", async () => {
   const f = await fixture();
   const slot = await f.registry.create(f.cwd, "home");
-  expect(f.registry.homeOwner().profileFor(slot.id, slot.cwd)).toBe("unnamed");
+  expect(homeOwnerOf(f.registry).profileFor(slot.id, slot.cwd)).toBe("unnamed");
   const first = await slot.context() as unknown as Tools;
   const firstTools = first.availableTools.map(tool => tool.name);
   expect(firstTools).toContain("delegate");
   expect(firstTools).not.toContain("write");
 
   await slot.replaceRuntimeForProfile(async () => {});
-  expect(f.registry.homeOwner().profileFor(slot.id, slot.cwd)).toBe("unnamed");
+  expect(homeOwnerOf(f.registry).profileFor(slot.id, slot.cwd)).toBe("unnamed");
   const second = await slot.context() as unknown as Tools;
   const secondTools = second.availableTools.map(tool => tool.name);
   expect(secondTools).toContain("write");
@@ -35,10 +36,10 @@ it("classifies a canonical append from the live record, not its fixed runtime pr
   const slot = await f.registry.create(f.cwd, "home");
   const runtimeTools = (await slot.context() as unknown as Tools).availableTools.map(tool => tool.name);
   expect(runtimeTools).toContain("delegate");
-  expect(f.registry.homeOwner().profileFor(slot.id, slot.cwd)).toBe("unnamed");
+  expect(homeOwnerOf(f.registry).profileFor(slot.id, slot.cwd)).toBe("unnamed");
   slot.sessionManager.appendMessage(fauxAssistantMessage("materialized canonical baseline"));
   const before = await readFile(slot.sessionFile!, "utf8");
-  const owner = f.registry.homeOwner();
+  const owner = homeOwnerOf(f.registry);
   const state = owner.chapterStateFor.bind(owner);
   // Fault seam: the real owner never reports an unrecorded id as sealed. This
   // probe detects a fixed Home profile replacing live append classification.

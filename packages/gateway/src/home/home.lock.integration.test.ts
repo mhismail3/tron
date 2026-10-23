@@ -8,6 +8,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { NotificationGrantStore } from "../notifications/grant-store.js";
 import { NotificationService } from "../notifications/notification-service.js";
 import { PushRelayClient } from "../notifications/relay-client.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 /**
  * `gateway/home` scenario lock (restructure E0a, docs/restructure/k0-kernel.md §7):
@@ -133,7 +134,7 @@ describe("gateway/home scenario lock", () => {
           return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
         });
         notifications = new NotificationService(new NotificationGrantStore(tronHome), relay, Date.now, () => {}, () => {}, () => {},
-          (sessionId) => gateway?.registry.homeOwner().chapterStateFor(sessionId).homeId !== undefined);
+          (sessionId) => (gateway ? homeOwnerOf(gateway.registry) : undefined)?.chapterStateFor(sessionId).homeId !== undefined);
         await notifications.initialize();
         return notifications;
       },
@@ -211,7 +212,7 @@ describe("gateway/home scenario lock", () => {
     await waitFor(() => callers.includes("home-delegated"), "Home's delegating activation to answer the admission");
     await gateway.settled(homeSessionId);
     releaseWorker();
-    const owner = gateway.registry.homeOwner();
+    const owner = homeOwnerOf(gateway.registry);
     await waitFor(async () => (await owner.taskResult(TASK_ID)).wake?.state === "acknowledged", "the task result wake to be acknowledged");
     await waitFor(() => callers.includes("home-wake"), "the wake activation's request");
     await gateway.settled(homeSessionId);

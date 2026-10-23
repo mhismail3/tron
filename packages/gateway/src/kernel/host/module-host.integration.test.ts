@@ -117,9 +117,10 @@ describe("kernel/host module host", () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "tron-module-host-")));
     roots.push(root);
     const tronHome = join(root, "tron");
-    const modules = await ModuleHost.start(gatewayModules(() => ({ registry })), { tronHome, log });
+    const trust = new TrustService(join(root, "agent"));
+    const modules = await ModuleHost.start(gatewayModules(() => ({ registry, home: { tronHome, agentDir: join(root, "agent"), trust } })).modules, { tronHome, log });
     const registry = new RuntimeRegistry({
-      modules, agentDir: join(root, "agent"), tronHome, idleRuntimeMs: 60_000, trust: new TrustService(join(root, "agent")),
+      modules, agentDir: join(root, "agent"), tronHome, idleRuntimeMs: 60_000, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     try {

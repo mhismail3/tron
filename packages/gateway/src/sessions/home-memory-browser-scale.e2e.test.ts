@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Manage Home → Memory at a real Home's scale (#940): three chapters, 1200+
  * messages and tens of megabytes of canonical JSONL, built through the real
@@ -73,8 +73,8 @@ async function openGateway(root: string, runtime: ModelRuntime): Promise<Gateway
   const receipts = new CommandReceiptStore(join(tronHome, "receipts"));
   const service = new GatewayService({
     config: { tronHome } as unknown as GatewayConfig,
-    modelRuntime: runtime, sessions: registry, home: registry.homeOwner(), receipts, broadcast: () => {},
-    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => registry.homeOwner(), registry }),
+    modelRuntime: runtime, sessions: registry, home: homeOwnerOf(registry), receipts, broadcast: () => {},
+    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => homeOwnerOf(registry), registry }),
     trust: new TrustService(agentDir), sessionDeleted: () => {},
     uploads: { acquire: async () => ({ release: () => {} }), materialize: async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 }), removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
@@ -146,7 +146,7 @@ describe("Home memory browser at scale", () => {
         } else {
           // Seal the previous chapter as the size rollover would; paused memory
           // still materializes the next chapter without dispatching a turn.
-          const owner = g.registry.homeOwner() as unknown as {
+          const owner = homeOwnerOf(g.registry) as unknown as {
             options: { sessions: { chapterMetrics: (id: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
             chapterQuiescent(id: string): Promise<void>;
           };
@@ -177,7 +177,7 @@ describe("Home memory browser at scale", () => {
       const reads = async (gateway: Gateway, fresh = false, label = "read") => {
         const timed = async <T>(stage: string, read: () => Promise<T>) => {
           markStage(stage);
-          if (fresh) (gateway.registry.homeOwner() as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs();
+          if (fresh) (homeOwnerOf(gateway.registry) as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs();
           try {
             const result = await timedRead(read);
             report.lastCompletedStage = currentStage;
@@ -260,7 +260,7 @@ describe("Home memory browser at scale", () => {
       expect(full.values).toEqual(afterRestart.values);
 
       // A cold proof the deadline cancels still completes for the retry (Reload).
-      (g.registry.homeOwner() as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs();
+      (homeOwnerOf(g.registry) as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs();
       markStage("cancelled cold proof request");
       const cancelled = new AbortController();
       const shed = g.service.invoke({ ...client, signal: cancelled.signal }, "home.memory.view", { limit: 30 }).then(() => undefined, error => error);
@@ -273,7 +273,7 @@ describe("Home memory browser at scale", () => {
 
       // A live turn appends to the active chapter: reads extend its proof by the
       // new bytes only. Navigation is not an append and re-proves the chapter.
-      const dropProofs = () => { (g.registry.homeOwner() as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs(); };
+      const dropProofs = () => { (homeOwnerOf(g.registry) as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs(); };
       const active = await g.registry.acquire(chapterIds[2]!);
       for (let index = 0; index < 4; index += 1) {
         active.sessionManager.appendMessage({ role: "user", content: `live turn input ${index} ${"while the browser is open ".repeat(30)}`, timestamp: Date.now() });

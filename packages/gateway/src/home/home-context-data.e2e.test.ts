@@ -7,6 +7,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 import type { HomeContextBreakdown } from "../protocol/types.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -25,7 +26,7 @@ async function configure(f: Fixture): Promise<void> {
 
 /** The breakdown of the last request the current Home activation prepared. */
 function breakdownOf(f: Fixture): HomeContextBreakdown & { effectiveTokens: number } {
-  const context = f.registry.homeOwner().contextStatus();
+  const context = homeOwnerOf(f.registry).contextStatus();
   if (!context.available || !context.breakdown) throw new Error("no request breakdown");
   return context.breakdown;
 }
@@ -77,7 +78,7 @@ describe("Home request breakdown (home.context)", () => {
     await home.prompt("first input");
     await waitFor(() => idle(home), "activation settled");
 
-    const context = f.registry.homeOwner().contextStatus();
+    const context = homeOwnerOf(f.registry).contextStatus();
     expect(context).toMatchObject({ available: true, activationOpen: false, breakdown: { activation: { state: "settled", kind: "user" } } });
     const breakdown = breakdownOf(f);
     expect(breakdown.sections.map(section => section.id)).toEqual(["instructions", "profile", "memory", "chapter", "results", "input"]);
@@ -162,7 +163,7 @@ describe("Home chapters, task names and memory pages", () => {
   it("names the delegated worker, lists the task by that name, and reports the chapter's contents and topics", async () => {
     const f = await fixture();
     await configure(f);
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const home = await f.registry.acquire(f.home.sessionId);
     scriptedRequests(f, [
       fauxAssistantMessage([fauxToolCall("delegate", { taskId: "task-titled", title: "Count the chapter", intent: "Finite work", target: f.cwd }, { id: "call-delegate" })], { stopReason: "toolUse" }),
@@ -203,7 +204,7 @@ describe("Home chapters, task names and memory pages", () => {
   it("titles an undelegated-name task by its brief's first line, with its project and worker", async () => {
     const f = await fixture();
     await configure(f);
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     f.faux.setResponses([reportCall("plain-report", "Plain result"), fauxAssistantMessage("Plain wake reply")]);
     const run = await dispatch(f, "task-plain");
     await run.completion;
@@ -215,7 +216,7 @@ describe("Home chapters, task names and memory pages", () => {
   it("refuses a delegated title that is blank or longer than 80 characters, and creates no task", async () => {
     const f = await fixture();
     await configure(f);
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     await expect(owner.dispatchTask(f.home.sessionId, { taskId: "task-long-title", intent: "Finite work", target: f.cwd, title: "t".repeat(81) }))
       .rejects.toMatchObject({ code: "invalid_request", message: "Invalid task title" });
     await expect(owner.dispatchTask(f.home.sessionId, { taskId: "task-blank-title", intent: "Finite work", target: f.cwd, title: "   " }))
@@ -227,7 +228,7 @@ describe("Home chapters, task names and memory pages", () => {
   it("filters the hierarchical memory view to one chapter and pages its lines", async () => {
     const f = await fixture();
     await configure(f);
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const first = f.home.sessionId;
     const home = await f.registry.acquire(first);
     f.faux.setResponses([fauxAssistantMessage("first chapter reply")]);
@@ -239,7 +240,7 @@ describe("Home chapters, task names and memory pages", () => {
     await owner.chapterQuiescent(first);
     metrics.mockRestore();
     const successor = (await owner.chapterList()).chapters.find(chapter => chapter.state === "reserved")!.sessionId;
-    await f.registry.homeOwner().materializer.materialize(successor);
+    await homeOwnerOf(f.registry).materializer.materialize(successor);
     f.faux.setResponses([fauxAssistantMessage("second chapter reply")]);
     const next = await f.registry.acquire(successor);
     await next.prompt("second chapter input");
@@ -264,7 +265,7 @@ describe("Home task counts", () => {
   it("counts every task exactly, active and finished, whatever the page cap", async () => {
     const f = await fixture();
     await configure(f);
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const hold = gate();
     const home: AssistantMessage[] = Array.from({ length: 6 }, (_, index) => fauxAssistantMessage(`wake ${index}`));
     // Worker requests take their replies in order; the third waits until the gate opens, so it stays active.
@@ -304,7 +305,7 @@ describe("Home session controls", () => {
   it("applies the Home session's model, thinking and context window through Home's saved settings", async () => {
     const f = await fixture();
     await configure(f);
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const home = await f.registry.acquire(f.home.sessionId);
     expect(home.snapshot().model).toEqual({ provider: f.model.provider, id: f.model.id });
 
@@ -325,6 +326,6 @@ describe("Home session controls", () => {
     f.faux.setResponses([fauxAssistantMessage("reply on the reasoning model")]);
     await home.prompt("check the window");
     await waitFor(() => idle(home), "activation settled");
-    expect(f.registry.homeOwner().contextStatus()).toMatchObject({ contextWindow: 40000 });
+    expect(homeOwnerOf(f.registry).contextStatus()).toMatchObject({ contextWindow: 40000 });
   }, 60_000);
 });

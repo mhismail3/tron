@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import * as fileSystem from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { spawn, spawnSync } from "node:child_process";
@@ -56,13 +56,13 @@ function processTerminal(pid: number): boolean {
   return state === "" || state.startsWith("Z");
 }
 async function waitForTaskAcknowledgement(f: Awaited<ReturnType<typeof fixture>>, taskId: string): Promise<void> {
-  await waitFor(async () => (await f.registry.homeOwner().taskResult(taskId)).wake?.state === "acknowledged", "durable task acknowledgement");
+  await waitFor(async () => (await homeOwnerOf(f.registry).taskResult(taskId)).wake?.state === "acknowledged", "durable task acknowledgement");
 }
 
 // Hold the real terminal → acknowledged publication so presentation retirement
 // cannot accidentally satisfy either route test's consumption cut.
 async function observeTaskAcknowledgement<T>(f: Awaited<ReturnType<typeof fixture>>, taskId: string, start: () => Promise<T>): Promise<T> {
-  const owner = f.registry.homeOwner();
+  const owner = homeOwnerOf(f.registry);
   const store: HomeTaskStore = (owner as any).tasks.store;
   const update = store.updateWake.bind(store);
   let release!: () => void;
@@ -99,7 +99,7 @@ describe("Home task authorization RPC", () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     await (await dispatch(f, "scope-setup")).completion;
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(join(f.root, "authorization-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "authorization-terminal", identity: "device:authorization-test", isLocal: true } as unknown as ClientContext;
     const rpc = async (method: string, params: unknown = {}) => await service.invoke(client, method, params) as any;
@@ -113,7 +113,7 @@ describe("Home task authorization RPC", () => {
     // These durable-authorization journeys also run after an unmaterialized Home
     // has been evicted. Choose a model explicitly rather than reading that absent chat.
     const model = f.faux.getModel();
-    try { const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd, model: { provider: model.provider, id: model.id } }); await run.completion; }
+    try { const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd, model: { provider: model.provider, id: model.id } }); await run.completion; }
     catch (error) { refusal = error; }
     expect(refusal).toMatchObject({ code: "grant-required", requestId: expect.any(String) });
     expect(refusal.requestId.length).toBeGreaterThan(0);
@@ -123,14 +123,14 @@ describe("Home task authorization RPC", () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     await (await dispatch(f, "valid-scope")).completion;
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(join(f.root, "valid-scope-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { identity: "device:authorization-test", isLocal: true } as ClientContext;
-    const before = await f.registry.homeOwner().taskPermissions();
+    const before = await homeOwnerOf(f.registry).taskPermissions();
     const permissions = await service.invoke(client, "home.taskPermissions", {}) as any;
     expect(permissions.needsReconfirmation).toBe(false);
     expect(permissions.scopes).toContainEqual(expect.objectContaining({ active: true }));
-    expect(await f.registry.homeOwner().taskPermissions()).toEqual(before);
+    expect(await homeOwnerOf(f.registry).taskPermissions()).toEqual(before);
     evidence.push({ case: "rpc-valid-scope-no-reconfirmation", permissions });
   });
   it("revokes standing scope through terminal RPC and prevents the next dispatch", async () => {
@@ -159,7 +159,7 @@ describe("Home task authorization RPC", () => {
     expect(modelRefusal).toMatchObject({ isError: true });
     // The model entrypoint fixes its worker choice into the authorized brief.
     // Bind the error to that exact durable request, not the lower-level raw brief.
-    const modelTask = await f.registry.homeOwner().taskResult("model-grant-request");
+    const modelTask = await homeOwnerOf(f.registry).taskResult("model-grant-request");
     expect(modelTask.intent.text).toContain("Finite work");
     expect(modelTask.intent.text).toContain("Worker choice: model");
     const modelRequest = (await list()).requests.find((pending: any) => pending.request.intentDigest === modelTask.intentDigest);
@@ -187,11 +187,11 @@ describe("Home task authorization RPC", () => {
     const expiringId = await refused(f, "expiring-request", "Expiring work");
     const expiresAt = Date.now() + 60_000;
     await rpc("home.decideTaskGrant", { ...command, commandId: "approve-expiring-grant", requestId: expiringId, expiresAt });
-    const authority = (f.registry.homeOwner() as any).tasks.authorization;
+    const authority = (homeOwnerOf(f.registry) as any).tasks.authorization;
     const clock = vi.spyOn(authority, "now").mockReturnValue(expiresAt);
     try { expect(await refused(f, "expired-admission", "Expiring work")).toBe(expiringId); }
     finally { clock.mockRestore(); }
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     await expect(owner.taskTool(f.home.sessionId, { action: "approve", taskId: task.taskId } as any)).rejects.toThrow();
     evidence.push({ case: "rpc-one-use-grant", task, permissions: await list() });
   });
@@ -204,7 +204,7 @@ describe("Home task authorization RPC", () => {
     const before = await list();
     f.registry = await f.restart();
     // A fresh production RPC owner must read the same durable decision.
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(join(f.root, "authorization-receipts")) } as unknown as GatewayServiceDependencies);
     expect(await service.invoke({ identity: "device:authorization-test", isLocal: true } as ClientContext, "home.taskPermissions", {})).toEqual(before);
     expect(await refused(f, "after-deny")).toBe(requestId);
@@ -232,7 +232,7 @@ describe("Home task authorization RPC", () => {
     const { f, rpc, list } = await controls();
     const requestId = await refused(f, "race-request");
     const { grant } = await rpc("home.decideTaskGrant", { commandId: "approve-racing-grant", requestId, approved: true, expiresAt: Date.now() + 60_000 });
-    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
     const save = store.authorization.save.bind(store.authorization);
     let reached = false;
     let release!: () => void;
@@ -277,12 +277,12 @@ describe("Home task bounded backlogs", () => {
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const tasks = [];
     // A paused Home takes no wake, so the settled results accumulate as a backlog.
-    await f.registry.homeOwner().pauseMemory();
+    await homeOwnerOf(f.registry).pauseMemory();
     for (let i = 0; i < 3; i++) {
       f.faux.setResponses([fauxAssistantMessage([reportCall(`backlog-${i}`, String(i).repeat(65536))], { stopReason: "toolUse" })]);
       tasks.push(await (await dispatch(f, `backlog-${i}`)).completion);
     }
-    await f.registry.homeOwner().resumeMemory();
+    await homeOwnerOf(f.registry).resumeMemory();
     const home = await f.registry.acquire(f.home.sessionId);
     const batches: string[][] = [];
     // The user's oversized input starves the inbox. When that activation settles, Home is idle and
@@ -308,7 +308,7 @@ describe("Home task bounded backlogs", () => {
     expect(f.signals).not.toContainEqual(expect.objectContaining({ reason: "context-overflow" }));
     for (const task of tasks) {
       await waitForTaskAcknowledgement(f, task.taskId);
-      expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+      expect(await homeOwnerOf(f.registry).taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
     }
     evidence.push({ case: "bounded-backlog", batches });
   }, 30_000);
@@ -316,7 +316,7 @@ describe("Home task bounded backlogs", () => {
   it("delivers a never-fit report by reference before its successor and reads immutable bounded pages", async () => {
     // A window the fixed Home prefix fits with room for one small result: the 64 KB report never does.
     const f = await fixture(undefined, false, 8_000); const model = f.faux.getModel();
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     f.faux.setResponses([fauxAssistantMessage([reportCall("large", "🦊".repeat(16384))], { stopReason: "toolUse" })]);
     const large = await (await dispatch(f, "large")).completion;
@@ -350,7 +350,7 @@ describe("Home task bounded backlogs", () => {
   }, 30_000);
 
   it.each(["initial", "replacement", "rollover"] as const)("admits the first %s backlog activation and refuses later canonical loss", async kind => {
-    const f = await fixture(); const owner = f.registry.homeOwner(); const model = f.faux.getModel();
+    const f = await fixture(); const owner = homeOwnerOf(f.registry); const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     let sessionId = f.home.sessionId;
     if (kind !== "initial") {
@@ -368,7 +368,7 @@ describe("Home task bounded backlogs", () => {
         const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 25 * 1024 * 1024, entries: 10, quiescent: true });
         await owner.chapterQuiescent(sessionId); metrics.mockRestore();
         sessionId = (await owner.open()).sessionId;
-        await f.registry.homeOwner().materializer.materialize(sessionId);
+        await homeOwnerOf(f.registry).materializer.materialize(sessionId);
       }
     }
     const home = await f.registry.acquire(sessionId);
@@ -395,7 +395,7 @@ describe("Home task bounded backlogs", () => {
   });
 
   it("Stop cancels the activation-owned envelope memory wait without admitting results or provider work", async () => {
-    const f = await fixture(); const owner = f.registry.homeOwner(); const model = f.faux.getModel();
+    const f = await fixture(); const owner = homeOwnerOf(f.registry); const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const task = await (await dispatch(f)).completion;
@@ -433,7 +433,7 @@ describe("Home task bounded backlogs", () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const base = await (await dispatch(f)).completion;
-    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
     for (let i = 0; i < 24; i++) await store.put({ ...base, taskId: `abandoned-${i}`, revision: 1, lifecycle: "pending", sessionId: null, operationId: null, reportRef: null, terminalEvidence: null, wake: null, spend: null }, null);
     const retained = new Set<string>(); let peak = 0;
     const observe = (task: any) => { if (task.lifecycle !== "terminal") { retained.add(task.taskId); peak = Math.max(peak, retained.size); } };
@@ -442,9 +442,9 @@ describe("Home task bounded backlogs", () => {
     const update = HomeTaskStore.prototype.update;
     vi.spyOn(HomeTaskStore.prototype, "update").mockImplementation(async function(taskId, change) { const task = await update.call(this, taskId, change); retained.delete(taskId); return task; });
     const cold = await f.restart();
-    expect(await (cold.homeOwner() as any).tasks.recoveryStatus()).toEqual({ available: true });
+    expect(await (homeOwnerOf(cold) as any).tasks.recoveryStatus()).toEqual({ available: true });
     expect(peak).toBe(1); expect(retained.size).toBe(0);
-    for (let i = 0; i < 24; i++) expect(await cold.homeOwner().taskResult(`abandoned-${i}`)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown" } });
+    for (let i = 0; i < 24; i++) expect(await homeOwnerOf(cold).taskResult(`abandoned-${i}`)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown" } });
     evidence.push({ case: "streaming-cold-recovery", tasks: 24, peakRetainedTasks: peak });
   }, 30_000);
 });
@@ -452,8 +452,8 @@ describe("Home task bounded backlogs", () => {
 describe("Home task cold reconciliation", () => {
   it.each(["before-report", "after-report", "after-terminal"])("recovers %s without replay and keeps terminal outbox/authorization", async cut => {
     const f = await fixture();
-    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
-    const authorization = (f.registry.homeOwner() as any).tasks.authorization;
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
+    const authorization = (homeOwnerOf(f.registry) as any).tasks.authorization;
     await store.initialize();
     await issueGrant(authorization, { intentDigest: "a".repeat(64), target: f.cwd,
       authorizationScope: "full-work", restoreEpoch: await store.restoreEpoch() },
@@ -482,15 +482,15 @@ describe("Home task cold reconciliation", () => {
     expect(f.notifications).toHaveLength(0);
     vi.restoreAllMocks();
     const recovered = await f.restart();
-    const task = await recovered.homeOwner().taskResult(run.taskId);
+    const task = await homeOwnerOf(recovered).taskResult(run.taskId);
     expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: cut === "before-report" ? "unknown" : "final" }, wake: { state: "pending", push: "decided" } });
     expect(await readFile(authorizationPath, "utf8")).toBe(beforeAuthority);
     expect(providers).toBe(2);
     expect(f.notifications).toHaveLength(1);
-    await expect(recovered.homeOwner().dispatchTask(f.home.sessionId, { taskId: run.taskId, intent: "Finite work", target: f.cwd,
+    await expect(homeOwnerOf(recovered).dispatchTask(f.home.sessionId, { taskId: run.taskId, intent: "Finite work", target: f.cwd,
       model: { provider: f.faux.getModel().provider, id: f.faux.getModel().id } })).rejects.toThrow(/already exists/);
     const again = await f.restart();
-    expect(await again.homeOwner().taskResult(run.taskId)).toEqual(task);
+    expect(await homeOwnerOf(again).taskResult(run.taskId)).toEqual(task);
     expect(f.notifications).toHaveLength(1);
     expect(providers).toBe(2);
     evidence.push({ case: `cold-${cut}`, frozen, task, providers, effect: await readFile(effect, "utf8"), authorizationUnchanged: true });
@@ -498,7 +498,7 @@ describe("Home task cold reconciliation", () => {
 
   it.each(["missing-marker", "duplicate-marker", "wrong-marker", "missing-report", "malformed-report", "wrong-report", "duplicate-report", "torn", "interrupted", "off-branch", "report-without-terminal", "missing-session", "bad-header", "old-format", "bad-graph", "sync-refused"])("reconciles %s evidence conservatively without constructing a worker", async mode => {
     const f = await fixture();
-    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
     const update = store.update.bind(store);
     vi.spyOn(store, "update").mockImplementation(async (id, change) => {
       if (change((await store.read(id))!).lifecycle === "terminal") throw new Error("frozen before terminal publication");
@@ -562,7 +562,7 @@ describe("Home task cold reconciliation", () => {
     const open = vi.spyOn(RuntimeRegistry.prototype, "acquire");
     const recovered = await f.restart();
     expect(open).not.toHaveBeenCalled();
-    const task = await (recovered.homeOwner() as any).tasks.store.read(run.taskId);
+    const task = await (homeOwnerOf(recovered) as any).tasks.store.read(run.taskId);
     const reportProven = mode === "off-branch" || mode === "report-without-terminal";
     expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: reportProven ? "final" : "unknown" }, wake: { state: "pending", push: "decided" } });
     expect(f.notifications).toHaveLength(1);
@@ -581,7 +581,7 @@ describe("Home task cold reconciliation", () => {
     await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
     await chmod(f.tronHome, 0o755);
     const cold = await f.restart();
-    const owner = cold.homeOwner();
+    const owner = homeOwnerOf(cold);
     expect(await owner.status()).toMatchObject({ taskRecovery: { available: false, reason: "unsafe-state" } });
     const control = { taskId: run.taskId, operationId: run.operationId, text: "Steer" };
     const operations: Array<[string, () => Promise<unknown>]> = [
@@ -613,8 +613,8 @@ describe("Home task cold reconciliation", () => {
     expect(ordinary.canonicalSessionEntries()).toContainEqual(expect.objectContaining({ type: "message", message: expect.objectContaining({ role: "assistant", content: expect.arrayContaining([expect.objectContaining({ text: "Ordinary sessions still work" })]) }) }));
     expect(await readFile(taskPath, "utf8")).toBe(taskBytes); expect(await readFile(authPath, "utf8")).toBe(authBytes);
     const again = await f.restart();
-    expect(await again.homeOwner().status()).toMatchObject({ taskRecovery: { available: true } });
-    expect(await again.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+    expect(await homeOwnerOf(again).status()).toMatchObject({ taskRecovery: { available: true } });
+    expect(await homeOwnerOf(again).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
     evidence.push({ case: "task-recovery-fence", operations: result, ordinaryPrompt: true, bytesPreserved: true, restartAvailable: true });
   }, 20_000);
 
@@ -632,7 +632,7 @@ describe("Home task cold reconciliation", () => {
     const bogus = join(f.tronHome, "gateway/home/tasks/0000000000001-bogus.json");
     await writeFile(bogus, "{}", { mode: 0o600 });
     const cold = await f.restart();
-    expect(await cold.homeOwner().status()).toMatchObject({ taskRecovery: { available: false, reason: "invalid-record" } });
+    expect(await homeOwnerOf(cold).status()).toMatchObject({ taskRecovery: { available: false, reason: "invalid-record" } });
     const home = await cold.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Home answers while task recovery is refused")]);
     await home.prompt("Review while recovery is refused");
@@ -641,10 +641,10 @@ describe("Home task cold reconciliation", () => {
     expect(cold.administrativeWorkRegistry.size).toBe(0);
     // Removing the cause does not lift the per-process refusal, and Home can still be disabled.
     await rm(bogus);
-    expect(await cold.homeOwner().status()).toMatchObject({ taskRecovery: { available: false } });
+    expect(await homeOwnerOf(cold).status()).toMatchObject({ taskRecovery: { available: false } });
     await cold.administrativeWorkRegistry.waitUntilSettled();
-    await expect(cold.homeOwner().disable()).resolves.toBeDefined();
-    expect(await cold.homeOwner().status()).toMatchObject({ enabled: false });
+    await expect(homeOwnerOf(cold).disable()).resolves.toBeDefined();
+    expect(await homeOwnerOf(cold).status()).toMatchObject({ enabled: false });
     evidence.push({ case: "prompt-during-task-recovery-refusal", workEntries: 0, disabled: true });
   }, 60_000);
 
@@ -657,7 +657,7 @@ describe("Home task cold reconciliation", () => {
     await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home before the result");
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const run = await dispatch(f); await run.completion;
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const settle = vi.spyOn(owner, "settleTaskResults").mockRejectedValueOnce(new Error("settlement store refused"));
     const diagnostic = vi.spyOn(home as any, "emit");
     f.faux.setResponses([fauxAssistantMessage("Result read although settlement failed")]);
@@ -683,7 +683,7 @@ describe("Home task cold reconciliation", () => {
     const running = home.prompt("Mid-run"); void running.catch(() => {});
     await waitFor(() => entered, "Home run in flight");
     // Stands in for the fence an uncertain ledger publication sets.
-    f.registry.homeOwner().publicationUncertain = true;
+    homeOwnerOf(f.registry).publicationUncertain = true;
     const live = () => (f.registry as any).slots.has(f.home.sessionId) as boolean;
     let retired = false;
     const retirement = (f.registry as any).retireUncertainHomeRuntimes().then(() => { retired = true; });
@@ -714,13 +714,13 @@ describe("Home task cold reconciliation", () => {
     await writeFile(leftover, "{\"partial\":", { mode: 0o600 });
     await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
     const cold = await f.restart();
-    expect(await cold.homeOwner().status()).toMatchObject({ taskRecovery: { available: true } });
+    expect(await homeOwnerOf(cold).status()).toMatchObject({ taskRecovery: { available: true } });
     await expect(readFile(leftover)).rejects.toMatchObject({ code: "ENOENT" });
     const home = await cold.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Home activates after temporary cleanup")]);
     await home.prompt("Continue after restart"); await waitFor(() => home.snapshot().configurationBlocker === null, "activation after temporary cleanup");
     expect(JSON.stringify(home.canonicalSessionEntries())).toContain("Home activates after temporary cleanup");
-    expect(await cold.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+    expect(await homeOwnerOf(cold).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
   }, 20_000);
 
   it("settles a delivery whose canonical proof cannot be read as outcome-unknown, and later Home prompts still work", async () => {
@@ -730,7 +730,7 @@ describe("Home task cold reconciliation", () => {
     const home = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const run = await dispatch(f); await run.completion;
-    const owner = f.registry.homeOwner() as any;
+    const owner = homeOwnerOf(f.registry) as any;
     // The first settlement proof fails to read its chapter (the failure an
     // over-bound line produces). Only that delivery is affected.
     const unreadable = vi.spyOn(owner, "inboxEvidence").mockRejectedValueOnce(new EpisodicMemoryError("source", "Canonical session has an incomplete tail"));
@@ -748,7 +748,7 @@ describe("Home task cold reconciliation", () => {
 
   it("joins the fresh catalog cut before irreversibly qualifying a cold report", async () => {
     const f = await fixture();
-    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
     vi.spyOn(store, "update").mockRejectedValue(new Error("frozen terminal owner"));
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const run = await dispatch(f); await expect(run.completion).rejects.toThrow(/frozen/);
@@ -765,14 +765,14 @@ describe("Home task cold reconciliation", () => {
       expect(JSON.parse(await readFile(await taskFile(f, run.taskId), "utf8")).lifecycle).toBe("active");
     } finally { release(); await starting; }
     const recovered = await starting;
-    expect(await recovered.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
-    evidence.push({ case: "cold-catalog-readiness", task: await recovered.homeOwner().taskResult(run.taskId) });
+    expect(await homeOwnerOf(recovered).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+    evidence.push({ case: "cold-catalog-readiness", task: await homeOwnerOf(recovered).taskResult(run.taskId) });
   }, 20_000);
 
   it("reaches readiness before a cold task recovery joins the catalog cut", async () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
-    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
     vi.spyOn(store, "update").mockRejectedValue(new Error("frozen terminal owner"));
     const run = await dispatch(f); await expect(run.completion).rejects.toThrow(/frozen/);
     vi.restoreAllMocks();
@@ -793,15 +793,15 @@ describe("Home task cold reconciliation", () => {
     release();
     const cold = await startup;
     expect(readiness).toBe("ready");
-    expect(await cold.homeOwner().status()).toMatchObject({ taskRecovery: { available: false, reason: "not-started" } });
-    await cold.homeOwner().recoverTasks();
+    expect(await homeOwnerOf(cold).status()).toMatchObject({ taskRecovery: { available: false, reason: "not-started" } });
+    await homeOwnerOf(cold).recoverTasks();
     expect(barrier).toHaveBeenCalled();
-    expect(await cold.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+    expect(await homeOwnerOf(cold).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
   }, 20_000);
 
   it.each(["pending", "grant-consumed", "worker-created", "operation-bound"])("retires the %s admission cut without replay or renewing grants", async cut => {
     const f = await fixture();
-    const tasks = (f.registry.homeOwner() as any).tasks;
+    const tasks = (homeOwnerOf(f.registry) as any).tasks;
     const store = tasks.store as HomeTaskStore;
     await store.initialize();
     const epoch = await store.restoreEpoch();
@@ -829,7 +829,7 @@ describe("Home task cold reconciliation", () => {
     const before = await readFile(authorizationPath, "utf8");
     vi.restoreAllMocks();
     const recovered = await f.restart();
-    const task = await (recovered.homeOwner() as any).tasks.store.read("task-one");
+    const task = await (homeOwnerOf(recovered) as any).tasks.store.read("task-one");
     expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown" }, wake: { state: "pending", push: "decided" } });
     expect(await readFile(authorizationPath, "utf8")).toBe(before);
     expect(JSON.parse(before).grants[0].state).toBe(cut === "pending" ? "available" : "consumed");
@@ -850,7 +850,7 @@ describe("Home workers without a cap", () => {
     vi.spyOn(os, "cpus").mockImplementation(() => structuredClone(kernelCpus));
     vi.spyOn(os, "loadavg").mockReturnValue([FAKE_CPUS * 4, 0, 0]);
     const f = await fixture();
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     // Cumulative per-CPU ticks, as the kernel counts them: `busy` is user, nice, sys and irq.
     const advanceTicks = (busy: number, idle: number, cpus = kernelCpus) => {
       for (const cpu of cpus) { cpu.times.user += busy; cpu.times.idle += idle; }
@@ -908,7 +908,7 @@ describe("Home workers without a cap", () => {
 describe("Home task list RPC", () => {
   it("pages durable summaries across new arrivals and refuses foreign cursors and recovery fences", async () => {
     const f = await fixture();
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const store = (owner as any).tasks.store as HomeTaskStore;
     await store.initialize();
     const service = new GatewayService({ sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
@@ -945,7 +945,7 @@ describe("Home task list RPC", () => {
     await expect(service.invoke(client, "home.taskList", { cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict" });
     await chmod(f.tronHome, 0o755);
     const cold = await f.restart();
-    const fenced = new GatewayService({ sessions: cold, home: cold.homeOwner() } as unknown as GatewayServiceDependencies);
+    const fenced = new GatewayService({ sessions: cold, home: homeOwnerOf(cold) } as unknown as GatewayServiceDependencies);
     await chmod(f.tronHome, 0o700);
     await expect(fenced.invoke(client, "home.taskList", {})).rejects.toMatchObject({ code: "conflict", details: { reason: "unsafe-state" } });
     evidence.push({ case: "task-list-pages", first, second, third, staleCursorRefused: true, recoveryFenceRefused: true });
@@ -959,7 +959,7 @@ describe("Home task list RPC", () => {
   it("reads the task store once per list and per Home admission, however many lists are in flight", async () => {
     const f = await fixture();
     await setHomeMemoryModels(f.registry, [{ provider: f.faux.getModel().provider, id: f.faux.getModel().id }]);
-    const owner = f.registry.homeOwner();
+    const owner = homeOwnerOf(f.registry);
     const store = (owner as any).tasks.store as HomeTaskStore;
     f.faux.setResponses([fauxAssistantMessage([reportCall("seed", "Seed result")], { stopReason: "toolUse" }), fauxAssistantMessage("Wake reply")]);
     const seed = await dispatch(f, "seed");
@@ -1059,7 +1059,7 @@ describe("Home task production dispatch", () => {
       expect(f.notifications).toHaveLength(1);
       vi.restoreAllMocks();
       const recovered = await f.restart();
-      expect(await recovered.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: task.terminalEvidence, reportRef: null });
+      expect(await homeOwnerOf(recovered).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: task.terminalEvidence, reportRef: null });
       expect(providers).toBe(1);
       expect(f.notifications).toHaveLength(1);
       evidence.push({ case: `live-canonical-${target}-sync-before-settlement`, task, providers });
@@ -1096,10 +1096,10 @@ describe("Home task production dispatch", () => {
   }
   async function resumeInPlace(f: Awaited<ReturnType<typeof fixture>>, taskId: string, sessionId: string): Promise<void> {
     f.faux.setResponses([fauxAssistantMessage([reportCall("resumed", "Resumed after the limit")], { stopReason: "toolUse" })]);
-    const resumed = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "resume", taskId }) as { taskId: string; sessionId: string };
+    const resumed = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "resume", taskId }) as { taskId: string; sessionId: string };
     expect(resumed.sessionId).toBe(sessionId);
-    await waitFor(async () => (await f.registry.homeOwner().taskResult(resumed.taskId)).lifecycle === "terminal", "resumed task settles");
-    expect((await f.registry.homeOwner().taskResult(resumed.taskId)).terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report", sessionId });
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskResult(resumed.taskId)).lifecycle === "terminal", "resumed task settles");
+    expect((await homeOwnerOf(f.registry).taskResult(resumed.taskId)).terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report", sessionId });
   }
 
   it("settles a usage-limited task whose live settlement fails, from its canonical file, and keeps it resumable", async () => {
@@ -1114,7 +1114,7 @@ describe("Home task production dispatch", () => {
       terminalEvidence: { outcome: "unknown", reason: "settlement-failed", sessionId: run.sessionId, detail: "Canonical session changed during inspection" } });
     expect(task.terminalEvidence!.entryIds).toHaveLength(1);
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", reason: "settlement-failed" }));
-    const status = await f.registry.homeOwner().taskStatus(run.taskId);
+    const status = await homeOwnerOf(f.registry).taskStatus(run.taskId);
     expect(status).toMatchObject({ subagents: { started: 0, stoppedAtEnd: 0 }, subagentRuns: { total: 0, runs: [] } });
     await evictWorker(f, run.sessionId);
     await resumeInPlace(f, run.taskId, run.sessionId);
@@ -1126,7 +1126,7 @@ describe("Home task production dispatch", () => {
     let providers = 0;
     const limited = () => { providers++; return fauxAssistantMessage("", { stopReason: "error", errorMessage: USAGE_LIMIT }); };
     f.faux.setResponses([limited, limited, limited, limited]);
-    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
     const update = store.update.bind(store);
     let refusals = 0;
     vi.spyOn(f.registry, "readLiveTaskEvidence").mockRejectedValueOnce(new GatewayError("conflict", "Canonical session changed during inspection"));
@@ -1142,11 +1142,11 @@ describe("Home task production dispatch", () => {
     expect(await store.read(run.taskId)).toMatchObject({ lifecycle: "active", stopIntent: null, terminalEvidence: null });
     await evictWorker(f, run.sessionId);
     const before = providers;
-    const tool = (input: Record<string, unknown>) => f.registry.homeOwner().taskTool(f.home.sessionId, { taskId: run.taskId, ...input });
+    const tool = (input: Record<string, unknown>) => homeOwnerOf(f.registry).taskTool(f.home.sessionId, { taskId: run.taskId, ...input });
     await expect(tool({ action: "steer", text: "Are you still there?" })).rejects.toThrow(/no live worker/);
     expect(providers, "steering an ownerless task starts no turn").toBe(before);
     await expect(tool({ action: "stop", operationId: run.operationId })).resolves.toMatchObject({ accepted: true, action: "stop", taskId: run.taskId });
-    const task = await f.registry.homeOwner().taskResult(run.taskId);
+    const task = await homeOwnerOf(f.registry).taskResult(run.taskId);
     expect(task).toMatchObject({ lifecycle: "terminal", stopIntent: { operationId: run.operationId },
       terminalEvidence: { outcome: "interrupted", reason: "task-stop", sessionId: run.sessionId } });
     expect(task.terminalEvidence!.entryIds).toHaveLength(1);
@@ -1195,7 +1195,7 @@ describe("Home task production dispatch", () => {
     await waitForTaskAcknowledgement(f, run.taskId);
     // The wake's one push is its turn's own terminal push: the inbox sends no notice for the reply.
     await waitFor(() => f.notifications.some(input => input.sessionId === f.home.sessionId), "wake reply push");
-    const eventId = (await f.registry.homeOwner().taskResult(run.taskId)).wake!.eventId;
+    const eventId = (await homeOwnerOf(f.registry).taskResult(run.taskId)).wake!.eventId;
     // The inbox delivery raises no client error (#730): its context receipt is the inbox's own.
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(f.events.slice(eventsBeforeWake).filter(event => event.topic === "session.extensionError")).toEqual([]);
@@ -1224,7 +1224,7 @@ describe("Home task production dispatch", () => {
   }, 20_000);
 
   it("refuses inbox acknowledgement until canonical message and terminal receipt are durably synced", async () => {
-    const f = await fixture(); const owner = f.registry.homeOwner(); const model = f.faux.getModel();
+    const f = await fixture(); const owner = homeOwnerOf(f.registry); const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const task = await (await dispatch(f)).completion;
@@ -1259,26 +1259,26 @@ describe("Home task production dispatch", () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const task = await (await dispatch(f)).completion;
-    const before = (await f.registry.homeOwner().status()) as any;
+    const before = (await homeOwnerOf(f.registry).status()) as any;
     for (let i = 0; i < 3; i++) {
-      await f.registry.homeOwner().disable();
-      expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "pending" } });
-      await f.registry.homeOwner().designate({});
+      await homeOwnerOf(f.registry).disable();
+      expect(await homeOwnerOf(f.registry).taskResult(task.taskId)).toMatchObject({ wake: { state: "pending" } });
+      await homeOwnerOf(f.registry).designate({});
     }
-    const after = (await f.registry.homeOwner().status()) as any;
+    const after = (await homeOwnerOf(f.registry).status()) as any;
     expect(after.routeGeneration).toBe(before.routeGeneration);
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "status", taskId: task.taskId })], { stopReason: "toolUse" }), fauxAssistantMessage("consumed once")]);
     const home = await f.registry.acquire(f.home.sessionId);
     await observeTaskAcknowledgement(f, task.taskId, () => home.prompt("Continue"));
-    expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    expect(await homeOwnerOf(f.registry).taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
     expect(home.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "task")).toContainEqual(expect.objectContaining({ message: expect.objectContaining({ isError: false }) }));
     evidence.push({ case: "inbox-disable-reenable", before, after });
   }, 20_000);
   it("blocks replacement until receipted maintainer redelivery and follows the logical route across chapter rollover", async () => {
     const f = await fixture();
-    const owner = f.registry.homeOwner(); const model = f.faux.getModel();
+    const owner = homeOwnerOf(f.registry); const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     let home = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);
@@ -1329,7 +1329,7 @@ describe("Home task production dispatch", () => {
 
   it("keeps the sealed predecessor openable while a rollover is pending, and routes attachments through home.prompt", async () => {
     const f = await fixture();
-    const owner = f.registry.homeOwner(); const model = f.faux.getModel();
+    const owner = homeOwnerOf(f.registry); const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const predecessor = f.home.sessionId;
     const home = await f.registry.acquire(predecessor);
@@ -1417,7 +1417,7 @@ describe("Home task production dispatch", () => {
         if (text === "Home first") { steeringEntered = true; await steeringGate; }
         return prompt(text, options);
       });
-      const first = firstSteer = f.registry.homeOwner().steerTask(f.home.sessionId, { ...control, text: "Home first" });
+      const first = firstSteer = homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, text: "Home first" });
       void first.catch(() => {});
       await waitFor(() => steeringEntered, "Home steering in session lane");
       const second = secondSteer = slot.prompt("Maintainer second", [], "steer");
@@ -1435,10 +1435,10 @@ describe("Home task production dispatch", () => {
       expect(called).toEqual(["Home first", "Maintainer second"]);
       expect(f.signals.filter(record => record.event === "home.task.control" && record.action === "steer")).toHaveLength(2);
       expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home first", "Maintainer second"]);
-      await expect(f.registry.homeOwner().steerTask(f.home.sessionId, { ...control, operationId: "stale-operation", text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
+      await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, operationId: "stale-operation", text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
       await expect(slot.steerHomeTask({ ...control, operationId: "stale-operation" }, "stale slot control")).rejects.toThrow(/stale|changed|conflict/i);
       // The removed controller generation is an unknown RPC parameter, refused before any Stop intent is written.
-      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
         receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
       const client = { id: "control-terminal", identity: "device:control-test", isLocal: true } as unknown as ClientContext;
       await expect(service.invoke(client, "home.stopTask",
@@ -1449,7 +1449,7 @@ describe("Home task production dispatch", () => {
       const canonicalUser = JSON.stringify(slot.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "user"));
       expect(canonicalUser).toContain("Home first");
       expect(canonicalUser.indexOf("Maintainer second")).toBeGreaterThan(canonicalUser.indexOf("Home first"));
-      await expect(f.registry.homeOwner().steerTask(f.home.sessionId, { ...control, text: "late" })).rejects.toThrow(/active|stale|settled|terminal/i);
+      await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, text: "late" })).rejects.toThrow(/active|stale|settled|terminal/i);
       evidence.push({ case: "shared-control-order", order: ["Home first", "Maintainer second"], staleRefused: true, afterReportRefused: true });
     } finally { releaseSteer?.(); release(); await Promise.allSettled([firstSteer, secondSteer]); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
   }, 20_000);
@@ -1489,10 +1489,10 @@ describe("Home task production dispatch", () => {
     try {
       await waitFor(() => entered, "SDK preflight barrier");
       const control = { taskId: run.taskId, operationId: run.operationId };
-      await expect(f.registry.homeOwner().stopTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
+      await expect(homeOwnerOf(f.registry).stopTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
       await expect(slot.stopHomeTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
       expect(cancelled).toBe(false);
-      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
         receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
       // A draining transport must keep status/exact Stop available; this is an
       // isolated service flag, never a live Gateway restart.
@@ -1510,11 +1510,11 @@ describe("Home task production dispatch", () => {
       output.mockRestore();
       expect(cancelled).toBe(true);
       const result = await run.completion.catch(() => undefined);
-      const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+      const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
       expect(await store.read(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "interrupted", reason: "stopped-before-conversation" } });
       if (!result) throw new Error("Live Stop did not settle");
       if (surface === "taskRPC") expect(await service.invoke(client, "home.stopTask", stopParams)).toEqual({ accepted: true });
-      expect(await f.registry.homeOwner().taskResult(run.taskId)).toEqual(result);
+      expect(await homeOwnerOf(f.registry).taskResult(run.taskId)).toEqual(result);
       expect(providerCalls).toBe(0);
       expect(result.stopIntent).toMatchObject({ operationId: run.operationId });
       expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "stopped-before-conversation", entryIds: [] });
@@ -1559,7 +1559,7 @@ describe("Home task production dispatch", () => {
       const first = await slot.steerHomeTask({ taskId: run.taskId, operationId: run.operationId }, "not delivered Home steer");
       const second = await slot.prompt("not delivered maintainer steer", [], "steer");
       expect(slot.snapshot().queuedItems.map(item => item.id)).toEqual([first.operationId, second.operationId]);
-      if (surface === "taskRPC") await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
+      if (surface === "taskRPC") await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
       else if (surface === "sessionStop") await slot.abort("agent", run.operationId);
       else { expect(expire).toBeDefined(); expire!(); }
       const result = await run.completion;
@@ -1648,14 +1648,14 @@ describe("Home task production dispatch", () => {
       await waitFor(() => entered, "second provider turn");
       const entries = slot.canonicalSessionEntries.bind(slot);
       vi.spyOn(slot, "canonicalSessionEntries").mockImplementation(() => { const values = entries(); const usage = values.find(value => value.type === "message" && value.message.role === "assistant"); return usage ? [...values, usage] : values; });
-      const one = await f.registry.homeOwner().taskResult(run.taskId);
-      const two = await f.registry.homeOwner().taskResult(run.taskId);
+      const one = await homeOwnerOf(f.registry).taskResult(run.taskId);
+      const two = await homeOwnerOf(f.registry).taskResult(run.taskId);
       const canonical = entries().find(value => value.type === "message" && value.message.role === "assistant")!;
       const usage = (canonical as any).message.usage;
       expect(one.spend).toMatchObject({ inputTokens: usage.input, cacheReadTokens: usage.cacheRead, cacheWriteTokens: usage.cacheWrite, outputTokens: usage.output });
       expect(two).toEqual(one);
       const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const terminal = { request: (_method: string, params: any) => f.registry.homeOwner().taskResult(params.taskId) };
+      const terminal = { request: (_method: string, params: any) => homeOwnerOf(f.registry).taskResult(params.taskId) };
       await runHomeInput(terminal as any, `/home task ${run.taskId}`);
       expect(output).toHaveBeenCalledWith(expect.stringContaining(`${one.spend!.inputTokens} input + ${one.spend!.cacheReadTokens} cache read + ${one.spend!.cacheWriteTokens} cache write + ${one.spend!.outputTokens} output tokens.`));
       output.mockRestore();
@@ -1677,7 +1677,7 @@ describe("Home task production dispatch", () => {
     await cp(namespace, copy, { recursive: true, preserveTimestamps: true });
     await rm(namespace, { recursive: true }); await rename(copy, namespace);
     await expect(dispatch(f, "before-confirmation")).rejects.toThrow(/reconfirmation/);
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(join(f.root, "receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "terminal-test", identity: "device:task-test", isLocal: true } as unknown as ClientContext;
     await expect(service.invoke(client, "home.reconfirmPermissions", { commandId: "confirm-permissions", unexpected: true })).rejects.toThrow(/unexpected|unknown/i);
@@ -1787,10 +1787,10 @@ describe("Home task production dispatch", () => {
     const home = await f.registry.acquire(f.home.sessionId);
     await home.prompt("Delegate this finite work");
     await waitFor(async () => {
-      try { return (await f.registry.homeOwner().taskResult("task-via-tool")).lifecycle === "terminal"; }
+      try { return (await homeOwnerOf(f.registry).taskResult("task-via-tool")).lifecycle === "terminal"; }
       catch { return false; }
     }, "delegate task terminal");
-    expect((await f.registry.homeOwner().taskResult("task-via-tool")).terminalEvidence?.outcome).toBe("final");
+    expect((await homeOwnerOf(f.registry).taskResult("task-via-tool")).terminalEvidence?.outcome).toBe("final");
     await waitFor(() => home.snapshot().configurationBlocker === null, "Home tool activation terminal");
     // The settled result wakes Home: the third Home request is that wake.
     await waitFor(() => homeCalls === 3, "wake request for the settled result");
@@ -1803,7 +1803,7 @@ describe("Home task production dispatch", () => {
     const f = await fixture();
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
-    const tasks = (f.registry.homeOwner() as any).tasks;
+    const tasks = (homeOwnerOf(f.registry) as any).tasks;
     let entered = false; let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     // The held step's late completion is joined before disposal removes its files.
@@ -1858,7 +1858,7 @@ describe("Home task production dispatch", () => {
 
   it("refuses a dispatch step that outlives its deadline and settles the task with the stage", async () => {
     const f = await fixture();
-    const tasks = (f.registry.homeOwner() as any).tasks;
+    const tasks = (homeOwnerOf(f.registry) as any).tasks;
     const originalTimer = globalThis.setTimeout;
     let expire: (() => void) | undefined;
     // Test-only deadline seam, as the 24-hour task deadline journey uses.
@@ -1914,7 +1914,7 @@ describe("Home task production dispatch", () => {
     expect(postReport).toBe(0);
     expect(f.notifications.filter(record => record.sessionId === run.sessionId)).toEqual([]);
     await expect(dispatch(f)).rejects.toThrow(/already|conflict/i);
-    expect(await f.registry.homeOwner().taskResult("task-one")).toEqual(result);
+    expect(await homeOwnerOf(f.registry).taskResult("task-one")).toEqual(result);
     const worker = await f.registry.acquire(run.sessionId);
     const path = worker.sessionFile!;
     const original = await readFile(path, "utf8");
@@ -1922,11 +1922,11 @@ describe("Home task production dispatch", () => {
     changed.find(entry => entry.id === ref.entryId).data.text = "edited evidence";
     try {
       await writeFile(path, changed.map(entry => JSON.stringify(entry)).join("\n") + "\n");
-      await expect(f.registry.homeOwner().taskResult("task-one")).rejects.toThrow(/contradictory|changed/);
+      await expect(homeOwnerOf(f.registry).taskResult("task-one")).rejects.toThrow(/contradictory|changed/);
     } finally { await writeFile(path, original); }
     const inputEntry = entries.find((entry: any) => entry.type === "message" && entry.message.role === "user")!;
     await worker.navigate(inputEntry.id, { summarize: false });
-    expect(await f.registry.homeOwner().taskResult("task-one")).toEqual(result);
+    expect(await homeOwnerOf(f.registry).taskResult("task-one")).toEqual(result);
     await expect(worker.fork(inputEntry.id)).rejects.toThrow(/task|identity/);
     expect(f.signals.filter(record => record.event === "home.task.transition").map(record => record.transition)).toEqual(["pending", "active", "terminal"]);
     expect(f.signals.find(record => record.event === "home.task.spend")).toMatchObject({ inputTokens: expect.any(Number) });
@@ -1948,7 +1948,7 @@ describe("Home task production dispatch", () => {
     });
     try {
       await cold.initialize(); await (cold as any).sessionCatalog.whenPublished();
-      await cold.homeOwner().recoverTasks();
+      await homeOwnerOf(cold).recoverTasks();
       await expect(cold.acquire(run.sessionId)).rejects.toThrow(/Referenced task/);
       expect(constructions).toBe(0);
       evidence.push({ case: "cold-missing-task", constructions, refused: true });
@@ -1960,7 +1960,7 @@ describe("Home task production dispatch", () => {
     { error: "Provider authentication failed: fixture-private-provider-detail", cause: "provider-error" },
   ].flatMap(scenario => [false, true].map(cold => ({ ...scenario, cold }))))("preserves $cause on a no-report task (cold=$cold)", async ({ error, cause, cold }) => {
     const f = await fixture();
-    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
     if (cold) {
       const update = store.update.bind(store);
       vi.spyOn(store, "update").mockImplementation(async (id, change) => {
@@ -1976,14 +1976,14 @@ describe("Home task production dispatch", () => {
       vi.restoreAllMocks();
       registry = await f.restart();
     } else await run.completion;
-    const result = await registry.homeOwner().taskResult(run.taskId);
+    const result = await homeOwnerOf(registry).taskResult(run.taskId);
     expect(result).toMatchObject({ lifecycle: "terminal", reportRef: null, terminalEvidence: {
       outcome: "unknown", reason: cold ? "cold-no-report" : "no-report", failureCause: cause,
       sessionId: run.sessionId, entryIds: [expect.any(String)],
     } });
-    const status = await registry.homeOwner().taskStatus(run.taskId);
+    const status = await homeOwnerOf(registry).taskStatus(run.taskId);
     expect(status.terminalEvidence).toEqual(result.terminalEvidence);
-    expect(await registry.homeOwner().taskTool(f.home.sessionId, { action: "list" })).toMatchObject({ tasks: expect.arrayContaining([
+    expect(await homeOwnerOf(registry).taskTool(f.home.sessionId, { action: "list" })).toMatchObject({ tasks: expect.arrayContaining([
       expect.objectContaining({ taskId: run.taskId, outcome: "unknown", failureCause: cause }),
     ]) });
     expect(status.subagentRuns.total).toBe(0);
@@ -2000,7 +2000,7 @@ describe("Home task production dispatch", () => {
     expect(JSON.parse(await readFile(await taskFile(f, run.taskId), "utf8")).terminalEvidence).toEqual(result.terminalEvidence);
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", failureCause: cause }));
     const restarted = await f.restart();
-    expect((await restarted.homeOwner().taskResult(run.taskId)).terminalEvidence).toEqual(result.terminalEvidence);
+    expect((await homeOwnerOf(restarted).taskResult(run.taskId)).terminalEvidence).toEqual(result.terminalEvidence);
     evidence.push({ case: `provider-failure-${cause}-cold-${cold}`, task: result, ownerSettlement: status.ownerSettlement });
   }, 20_000);
 

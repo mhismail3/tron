@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { existsSync } from "node:fs";
 import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -124,10 +124,10 @@ async function openRegistry(f: {
     config: { tronHome: f.tronHome } as unknown as GatewayConfig,
     modelRuntime: f.runtime,
     sessions: registry,
-    home: registry.homeOwner(),
+    home: homeOwnerOf(registry),
     receipts: new CommandReceiptStore(join(f.tronHome, "receipts")),
     broadcast: () => {},
-    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner(), registry }),
+    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => homeOwnerOf(registry), registry }),
     trust: new TrustService(f.agentDir),
   } as unknown as GatewayServiceDependencies);
   return { registry, service };
@@ -180,7 +180,7 @@ async function fixture(label: string, options: { cacheWarming?: boolean; virtual
   f.service = opened.service;
   await f.registry.initialize();
   // Gateway startup retires abandoned task identities after its listener serves (gateway-main).
-  await f.registry.homeOwner().recoverTasks();
+  await homeOwnerOf(f.registry).recoverTasks();
   return f;
 }
 
@@ -205,7 +205,7 @@ async function reopen(f: Fixture): Promise<void> {
   f.registry = opened.registry;
   f.service = opened.service;
   await f.registry.initialize();
-  await f.registry.homeOwner().recoverTasks();
+  await homeOwnerOf(f.registry).recoverTasks();
 }
 
 interface ContextEnvelope {
@@ -576,7 +576,7 @@ describe("Tron Home designation", () => {
     // never-written session is gone from the catalog, so the record is dangling.
     const f = await fixture("dangling");
     const designation = await designate(f, "home-designate-dangling");
-    expect(f.registry.homeOwner().profileFor(designation.sessionId)).toBe("home");
+    expect(homeOwnerOf(f.registry).profileFor(designation.sessionId)).toBe("home");
     await f.service.invoke(client, "home.disable", { commandId: "home-disable-dangling" });
     await reopen(f);
     // Let the restarted Gateway finish its first catalog cut, so membership is

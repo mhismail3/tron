@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 /**
  * `gateway/home` contention, publication and restart lock (K-0 §7 E0a follow-up,
@@ -167,7 +168,7 @@ describe("gateway/home contention, publication and restart lock", () => {
     restarted.script(Array.from({ length: 8 }, () => route));
     const mac = await restarted.connect("mac");
     // Read the owner, not the RPC, while waiting: a poll's count is host timing.
-    const owner = restarted.registry.homeOwner();
+    const owner = homeOwnerOf(restarted.registry);
     await waitFor(async () => (await owner.taskResult(TASK_ID)).wake?.state === "acknowledged", "the recovered result's wake to be acknowledged");
     await waitFor(() => callers.some((entry) => entry.phase === "restarted" && entry.caller === "home-wake"), "the recovered result's wake activation");
     await restarted.settled(homeSessionId);

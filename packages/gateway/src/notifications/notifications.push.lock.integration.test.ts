@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
 import { OwnedSessionDispatch } from "../kernel/delegation/owned-session-dispatch.js";
 import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { NotificationGrantStore } from "./grant-store.js";
@@ -64,7 +65,7 @@ describe("gateway/notifications push lock", () => {
         });
         // gateway-main's wiring, Home role resolved from the live registry.
         notifications = new NotificationService(new NotificationGrantStore(tronHome), relay, Date.now, () => {}, () => {}, () => {},
-          (sessionId) => gateway?.registry.homeOwner().chapterStateFor(sessionId).homeId !== undefined);
+          (sessionId) => (gateway ? homeOwnerOf(gateway.registry) : undefined)?.chapterStateFor(sessionId).homeId !== undefined);
         await notifications.initialize();
         return notifications;
       },

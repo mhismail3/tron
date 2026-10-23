@@ -9,6 +9,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 const homes: string[] = [];
 afterEach(async () => {
@@ -45,7 +46,7 @@ async function liveHome() {
   await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
   const home = await f.registry.acquire(f.home.sessionId);
   await watchersDeliver(f, userHome);
-  const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+  const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
     uploads: new UploadStore(join(f.root, "composer-uploads"), 1024),
     receipts: new CommandReceiptStore(join(f.root, "composer-receipts")) } as unknown as GatewayServiceDependencies);
   const client = { id: "resources-client", identity: "device:resources-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;

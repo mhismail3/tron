@@ -100,19 +100,14 @@ import {
 } from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { HomeOwner } from "../home/home-owner.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
-import type { HomeDiagnostic } from "../home/home-diagnostic.js";
-import { readHomeSessionEntry } from "../home/home-session-read.js";
-import type { HomeMemoryDiagnostic } from "../home/home-memory.js";
 import { ModelQueueOwner, modelQueueKey, modelQueueProjectionPath, type ModelQueueRecord } from "../providers/model-queue.js";
 import type { ModelQueueRole } from "../providers/model-queue-extension.js";
 import { ProviderUsageOwner } from "../providers/provider-usage.js";
 import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
-import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
-import { applyHomeCacheRetention, type HomeRequestRecord } from "../home/home-request-policy.js";
-import { homeModuleServices } from "../home/home-module.js";
+import { applyHomeCacheRetention } from "../home/home-request-policy.js";
+import type { HomeKernelPorts } from "../home/home-module.js";
 import {
   CatalogDiscovery,
   DEFAULT_CATALOG_DISCOVERY_LIMITS,
@@ -559,7 +554,6 @@ export class RuntimeRegistry {
   private knowledgeService: KnowledgeService | undefined;
   private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
   /** The one owner of Tron Home's designation for this installation. */
-  private readonly home: HomeOwner;
   /** The model fallback queues (providers/model-queue.ts); absent without a Gateway model runtime. */
   readonly modelQueue: ModelQueueOwner | undefined;
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
@@ -718,11 +712,6 @@ export class RuntimeRegistry {
        * examined by a later pass; the report keeps the stop visible. */
       artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
       extensionArtifactWarning?: (warning: { reason: import("../kernel/projection/extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
-      /** One Home designation lifecycle outcome, for the Gateway log. */
-      homeDiagnostic?: HomeDiagnostic;
-      /** Home memory's compactor calls. Production omits it: they run on the
-       * background model queue, on the Gateway's ModelRuntime. */
-      homeMemorySummarizer?: () => EpisodicSummarizer;
       /** Provider usage for the queues' 95% skip; the transport shares this owner. */
       providerUsage?: Pick<ProviderUsageOwner, "read">;
       /** Where the queue owner logs each skipped model. */
@@ -732,16 +721,7 @@ export class RuntimeRegistry {
        * on it (#480). Only a registry without a Gateway, as in tests, omits it;
        * Home then gets a runtime of its own, as an ordinary session does. */
       gatewayModelRuntime?: ModelRuntime;
-      /** Where Home's memory reports its bounded records. */
-      homeMemoryDiagnostic?: (record: HomeMemoryDiagnostic) => void;
       homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
-      /** Where Home's request seam reports one record per activation and per
-       * refusal. */
-      homeRequestDiagnostic?: (record: HomeRequestRecord) => void;
-      /** Transport injection for Home's web research tools, the same seam
-       * capture's fetch exposes; production omits it and uses the pinned
-       * DNS-safe transport. */
-      homeWebTransport?: import("../home/home-research-tools.js").HomeResearchTransport;
     },
   ) {
     this.openAIModelEligibility = options.openAIModelEligibility ?? new OpenAIModelEligibility();
@@ -777,10 +757,36 @@ export class RuntimeRegistry {
       projectionPath: modelQueueProjectionPath(options.tronHome),
       ...(options.modelQueueDiagnostic ? { log: options.modelQueueDiagnostic } : {}),
     }) : undefined;
-    this.home = new HomeOwner({
-      tronHome: options.tronHome,
-      agentDir: options.agentDir,
-      trust: options.trust,
+    this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
+    this.readHeapSample = options.heapSample ?? (() => ({
+      usedBytes: process.memoryUsage().heapUsed,
+      limitBytes: getHeapStatistics().heap_size_limit,
+    }));
+    this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
+    this.configuredSessionDir = SettingsManager.create(
+      process.cwd(),
+      options.agentDir,
+      { projectTrusted: false },
+    ).getSessionDir();
+    for (const [name, value] of Object.entries(this.catalogDiscoveryLimits())) {
+      if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid session catalog ${name} bound`);
+    }
+  }
+
+  get listRevision(): number {
+    return this.revision;
+  }
+
+  /** The composition's one workspace (`workspaceModule`), shared by capability stores. */
+  knowledgeWorkspace(): TronWorkspace { return this.workspace; }
+  get moduleHost(): ModuleHost { return this.options.modules; }
+  get knowledge(): KnowledgeService | undefined { return this.knowledgeService; }
+  displayModuleServices() { return { artifacts: this.displayArtifacts, liveViews: this.options.browserLiveViews }; }
+  notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
+  /** The generic K1/K5 operations and reads Home's owner and module are built over
+   * (k0-kernel.md §5); Home's module constructs the owner. */
+  homeKernel(): HomeKernelPorts {
+    return {
       sessions: {
         createHomeSession: async (cwd) => (await this.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
         currentSessionModel: sessionId => this.slots.get(sessionId)?.snapshot().model ?? null,
@@ -847,55 +853,21 @@ export class RuntimeRegistry {
         canonicalEntries: (sessionId) => this.canonicalEntries(sessionId),
         createRuntimeOver: (sessionId, build) => this.createRuntimeOver(sessionId, build),
       },
-      ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
-      workspace: this.workspace,
       memoryModels: () => this.modelQueueOf("background", "home"),
-      memorySummarizer: options.homeMemorySummarizer ?? (() => {
+      memorySummarizer: () => {
         const queue = this.modelQueue;
         if (!queue) throw new GatewayError("unsupported", "Home memory needs the Gateway model runtime");
         return createQueueSummarizer({ complete: async (role, request, signal) =>
           queue.complete(role, request, signal, await this.modelQueueOf(role, "home")) });
-      }),
-      ...(options.homeMemoryDiagnostic ? { memoryDiagnostic: options.homeMemoryDiagnostic } : {}),
-      ...(options.homeRequestDiagnostic ? { requestDiagnostic: options.homeRequestDiagnostic } : {}),
+      },
       taskSessions: this,
-      ...(options.notifications ? { notifications: options.notifications } : {}),
-      ...(options.machineId ? { machineId: options.machineId } : {}),
-      ...(options.homeTaskDiagnostic ? { taskDiagnostic: options.homeTaskDiagnostic } : {}),
       knowledge: () => this.knowledgeService,
-    });
-    this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
-    this.readHeapSample = options.heapSample ?? (() => ({
-      usedBytes: process.memoryUsage().heapUsed,
-      limitBytes: getHeapStatistics().heap_size_limit,
-    }));
-    this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
-    this.configuredSessionDir = SettingsManager.create(
-      process.cwd(),
-      options.agentDir,
-      { projectTrusted: false },
-    ).getSessionDir();
-    for (const [name, value] of Object.entries(this.catalogDiscoveryLimits())) {
-      if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid session catalog ${name} bound`);
-    }
-  }
-
-  get listRevision(): number {
-    return this.revision;
-  }
-
-  /** The composition's one workspace (`workspaceModule`), shared by capability stores. */
-  knowledgeWorkspace(): TronWorkspace { return this.workspace; }
-  get moduleHost(): ModuleHost { return this.options.modules; }
-  get knowledge(): KnowledgeService | undefined { return this.knowledgeService; }
-  displayModuleServices() { return { artifacts: this.displayArtifacts, liveViews: this.options.browserLiveViews }; }
-  notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
-  homeModuleServices() { return homeModuleServices(this.home, this.options, {
+      readSearchCut: sessionId => this.readSearchCut(sessionId),
       runtime: async () => ({
         runtime: applyHomeCacheRetention(sessionRuntimeView(this.options.gatewayModelRuntime ?? await this.dependencies().createModelRuntime())),
         ownership: this.options.gatewayModelRuntime ? "borrowed" as const : "owned" as const,
       }),
-      knowledge: this.knowledgeService, changes: () => this.settingsOwners?.changes,
+      changes: () => this.settingsOwners?.changes,
       workerChoice: {
         homeRuntime: async sessionId => (await this.acquire(sessionId)).snapshot(),
         settings: () => this.settingsOwners?.model,
@@ -903,9 +875,9 @@ export class RuntimeRegistry {
         availability: (role, signal, queue) => this.modelQueue?.availability(role, signal, queue),
         model: (provider, id) => this.options.gatewayModelRuntime?.getModel(provider, id),
       },
-      read: (request, signal) => readHomeSessionEntry(this, request, signal),
-    });
+    };
   }
+
   setSearchInvalidator(invalidator: (sessionID: string, nextSessionID?: string) => void): void {
     this.searchInvalidator = invalidator;
   }
@@ -924,8 +896,8 @@ export class RuntimeRegistry {
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
-  /** The Home designation owner for this installation. */
-  homeOwner(): HomeOwner { return this.home; }
+  /** Whether a session belongs to a lineage (a Home chapter): a generic K1 read. */
+  isLineageMember(sessionId: string): boolean { return this.lineage().state(sessionId).lineageId !== undefined; }
 
   /** One construction flight per session (K1): a live runtime is returned as
    * `existing`, a running flight is joined, otherwise `construct` runs once. */

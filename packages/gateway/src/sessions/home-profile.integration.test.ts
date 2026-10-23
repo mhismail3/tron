@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's learned profile (#731), end to end: the `profile` tool called by a
  * faux Home model inside real activations, the real Knowledge store behind it,
@@ -242,12 +242,12 @@ async function fixture(label: string): Promise<Fixture> {
     notifications: { enqueue: async (push: { title: string; message: string }) => { pushes.push(push); } },
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
-    knowledge, home: registry.homeOwner(),
+    knowledge, home: homeOwnerOf(registry),
   } as unknown as GatewayServiceDependencies);
 
   // Task recovery runs after listen, as in gateway-main; delegation is refused before it.
-  await registry.homeOwner().recoverTasks();
-  const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
+  await homeOwnerOf(registry).recoverTasks();
+  const designation = await homeOwnerOf(registry).designate({ model: MODEL }, () => MODEL);
   await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);
   const state: Fixture = { registry, knowledge, store, project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, broadcasts, pushes };
@@ -472,7 +472,7 @@ describe("Tron Home learned profile", () => {
     expect(profileResults(retire.last.messages)).toEqual([expect.objectContaining({ status: "saved", action: "retire", id: replacement.id,
       previousText: "Use metric units, and state conversions." })]);
     // `home.profileList` (Manage Home's Profile row) classifies the notes as the instructions do.
-    const listed = await f.registry.homeOwner().profileList();
+    const listed = await homeOwnerOf(f.registry).profileList();
     expect(listed.unclassified).toBe(0);
     expect(listed.items.map(({ id, kind, text, confirmed, status }) => ({ id, kind, text, confirmed, status }))).toEqual([
       { id: original!.id, kind: "preference", text: "Use metric units everywhere.", confirmed: false, status: "superseded" },

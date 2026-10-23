@@ -8,6 +8,7 @@ import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT } from "../../test-suppo
 import { HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "./home-task-subagents.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { closeSubagentFixtures, bound, childModel, captureTimer, captureDeadline, launchResults, asyncState, holdingWorkflowLaunch, workflowChildRunId, holdingAsyncLaunch, waitBetweenTurns, toolResultText, type FauxContext } from "../../test-support/home-task-subagents-support.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 afterEach(closeSubagentFixtures);
 
@@ -33,7 +34,7 @@ describe("Home task subagents: settlement and stop", () => {
         return fauxAssistantMessage("Still no report after the reminder");
       },
     ]);
-    const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, {
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, {
       taskId: "owner-no-report", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: f.model.id },
     });
@@ -41,7 +42,7 @@ describe("Home task subagents: settlement and stop", () => {
     expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "no-report" });
     if (ending === "error") expect(result.terminalEvidence).toHaveProperty("failureCause", "provider-error");
     else expect(result.terminalEvidence).not.toHaveProperty("failureCause");
-    const status = await f.registry.homeOwner().taskStatus(run.taskId);
+    const status = await homeOwnerOf(f.registry).taskStatus(run.taskId);
     const stoppedAtEnd = ending === "error" ? 1 : 0;
     expect(status).toMatchObject({ subagents: { started: 1, stoppedAtEnd }, subagentRuns: { total: 0, runs: [] },
       ownerSettlement: { taskId: run.taskId, sessionId: run.sessionId, operationId: run.operationId, stoppedAtEnd,
@@ -87,10 +88,10 @@ describe("Home task subagents: settlement and stop", () => {
       for (const [name, corrupt] of cases) {
         const changed = structuredClone(rows); corrupt(changed);
         await writeFile(path, changed.map(row => JSON.stringify(row)).join("\n") + "\n");
-        expect((await f.registry.homeOwner().taskStatus(run.taskId)).ownerSettlement, name).toBeNull();
+        expect((await homeOwnerOf(f.registry).taskStatus(run.taskId)).ownerSettlement, name).toBeNull();
       }
     } finally { await writeFile(path, original); }
-    expect((await f.registry.homeOwner().taskStatus(run.taskId)).ownerSettlement).toEqual(status.ownerSettlement);
+    expect((await homeOwnerOf(f.registry).taskStatus(run.taskId)).ownerSettlement).toEqual(status.ownerSettlement);
 
     // Replace the durable task identity while the canonical read is in flight.
     const taskDir = join(f.tronHome, "gateway/home/tasks");
@@ -102,7 +103,7 @@ describe("Home task subagents: settlement and stop", () => {
       await writeFile(taskPath, JSON.stringify({ ...JSON.parse(taskBytes), operationId: "replacement-operation" }));
       return entries;
     });
-    try { await expect(f.registry.homeOwner().taskStatus(run.taskId)).rejects.toThrow(/changed during status inspection/); }
+    try { await expect(homeOwnerOf(f.registry).taskStatus(run.taskId)).rejects.toThrow(/changed during status inspection/); }
     finally { gate.mockRestore(); await writeFile(taskPath, taskBytes); }
   }, 60_000);
 
@@ -138,7 +139,7 @@ describe("Home task subagents: settlement and stop", () => {
     expect(child.abortedRequests()).toBe(0);
     const slot = await f.registry.acquire(run.sessionId);
     expect(slot.catalogHasActiveSubagents).toBe(false);
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 2, stoppedAtEnd: 0 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 2, stoppedAtEnd: 0 } });
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.subagents", started: 2, stoppedAtEnd: 0 }));
   }, 60_000);
 
@@ -157,7 +158,7 @@ describe("Home task subagents: settlement and stop", () => {
     ]);
     const run = await dispatch(f);
     await waitFor(() => child.heldRequests() === 1, "async child live", bound);
-    await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
+    await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "async-launch");
@@ -177,7 +178,7 @@ describe("Home task subagents: settlement and stop", () => {
     await writeFile("test-results/stopped-subagent-mission.json", JSON.stringify(evidence, null, 2));
     expect(evidence).toEqual({ runState: "stopped", missions: [{ status: "cancelled", run: "stopped" }] });
     await waitFor(() => child.abortedRequests() === 1, "stopped async child request closed", bound);
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
     // Nothing follows settlement: no model request and no canonical entry after it.
     const slot = await f.registry.acquire(run.sessionId);
     const entries = slot.canonicalSessionEntries().length;
@@ -216,7 +217,7 @@ describe("Home task subagents: settlement and stop", () => {
     expect(await asyncState(workflowDir)).toBe("complete");
     expect(await asyncState(join(dirname(workflowDir), await workflowChildRunId(workflowDir)))).toBe("complete");
     expect(child.abortedRequests()).toBe(0);
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
   it("stops a running async workflow when the task is stopped, and its held child with it", async () => {
@@ -231,13 +232,13 @@ describe("Home task subagents: settlement and stop", () => {
     ]);
     const run = await dispatch(f);
     await waitFor(() => child.heldRequests() === 1, "workflow child live", bound);
-    await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
+    await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
     expect(await asyncState(launch!.details!.asyncDir as string)).toBe("stopped");
     await waitFor(() => child.abortedRequests() === 1, "stopped workflow child request closed", bound);
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
   it.each(["ordinary", "late runner terminal state"])("stops a workflow's async child that outlives its completed workflow when the task is stopped while it waits (%s)", async (interleaving) => {
@@ -268,7 +269,7 @@ describe("Home task subagents: settlement and stop", () => {
     const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => child.heldRequests() === 1, "detached child live", bound);
     await waitBetweenTurns(slot);
-    await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
+    await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
@@ -277,7 +278,7 @@ describe("Home task subagents: settlement and stop", () => {
     expect(await asyncState(workflowDir)).toBe("complete");
     expect(await asyncState(join(dirname(workflowDir), await workflowChildRunId(workflowDir)))).toBe("stopped");
     await waitFor(() => child.abortedRequests() === 1, "stopped workflow child request closed", bound);
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
   it("starts no turn when an async run completes before its task reports", async () => {
@@ -327,7 +328,7 @@ describe("Home task subagents: settlement and stop", () => {
     expect(result.terminalEvidence).toMatchObject({ outcome: "limited", reason: "deadline" });
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "async-launch");
     expect(await asyncState(launch!.details!.asyncDir as string)).toBe("stopped");
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
   it("records unknown with detached-work-outlived-task once the stop join is bounded, without waiting for the deadline", async () => {
@@ -351,14 +352,14 @@ describe("Home task subagents: settlement and stop", () => {
       stopRefusals += 1;
       throw new Error("injected stop refusal");
     });
-    await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
+    await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     await waitFor(() => stopRefusals === 1, "stop refused", bound);
     await waitFor(() => stopJoin.armed(), "stop join bounded", bound);
     stopJoin.expire();
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "detached-work-outlived-task" });
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.detached-work", reason: "detached-work-outlived-task" }));
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: null } });
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: null } });
     // The run is not dropped: it is still live, and it finishes once its child is released.
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "async-launch");
     expect(await asyncState(launch!.details!.asyncDir as string)).toBe("running");

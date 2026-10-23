@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
@@ -194,7 +194,7 @@ describe("Home materialization crash recovery", () => {
     try {
       await awaitsWithin(frozen.started, "claim durably written");
       fresh = await makeRegistry(f.root);
-      expect(fresh.registry.homeOwner().reservedChapter(sessionId)).toMatchObject({ state: "materializing", attemptId });
+      expect(homeOwnerOf(fresh.registry).reservedChapter(sessionId)).toMatchObject({ state: "materializing", attemptId });
       expect((await ledger(f.recordPath)).chapters.at(-1).expectedPath).toBeUndefined();
       await noReplay(f, fresh.dispatches, 0);
       report.push({ cut: "claim", recovered: "materializing", replayed: false });
@@ -218,8 +218,8 @@ describe("Home materialization crash recovery", () => {
     try {
       await awaitsWithin(frozen.started, "path durably recorded before flush");
       fresh = await makeRegistry(f.root);
-      expect(fresh.registry.homeOwner().reservedChapter(sessionId)).toMatchObject({ state: "materializing", expectedPath: f.expectedPath });
-      const recovery = await fresh.registry.homeOwner().materializer.materialize(sessionId).then(
+      expect(homeOwnerOf(fresh.registry).reservedChapter(sessionId)).toMatchObject({ state: "materializing", expectedPath: f.expectedPath });
+      const recovery = await homeOwnerOf(fresh.registry).materializer.materialize(sessionId).then(
         slot => ({ blocked: false, reusedPath: slot.sessionFile === f.expectedPath }),
         error => ({ blocked: true, reason: error instanceof Error ? error.message : String(error) }),
       );
@@ -250,10 +250,10 @@ describe("Home materialization crash recovery", () => {
     try {
       await awaitsWithin(frozen.started, "conversation flushed before publication");
       fresh = await makeRegistry(f.root);
-      expect(fresh.registry.homeOwner().reservedChapter(sessionId)).toMatchObject({ state: "materializing", expectedPath: f.expectedPath });
-      const rebuilt = await fresh.registry.homeOwner().materializer.materialize(sessionId);
+      expect(homeOwnerOf(fresh.registry).reservedChapter(sessionId)).toMatchObject({ state: "materializing", expectedPath: f.expectedPath });
+      const rebuilt = await homeOwnerOf(fresh.registry).materializer.materialize(sessionId);
       expect(rebuilt.sessionFile).toBe(f.expectedPath);
-      expect(fresh.registry.homeOwner().reservedChapter(sessionId)).toBeUndefined();
+      expect(homeOwnerOf(fresh.registry).reservedChapter(sessionId)).toBeUndefined();
       expect((await ledger(f.recordPath)).chapters.at(-1)).toMatchObject({ state: "active", sessionId });
       expect(await readFile(f.expectedPath)).toEqual(before);
       await noReplay(f, fresh.dispatches, 1);
@@ -280,7 +280,7 @@ describe("Home materialization crash recovery", () => {
     try {
       await awaitsWithin(frozen.started, "publication renamed before directory fsync");
       fresh = await makeRegistry(f.root);
-      expect(fresh.registry.homeOwner().reservedChapter(sessionId)).toBeUndefined();
+      expect(homeOwnerOf(fresh.registry).reservedChapter(sessionId)).toBeUndefined();
       expect((await ledger(f.recordPath)).chapters.at(-1)).toMatchObject({ state: "active", sessionId });
       const rebuilt = await fresh.registry.acquire(sessionId);
       expect(rebuilt.sessionFile).toBe(f.expectedPath);
@@ -306,7 +306,7 @@ describe("Home materialization crash recovery", () => {
     let release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });
     try {
-      const designation = await registry.homeOwner().designate({ model }, () => model);
+      const designation = await homeOwnerOf(registry).designate({ model }, () => model);
       await setHomeMemoryModels(registry, [model]);
       const live = await registry.acquire(designation.sessionId);
       await live.prompt("persist one canonical Home response");
@@ -315,18 +315,18 @@ describe("Home materialization crash recovery", () => {
       const retire = live.retireAfterSettled.bind(live);
       vi.spyOn(live, "retireAfterSettled").mockImplementation(async () => { await held; await retire(); });
       publication.failAfterVisibleWrite = true;
-      await expect(awaitsWithin(registry.homeOwner().disable(), "disable settles without awaiting retirement", 5_000)).rejects.toThrow("injected directory synchronization failure");
-      expect(await registry.homeOwner().status()).toMatchObject({ available: false, reason: "Home ledger publication is being reconciled" });
-      expect(() => registry.homeOwner().routeBinding()).toThrow(/unavailable/);
+      await expect(awaitsWithin(homeOwnerOf(registry).disable(), "disable settles without awaiting retirement", 5_000)).rejects.toThrow("injected directory synchronization failure");
+      expect(await homeOwnerOf(registry).status()).toMatchObject({ available: false, reason: "Home ledger publication is being reconciled" });
+      expect(() => homeOwnerOf(registry).routeBinding()).toThrow(/unavailable/);
       await expect(registry.acquire(designation.sessionId)).rejects.toThrow(/rebuilding/);
       expect(registry.retainLiveSession(designation.sessionId)).toBeUndefined();
       expect(lifecycle.filter(record => record.reason === "publication-uncertain")).toEqual([]);
       release();
       await waitFor(async () => {
-        const status = await registry.homeOwner().status();
+        const status = await homeOwnerOf(registry).status();
         return status.available ? status : undefined;
       }, "Home reloaded and all stale slots retired", { boundMs: 5_000, intervalMs: 25 });
-      expect(await registry.homeOwner().status()).toMatchObject({ available: true, enabled: false });
+      expect(await homeOwnerOf(registry).status()).toMatchObject({ available: true, enabled: false });
       const rebuilt = await registry.acquire(designation.sessionId);
       // Compare identity as a scalar: failure reporting must not traverse an
       // obsolete slot's retired extension-host getters.

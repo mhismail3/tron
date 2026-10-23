@@ -9,6 +9,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import type { Resolution } from "../kernel/settings/tool-contract.js";
+import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 // Real Registry/Pi/provider/RPC boundaries, not declaration-table assertions.
 // This RED checkpoint names the approved behavior before changing any owner.
@@ -22,11 +23,11 @@ afterAll(async () => {
 async function setup() {
   const f = await fixture();
   const dependencies = { registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway };
-  const { settingsModel, settingsChanges } = settingsDependencies({ ...dependencies, sessions: f.registry, home: () => f.registry.homeOwner() });
+  const { settingsModel, settingsChanges } = settingsDependencies({ ...dependencies, sessions: f.registry, home: () => homeOwnerOf(f.registry) });
   const service = new GatewayService({
     config: { machineId: "settings-machine", machineGroupID: "settings-group", machineName: "Test Mac", agentDir: f.agentDir, tronHome: f.tronHome },
     modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry,
-    home: f.registry.homeOwner(), receipts: new CommandReceiptStore(f.tronHome), broadcast: () => {},
+    home: homeOwnerOf(f.registry), receipts: new CommandReceiptStore(f.tronHome), broadcast: () => {},
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
   const client = { id: "settings-phone", identity: "local", isLocal: true, isSubscribed: () => true,
@@ -311,7 +312,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     const home = await f.registry.acquire(f.home.sessionId);
     await home.prompt("Delegate the model precedence check");
     await waitFor(() => home.snapshot().configurationBlocker === null, "Home delegation turn settled");
-    await waitFor(async () => (await f.registry.homeOwner().taskStatus(taskId)).lifecycle === "terminal", "worker terminal");
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus(taskId)).lifecycle === "terminal", "worker terminal");
     evidence.push({ case: `worker ${mode} admission Project precedence`, observed, projectModel: f.model.id });
     expect(observed).toEqual([f.model.id]);
   });

@@ -316,7 +316,7 @@ export class SessionSearchService {
     this.sliceStartedAt = performance.now();
     const catalog = await this.sessions.catalog("user");
     // Home owns its cross-chapter memory route; session_read opens other roots.
-    const eligible = catalog.sessions.filter(session => !this.sessions.homeOwner().isHomeChapter(session.id));
+    const eligible = catalog.sessions.filter(session => !this.sessions.isLineageMember(session.id));
     this.coverageSessionsTotal = eligible.length;
     this.coverageOmittedSessions = 0;
     this.coverageReason = undefined;
@@ -497,7 +497,7 @@ export class SessionSearchService {
     await awaitWithAbort(this.dirtyRefresh, signal);
     try {
       const catalog = await awaitWithAbort(this.sessions.catalog("user"), signal);
-      const eligible = catalog.sessions.filter(session => !this.sessions.homeOwner().isHomeChapter(session.id));
+      const eligible = catalog.sessions.filter(session => !this.sessions.isLineageMember(session.id));
       this.coverageSessionsTotal = eligible.length;
       const stats = this.index.stats();
       this.coverageOmittedSessions = Math.max(0, eligible.length - stats.sessionsIndexed);
@@ -536,9 +536,9 @@ export class SessionSearchService {
 
   private async loadDocument(sessionId: string): Promise<SearchDocument | undefined> {
     try {
-      if (this.sessions.homeOwner().isHomeChapter(sessionId)) return undefined;
+      if (this.sessions.isLineageMember(sessionId)) return undefined;
       const cut = await this.sessions.readSearchCut(sessionId);
-      if (this.sessions.homeOwner().isHomeChapter(sessionId)) return undefined;
+      if (this.sessions.isLineageMember(sessionId)) return undefined;
       const boundary = cut.forkBoundary;
       const branch = validateSearchBranch(cut.entries, boundary, cut.leafEntryId);
       const entries = extractSearchTexts(branch.entries);

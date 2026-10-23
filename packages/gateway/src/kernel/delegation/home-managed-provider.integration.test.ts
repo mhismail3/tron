@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
@@ -81,7 +81,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
     const first = await openRegistry();
     const ordinary = await first.create(cwd);
     await assertProfile(ordinary, "ordinary", "ordinary-create");
-    const designation = await first.homeOwner().designate({ model }, () => model);
+    const designation = await homeOwnerOf(first).designate({ model }, () => model);
     const home = await first.acquire(designation.sessionId);
     await assertProfile(home, "home", "home-first-runtime");
     await home.reload(false, true, true);
@@ -91,10 +91,10 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
     await home.prompt("Persist this Home chapter for cold acquisition");
     await waitFor(() => home.snapshot().configurationBlocker === null, "Home persisted turn");
     expect(await readFile(home.sessionFile!, "utf8")).toContain("persisted Home reply");
-    await first.homeOwner().disable();
+    await homeOwnerOf(first).disable();
     expect(await first.acquire(designation.sessionId)).toBe(home);
     await assertProfile(home, "ordinary", "home-disable");
-    await first.homeOwner().designate({ model }, () => model);
+    await homeOwnerOf(first).designate({ model }, () => model);
     expect(await first.acquire(designation.sessionId)).toBe(home);
     await assertProfile(home, "home", "home-reenable");
     await assertProfile(ordinary, "ordinary", "ordinary-after-designation");

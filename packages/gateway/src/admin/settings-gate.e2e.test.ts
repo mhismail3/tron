@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -115,14 +115,14 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   // The fixture's clock: expiry is tested by advancing it, never by waiting.
   let clock = Date.parse("2026-10-11T12:00:00.000Z");
   const { settingsModel, settingsChanges } = settingsDependencies({
-    agentDir, tronHome, trust, modelRuntime, sessions: registry, home: () => registry.homeOwner(), registry, now: () => new Date(clock),
+    agentDir, tronHome, trust, modelRuntime, sessions: registry, home: () => homeOwnerOf(registry), registry, now: () => new Date(clock),
     toolCatalog: async target => target.kind === "home" ? registry.homeToolCatalog() : target.kind === "session" ? registry.liveToolCatalog(target.sessionId) : [],
   });
   const pushes: Array<{ kind: string; title?: string; message: string; sessionId: string; category?: string }> = [];
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
-    modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, home: registry.homeOwner(), receipts: new CommandReceiptStore(tronHome),
+    modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, home: homeOwnerOf(registry), receipts: new CommandReceiptStore(tronHome),
     uploads: new UploadStore(tronHome, DEFAULT_MAX_UPLOAD_BYTES),
     // The push owner's admission boundary, recorded: delivery is not under test.
     notifications: { enqueue: async (input: { kind: string; title?: string; message: string; sessionId: string; category?: string }) => { pushes.push(input); return "queued"; } },
@@ -174,7 +174,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
   const designateHome = async () => {
-    const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
+    const designation = await homeOwnerOf(registry).designate({ model: MODEL }, () => MODEL);
     await setHomeMemoryModels(registry, [MEMORY_MODEL]);
     return registry.acquire(designation.sessionId);
   };
@@ -230,7 +230,7 @@ describe("settings risk gate", () => {
 
   it("a model picked at designation is Home's saved model and serves its next turn", async () => {
     const f = await fixture();
-    const designation = await f.registry.homeOwner().designate({ model: MEMORY_MODEL }, () => MODEL);
+    const designation = await homeOwnerOf(f.registry).designate({ model: MEMORY_MODEL }, () => MODEL);
     await setHomeMemoryModels(f.registry, [MEMORY_MODEL]);
     const home = await f.registry.acquire(designation.sessionId);
     const served: string[] = [];
@@ -274,8 +274,8 @@ describe("settings risk gate", () => {
     await turn();
     expect(served).toEqual([MEMORY_MODEL.id, MODEL.id]);
     await save(MEMORY_MODEL);
-    await f.registry.homeOwner().disable();
-    const enabled = await f.registry.homeOwner().designate({}, () => MODEL);
+    await homeOwnerOf(f.registry).disable();
+    const enabled = await homeOwnerOf(f.registry).designate({}, () => MODEL);
     expect(enabled.sessionId).toBe(home.id);
     await turn();
     expect(served).toEqual([MEMORY_MODEL.id, MODEL.id, MEMORY_MODEL.id]);
@@ -374,13 +374,13 @@ describe("settings risk gate", () => {
     const window = first.snapshot();
     await first.setContextWindow(window.model!.provider, window.model!.id, 64_000, window.revision, window.runtimeGeneration);
     const choices = first.settingsSessionLayer();
-    const owner = f.registry.homeOwner() as unknown as { options: { sessions: { chapterMetrics: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } } };
+    const owner = homeOwnerOf(f.registry) as unknown as { options: { sessions: { chapterMetrics: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } } };
     const metrics = owner.options.sessions.chapterMetrics;
     owner.options.sessions.chapterMetrics = async () => ({ bytes: 0, entries: 50_001, quiescent: true });
     f.faux.setResponses([fauxAssistantMessage("chapter one complete")]);
     await first.prompt("Only the first chapter contains this message.");
     const successor = await waitFor(async () => {
-      const status = await f.registry.homeOwner().status();
+      const status = await homeOwnerOf(f.registry).status();
       return status.sessionId && status.sessionId !== first.id ? status.sessionId : undefined;
     }, "Home chapter reservation");
     owner.options.sessions.chapterMetrics = metrics;
@@ -662,7 +662,7 @@ describe("settings risk gate", () => {
     await reopened.initialize();
     await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "compaction catalog cut");
     settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime, sessions: reopened,
-      home: () => reopened.homeOwner(), registry: reopened });
+      home: () => homeOwnerOf(reopened), registry: reopened });
     const resumed = await reopened.acquire(parentId);
     expect(resumed.settingsSessionLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
     expect(resumed.snapshot().compactionPolicy?.next).toMatchObject({ enabled: false, reserveTokens: 4_096, keepRecentTokens: 12_000,
@@ -802,7 +802,7 @@ describe("settings risk gate", () => {
     await reopened.initialize();
     await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "resumed catalog cut");
     settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime,
-      sessions: reopened, home: () => reopened.homeOwner(), registry: reopened });
+      sessions: reopened, home: () => homeOwnerOf(reopened), registry: reopened });
     const resumed = await reopened.acquire(fork.sessionId);
     expect(resumed.settingsSessionLayer().settings).toEqual(expectedChat);
     expect(resumed.settingsSessionLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true, from: "global" }) });
@@ -1039,9 +1039,9 @@ describe("settings risk gate", () => {
       f.faux.setResponses(Array.from({ length: 8 }, () => worker(taskId, value, expected, marked)));
       await home.prompt(`Delegate ${taskId}`);
       await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home delegation turn");
-      await waitFor(async () => (await f.registry.homeOwner().taskStatus(taskId).catch(() => undefined))?.lifecycle === "terminal" || undefined, `task ${taskId} terminal`);
+      await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus(taskId).catch(() => undefined))?.lifecycle === "terminal" || undefined, `task ${taskId} terminal`);
       // The result wakes Home; the next delegation starts once that wake is acknowledged.
-      await waitFor(async () => (await f.registry.homeOwner().taskResult(taskId).catch(() => undefined) as { wake?: { state?: string } } | undefined)?.wake?.state === "acknowledged" || undefined, `task ${taskId} acknowledged`);
+      await waitFor(async () => (await homeOwnerOf(f.registry).taskResult(taskId).catch(() => undefined) as { wake?: { state?: string } } | undefined)?.wake?.state === "acknowledged" || undefined, `task ${taskId} acknowledged`);
       await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home wake settled");
     };
     // The fixture's settings carry no retry value; the worker's change sets it.
@@ -1069,11 +1069,11 @@ describe("settings risk gate", () => {
   it("Home changes a running worker's model and thinking from its next request, with an explicit signal", async () => {
     const f = await homeTaskFixture();
     const { settingsModel, settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway,
-      sessions: f.registry, home: () => f.registry.homeOwner(), registry: f.registry });
+      sessions: f.registry, home: () => homeOwnerOf(f.registry), registry: f.registry });
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
     const service = new GatewayService({
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
-      modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry, home: f.registry.homeOwner(),
+      modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(f.tronHome), uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES),
       notifications: { enqueue: async () => "queued" }, broadcast: () => {},
       globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
@@ -1128,7 +1128,7 @@ describe("settings risk gate", () => {
 
     await homeSays("Delegate live-worker", "delegate", { taskId: "live-worker", title: "Live settings worker", intent: "Work in two steps", target: f.cwd });
     await waitFor(() => workerRequests.length >= 1 || undefined, "worker request in flight");
-    const workerSessionId = (await f.registry.homeOwner().taskStatus("live-worker")).sessionId!;
+    const workerSessionId = (await homeOwnerOf(f.registry).taskStatus("live-worker")).sessionId!;
     const worker = await f.registry.acquire(workerSessionId);
     const started = workerRequests[0]!;
     expect(started.model).not.toBe(REASONING.id);
@@ -1189,7 +1189,7 @@ describe("settings risk gate", () => {
     expect(workerRequests[2]).toMatchObject({ model: REASONING.id, thinking: "low" });
     expect(workerRequests[2]!.signals).toHaveLength(2);
     expect(workerRequests[2]!.signals[1]).toMatch(/^\[Tron settings\] Tron Home changed this session's settings \(approved by the maintainer\) while you work on task live-worker\. Reason: Cheaper final step\.\n- Thinking: High → Low \(from your next model request; /);
-    await waitFor(async () => (await f.registry.homeOwner().taskStatus("live-worker").catch(() => undefined))?.lifecycle === "terminal" || undefined, "task terminal");
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("live-worker").catch(() => undefined))?.lifecycle === "terminal" || undefined, "task terminal");
     await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home settled after the result");
     steps.push({ requests: workerRequests, approved });
 
@@ -1221,7 +1221,7 @@ describe("settings risk gate", () => {
       ["model.thinking[role=chat]", "approved", "low", "live-worker", { kind: "session", sessionId: workerSessionId }],
       ["model.ref[role=chat]", "applied", { provider: f.model.provider, id: f.model.id }, "live-worker", { kind: "session", sessionId: workerSessionId }],
     ]);
-    const status = await f.registry.homeOwner().taskStatus("live-worker");
+    const status = await homeOwnerOf(f.registry).taskStatus("live-worker");
     expect(status).toMatchObject({ sessionId: workerSessionId, lifecycle: "terminal" });
     expect(worker.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "report")).toHaveLength(1);
     transcript.push({ case: "Home changes a running worker", steps: [...steps, { entries: entries.map(entry => ({ key: entry.key, status: entry.status, after: entry.after, actor: entry.actor })) }] });

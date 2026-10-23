@@ -12,7 +12,8 @@ import { createCoreModule } from "../workspace/core-module.js";
 import { createDisplayModule, createNativeCaptureModule } from "../display/display-modules.js";
 import { createScheduleModule } from "../automations/schedule-module.js";
 import { createNotifyModule } from "../notifications/notify-module.js";
-import { createHomeModule, createHomeResearchModule } from "../home/home-module.js";
+import { createHomeModules, type HomeComposition } from "../home/home-module.js";
+import type { HomeOwner } from "../home/home-owner.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
@@ -21,7 +22,8 @@ import type { SessionSearchService } from "../sessions/session-search-service.js
 /** The owners modules read per runtime: the registry's own services and the
  * composition's, which never pass through the registry. */
 export interface ModuleOwners {
-  registry: Pick<RuntimeRegistry, "knowledge" | "displayModuleServices" | "notifyModuleServices" | "homeModuleServices">;
+  registry: Pick<RuntimeRegistry, "knowledge" | "displayModuleServices" | "notifyModuleServices" | "homeKernel">;
+  home: HomeComposition;
   connections?: ConnectionOwner | undefined;
   scheduleToolOperations?: ScheduleToolOperations | undefined;
   sessionSearch?: SessionSearchService | undefined;
@@ -29,13 +31,13 @@ export interface ModuleOwners {
 
 /** One production composition. Callbacks may close over the not-yet-constructed
  * registry: start only captures them; extension assembly resolves the live owner. */
-export function gatewayModules(owners: () => ModuleOwners): readonly ModuleDescriptor<unknown>[] {
+export function gatewayModules(owners: () => ModuleOwners): { modules: readonly ModuleDescriptor<unknown>[]; home: () => HomeOwner } {
   const registry = () => owners().registry;
-  const home = () => ({ ...registry().homeModuleServices(), search: () => {
+  const home = createHomeModules(() => ({ composition: owners().home, kernel: () => registry().homeKernel(), search: () => {
     const owner = owners().sessionSearch;
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
-  } });
-  return [
+  } }));
+  return { home: home.owner, modules: [
     workspaceModule,
     settlementModule,
     contextWindowModule,
@@ -49,13 +51,14 @@ export function gatewayModules(owners: () => ModuleOwners): readonly ModuleDescr
     computerModule,
     createScheduleModule(() => owners().scheduleToolOperations),
     createNotifyModule(() => registry().notifyModuleServices()),
-    createHomeModule(home),
-    createHomeResearchModule(home),
-  ];
+    home.home,
+    home.research,
+  ] };
 }
 
 /** Pi's process-global theme must precede every extension resource load. */
-export function startGatewayModules(platform: Omit<GatewayHost, "contract">, owners: () => ModuleOwners): Promise<ModuleHost> {
+export async function startGatewayModules(platform: Omit<GatewayHost, "contract">, owners: () => ModuleOwners): Promise<{ modules: ModuleHost; home: () => HomeOwner }> {
   initTheme();
-  return ModuleHost.start(gatewayModules(owners), platform);
+  const composition = gatewayModules(owners);
+  return { modules: await ModuleHost.start(composition.modules, platform), home: composition.home };
 }
