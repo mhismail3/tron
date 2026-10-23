@@ -1,5 +1,5 @@
 import type { ContextPolicyLifecycle, ModuleDescriptor } from "../kernel/host/module-host.js";
-import type { OpenAIModelEligibility } from "./openai-model-eligibility.js";
+import { initialModel, type OpenAIModelEligibility } from "./openai-model-eligibility.js";
 import { existsSync } from "node:fs";
 import type { Model } from "../kernel/pi/ai.js";
 import { estimateTokens, type AgentSession, type ExtensionFactory, type ModelRuntime, type SessionEntry, type SessionManager } from "../kernel/pi/coding-agent.js";
@@ -260,7 +260,7 @@ export const createContextWindowModule = (eligibility: () => OpenAIModelEligibil
   purpose: "Keeps the session's model context window applied as the model changes.",
   tools: [], commands: [],
   start: () => ({
-    hooks: { modelRuntimeInstalled: runtime => eligibility().attachRuntime(runtime) },
+    hooks: { modelRuntimeInstalled: () => ({ attach: runtime => eligibility().attachRuntime(runtime), initialModel }) },
     extension: session => contextWindowExtension(() => session.contextPolicy()),
   }),
 });

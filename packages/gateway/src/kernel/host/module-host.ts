@@ -1,6 +1,7 @@
 import type { SessionLineagePolicy } from "./session-lineage.js";
 import type { KernelLifecycleObserver, TaskLedgerPolicy } from "./kernel-lifecycle.js";
-import type { ExtensionFactory, ModelRuntime, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
+import type { Model } from "../pi/ai.js";
+import type { ExtensionFactory, ModelRuntime, SettingsManager, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
 import type { SettingsToolAccess } from "../settings/tool-contract.js";
 import type { JsonValue, TronModuleSummary } from "../../protocol/types.js";
 import type { ToolResultProjection } from "../projection/tool-result.js";
@@ -32,6 +33,12 @@ export interface InteractionRequiredInput {
 export interface RunSettledPolicy {
   quiescent(sessionId: string): Promise<void>;
   idle(sessionId: string, by: "user" | "wake"): void;
+}
+
+/** Provider operations for owned runtime attachment and a new runtime's saved default. */
+export interface ModelRuntimePolicy {
+  attach(runtime: ModelRuntime): () => void;
+  initialModel(runtime: ModelRuntime, settings: Pick<SettingsManager, "getDefaultProvider" | "getDefaultModel">): Promise<Model<never> | undefined>;
 }
 
 /** One log line from a module, in the Gateway logger's shape. */
@@ -117,7 +124,7 @@ export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
 export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision" | "sessionLineage" | "taskLedger" | "kernelLifecycle" | "modelRuntimeInstalled">]: (...args: never[]) => unknown } & {
-  modelRuntimeInstalled(runtime: ModelRuntime): () => void;
+  modelRuntimeInstalled(): ModelRuntimePolicy;
   toolResultProjection(): ToolResultProjection;
   runSettled(): RunSettledPolicy;
   sessionLineage(): SessionLineagePolicy;

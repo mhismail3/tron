@@ -58,7 +58,6 @@ import type { SessionLineageState } from "../kernel/host/session-lineage.js";
 import type { HomeMaterializationAuthority } from "../modules/home/home-append-guard.js";
 import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
-import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../kernel/delegation/task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../modules/home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
@@ -1622,10 +1621,11 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         : { runtime: await this.dependencies.createModelRuntime(), ownership: "owned" as const };
       const modelRuntime = binding.runtime;
       const requestPipeline = new RunRequestPipeline(modelRuntime);
+      const modelRuntimePolicy = this.dependencies.modules.policy("modelRuntimeInstalled")?.();
       // Only the ModelRuntime owner installs filters. Home's borrowed view reads
       // the Gateway's installation without wrapping its providers on rebuild.
       const detachOpenAIEligibility = binding.ownership === "owned"
-        ? this.dependencies.modules.policy("modelRuntimeInstalled")?.(modelRuntime)
+        ? modelRuntimePolicy?.attach(modelRuntime)
         : undefined;
       this.detachOpenAIEligibility?.();
       this.detachOpenAIEligibility = detachOpenAIEligibility;
@@ -1741,24 +1741,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       this.directBashProcesses = directBashProcesses;
       let initialModel: Model<never> | undefined;
       if (sessionManager.getEntryCount() === 0) {
-        const eligibility = openAIModelEligibility(modelRuntime);
-        await eligibility?.refresh();
-        const defaultProvider = services.settingsManager.getDefaultProvider();
-        const defaultModelId = services.settingsManager.getDefaultModel();
-        if ((defaultProvider === "openai" || defaultProvider === "openai-codex") && defaultModelId) {
-          const savedDefault = modelRuntime.getModel(defaultProvider, defaultModelId);
-          if (savedDefault && eligibility) {
-            const available = await modelRuntime.getAvailable();
-            if (!eligibility.isEligibleInRuntime(modelRuntime, savedDefault.provider, savedDefault.id)) {
-              // Pi reads a saved default directly, independently of its filtered
-              // available-model snapshot. Only brand-new sessions may replace
-              // that stale preference; existing transcript identities stay intact.
-              const fallback = available[0];
-              if (!fallback) throw new GatewayError("invalid_request", "Your saved default model is no longer available and no eligible model was found; choose a model or check your provider sign-in.");
-              initialModel = fallback as Model<never>;
-            }
-          }
-        }
+        initialModel = await modelRuntimePolicy?.initialModel(modelRuntime, services.settingsManager);
       }
       const startsNewChat = sessionManager.getEntryCount() === 0;
       // Pi treats a metadata-only chapter as new because it has no messages.

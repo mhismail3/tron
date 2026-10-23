@@ -69,6 +69,8 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
   context-window hooks through SessionContext's `restore`/`apply` port and attaches
   owned runtimes through `modelRuntimeInstalled`. Composition supplies the eligibility
   owner; borrowed Home views never attach. Slots retain and release their exact attachment.
+  The same policy owns `initialModel`: new runtimes refresh eligibility before accepting a
+  saved default or selecting the first eligible fallback; existing transcripts never use it.
   The concrete session policy remains the sole owner of budgets and canonical overrides.
 - Context windows, recents and release dates:
   [runtime configuration](../admin/runtime-configuration.md#context-windows).

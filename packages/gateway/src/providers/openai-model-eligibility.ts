@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Api, Credential, Model, Provider } from "../kernel/pi/ai.js";
-import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
+import type { ModelRuntime, SettingsManager } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { providerUsageLentTo } from "./provider-usage.js";
 
@@ -335,6 +335,29 @@ export function openAIModelEligibility(runtime: ModelRuntime): OpenAIModelEligib
   return installed.get(runtime)
     ?? (runtime as ModelRuntime & { readonly [borrowedOpenAIModelEligibility]?: OpenAIModelEligibility })[borrowedOpenAIModelEligibility];
 }
+/** Only brand-new sessions may replace an ineligible saved preference. */
+export async function initialModel(runtime: ModelRuntime, settings: Pick<SettingsManager, "getDefaultProvider" | "getDefaultModel">): Promise<Model<never> | undefined> {
+  const eligibility = openAIModelEligibility(runtime);
+  await eligibility?.refresh();
+  const defaultProvider = settings.getDefaultProvider();
+  const defaultModelId = settings.getDefaultModel();
+  if ((defaultProvider === "openai" || defaultProvider === "openai-codex") && defaultModelId) {
+    const savedDefault = runtime.getModel(defaultProvider, defaultModelId);
+    if (savedDefault && eligibility) {
+      const available = await runtime.getAvailable();
+      if (!eligibility.isEligibleInRuntime(runtime, savedDefault.provider, savedDefault.id)) {
+        // Pi reads a saved default directly, independently of its filtered
+        // available-model snapshot. Only brand-new sessions may replace
+        // that stale preference; existing transcript identities stay intact.
+        const fallback = available[0];
+        if (!fallback) throw new GatewayError("invalid_request", "Your saved default model is no longer available and no eligible model was found; choose a model or check your provider sign-in.");
+        return fallback as Model<never>;
+      }
+    }
+  }
+  return undefined;
+}
+
 export async function assertNewModelChoice(runtime: ModelRuntime, provider: string, id: string, signal?: AbortSignal): Promise<void> {
   const owner = openAIModelEligibility(runtime);
   if (!owner) return;
