@@ -466,7 +466,7 @@ private struct ToolDetailSection<Content: View>: View {
     }
 }
 
-private struct ToolDetailCodeBlock: View {
+struct ToolDetailCodeBlock: View {
     let text: String
     let accent: Color
 

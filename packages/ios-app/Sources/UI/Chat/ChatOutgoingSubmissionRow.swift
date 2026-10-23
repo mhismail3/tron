@@ -80,7 +80,7 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
                 Spacer(minLength: 8)
                 if let detail {
                     Text(detail)
-                        .font(TronTypography.caption)
+                        .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextSecondary)
                         .multilineTextAlignment(.trailing)
                         .lineLimit(1)
@@ -148,7 +148,7 @@ struct ChatPendingPromptRow: View, Equatable {
                 VStack(alignment: .trailing, spacing: 4) {
                     CanonicalResourceChips(owner: presentation.id, resources: presentation.resourceInvocations)
                     Label(presentation.statusTitle, systemImage: "clock.arrow.circlepath")
-                        .font(TronTypography.caption)
+                        .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextSecondary)
                         .accessibilityLabel(presentation.statusTitle)
                     if !displayText.isEmpty {

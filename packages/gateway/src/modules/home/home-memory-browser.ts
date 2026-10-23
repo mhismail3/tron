@@ -1,9 +1,14 @@
 import { GatewayError } from "../../errors.js";
+import { basename } from "node:path";
+import type { EpisodicCanonicalEntry } from "../../episodic/episodic-source.js";
+import { redactCredentials } from "../../util/credential-redaction.js";
 import type { EpisodicMessageRecord, EpisodicNodeRecord } from "../../episodic/episodic-contract.js";
 import type { EpisodicViewPart } from "../../episodic/episodic-tree.js";
 import type { HomeMemoryEvidence, HomeMemoryItem, HomeMemoryViewLine } from "../../protocol/types.js";
 
 export const HOME_MEMORY_PAGE_BYTES = 128 * 1024;
+/** Two 100-character strings even at JSON's worst-case escaping, plus field names. */
+export const HOME_MEMORY_DISPLAY_BYTES = 1536;
 const TEXT_CHARS = 4096;
 
 export interface HomeMemoryViewRequest {
@@ -102,6 +107,39 @@ function homeMemoryItem(message: EpisodicMessageRecord, node: EpisodicNodeRecord
       omissions: [...message.omissions, ...(text.length < message.text.length ? ["browser-cap"] : [])] },
     summary: node ? { format: "memory-summary", text: summary!, truncated: summary!.length < node.text.length } : null,
   };
+}
+
+/** Display facts are disposable: keep persisted/model-facing memory unchanged.
+ * Never use a result's first line as a preview; it can be arbitrary source code. */
+export function homeMemoryToolDisplay(entry: EpisodicCanonicalEntry, item: HomeMemoryItem): HomeMemoryItem["display"] {
+  if (item.projection.omitted) return undefined;
+  // An edited projection is not the original call. Keep its content out of rows
+  // without claiming the original target or result status still applies.
+  if (item.projection.omissions.includes("context-edit")) {
+    return item.kind === "talk" ? { kind: "tool-call" } : item.kind === "echo" ? { kind: "tool-result" } : undefined;
+  }
+  const message = entry.raw.message as Record<string, unknown> | undefined;
+  if (!message || typeof message !== "object") return undefined;
+  if (message.role === "toolResult") {
+    return { kind: "tool-result", toolName: displayText(message.toolName) ?? "Tool",
+      status: message.isError === true ? "error" : "ok" };
+  }
+  if (message.role !== "assistant" || !Array.isArray(message.content)) return undefined;
+  const calls = message.content.filter((part): part is Record<string, unknown> =>
+    part !== null && typeof part === "object" && part.type === "toolCall");
+  const call = calls[0];
+  if (!call) return undefined;
+  const args = call.arguments && typeof call.arguments === "object" && !Array.isArray(call.arguments)
+    ? call.arguments as Record<string, unknown> : {};
+  const path = typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : undefined;
+  const target = path ? displayText(basename(path)) : undefined;
+  return { kind: "tool-call", toolName: displayText(call.name) ?? "Tool", toolCount: calls.length,
+    ...(target ? { target } : {}) };
+}
+
+function displayText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return redactCredentials(value).replace(/[\r\n\t]/gu, " ").slice(0, 100).trim() || undefined;
 }
 
 function lineText(text: string | undefined): { text: string | null; truncated: boolean } {

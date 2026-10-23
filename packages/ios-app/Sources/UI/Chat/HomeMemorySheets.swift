@@ -38,9 +38,9 @@ extension HomeSheet {
         } label: {
             TronSettingsRow(icon: HomeMemoryPresentation.icon(line), title: HomeMemoryPresentation.title(line),
                             subtitle: HomeMemoryPresentation.text(line), subtitleLineLimit: 3,
-                            subtitleIsMarkdown: true, accent: accent) {
+                            subtitleIsMarkdown: line.item?.isToolActivity != true, accent: accent) {
                 Text(HomeMemoryPresentation.when(line) ?? "")
-                    .font(TronTypography.caption)
+                    .font(TronTypography.settingsRowSubtext)
                     .foregroundStyle(Color.tronTextMuted)
                     .lineLimit(1)
             }
@@ -71,35 +71,40 @@ extension HomeSheet {
     /// A message: who said it and when, the message as Home recorded it, what Home
     /// remembers of it when that differs, and the canonical evidence behind it.
     func memoryDetail(_ item: HomeMemoryItemDTO) -> some View {
-        let origin = HomeMemoryOrigin(attribution: item.attribution, timestamp: item.timestamp)
         let message = item.projection.text
         let remembered = item.summary.map { HomeMemoryPresentation.strip($0.text) }
             .flatMap { HomeMemoryPresentation.differs($0, from: message) ? $0 : nil }
         return VStack(alignment: .leading, spacing: 18) {
+            if let remembered {
+                TronSettingsGroup("Summary", accent: accent) { markdownText(remembered) }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("home-memory-remembered")
+            }
             TronGlassCard(accent: accent) {
                 VStack(alignment: .leading, spacing: 0) {
                     TronSettingsRow(icon: Self.attributionIcon(item.attribution), title: Self.attributionLabel(item.attribution),
                                     subtitle: HomeSheetTime.relative(item.timestamp), accent: accent)
                     divider()
-                    markdownText(message)
+                    if item.isToolActivity {
+                        ToolDetailCodeBlock(text: message, accent: accent)
+                            .padding(16)
+                            .accessibilityIdentifier("home-memory-raw-output")
+                    } else {
+                        markdownText(message)
+                    }
                     if item.projection.omitted || !item.projection.omissions.isEmpty {
                         TronCaption("Part of this message is left out of memory.")
                             .padding(.horizontal, 16).padding(.bottom, 14)
                     }
                 }
             }
-            if let remembered {
-                TronSettingsGroup("Home remembers", accent: accent) { markdownText(remembered) }
-                    .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("home-memory-remembered")
-            }
             TronGlassCard(accent: accent) {
-                Button { present(.evidence(item.evidence, origin: origin)) } label: {
-                    TronSettingsRow(icon: "doc.text.magnifyingglass", title: "Exact evidence",
+                Button { present(.evidence(item.evidence)) } label: {
+                    TronSettingsRow(icon: "doc.text.magnifyingglass", title: "View canonical transcript",
                                     subtitle: "The canonical text this memory came from", accent: accent)
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("home-memory-exact-evidence")
+                .accessibilityIdentifier("home-memory-canonical-transcript")
             }
         }
         .accessibilityElement(children: .contain)
@@ -107,29 +112,10 @@ extension HomeSheet {
     }
 
     /// The canonical history of one memory entry, paged in bounded characters.
-    func evidenceSheet(_ page: HomeMemoryEvidencePageDTO, origin: HomeMemoryOrigin) -> some View {
+    func evidenceSheet(_ page: HomeMemoryEvidencePageDTO) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            TronGlassCard(accent: accent) {
-                VStack(alignment: .leading, spacing: 0) {
-                    TronSettingsRow(icon: Self.attributionIcon(origin.attribution), title: Self.attributionLabel(origin.attribution),
-                                    subtitle: HomeSheetTime.relative(origin.timestamp), accent: accent)
-                    divider()
-                    Text("\(page.evidence.sessionId) · \(page.evidence.entryId)")
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
-                        .foregroundStyle(Color.tronTextMuted)
-                        .textSelection(.enabled)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .accessibilityIdentifier("home-evidence-reference")
-                }
-            }
-            TronSettingsGroup("Canonical history",
-                              detail: "Characters \(page.offset)–\(page.offset + page.text.utf16.count) of \(page.totalCharacters)",
-                              accent: accent) {
-                readingText(page.text).accessibilityIdentifier("home-evidence-text")
-            }
+            ToolDetailCodeBlock(text: page.text, accent: accent)
+                .accessibilityIdentifier("home-evidence-text")
             if let previous = page.previousOffset {
                 pageRow(title: "Previous evidence page", icon: "arrow.up", id: "home-evidence-previous") {
                     request = HomeSheetRequest(query: .evidence(page.evidence, offset: previous))
@@ -143,19 +129,50 @@ extension HomeSheet {
         }
     }
 
+    /// Only facts this browser actually carries; never imply a model or timestamp
+    /// that the memory store did not record.
+    var memoryMetadata: [TronTechnicalMetadataItem]? {
+        switch destination {
+        case .memoryItem(let item):
+            var rows: [TronTechnicalMetadataItem] = [
+                .init(title: "Kind", value: item.kind.rawValue, icon: "tag"),
+                .init(title: "Message index", value: String(item.index), icon: "number"),
+                .init(title: "Entry ID", value: item.evidence.entryId, icon: "text.alignleft"),
+                .init(title: "Chapter session ID", value: item.evidence.sessionId, icon: "books.vertical"),
+                .init(title: "Source digest", value: item.evidence.sourceDigest, icon: "number"),
+                .init(title: "Level", value: "0", icon: "square.stack"),
+                .init(title: "Projection bytes", value: String(item.projection.text.utf8.count), icon: "doc"),
+                .init(title: "Projection characters", value: String(item.projection.text.utf16.count), icon: "textformat"),
+                .init(title: "Omitted", value: item.projection.omitted ? "Yes" : "No", icon: "text.badge.minus"),
+                .init(title: "Omitted parts", value: item.projection.omissions.isEmpty ? "None" : item.projection.omissions.joined(separator: ", "), icon: "text.badge.minus"),
+            ]
+            if let timestamp = item.timestamp { rows.append(.init(title: "Timestamp", value: timestamp, icon: "clock")) }
+            if let tool = item.display?.toolName { rows.append(.init(title: "Tool", value: tool, icon: "wrench.adjustable")) }
+            if let status = item.display?.status { rows.append(.init(title: "Status", value: status, icon: "checkmark.circle")) }
+            if let summary = item.summary {
+                rows.append(.init(title: "Summary truncated", value: summary.truncated ? "Yes" : "No", icon: "text.badge.minus"))
+            }
+            return rows
+        case .memorySummary(let line, let sessionID):
+            var rows: [TronTechnicalMetadataItem] = [
+                .init(title: "Kind", value: "Summary", icon: "tag"),
+                .init(title: "Message range", value: "\(line.start)–\(line.start + line.span - 1)", icon: "number"),
+                .init(title: "Messages", value: String(line.span), icon: "text.alignleft"),
+                .init(title: "Level", value: String(line.span.trailingZeroBitCount), icon: "square.stack"),
+                .init(title: "Summary bytes", value: String((line.text ?? "").utf8.count), icon: "doc"),
+                .init(title: "Summary truncated", value: line.truncated ? "Yes" : "No", icon: "text.badge.minus"),
+            ]
+            if let sessionID { rows.append(.init(title: "Chapter session ID", value: sessionID, icon: "books.vertical")) }
+            if let first = line.firstAt { rows.append(.init(title: "First message", value: first, icon: "clock")) }
+            if let last = line.lastAt { rows.append(.init(title: "Last message", value: last, icon: "clock")) }
+            return rows
+        default: return nil
+        }
+    }
+
     /// Memory text is Home's own words, often markdown: the chat renderer shows it.
     func markdownText(_ text: String) -> some View {
         TronMarkdownView(text: text, streaming: false)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-    }
-
-    func readingText(_ text: String) -> some View {
-        Text(text)
-            .font(TronTypography.body)
-            .lineSpacing(4)
-            .foregroundStyle(Color.tronTextPrimary)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
@@ -192,7 +209,14 @@ extension HomeSheet {
     }
 }
 
+extension HomeMemoryItemDTO {
+    var isToolActivity: Bool {
+        kind == .echo || display?.kind == .toolCall || display?.kind == .toolResult
+    }
+}
+
 /// One owner of the memory lines' derived text, so rows and details agree.
+@MainActor
 enum HomeMemoryPresentation {
     static func icon(_ line: HomeMemoryViewDTO.Line) -> String {
         guard let item = line.item else { return "text.append" }
@@ -205,7 +229,18 @@ enum HomeMemoryPresentation {
     }
 
     static func text(_ line: HomeMemoryViewDTO.Line) -> String {
-        line.text ?? "Not summarized yet"
+        guard let item = line.item else { return line.text ?? "Not summarized yet" }
+        if item.projection.omitted { return "Message left out of memory" }
+        guard item.isToolActivity else { return line.text ?? "Not summarized yet" }
+        let display = item.display
+        let tool = display?.toolName.map { ToolDetailPresentation.displayTitle(for: $0) } ?? "Tool"
+        if item.kind == .echo || display?.kind == .toolResult {
+            let status = display?.status == "error" ? "Error" : display?.status == "ok" ? "Completed" : "Result"
+            let size = ByteCountFormatter.string(fromByteCount: Int64(item.projection.text.utf8.count), countStyle: .file)
+            return "\(tool) · \(status) · \(size) in memory"
+        }
+        let count = (display?.toolCount ?? 1) > 1 ? " + \((display?.toolCount ?? 1) - 1) more" : ""
+        return [tool + count, display?.target].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// A message's relative time; a summary's date range.

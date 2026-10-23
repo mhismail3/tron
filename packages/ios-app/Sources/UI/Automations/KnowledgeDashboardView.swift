@@ -1038,7 +1038,7 @@ struct KnowledgeRecordRow: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("\(record.kind.label) · \(record.scope.label) · \(record.updatedAt)")
-                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .font(TronTypography.settingsRowSubtext)
                     .foregroundStyle(Color.tronTextMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -1629,9 +1629,9 @@ struct KnowledgeDetailView: View {
                         VStack(alignment: .leading, spacing: TronSpacing.xs) {
                             Text(field.field).font(TronTypography.bodySM.bold()).foregroundStyle(Color.tronTextPrimary)
                             Text("Value: \(jsonText(field.value))").font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled)
-                            if let subject = field.subject { Text("Subject: \(subject)").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
+                            if let subject = field.subject { Text("Subject: \(subject)").font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary) }
                             Text("\(field.certainty.rawValue)\(field.validFrom.map { " · from \($0)" } ?? "")\(field.validTo.map { " · to \($0)" } ?? "")")
-                                .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                                .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
                             citationLinks(field.evidence)
                         }
                     }
@@ -1704,7 +1704,7 @@ struct KnowledgeDetailView: View {
                     .accessibilityLabel("Your take")
                 HStack {
                     Text(takeSaving ? "Saving…" : (source.take == nil ? "Private note · used to guide tagging and retrieval" : "Saved \(humanDate(source.take!.updatedAt))"))
-                        .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                        .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
                     Spacer()
                 }
                 if let takeCurrentText {
@@ -1974,8 +1974,8 @@ struct KnowledgeDetailView: View {
     @ViewBuilder private var noteMetadata: some View {
         if case .note(let note) = currentRecord.content {
             VStack(alignment: .leading, spacing: TronSpacing.sm) {
-                if let freshness = note.freshness { Text("Freshness: \(freshness.rawValue)").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
-                if let contrary = note.contraryEvidence, !contrary.isEmpty { Text("Contrary evidence retained: \(contrary.count)").font(TronTypography.caption).foregroundStyle(Color.tronAmber) }
+                if let freshness = note.freshness { Text("Freshness: \(freshness.rawValue)").font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary) }
+                if let contrary = note.contraryEvidence, !contrary.isEmpty { Text("Contrary evidence retained: \(contrary.count)").font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronAmber) }
             }
         }
     }

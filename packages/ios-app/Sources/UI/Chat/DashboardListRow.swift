@@ -25,7 +25,7 @@ struct DashboardListRow<Leading: View, Trailing: View>: View {
                     .truncationMode(.tail)
                 if let subtitle {
                     Text(subtitle)
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
+                        .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextMuted)
                         .lineLimit(1)
                         .truncationMode(.tail)

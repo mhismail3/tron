@@ -279,7 +279,7 @@ private struct DisplayToolElapsedText: View {
 
     private func value(at date: Date) -> some View {
         Text(tool.elapsedMilliseconds(at: date).map(ToolTiming.format(milliseconds:)) ?? "")
-            .font(TronTypography.caption)
+            .font(TronTypography.settingsRowSubtext)
             .foregroundStyle(color)
             .monospacedDigit()
     }

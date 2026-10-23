@@ -36,7 +36,7 @@ struct HomeContextSummaryCard: View {
                     VStack(alignment: .leading, spacing: TronSpacing.xxs) {
                         Text(headline).font(SessionSummaryTypography.headline)
                         Text(detail)
-                            .font(SessionSummaryTypography.usageDetail)
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextSecondary)
                             .accessibilityIdentifier("home-context-detail")
                     }

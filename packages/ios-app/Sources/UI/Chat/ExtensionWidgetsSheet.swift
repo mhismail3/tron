@@ -203,7 +203,7 @@ private struct ExtensionContentNotice: View {
                 .font(TronTypography.caption)
                 .foregroundStyle(Color.tronTextMuted)
             Text(text)
-                .font(TronTypography.caption)
+                .font(TronTypography.settingsRowSubtext)
                 .foregroundStyle(Color.tronTextMuted)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)

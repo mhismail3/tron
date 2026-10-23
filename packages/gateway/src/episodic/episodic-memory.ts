@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import type { HomeMemoryEvidence, HomeMemoryView } from "../protocol/types.js";
-import { HOME_MEMORY_PAGE_BYTES, encodeHomeMemoryCursor, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "../modules/home/home-memory-browser.js";
+import { HOME_MEMORY_PAGE_BYTES, HOME_MEMORY_DISPLAY_BYTES, encodeHomeMemoryCursor, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "../modules/home/home-memory-browser.js";
 import type { AssistantMessage } from "../kernel/pi/ai.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
@@ -417,7 +417,7 @@ export class EpisodicMemory {
     let bytes = Buffer.byteLength(JSON.stringify(result)) + 1024;
     for (; position < ranges.length && result.lines.length < request.limit; position += 1) {
       const line = homeMemoryLine(ranges[position]!, this.messages, this.nodes, nodeAddress);
-      const size = Buffer.byteLength(JSON.stringify(line)) + 1;
+      const size = Buffer.byteLength(JSON.stringify(line)) + 1 + (line.item ? HOME_MEMORY_DISPLAY_BYTES : 0);
       if (bytes + size > HOME_MEMORY_PAGE_BYTES) break;
       bytes += size;
       result.lines.push(line);

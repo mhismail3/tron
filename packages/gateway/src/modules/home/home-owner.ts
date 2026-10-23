@@ -19,7 +19,7 @@ import { readHomeProfile } from "./home-profile.js";
 import type { SessionEntry } from "../../kernel/pi/coding-agent.js";
 import { historyEntry } from "../../kernel/projection/history.js";
 import type { EpisodicMemory } from "../../episodic/episodic-memory.js";
-import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, type HomeMemoryViewRequest } from "./home-memory-browser.js";
+import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, homeMemoryToolDisplay, type HomeMemoryViewRequest } from "./home-memory-browser.js";
 import { GatewayError } from "../../errors.js";
 import type { TrustService } from "../../admin/trust-service.js";
 import { EPISODIC_DEFAULTS, EpisodicMemoryError, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
@@ -1305,7 +1305,18 @@ export class HomeOwner {
     if (request.sessionId !== undefined && !this.record?.chapters.some(chapter => chapter.sessionId === request.sessionId)) {
       throw new GatewayError("not_found", "Session is not a chapter of Tron Home");
     }
-    return this.browserRead(async memory => memory.browserView(request), signal);
+    return this.browserRead(async (memory, source, proofs) => {
+      const view = memory.browserView(request);
+      const cursor = memory.browserCursor();
+      if (!cursor) throw homeMemorySourceUnavailable("no-cursor");
+      for (const line of view.lines) {
+        if (!line.item) continue;
+        const entry = await readCanonicalHomeEvidence(source, cursor, line.item.evidence, EPISODIC_DEFAULTS, signal, proofs);
+        const display = homeMemoryToolDisplay(entry, line.item);
+        if (display) line.item.display = display;
+      }
+      return view;
+    }, signal);
   }
 
   async memoryEvidence(evidence: HomeMemoryEvidence, offset: number, signal?: AbortSignal): Promise<HomeMemoryEvidencePage> {

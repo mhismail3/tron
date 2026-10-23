@@ -848,7 +848,7 @@ private struct ToolRunSummaryRow: View {
                    !primaryPreview.text.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(primaryLabel.uppercased())
-                            .font(TronTypography.caption)
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextMuted)
                         ToolRowPreviewViewport(
                             edge: .bottom,
@@ -863,7 +863,7 @@ private struct ToolRunSummaryRow: View {
                 if let output = presentation.outputPreview {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(presentation.isRunning ? "LIVE OUTPUT" : (presentation.error ? "ERROR" : "RESULT"))
-                            .font(TronTypography.caption)
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(presentation.isRunning ? Color.tronEmerald : Color.tronTextMuted)
                         ToolRowPreviewViewport(
                             edge: .top,
@@ -880,7 +880,7 @@ private struct ToolRunSummaryRow: View {
                     }
                 } else if presentation.hasStructuredResult {
                     Label("Structured result available in details", systemImage: "list.bullet.rectangle")
-                        .font(TronTypography.caption)
+                        .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextMuted)
                 }
             }

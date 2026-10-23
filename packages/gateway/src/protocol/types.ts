@@ -1147,6 +1147,9 @@ export interface HomeMemoryItem {
   attribution: "user" | "assistant" | "tool" | "event";
   timestamp?: string;
   evidence: HomeMemoryEvidence;
+  /** Browser-only facts from the digest-verified canonical entry, never parsed from model prose. */
+  display?: { kind: "message" | "tool-call" | "tool-result"; toolName?: string; target?: string;
+    toolCount?: number; status?: "ok" | "error" };
   projection: { format: "memory-projection"; text: string; omitted: boolean; omissions: string[] };
   /** A leaf summary, not canonical evidence; null while unbuilt/invalidated. */
   summary: { format: "memory-summary"; text: string; truncated: boolean } | null;

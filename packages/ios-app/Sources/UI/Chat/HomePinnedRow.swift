@@ -109,7 +109,7 @@ struct HomePinnedRow: View {
                 .foregroundStyle(Color.tronTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(detail)
-                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                .font(TronTypography.settingsRowSubtext)
                 .foregroundStyle(Color.tronTextMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -123,7 +123,7 @@ struct HomePinnedRow: View {
                     .accessibilityHidden(true)
             }
             Text(trailing)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                .font(TronTypography.settingsRowSubtext)
                 .foregroundStyle(action == .unavailable ? Color.tronTextMuted : Color.tronEmerald)
                 .fixedSize(horizontal: false, vertical: true)
         }

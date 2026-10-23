@@ -23,6 +23,14 @@ struct HomeMemoryEvidenceDTO: Codable, Equatable, Hashable, Sendable {
 struct HomeMemoryItemDTO: Decodable, Equatable, Hashable, Sendable, Identifiable {
     enum Kind: String, Decodable, Sendable { case user, talk, echo, event }
     enum Attribution: String, Decodable, Sendable { case user, assistant, tool, event }
+    struct Display: Decodable, Equatable, Hashable, Sendable {
+        enum Kind: String, Decodable, Sendable { case message; case toolCall = "tool-call"; case toolResult = "tool-result" }
+        let kind: Kind
+        let toolName: String?
+        let target: String?
+        let toolCount: Int?
+        let status: String?
+    }
     struct Projection: Decodable, Equatable, Hashable, Sendable {
         let format: String
         let text: String
@@ -39,6 +47,7 @@ struct HomeMemoryItemDTO: Decodable, Equatable, Hashable, Sendable, Identifiable
     let attribution: Attribution
     let timestamp: String?
     let evidence: HomeMemoryEvidenceDTO
+    let display: Display?
     let projection: Projection
     let summary: Summary?
     var id: Int { index }

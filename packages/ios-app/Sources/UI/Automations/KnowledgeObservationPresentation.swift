@@ -88,7 +88,7 @@ struct KnowledgeObservationStatement: View {
                 Spacer(minLength: 0)
                 if let date = presentation.date {
                     Text(date, format: .dateTime.month(.abbreviated).day().year())
-                        .font(preview ? TronTypography.caption : TronTypography.secondaryDescription)
+                        .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextMuted)
                 }
             }
@@ -206,7 +206,7 @@ struct KnowledgeCoverageCutRow: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(KnowledgeCoveragePresentationPolicy.citation(cut.range))
-                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .font(TronTypography.settingsRowSubtext)
                     .foregroundStyle(Color.tronTextMuted)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)

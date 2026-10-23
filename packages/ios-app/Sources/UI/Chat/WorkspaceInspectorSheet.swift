@@ -470,7 +470,7 @@ struct WorkspaceInspectorSheet: View {
                             }
                             if entry.kind == .symlink { Text("Symbolic link") }
                         }
-                        .font(TronTypography.caption)
+                        .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextMuted)
                     }
                 }
@@ -525,7 +525,7 @@ struct WorkspaceInspectorSheet: View {
                         .lineLimit(1)
                     if let originalPath = change.originalPath {
                         Text("from \(originalPath)")
-                            .font(TronTypography.caption)
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextMuted)
                             .lineLimit(1)
                     }
@@ -838,7 +838,7 @@ private struct WorkspaceCommitDetailSheet: View {
                                 .textSelection(.enabled)
                         }
                         Text("\(detail.authorName) · \(detail.shortOid) · \(GatewayTimestamp.relativeDescription(detail.authoredAt, relativeTo: .now))")
-                            .font(TronTypography.caption)
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextMuted)
                     }
                     .padding(14)
@@ -862,7 +862,7 @@ private struct WorkspaceCommitDetailSheet: View {
                                             .lineLimit(2)
                                             .truncationMode(.middle)
                                         Text(change.kind.rawValue.capitalized)
-                                            .font(TronTypography.caption)
+                                            .font(TronTypography.settingsRowSubtext)
                                             .foregroundStyle(Color.tronTextMuted)
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)

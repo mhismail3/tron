@@ -581,7 +581,7 @@ struct QueuedMessageEditorSheet: View {
                                 "Attachments stay with this queued message.",
                                 systemImage: "paperclip"
                             )
-                            .font(TronTypography.caption)
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextSecondary)
                         }
                     }

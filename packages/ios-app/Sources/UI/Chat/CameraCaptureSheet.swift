@@ -267,7 +267,7 @@ struct CameraCaptureSheet: View {
                     .font(TronTypography.subheadline)
                     .foregroundStyle(.white.opacity(0.9))
                 Text(denied ? "Enable in Settings" : "Try again later")
-                    .font(TronTypography.caption)
+                    .font(TronTypography.settingsRowSubtext)
                     .foregroundStyle(.white.opacity(0.62))
             }
             .multilineTextAlignment(.center)

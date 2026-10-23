@@ -131,9 +131,9 @@ struct AppearanceSettingsView: View {
             Slider(value: value, in: range) {
                 Text(title).font(TronTypography.bodySM)
             } minimumValueLabel: {
-                Text(minimum).font(TronTypography.caption)
+                Text(minimum).font(TronTypography.settingsRowSubtext)
             } maximumValueLabel: {
-                Text(maximum).font(TronTypography.caption)
+                Text(maximum).font(TronTypography.settingsRowSubtext)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

@@ -2700,7 +2700,7 @@ struct ChatView: View {
         .overlay(alignment: .bottom) {
             if case let .failed(message) = model.transcriptLoadState {
                 Text(message)
-                    .font(TronTypography.caption)
+                    .font(TronTypography.settingsRowSubtext)
                     .foregroundStyle(Color.tronTextSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.top, 42)

@@ -24,7 +24,7 @@ struct ModelRailCard: View {
             // centred on the provider line, clear of the model name below.
             HStack(alignment: .center, spacing: 4) {
                 Text(model.displayProviderName)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .font(TronTypography.settingsRowSubtext)
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -55,7 +55,7 @@ struct ModelRailCard: View {
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                         .foregroundStyle(Color.tronTextPrimary)
                     + Text(" context")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextSecondary))
                         .lineLimit(1)
                 }
@@ -64,7 +64,7 @@ struct ModelRailCard: View {
                 }
                 if let released = ModelCardFacts.releaseLabel(model.releaseDate) {
                     Text(released)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextSecondary)
                         .lineLimit(1)
                 }
@@ -85,7 +85,7 @@ struct ModelRailCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Text(caption)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .font(TronTypography.settingsRowSubtext)
                 .foregroundStyle(Color.tronTextSecondary)
                 .lineLimit(1)
         }

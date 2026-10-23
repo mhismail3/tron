@@ -9,7 +9,7 @@ enum HomeSheetDestination: Identifiable {
     case memorySummary(HomeMemoryViewDTO.Line, sessionID: String?)
     /// A memory message's detail. Its data came with the row, so it is never read again.
     case memoryItem(HomeMemoryItemDTO)
-    case evidence(HomeMemoryEvidenceDTO, origin: HomeMemoryOrigin)
+    case evidence(HomeMemoryEvidenceDTO)
     case chapters
     /// The learned profile, and one item: shown from the row the Profile sheet already
     /// loaded, then re-read with the profile so a change made here shows at once.
@@ -40,7 +40,7 @@ enum HomeSheetDestination: Identifiable {
         switch self {
         case .manage: "Manage Home"
         case .memory, .memorySummary, .memoryItem: "Memory"
-        case .evidence: "Exact Evidence"
+        case .evidence: "Canonical transcript"
         case .chapters, .chapter: "Chapters"
         case .profile, .profileItem: "Profile"
         case .tasks, .task: "Tasks"
@@ -54,7 +54,7 @@ enum HomeSheetDestination: Identifiable {
         case .memorySummary(let line, let sessionID): .memoryPart(sessionID: sessionID, line)
         // Carried by the destination and never loaded; see `loadsPage`.
         case .memoryItem, .chapter: .chapters
-        case .evidence(let source, _): .evidence(source, offset: 0)
+        case .evidence(let source): .evidence(source, offset: 0)
         case .chapters: .chapters
         case .profile, .profileItem: .profile
         case .tasks: .tasks(nil)
@@ -69,12 +69,6 @@ enum HomeSheetDestination: Identifiable {
     var loadsPage: Bool {
         switch self { case .memoryItem, .chapter: false; default: true }
     }
-}
-
-/// The memory row an evidence page belongs to, shown in the evidence header.
-struct HomeMemoryOrigin: Hashable, Sendable {
-    let attribution: HomeMemoryItemDTO.Attribution
-    let timestamp: String?
 }
 
 /// A Home control's admission, captured when the user taps it. A confirmation
@@ -137,6 +131,7 @@ struct HomeSheet: View {
     @PresentationState var childDestination: HomeSheetDestination?
     /// A Home text opened whole (a chapter topic) in the shared document sheet.
     @PresentationState var reading: HomeTextReading?
+    @PresentationState private var showingMemoryInfo = false
     @Environment(\.tronSettingsVisualTheme) private var visualTheme
     /// Manage Home's open child only reads (Context, Memory, Chapters), so its return
     /// keeps the installed page instead of re-reading every row.
@@ -214,6 +209,14 @@ struct HomeSheet: View {
                     ) { showsTerminal = true }
                 }
             }
+            if memoryMetadata != nil {
+                ToolbarItem(placement: .topBarLeading) {
+                    TronSheetInfoButton(accessibilityLabel: "Technical details", accent: accent) {
+                        showingMemoryInfo = true
+                    }
+                    .accessibilityIdentifier("home-memory-info")
+                }
+            }
             ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: accent) }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
@@ -258,6 +261,19 @@ struct HomeSheet: View {
             HomeSheet(destination: child, profileID: profileID, sessionID: sessionID, onOpenSession: onOpenSession,
                       onChanged: { returnsFromBrowsing = false; onChanged?() })
                 .tronSettingsVisualTheme(accent: accent)
+        }
+        .tronManagedSheet(isPresented: $showingMemoryInfo, identity: "home.\(profileID).memory-info.\(destination.id)") {
+            if let metadata = memoryMetadata {
+                TronDocumentSheet(title: "Technical details", detents: [.medium, .large]) {
+                    ScrollView {
+                        TronTechnicalMetadataSection(title: "Memory", items: metadata, accent: accent)
+                            .padding(18)
+                            .accessibilityIdentifier("home-memory-technical-details")
+                    }
+                    .tronScrollEdgeChrome()
+                }
+                .tronSettingsVisualTheme(accent: accent)
+            }
         }
         .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
             HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent)
@@ -304,7 +320,7 @@ struct HomeSheet: View {
                 case .profile(let list): profile(list)
                 case .memory(let view): memory(view)
                 case .evidence(let page):
-                    if case .evidence(_, let origin) = destination { evidenceSheet(page, origin: origin) }
+                    evidenceSheet(page)
                 case .tasks, .task, .permissions: EmptyView()
                 }
             } else {

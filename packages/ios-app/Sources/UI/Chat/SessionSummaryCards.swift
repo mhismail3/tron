@@ -9,8 +9,6 @@ enum SessionSummaryTypography {
     static var headline: Font { TronTypography.sans(size: TronTypography.sizeXL, weight: .bold) }
     static var detail: Font { TronTypography.sans(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
     static var usageValue: Font { TronTypography.code(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
-    /// The used/window line under the headline, a step below the usage values.
-    static var usageDetail: Font { TronTypography.code(size: TronTypography.sizeCaption + metadataSizeAdjustment) }
     static var metric: Font { TronTypography.code(size: TronTypography.sizeSecondary + metadataSizeAdjustment, weight: .semibold) }
     static var metricLabel: Font { TronTypography.sans(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
 }
@@ -33,7 +31,7 @@ struct SessionWorkspaceSummaryRow: View {
         case .notRepository:
             TronSettingsRow(icon: "folder", title: WorkspaceInspectorSheet.title, subtitle: "Browse workspace files", accent: accent) {
                 Text("No Git")
-                    .font(TronTypography.code(size: TronTypography.sizeCaption + SessionSummaryTypography.metadataSizeAdjustment))
+                    .font(TronTypography.settingsRowSubtext)
                     .foregroundStyle(Color.tronTextSecondary)
             }
         case .loaded(let branch, let dirty, let changeCount):
@@ -58,7 +56,7 @@ struct SessionWorkspaceSummaryRow: View {
                 subtitle: "Tap to retry workspace inspection", accent: accent
             ) {
                 Text("Unavailable")
-                    .font(TronTypography.code(size: TronTypography.sizeCaption + SessionSummaryTypography.metadataSizeAdjustment))
+                    .font(TronTypography.settingsRowSubtext)
                     .foregroundStyle(Color.tronTextSecondary)
             }
         }
@@ -131,7 +129,7 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
                 header {
                     Text(headline).font(SessionSummaryTypography.headline)
                         .accessibilityIdentifier("session-usage-headline")
-                    Text(detail).font(SessionSummaryTypography.usageDetail)
+                    Text(detail).font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextPrimary)
                         .accessibilityIdentifier("session-usage-detail")
                 }

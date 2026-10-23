@@ -69,12 +69,12 @@ struct ToolDiffCountChip: View {
                     .foregroundStyle(Color.tronError)
                 if diff.sourceIsTruncated {
                     Text("Partial")
-                        .font(TronTypography.caption)
+                        .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextMuted)
                 }
             } else {
                 Text("Line counts unavailable")
-                    .font(TronTypography.caption)
+                    .font(TronTypography.settingsRowSubtext)
                     .foregroundStyle(Color.tronTextMuted)
             }
         }

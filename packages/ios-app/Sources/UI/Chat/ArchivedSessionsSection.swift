@@ -375,7 +375,7 @@ struct ArchivedSessionsSectionRows: View {
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 .accessibilityHidden(true)
             Text("Archived sessions unavailable on \(name)")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                .font(TronTypography.settingsRowSubtext)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }

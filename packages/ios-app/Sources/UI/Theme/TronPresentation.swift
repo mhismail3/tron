@@ -2285,7 +2285,7 @@ struct TronCaption: View {
 
     var body: some View {
         Text(text)
-            .font(TronTypography.caption)
+            .font(TronTypography.settingsRowSubtext)
             .foregroundStyle(Color.tronTextMuted)
             .fixedSize(horizontal: false, vertical: true)
     }

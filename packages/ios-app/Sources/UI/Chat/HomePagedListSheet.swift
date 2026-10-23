@@ -205,6 +205,10 @@ extension HomeMemoryPresentation {
     /// One kind icon and colour per memory line; the card itself stays uniform.
     static func kind(_ line: HomeMemoryViewDTO.Line) -> (icon: String, tone: Color, label: String) {
         guard let item = line.item else { return ("square.stack.3d.up", .tronPurple, "Summary") }
+        if item.isToolActivity {
+            let icon = item.display?.toolName.flatMap { ToolDetailPresentation.sheetTitleIcon(for: $0) } ?? "wrench.adjustable"
+            return (icon, ChatSemanticPillRole.tool.accent, item.kind == .echo ? "Tool result" : "Tool call")
+        }
         return switch item.attribution {
         case .user: ("person", .tronEmerald, "You")
         case .assistant: ("text.bubble", .tronTeal, "Home")
@@ -216,7 +220,8 @@ extension HomeMemoryPresentation {
     static func rowContent(_ line: HomeMemoryViewDTO.Line, now: Date = .now) -> TronListRowContent {
         let kind = kind(line)
         return TronListRowContent(
-            leading: .icon(kind.icon, kind.tone), title: SessionHistoryPreview.plain(text(line)), preview: true,
+            leading: .icon(kind.icon, kind.tone), title: line.item?.isToolActivity == true ? text(line) : SessionHistoryPreview.plain(text(line)),
+            preview: line.item?.isToolActivity != true,
             subtext: line.isSummary ? "Summary of \(line.span.formatted()) messages" : nil,
             tags: [TronListTag(text: kind.label)],
             timestamp: line.isSummary ? HomeSheetTime.range(line.firstAt, line.lastAt) : TronListTime.short(iso: line.firstAt, now: now))

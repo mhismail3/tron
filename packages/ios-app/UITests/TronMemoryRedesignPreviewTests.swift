@@ -31,7 +31,8 @@ final class TronMemoryRedesignPreviewTests: XCTestCase {
                 if info.exists {
                     info.tap(); try ready(app, "home-memory-technical-details")
                     shot("\(mode)-technical-details")
-                    try tap(app, "home-memory-technical-done")
+                    app.buttons.matching(NSPredicate(format: "label == 'Done'"))
+                        .allElementsBoundByIndex.first(where: \.isHittable)?.tap()
                 } else { shot("\(mode)-technical-details-unavailable-before") }
                 let canonical = element(app, "home-memory-canonical-transcript").exists
                     ? "home-memory-canonical-transcript" : "home-memory-exact-evidence"

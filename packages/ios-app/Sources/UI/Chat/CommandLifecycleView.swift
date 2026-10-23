@@ -119,7 +119,7 @@ private struct CommandLifecycleDetailsSheet: View {
                             .padding(TronSpacing.lg)
                             .tronGlassSurface(accent: accent, tintOpacity: 0.08)
                         Text("Arguments are passed exactly to the extension and may be case-sensitive.")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextSecondary)
                     }
                     TronTechnicalMetadataSection(title: "Command", items: metadata, accent: accent)

@@ -225,7 +225,7 @@ struct GatewayLogsSettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("\(visibleItems.count) entries · Newest entries first")
         }
-            .font(TronTypography.caption)
+            .font(TronTypography.settingsRowSubtext)
             .foregroundStyle(Color.tronTextMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
@@ -620,7 +620,7 @@ private struct GatewayLogRow: View, Equatable {
                     .lineLimit(1)
                     .layoutPriority(1)
             }
-            .font(TronTypography.caption2)
+            .font(TronTypography.settingsRowSubtext)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(actionDescription), \(sourceDescription), \(record.record.levelTitle) log, \(timestampDescription)")
 
@@ -673,7 +673,7 @@ struct GatewayLogDetailView: View {
                     .font(TronTypography.bodySM)
                     if let source = record.record.source {
                         Text("Source: \(source)")
-                            .font(TronTypography.caption)
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextMuted)
                     }
                     Text(record.record.message)

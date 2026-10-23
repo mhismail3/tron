@@ -284,7 +284,7 @@ struct ProviderConfigurationSheet: View {
                     }
                     if usageController.didFail {
                         Text("Refresh unavailable. Showing last known usage.")
-                            .font(TronTypography.caption)
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextMuted)
                     }
                 }

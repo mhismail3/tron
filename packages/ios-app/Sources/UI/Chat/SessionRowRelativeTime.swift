@@ -18,7 +18,7 @@ struct SessionRowRelativeTime: View {
             Text(text)
                 .foregroundStyle(isWaiting ? Color.tronAmber : Color.tronTextMuted)
         }
-        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium).monospacedDigit())
+        .font(TronTypography.settingsRowSubtext.monospacedDigit())
         .lineLimit(1)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(text)

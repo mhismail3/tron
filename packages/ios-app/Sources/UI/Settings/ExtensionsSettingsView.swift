@@ -432,7 +432,7 @@ struct ExtensionsSettingsView: View {
                 .foregroundStyle(Color.tronTextPrimary)
                 .accessibilityAddTraits(.isHeader)
             Text(detail)
-                .font(TronTypography.caption)
+                .font(TronTypography.settingsRowSubtext)
                 .foregroundStyle(Color.tronTextMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
