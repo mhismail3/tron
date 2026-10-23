@@ -41,13 +41,13 @@ export async function createTestRegistry(options: RegistryOptions & HomeTestOpti
   const { modules, home: owner, recentModels } = await startGatewayModules({ tronHome: options.tronHome, log: { log: () => {} } },
     () => ({ registry, home, openAIModelEligibility, connections, scheduleToolOperations, recentModelsChanged, persistenceDiagnostic: options.persistenceDiagnostic, sessionSearch: sessionSearch?.() }));
   const registry: RuntimeRegistry = new RuntimeRegistry({ ...registryOptions, modules,
-    modelQueue: options.gatewayModelRuntime ? new ModelQueueOwner({
+    ...(options.gatewayModelRuntime ? { modelQueue: new ModelQueueOwner({
       runtime: options.gatewayModelRuntime,
       usage: providerUsage ?? new ProviderUsageOwner(),
       queue: role => registry.modelQueueOf(role),
       projectionPath: modelQueueProjectionPath(options.tronHome),
       ...(modelQueueDiagnostic ? { log: modelQueueDiagnostic } : {}),
-    }) : undefined,
+    }) } : {}),
     createModelRuntime: () => createProviderModelRuntime(options.agentDir, modelRuntimeFactory) });
   homes.set(registry, owner);
   recents.set(registry, recentModels);
