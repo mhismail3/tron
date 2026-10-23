@@ -93,7 +93,8 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   nearly the whole tree. `open` also invalidates leaves whose `sourceDigest` no
   longer matches the catalog (a crash between catalog and invalidation writes).
   Resume performs the same dependency/catalog reconciliation before replay, so
-  a failed ingest cannot leave an edited catalog under a stale summary.
+  a failed ingest cannot leave an edited catalog under a stale summary. Failed
+  reconciliation rejects resume and retains its durable block.
 - **Pause.** Home's ledger owns pause through `isPaused`: ingestion continues, the
   pump admits no new nodes, started nodes finish; outstanding and new `whenReady`
   waits reject `paused`; resume re-reads and drains. Not a zero-spend promise.
