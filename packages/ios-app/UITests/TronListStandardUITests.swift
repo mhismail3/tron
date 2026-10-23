@@ -17,14 +17,20 @@ final class TronListStandardUITests: XCTestCase {
             expandSheet(app, title: "Instructions")
             shot("instructions-\(mode)")
             app.terminate()
-            app.launchArguments = ["-tron-subagent-parity-fixture", "-history-grouping", dark ? "-dark" : "-light"]
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-history-grouping", "-history-long", dark ? "-dark" : "-light"]
             app.launch()
             let open = app.buttons["Subagent History"]
             XCTAssertTrue(open.waitForExistence(timeout: 10), app.debugDescription)
             open.tap()
             XCTAssertTrue(app.buttons["subagent-row-worker"].waitForExistence(timeout: 5), app.debugDescription)
+            shot("subagent-history-initial-\(mode)")
             expandSheet(app, title: "Subagent History")
             shot("subagent-history-\(mode)")
+            app.swipeUp()
+            app.navigationBars.containing(.staticText, identifier: "Subagent History").buttons["Done"].firstMatch.tap()
+            open.tap()
+            _ = app.buttons["subagent-row-worker"].waitForExistence(timeout: 5)
+            shot("subagent-history-reopen-\(mode)")
             app.terminate()
         }
     }
