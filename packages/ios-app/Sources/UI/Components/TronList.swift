@@ -400,8 +400,9 @@ final class TronFeedPosition {
     static let hysteresis: CGFloat = 60
 }
 
-/// Room for the floating chip above the caption once the feed is long; it reads
-/// only `long`, which changes once, never the scrolling range.
+/// Room for the floating chip below the last row once the feed is long, so the
+/// end scrolls clear of it; it reads only `long`, which changes once, never the
+/// scrolling range.
 private struct TronFeedChipSpace: View {
     let position: TronFeedPosition
     var body: some View {
@@ -410,8 +411,10 @@ private struct TronFeedChipSpace: View {
 }
 
 /// "6,689–6,714 of 6,733", newest first; tapping jumps to the newest entry.
+/// The capsule's 44-pt target takes every touch on it; beside it, rows stay live.
 struct TronFeedPositionChip: View {
-    static let height: CGFloat = 38
+    static let target: CGFloat = 44
+    static let height: CGFloat = target + 4
     let position: TronFeedPosition
     let total: Int?
     let totalIsExact: Bool
@@ -433,10 +436,11 @@ struct TronFeedPositionChip: View {
                 .monospacedDigit()
                 .padding(.horizontal, 13).frame(height: 30)
                 .glassEffect(.regular.interactive(), in: Capsule())
+                .frame(minWidth: Self.target, minHeight: Self.target)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 4)
+            .padding(.bottom, 4)
             .accessibilityLabel("Entries \(low.formatted()) to \(high.formatted())\(total.map { " of \($0.formatted())" } ?? "")")
             .accessibilityHint("Jumps to the newest entry")
             .accessibilityIdentifier("feed-position-chip")
@@ -479,7 +483,6 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
         ScrollViewReader { reader in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
-                    TronFeedChipSpace(position: position)
                     header()
                     ForEach(items) { item in
                         row(item)
@@ -488,6 +491,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                     }
                     TronFeedStateRow(tail: tail, retry: retry)
                         .onAppear { if tail == .idle { loadMore() } }
+                    TronFeedChipSpace(position: position)
                 }
                 .scrollTargetLayout()
                 .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
@@ -496,8 +500,9 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
             .accessibilityIdentifier(identifier)
             // The chip is an overlay: updating it never lays out the scroll view or
             // re-places rows (a pinned header and then an inset both fed back into the
-            // lazy layout). Its space is a fixed spacer at the top of the content.
-            .overlay(alignment: .top) {
+            // lazy layout). It sits above the bottom safe area; its space is a fixed
+            // spacer after the last row.
+            .overlay(alignment: .bottom) {
                 TronFeedPositionChip(position: position, total: total, totalIsExact: totalIsExact) {
                     guard let first = items.first?.id else { return }
                     withAnimation(.snappy) { reader.scrollTo(first, anchor: .top) }
