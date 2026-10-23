@@ -78,6 +78,24 @@ final class TronManageSheetsThemeUITests: XCTestCase {
 
     // MARK: Behavior
 
+    /// Each editor is the first interaction on a newly opened Home model card.
+    @MainActor func testFirstOpenHomeEffortAndContextExposeUsableSliders() {
+        for (control, slider) in [("settings-choice-control", "settings-choice-slider"),
+                                  ("settings-number-control", "settings-number-slider")] {
+            let app = launchManageHome(dark: false)
+            defer { app.terminate() }
+            let button = app.buttons[control].firstMatch
+            XCTAssertTrue(button.waitForExistence(timeout: 8), app.debugDescription)
+            button.tap()
+            let editor = app.descendants(matching: .any)[slider].firstMatch
+            XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(editor.isHittable, "First-open editor must accept input, not remain an empty capsule")
+            XCTAssertGreaterThan(editor.frame.width, 150)
+            shot("first-open-\(control)")
+            app.terminate()
+        }
+    }
+
     /// Each Manage Session row opens a sheet titled with the row's own label, and
     /// the row's icon and that title are inked in Manage Session's emerald title
     /// color: one sheet theme, no per-row teal.
