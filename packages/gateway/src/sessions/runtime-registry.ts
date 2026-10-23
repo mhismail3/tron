@@ -11,7 +11,7 @@ import { lstat, open, readFile, realpath, rename, rm, stat } from "node:fs/promi
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import {
-  ModelRuntime,
+  type ModelRuntime,
   parseSessionEntries,
   SessionManager,
   type FileEntry,
@@ -19,9 +19,7 @@ import {
   SettingsManager,
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
-import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
 import { sessionRuntimeView } from "../providers/openai-model-eligibility.js";
-import { applyJevModelPricing } from "../providers/jev-model-pricing.js";
 import type {
   AdministrativeDrainBlockerCategory,
   AdministrativeDrainBlockerSummary,
@@ -652,7 +650,7 @@ export class RuntimeRegistry {
       mcpAuth?: RuntimeSlotDependencies["mcpAuth"];
       idleRuntimeMs: number;
       maximumLiveRuntimes?: number;
-      modelRuntimeFactory?: () => Promise<ModelRuntime>;
+      createModelRuntime: () => Promise<ModelRuntime>;
       trust: TrustService;
       broadcast: SessionBroadcast;
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
@@ -1733,16 +1731,7 @@ export class RuntimeRegistry {
       ...(this.modelQueue ? { modelQueue: this.modelQueue } : {}),
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
-      createModelRuntime: async () => {
-        const runtime = applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
-          authPath: join(this.options.agentDir, "auth.json"),
-          modelsPath: join(this.options.agentDir, "models.json"),
-          modelsStorePath: join(this.options.agentDir, "models-store.json"),
-          refreshOnCreate: true,
-          allowModelNetwork: false,
-        })))()));
-        return runtime;
-      },
+      createModelRuntime: this.options.createModelRuntime,
       trust: this.options.trust,
       blobs: this.blobs,
       exports: this.exports,

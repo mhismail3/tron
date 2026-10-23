@@ -11,7 +11,7 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
 `provider-usage.ts`, `openai-model-eligibility.ts` (`OpenAIModelEligibility`),
 `context-window-policy.ts`, `model-queue.ts` and `model-queue-extension.ts`,
 `recent-models.ts`, `model-release-date-catalog.ts` (+ JSON data), `virtual-model.ts`,
-`kimi-k3-policy.ts`, `jev-model-pricing.ts`.
+`kimi-k3-policy.ts`, `jev-model-pricing.ts`, `provider-runtime.ts`.
 
 ## Contract
 
@@ -58,6 +58,9 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
   saved default with the first available model without rewriting settings; existing
   sessions are never rewritten. Extension `ctx.setModel` and extension re-registration
   of `openai`/`openai-codex` are outside this policy (no SDK pre-selection hook).
+- **Runtime construction.** `createProviderModelRuntime` supplies canonical auth/model paths,
+  offline refresh defaults and Kimi-then-Jev policy wrapping for Gateway and session runtimes.
+  The registry receives this factory from composition; injected raw factories use the same policies.
 - **Moonshot Kimi K3** caps the completion reservation at 32,768 tokens via
   `max_completion_tokens` (Moonshot TPM counts the reservation). Account and org quota
   errors are non-retryable; max-concurrency with explicit guidance gets one bounded

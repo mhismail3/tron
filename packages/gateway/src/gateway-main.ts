@@ -3,7 +3,7 @@ import { ManagedSubagents } from "./kernel/delegation/managed-subagents.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, renameSync, writeFileSync, rmSync } from "node:fs";
-import { ModelRuntime, SettingsManager } from "./kernel/pi/coding-agent.js";
+import { SettingsManager } from "./kernel/pi/coding-agent.js";
 import { piCliBundle } from "./kernel/pi/packages.js";
 import { loadConfig } from "./config.js";
 import { GatewayError } from "./errors.js";
@@ -44,9 +44,8 @@ import { ResourceSampler } from "./transport/stall-diagnostics.js";
 import type { ResourceRuntimeEntry } from "./util/resource-recorder.js";
 import { requestsCompetingForLoop } from "./util/request-span.js";
 import { backgroundWork } from "./background-work.js";
-import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
+import { createProviderModelRuntime } from "./providers/provider-runtime.js";
 import { OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";
-import { applyJevModelPricing } from "./providers/jev-model-pricing.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
@@ -184,13 +183,7 @@ startupCheckpoint("notifications");
 const openAIModelEligibility = new OpenAIModelEligibility();
 // One usage owner: Providers usage and the model queues' 95% skip share its cache.
 const providerUsage = new ProviderUsageOwner();
-const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime.create({
-  authPath: join(config.agentDir, "auth.json"),
-  modelsPath: join(config.agentDir, "models.json"),
-  modelsStorePath: join(config.agentDir, "models-store.json"),
-  refreshOnCreate: true,
-  allowModelNetwork: false,
-})));
+const modelRuntime = await createProviderModelRuntime(config.agentDir);
 openAIModelEligibility.attachRuntime(modelRuntime);
 startupCheckpoint("model-runtime");
 const globalSettingsManager = SettingsManager.create(homedir(), config.agentDir, { projectTrusted: false });
@@ -314,6 +307,7 @@ const resourceSampler: ResourceSampler = new ResourceSampler({
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
 const sessions = new RuntimeRegistry({
   modules, agentDir: config.agentDir,
+  createModelRuntime: () => createProviderModelRuntime(config.agentDir),
   gatewayModelRuntime: modelRuntime,
   tronHome: config.tronHome,
   resources: resourceSampler,

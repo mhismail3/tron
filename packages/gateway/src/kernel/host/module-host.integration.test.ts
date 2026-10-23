@@ -6,6 +6,7 @@ import { TrustService } from "../../admin/trust-service.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { OpenAIModelEligibility } from "../../providers/openai-model-eligibility.js";
+import { createProviderModelRuntime } from "../../providers/provider-runtime.js";
 import { gatewayModules } from "../../main/modules.js";
 import { ORDINARY_SESSION_PROFILE } from "./session-profile.js";
 import { ModuleHost, type KernelHooks, type ModuleDescriptor, type ModuleInstance } from "./module-host.js";
@@ -123,6 +124,7 @@ describe("kernel/host module host", () => {
     const modules = await ModuleHost.start(gatewayModules(() => ({ registry, openAIModelEligibility, home: { tronHome, agentDir: join(root, "agent"), trust } })).modules, { tronHome, log });
     const registry = new RuntimeRegistry({
       modules, agentDir: join(root, "agent"), tronHome, idleRuntimeMs: 60_000, trust,
+      createModelRuntime: () => createProviderModelRuntime(join(root, "agent")),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     try {
