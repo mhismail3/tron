@@ -368,7 +368,7 @@ describe("Home task bounded backlogs", () => {
         const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 25 * 1024 * 1024, entries: 10, quiescent: true });
         await owner.chapterQuiescent(sessionId); metrics.mockRestore();
         sessionId = (await owner.open()).sessionId;
-        await f.registry.materializeReservedHome(sessionId);
+        await f.registry.homeOwner().materializer.materialize(sessionId);
       }
     }
     const home = await f.registry.acquire(sessionId);

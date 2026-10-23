@@ -401,7 +401,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     await registry.homeOwner().chapterQuiescent(home.id);
     const successorId = (await registry.homeOwner().status()).sessionId!;
     expect(successorId).not.toBe(home.id);
-    const successor = await registry.materializeReservedHome(successorId);
+    const successor = await registry.homeOwner().materializer.materialize(successorId);
     (successor as unknown as { sessionManager: SessionManager }).sessionManager
       .appendMessage(fauxAssistantMessage("Successor Home completion"));
     await notifications.enqueue({ sessionId: successorId, sourceId: "successor-completion", kind: "agent_finished", message: "The agent finished responding.",

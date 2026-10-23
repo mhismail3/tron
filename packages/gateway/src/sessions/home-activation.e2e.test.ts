@@ -548,9 +548,9 @@ describe("Tron Home activations end to end", () => {
       const constructions = vi.spyOn(RuntimeSlot, "create");
       let releaseTerminal!: () => void;
       const terminalGate = new Promise<void>(resolve => { releaseTerminal = resolve; });
-      const originalMaterialize = f.registry.materializeReservedHome.bind(f.registry);
+      const originalMaterialize = f.registry.homeOwner().materializer.materialize.bind(f.registry.homeOwner().materializer);
       let contenders = 0;
-      const materializations = vi.spyOn(f.registry, "materializeReservedHome").mockImplementation(async id => {
+      const materializations = vi.spyOn(f.registry.homeOwner().materializer, "materialize").mockImplementation(async id => {
         const joinedTerminal = ++contenders === 2;
         const slot = await originalMaterialize(id);
         // One ordering lets both joined inputs be admitted: construction is still
@@ -1234,7 +1234,6 @@ describe("Tron Home activations end to end", () => {
       homeOwner(): { writeLocked(record: HomeRecord): Promise<void> };
       sessionDirectoryFor(cwd: string): string;
       home: { homeWorkspacePath(): string };
-      materializeReservedHome(sessionId: string): Promise<unknown>;
     };
     const owner = f.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
     const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
@@ -1249,7 +1248,7 @@ describe("Tron Home activations end to end", () => {
       ],
     });
 
-    await expect(f.registry.materializeReservedHome(reservedId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(f.registry.homeOwner().materializer.materialize(reservedId)).rejects.toMatchObject({ code: "conflict" });
     await expect(readFile(expectedPath)).rejects.toMatchObject({ code: "ENOENT" });
     const recovered = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     expect(recovered.chapters.at(-1)).toMatchObject({ state: "materializing", expectedPath });
@@ -1280,7 +1279,7 @@ describe("Tron Home activations end to end", () => {
     const entered = new Promise<void>(resolve => { reached = resolve; });
     const held = new Promise<void>(resolve => { release = resolve; });
     runtimeServices.hold = async () => { reached(); await held; };
-    const flight = construction === "reserved" ? f.registry.materializeReservedHome(sessionId) : f.registry.acquire(sessionId);
+    const flight = construction === "reserved" ? f.registry.homeOwner().materializer.materialize(sessionId) : f.registry.acquire(sessionId);
     void flight.catch(() => {});
     let transition: Promise<unknown> | undefined;
     try {
@@ -1336,7 +1335,7 @@ describe("Tron Home activations end to end", () => {
     const entered = new Promise<void>(resolve => { reached = resolve; });
     const held = new Promise<void>(resolve => { release = resolve; });
     runtimeServices.hold = async () => { reached(); await held; throw new Error("fixture service construction failed"); };
-    const flight = f.registry.materializeReservedHome(sessionId);
+    const flight = f.registry.homeOwner().materializer.materialize(sessionId);
     void flight.catch(() => {});
     let transition: Promise<unknown> | undefined;
     try {

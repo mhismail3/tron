@@ -320,9 +320,9 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       return originalClaim(sessionId, attemptId);
     };
 
-    const first = item.registry.materializeReservedHome(reservedId);
+    const first = item.registry.homeOwner().materializer.materialize(reservedId);
     await claimEntered;
-    const second = item.registry.materializeReservedHome(reservedId);
+    const second = item.registry.homeOwner().materializer.materialize(reservedId);
     releaseClaim();
     const [firstSlot, secondSlot] = await Promise.all([first, second]);
     expect(claims).toBe(1);
@@ -338,7 +338,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
 
     // A contender arriving after the shared construction promise resolves, but
     // before the first canonical flush, must still join the live owner.
-    const afterReturn = await item.registry.materializeReservedHome(reservedId);
+    const afterReturn = await item.registry.homeOwner().materializer.materialize(reservedId);
     const afterReturnRecord = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     expect(afterReturn).toBe(firstSlot);
     expect(afterReturn.sessionFile).toBe(firstSlot.sessionFile);
@@ -386,7 +386,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const unknownBytes = "{partial";
     await writeFile(unknownPath, unknownBytes);
 
-    await expect(item.registry.materializeReservedHome(reservedId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(item.registry.homeOwner().materializer.materialize(reservedId)).rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(unknownPath, "utf8")).toBe(unknownBytes);
     expect(item.faux.state.callCount).toBe(0);
     expect(await item.registry.homeOwner().status()).toMatchObject({ sessionId: reservedId, live: false });
@@ -410,7 +410,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const refused = owner.recordReservedChapterPath.bind(owner);
     owner.recordReservedChapterPath = async () => { throw new Error("injected path persistence failure"); };
 
-    await expect(item.registry.materializeReservedHome(reservedId)).rejects.toThrow("injected path persistence failure");
+    await expect(item.registry.homeOwner().materializer.materialize(reservedId)).rejects.toThrow("injected path persistence failure");
     owner.recordReservedChapterPath = refused;
     expect(item.faux.state.callCount).toBe(0);
     expect(await item.registry.homeOwner().status()).toMatchObject({ sessionId: reservedId, live: false });

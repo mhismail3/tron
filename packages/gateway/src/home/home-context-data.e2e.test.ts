@@ -239,7 +239,7 @@ describe("Home chapters, task names and memory pages", () => {
     await owner.chapterQuiescent(first);
     metrics.mockRestore();
     const successor = (await owner.chapterList()).chapters.find(chapter => chapter.state === "reserved")!.sessionId;
-    await f.registry.materializeReservedHome(successor);
+    await f.registry.homeOwner().materializer.materialize(successor);
     f.faux.setResponses([fauxAssistantMessage("second chapter reply")]);
     const next = await f.registry.acquire(successor);
     await next.prompt("second chapter input");

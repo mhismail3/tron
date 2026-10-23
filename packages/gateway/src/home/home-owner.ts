@@ -5,6 +5,7 @@ import { visitCanonicalSessionEntries } from "../episodic/episodic-source.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { HomeChapterMaterializer, type HomeRuntimePort } from "./home-chapter-materialization.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest, type HomeTaskControlRefusalReason, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
@@ -141,6 +142,8 @@ export interface HomeOwnerOptions {
   tronHome: string;
   trust: TrustService;
   sessions: HomeSessionPort;
+  /** K1 runtime operations the reserved-successor procedure is built on. */
+  runtimes: HomeRuntimePort;
   diagnostic?: HomeDiagnostic;
   /** The Tron internal workspace whose capability state holds Home's memory. */
   workspace: TronWorkspace;
@@ -208,6 +211,8 @@ export class HomeOwner {
    * its runtimes are retired (the kernel reads it through `sessionLineage`). */
   publicationUncertain = false;
   private readonly tasks: HomeTaskDispatcher;
+  /** Builds a reserved successor chapter's runtime (home.prompt, wake). */
+  readonly materializer: HomeChapterMaterializer;
   private readonly inbox: WakeInboxOwner;
   /** The wake owner's single-flight state: one drain at a time, with one request
    * remembered while it runs. Nothing else starts a wake. */
@@ -239,6 +244,7 @@ export class HomeOwner {
       wakeAvailable: homeId => this.wakeAvailable(homeId),
       wake: () => this.requestWake(),
     });
+    this.materializer = new HomeChapterMaterializer(this, options.runtimes, options.trust, options.diagnostic);
     this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox);
   }
 
@@ -612,6 +618,8 @@ export class HomeOwner {
     }
     let delivered: boolean;
     try {
+      // A post-rollover wake materializes the successor as home.prompt does (#1518).
+      if (this.reservedChapter(sessionId)) { await this.materializer.materialize(sessionId); await this.materializer.assertAttempt(sessionId); }
       ({ delivered } = await this.options.sessions.wakeHome(sessionId));
     } catch (error) {
       if (error instanceof GatewayError && error.code === "busy") {

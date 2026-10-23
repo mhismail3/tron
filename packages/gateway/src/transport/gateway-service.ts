@@ -1772,9 +1772,9 @@ export class GatewayService {
           });
           const reserved = this.requireHome().reservedChapter(binding.physicalSessionId);
           const slot = reserved
-            ? await this.dependencies.sessions.materializeReservedHome(binding.physicalSessionId)
+            ? await this.requireHome().materializer.materialize(binding.physicalSessionId)
             : await this.dependencies.sessions.acquire(binding.physicalSessionId);
-          if (reserved) await this.dependencies.sessions.assertReservedHomeAttempt(binding.physicalSessionId);
+          if (reserved) await this.requireHome().materializer.assertAttempt(binding.physicalSessionId);
           this.requireHome().assertRouteBinding({
             homeId: binding.homeId,
             bindingRevision: binding.bindingRevision,

@@ -105,6 +105,8 @@ function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
     workspace,
     // Designation and status never dispatch a task, so the task namespace is never read.
     taskSessions: {} as RuntimeRegistry,
+    // Designation and status never materialize a successor runtime.
+    runtimes: {} as never,
     sessions: {
       createHomeSession: async () => CORPUS_IDS.session, sessionFile: async () => undefined,
       sessionPresent: async (id) => id === CORPUS_IDS.session, hasLiveRuntime: () => false, currentSessionModel: () => null,

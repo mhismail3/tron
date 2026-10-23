@@ -219,7 +219,7 @@ describe("Home materialization crash recovery", () => {
       await awaitsWithin(frozen.started, "path durably recorded before flush");
       fresh = await makeRegistry(f.root);
       expect(fresh.registry.homeOwner().reservedChapter(sessionId)).toMatchObject({ state: "materializing", expectedPath: f.expectedPath });
-      const recovery = await fresh.registry.materializeReservedHome(sessionId).then(
+      const recovery = await fresh.registry.homeOwner().materializer.materialize(sessionId).then(
         slot => ({ blocked: false, reusedPath: slot.sessionFile === f.expectedPath }),
         error => ({ blocked: true, reason: error instanceof Error ? error.message : String(error) }),
       );
@@ -251,7 +251,7 @@ describe("Home materialization crash recovery", () => {
       await awaitsWithin(frozen.started, "conversation flushed before publication");
       fresh = await makeRegistry(f.root);
       expect(fresh.registry.homeOwner().reservedChapter(sessionId)).toMatchObject({ state: "materializing", expectedPath: f.expectedPath });
-      const rebuilt = await fresh.registry.materializeReservedHome(sessionId);
+      const rebuilt = await fresh.registry.homeOwner().materializer.materialize(sessionId);
       expect(rebuilt.sessionFile).toBe(f.expectedPath);
       expect(fresh.registry.homeOwner().reservedChapter(sessionId)).toBeUndefined();
       expect((await ledger(f.recordPath)).chapters.at(-1)).toMatchObject({ state: "active", sessionId });

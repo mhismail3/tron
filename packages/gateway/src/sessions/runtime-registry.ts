@@ -71,6 +71,7 @@ import { workspaceModule } from "../workspace/workspace-module.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
 import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
+import type { HomeRuntimePort } from "../home/home-chapter-materialization.js";
 import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
 import { syncDurably } from "../util/durable-json.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
@@ -86,9 +87,7 @@ import {
   type CatalogMetadataIndexFailure,
   type CatalogMetadataIndexSummary,
 } from "./catalog-metadata-index.js";
-import { branchFromParsedSession, branchFromSessionEntries, validateSearchBranch, type SessionSearchForkBoundary } from "./session-branch.js";
-import { appendChatSettingsSnapshot } from "./session-settings.js";
-import { appendContextWindowSnapshot } from "../providers/context-window-policy.js";
+import { branchFromParsedSession, validateSearchBranch, type SessionSearchForkBoundary } from "./session-branch.js";
 import {
   SessionCatalog,
   SUBAGENT_RUN_DIRECTORY,
@@ -841,7 +840,14 @@ export class RuntimeRegistry {
         replaceRuntimeForProfile: (sessionId, commit) => this.replaceHomeRuntimeForProfile(sessionId, commit),
         serializeSessionMutation: (sessionId, commit) => this.serializeSessionMutation(sessionId, commit),
         retireHomeRuntimes: () => this.retireUncertainHomeRuntimes(),
-        wakeHome: async (sessionId) => { if (this.home.reservedChapter(sessionId)) { await this.materializeReservedHome(sessionId); await this.assertReservedHomeAttempt(sessionId); } return (await this.acquire(sessionId)).admitHomeWake(); }, // A post-rollover wake materializes the successor as home.prompt does (#1518).
+        wakeHome: async (sessionId) => (await this.acquire(sessionId)).admitHomeWake(),
+      },
+      runtimes: {
+        materializeRuntime: (sessionId, construct) => this.materializeRuntime(sessionId, construct),
+        liveRuntime: (sessionId) => this.mutex.run(() => this.slots.get(sessionId)),
+        sessionDirectory: (cwd) => this.sessionDirectoryFor(cwd),
+        canonicalEntries: (sessionId) => this.canonicalEntries(sessionId),
+        createRuntimeOver: (sessionId, build) => this.createRuntimeOver(sessionId, build),
       },
       ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
       workspace: this.workspace,
@@ -918,11 +924,9 @@ export class RuntimeRegistry {
   /** The Home designation owner for this installation. */
   homeOwner(): HomeOwner { return this.home; }
 
-  /**
-   * One reservation-scoped materialization promise. Callers await this before
-   * dispatching their own input, so joining never consumes or replays a command.
-   */
-  async materializeReservedHome(sessionId: string): Promise<RuntimeSlot> {
+  /** One construction flight per session (K1): a live runtime is returned as
+   * `existing`, a running flight is joined, otherwise `construct` runs once. */
+  private async materializeRuntime(sessionId: string, construct: () => Promise<RuntimeSlot>): Promise<{ slot: RuntimeSlot; existing: boolean }> {
     let existingSlot: RuntimeSlot | undefined;
     let selected!: Promise<RuntimeSlot>;
     await this.mutex.run(() => {
@@ -931,23 +935,13 @@ export class RuntimeRegistry {
       const existing = this.homeMaterializations.get(sessionId);
       if (existing) selected = existing;
       else {
-        selected = Promise.resolve().then(() => this.createReservedHomeRuntime(sessionId));
+        selected = Promise.resolve().then(construct);
         this.homeMaterializations.set(sessionId, selected);
       }
     });
-    if (existingSlot) {
-      const reservation = this.home.reservedChapter(sessionId);
-      if (reservation?.state === "materializing" && reservation.attemptId && reservation.expectedPath && reservation.expectedPath === existingSlot.sessionFile) {
-        await this.home.assertReservedChapterAttempt(sessionId, reservation.attemptId, reservation.expectedPath);
-      } else {
-        const path = existingSlot.sessionFile;
-        if (!path) throw new GatewayError("conflict", "Live Home chapter has no canonical path", true);
-        await this.home.assertPublishedHomeChapter(sessionId, path);
-      }
-      return existingSlot;
-    }
+    if (existingSlot) return { slot: existingSlot, existing: true };
     try {
-      return await selected;
+      return { slot: await selected, existing: false };
     } finally {
       await this.mutex.run(() => {
         if (this.homeMaterializations.get(sessionId) === selected) this.homeMaterializations.delete(sessionId);
@@ -955,53 +949,15 @@ export class RuntimeRegistry {
     }
   }
 
-  async assertReservedHomeAttempt(sessionId: string): Promise<void> {
-    const slot = await this.mutex.run(() => this.slots.get(sessionId));
-    if (!slot || slot.isDisposed || !slot.sessionFile) throw new GatewayError("conflict", "No live Home reservation runtime exists", true);
-    const chapter = this.home.reservedChapter(sessionId);
-    if (chapter?.state === "materializing" && chapter.attemptId && chapter.expectedPath) {
-      if (slot.sessionFile !== chapter.expectedPath) throw new GatewayError("conflict", "Home runtime path differs from its reservation", true);
-      await this.home.assertReservedChapterAttempt(sessionId, chapter.attemptId, chapter.expectedPath);
-      return;
-    }
-    await this.home.assertPublishedHomeChapter(sessionId, slot.sessionFile);
+  /** A session's canonical entries: its live runtime's branch, else the durable file's cut. */
+  private async canonicalEntries(sessionId: string): Promise<{ entries: readonly FileEntry[] | null; live: boolean }> {
+    const live = this.slots.get(sessionId);
+    if (live !== undefined && !live.isDisposed) return { entries: live.canonicalSessionEntries(), live: true };
+    return { entries: await this.canonicalSessionEvidenceCut(sessionId), live: false };
   }
 
-  private async createReservedHomeRuntime(sessionId: string): Promise<RuntimeSlot> {
-    const attemptId = randomUUID();
-    const chapter = await this.home.claimReservedChapter(sessionId, attemptId);
-    const cwd = await this.options.trust.requireResolved(this.home.homeWorkspacePath());
-    const sessionDirectory = this.sessionDirectoryFor(cwd.cwd);
-    let expectedPath = chapter.expectedPath ?? join(sessionDirectory, `.home-reservation-${sessionId}.jsonl`);
-    const scan = await scanReservedHomeSession({ directory: sessionDirectory, expectedPath, sessionId });
-    if (scan.action === "blocked") {
-      this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason: "uncertain-session-evidence" });
-      throw new GatewayError("conflict", "Home chapter recovery is blocked by uncertain session evidence");
-    }
-    this.options.homeDiagnostic?.({ outcome: "chapter-recovery", reason: scan.action });
-    // Pi's public newSession API selects a timestamped path but stages setup
-    // entries: no file is persisted until the first user or assistant entry.
-    // Once a previous attempt durably named a different
-    // path, absence is not permission to silently replace that binding: no
-    // verified exact-path adapter exists in the pinned SDK, so preserve and
-    // block rather than create evidence outside the recorded attempt.
-    if (chapter.expectedPath && scan.action === "absent") {
-      throw new GatewayError("conflict", "Home recovery is blocked because its recorded chapter path is absent");
-    }
-
-    // Resolve the sealed predecessor before reserving a new durable path. A
-    // failed read must not strand an otherwise absent materialization attempt.
-    const previousId = scan.action === "absent" ? this.home.settingsPredecessor(sessionId) : undefined;
-    // A never-prompted live predecessor can still have SDK-staged choices and
-    // no physical file. Its sealed slot is the canonical owner; cold reads must
-    // instead prove the exact durable file and may not treat absence as defaults.
-    const livePrevious = previousId ? this.slots.get(previousId) : undefined;
-    const previousFromLive = livePrevious !== undefined && !livePrevious.isDisposed;
-    const previousEntries = previousId ? previousFromLive
-      ? livePrevious.canonicalSessionEntries() : await this.canonicalSessionEvidenceCut(previousId) : undefined;
-    if (previousId && !previousEntries) throw new GatewayError("conflict", "Home settings predecessor is missing");
-    const previousBranch = previousEntries ? branchFromSessionEntries(previousEntries.filter((entry): entry is SessionEntry => entry.type !== "session")) : undefined;
-    if (previousId && !previousBranch) throw new GatewayError("conflict", "Home settings predecessor is invalid");
+  /** Builds and publishes a runtime over a caller-prepared manager inside one slot admission (K1). */
+  private async createRuntimeOver(sessionId: string, build: Parameters<HomeRuntimePort["createRuntimeOver"]>[1]): Promise<RuntimeSlot> {
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;
@@ -1013,49 +969,10 @@ export class RuntimeRegistry {
         this.reservedSlotStarts += 1;
         reserved = true;
       });
-      let manager: SessionManager;
-      if (scan.action === "adopt") {
-        // The scan adopts only the path it was given, so a mismatch means the
-        // durable reservation names a different file.
-        if (chapter.expectedPath !== scan.path) {
-          throw new GatewayError("conflict", "Home chapter recovery path no longer matches its durable reservation");
-        }
-        manager = SessionManager.open(scan.path, sessionDirectory, cwd.cwd);
-        if (manager.getSessionId() !== sessionId || manager.getSessionFile() !== scan.path) {
-          throw new GatewayError("conflict", "Home chapter recovery did not reopen the exact reserved session");
-        }
-        // The durable path was recorded by the earlier process; this attempt
-        // rebinds it before any runtime can submit canonical input.
-        await this.home.recordReservedChapterPath(sessionId, attemptId, scan.path);
-      } else {
-        manager = SessionManager.create(cwd.cwd, sessionDirectory);
-        const createdPath = manager.newSession({ id: sessionId });
-        if (!createdPath) throw new GatewayError("internal", "Home chapter creation did not reserve a session path");
-        // These metadata-only appends stage in Pi. Validate and stage the
-        // inherited policy before committing the new path to the Home ledger.
-        if (previousBranch) {
-          appendChatSettingsSnapshot(previousBranch, manager);
-          appendContextWindowSnapshot(previousBranch, manager);
-        }
-        await this.home.recordReservedChapterPath(sessionId, attemptId, createdPath);
-        expectedPath = createdPath;
-      }
-      const chapterState = this.lineage().state(sessionId);
-      if (!chapterState.materializing || !chapterState.lineageId || chapterState.ordinal !== chapter.ordinal
-        || chapterState.attemptId !== attemptId || chapterState.expectedPath !== expectedPath) {
-        throw new GatewayError("conflict", "Home materialization authority no longer matches its durable reservation", true);
-      }
-      slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, this.options.modules.profile(HOME_SESSION_PROFILE_NAME), {
-        homeId: chapterState.lineageId,
-        ordinal: chapterState.ordinal,
-        sessionId,
-        attemptId,
-        expectedPath,
-      });
-      if (slot.id !== sessionId || slot.sessionFile !== manager.getSessionFile()) {
-        throw new GatewayError("conflict", "Home chapter runtime identity differs from its reservation");
-      }
-      if (previousBranch) this.options.homeDiagnostic?.({ outcome: "chapter-recovery", reason: previousFromLive ? "settings-from-live" : "settings-from-cold" });
+      const manager = await build.prepare();
+      const authority = build.authority();
+      slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, this.options.modules.profile(build.profile), authority);
+      build.admitted(slot);
       const transcriptBytes = await sessionFileBytes(slot.persistedSessionFile);
       await this.mutex.run(() => {
         if (this.slots.has(sessionId)) throw new GatewayError("conflict", "Reserved Home chapter runtime is already active");
@@ -1067,10 +984,10 @@ export class RuntimeRegistry {
         this.revision += 1;
         this.options.sessionListChanged();
       });
-      await this.home.publishObservedMaterialization(sessionId, attemptId, expectedPath);
+      await build.published(slot);
       return slot;
     } catch (error) {
-      this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason: "materialization-failed" });
+      build.failed();
       if (slot && this.slots.get(sessionId) !== slot) await slot.dispose().catch(() => {});
       throw error;
     } finally {
