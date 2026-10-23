@@ -16,7 +16,7 @@ extension HomeSheet {
             profileHeader(list)
             if active.isEmpty { profileEmptyPlaceholder }
             if editable, inferred.count > 1 {
-                TronListGroup([HomeProfileConfirmAll(count: inferred.count)]) { row in
+                TronListGroup([HomeProfileConfirmAll(count: inferred.count)], identifier: "home-profile-confirm-all") { row in
                     TronSettingsRow(icon: nil, title: "Confirm all inferred",
                                     subtitle: "\(row.count) items become binding on every Home turn", accent: accent) {
                         Button { profileEdit.confirmingAll = true } label: {
@@ -27,7 +27,6 @@ extension HomeSheet {
                         .accessibilityIdentifier("home-profile-confirm-all-button")
                     }
                     .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("home-profile-confirm-all")
                 }
                 .tronManagedSheet(isPresented: $profileEdit.confirmingAll, identity: "home.\(profileID).profile-confirm-all") {
                     TronConfirmationSheet(
