@@ -234,6 +234,72 @@ describe("gateway/notifications delivery locks", () => {
     });
   }, 60_000);
 
+  it("overlapping terminal admissions send one waiting push per live background episode", async () => {
+    const lock = await pushLock("notifications-overlapping-terminal", [{ name: "lock-background.ts", source: DETACHED_RUN }]);
+    const { gateway, relay, sessionId } = lock;
+    const slot = await gateway.registry.acquire(sessionId);
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const service = lock.service();
+    const enqueue = service.enqueue.bind(service);
+    let reached!: () => void;
+    const admitted = new Promise<void>(resolve => { reached = resolve; });
+    let successorReached!: () => void;
+    const successorAdmission = new Promise<void>(resolve => { successorReached = resolve; });
+    let admissions = 0;
+    service.enqueue = async input => {
+      const result = await enqueue(input);
+      if (++admissions === 2) successorReached();
+      if (input.kind === "waiting") {
+        reached();
+        await held;
+      }
+      return result;
+    };
+    owned.push(async () => { release(); });
+    gateway.script([
+      () => fauxAssistantMessage([fauxToolCall("lock_background", {}, { id: "overlap-background-call" })], { stopReason: "toolUse" }),
+      () => fauxAssistantMessage("Background work is running."),
+      () => fauxAssistantMessage("The work is still running."),
+    ]);
+    expect((await lock.prompt("start background work")).ok).toBe(true);
+    await awaitsWithin(admitted, "the predecessor's waiting admission");
+    await waitFor(() => pushes(relay).length === 1, "the predecessor's waiting push");
+    expect((await lock.prompt("check the same background work")).ok).toBe(true);
+    await waitFor(() => gateway.record().providerRequests.length === 3 && !slot.snapshot().operation, "the successor turn to end");
+    await awaitsWithin(successorAdmission, "the successor notification admission");
+    release();
+    await waitFor(() => gateway.registry.administrativeDrainSnapshot().blockers.every(blocker => blocker.category === "detached-extension-run"), "both terminal owners to settle");
+    await waitFor(async () => (await lock.document()).pending.length === 0, "the successor push to settle");
+    expect(slot.snapshot().extensionActivities?.some(activity => activity.status === "running")).toBe(true);
+    expect(pushes(relay)).toEqual([
+      "200 waiting [start background work]: The agent is waiting on 1 background task.",
+    ]);
+  }, 60_000);
+
+  it("a rapid reply preserves live-background notification semantics", async () => {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const lock = await pushLock(`notifications-rapid-reply-${attempt}`, [{ name: "lock-background.ts", source: DETACHED_RUN }]);
+      const { gateway, relay, sessionId } = lock;
+      const slot = await gateway.registry.acquire(sessionId);
+      gateway.script([
+        () => fauxAssistantMessage([fauxToolCall("lock_background", {}, { id: "rapid-background-call" })], { stopReason: "toolUse" }),
+        () => fauxAssistantMessage("The background work is running."),
+        () => fauxAssistantMessage("Still running."),
+      ]);
+      expect((await lock.prompt("start the background run")).ok).toBe(true);
+      await waitFor(() => pushes(relay).length === 1, "the launching push at the relay");
+      expect((await lock.prompt("check while the push is in flight")).ok).toBe(true);
+      await waitFor(() => gateway.record().providerRequests.length === 3 && !slot.snapshot().operation
+        && gateway.registry.administrativeDrainSnapshot().blockers.every(blocker => blocker.category === "detached-extension-run"),
+      "the rapid reply's terminal owner to settle");
+      await waitFor(async () => (await lock.document()).pending.length === 0, "rapid reply delivery");
+      expect(slot.snapshot().extensionActivities?.some(activity => activity.status === "running")).toBe(true);
+      expect(pushes(relay).filter(push => push.includes("agent_finished"))).toEqual([]);
+      for (const release of owned.splice(0).reverse()) await release();
+    }
+  }, 60_000);
+
   it("notifications-queued-restart: pushes the relay could not take stay queued and a restarted owner delivers them", async () => {
     const lock = await pushLock("notifications-queued-restart");
     const { gateway, phone, relay, sessionId } = lock;
