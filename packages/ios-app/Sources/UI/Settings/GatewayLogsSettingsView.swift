@@ -31,6 +31,7 @@ struct GatewayLogsSettingsView: View {
     #if HOSTED_TEST
     @Environment(\.hostedDiagnosticsPreparation) private var hostedDiagnosticsPreparation
     @Environment(\.hostedDiagnosticsCapture) private var hostedDiagnosticsCapture
+    @Environment(\.hostedDiagnosticsLocalPreparation) private var hostedDiagnosticsLocalPreparation
     #endif
     @PresentationState private var recordIndex = GatewayLogRecordIndex()
     @PresentationState private var selectedLog: GatewayProfileLogRecord?
@@ -255,6 +256,9 @@ struct GatewayLogsSettingsView: View {
                 appRecords: appRecords, captureKind: "iphone-local"
             )
             do {
+                #if HOSTED_TEST
+                await hostedDiagnosticsLocalPreparation?()
+                #endif
                 let url = try await model.writeLocalDiagnosticArtifact(text)
                 #if HOSTED_TEST
                 await hostedDiagnosticsCapture?(url)
@@ -268,7 +272,8 @@ struct GatewayLogsSettingsView: View {
                 exportArtifactURL = url
                 shareURL = DiagnosticShareFile(url: url)
             } catch {
-                guard scope?.isRetired != true, generation == localCaptureGeneration else { return }
+                guard scope?.isRetired != true, generation == localCaptureGeneration,
+                      shareIntent == shareIntentGeneration else { return }
                 model.postNotice("Local diagnostics could not be captured. Try again.", role: .error, lifetime: .standard, priority: .normal)
             }
         }

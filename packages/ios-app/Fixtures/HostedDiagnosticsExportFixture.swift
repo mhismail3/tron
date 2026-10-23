@@ -4,6 +4,7 @@ import SwiftUI
 
 extension EnvironmentValues {
     @Entry var hostedDiagnosticsPreparation: (@MainActor @Sendable () async -> Void)? = nil
+    @Entry var hostedDiagnosticsLocalPreparation: (@MainActor @Sendable () async -> Void)? = nil
     @Entry var hostedDiagnosticsCapture: (@MainActor @Sendable (URL) async -> Void)? = nil
 }
 
@@ -32,7 +33,7 @@ struct HostedDiagnosticsExportFixture: View {
         let first = DiagnosticsExportFixtureGateway(name: "original", fails: scenario == "failure" || scenario == "held-failure", holdsLogs: scenario == "logs-held")
         let second = DiagnosticsExportFixtureGateway(name: "replacement", fails: false)
         originalGateway = first; replacementGateway = second
-        gate = DiagnosticsExportPreparationGate(held: scenario == "held" || scenario == "held-failure" || scenario == "retirement")
+        gate = DiagnosticsExportPreparationGate(held: scenario == "held" || scenario == "held-failure" || scenario == "retirement" || scenario == "local-held-failure")
         let memory = AutomationFixtureProfileStore(); store = memory
         let profiles = GatewayProfileStore(metadata: memory, tokens: memory)
         try! profiles.save(original, token: "fixture-only-token")
@@ -102,7 +103,12 @@ struct HostedDiagnosticsExportFixture: View {
             }.tronSettingsLayout()
         }
         .environment(model)
-        .environment(\.hostedDiagnosticsPreparation, { await gate.prepare() })
+        .environment(\.hostedDiagnosticsPreparation, {
+            if scenario != "local-held-failure" { await gate.prepare() }
+        })
+        .environment(\.hostedDiagnosticsLocalPreparation, {
+            if scenario == "local-held-failure" { await gate.prepare() }
+        })
         .environment(\.hostedDiagnosticsCapture, { url in
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             let header = text.split(separator: "\n").first
@@ -130,6 +136,12 @@ struct HostedDiagnosticsExportFixture: View {
                         details: String(repeating: "\n", count: 420)
                     )
                 }
+            }
+            if scenario == "local-held-failure" {
+                // The production artifact store must hit a real filesystem refusal,
+                // not an injected writer error, after its preparation is released.
+                try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                try! Data("fixture-not-a-directory".utf8).write(to: root.appending(path: "artifacts"))
             }
             if scenario != "offline" { await model.start() }
             ready = true

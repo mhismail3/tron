@@ -120,6 +120,27 @@ final class TronDiagnosticsExportUITests: XCTestCase {
     }
 
     @MainActor
+    func testOlderLocalWriteFailureCannotPublishAfterNewerExportIntent() {
+        let app = launch("local-held-failure")
+        defer { app.terminate() }
+        app.buttons["Capture on iPhone"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:1 released:0"))
+        app.buttons["Export Diagnostics"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-original", "exports:1 commands:1 repeats:0 originalEvidence:true"))
+        XCTAssertTrue(observe(app, "fixture.export-notices", "Diagnostics saved on Mac"))
+        app.buttons["fixture.release-export-preparation"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:0 released:1"))
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["Capture on iPhone"])
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 15), .completed)
+        let staleError = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Local diagnostics could not be captured"),
+            object: app.staticTexts["fixture.export-notices"])
+        XCTAssertEqual(XCTWaiter.wait(for: [staleError], timeout: 3), .timedOut,
+            "A real failed older local write cannot replace a newer export's successful intent")
+        XCTAssertFalse(app.buttons["Close"].exists)
+        evidence(app, "1732-superseded-local-write-failure")
+    }
+
+    @MainActor
     func testLocalArtifactReportsActualBoundedRowsAndWindow() {
         let app = launch("overflow")
         defer { app.terminate() }

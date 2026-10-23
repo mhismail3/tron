@@ -265,5 +265,5 @@ canonical state, is never persisted, and is not a second state authority.
   mutations, drafts, receipts, terminal connections or notifications. User-started diagnostics
   capture/export also retains result publication across cover or scene inactivity; surface
   retirement and destination authority still fence stale results, and newer share
-  intent fences share artifacts. On uncover each branch's owner installs one current aggregate; chat rebases its viewport once against the newest
+  intent fences share artifacts and superseded local-capture errors. On uncover each branch's owner installs one current aggregate; chat rebases its viewport once against the newest
   installation and suppresses accumulated entrances; the dashboard publishes one row cut.
