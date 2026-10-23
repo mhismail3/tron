@@ -5321,6 +5321,36 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
 }
 
 extension AppModel: SessionPresentationStoreDelegate {
+    func sessionPresentationStoreDidBecomeVisible(_ target: SessionPresentationIdentity, at date: Date) {
+        guard let profile = profiles.selected, let connectionID = gatewayConnectionID else { return }
+        let generation = lifecycle.currentLifecycleGeneration
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            @MainActor func isCurrent() -> Bool {
+                self.lifecycle.selectedProfileID == profile.id && self.lifecycle.currentLifecycleGeneration == generation
+                    && self.gatewayConnectionID == connectionID
+                    && self.sessionPresentation.isPresentationVisible(target)
+            }
+            guard isCurrent() else { return }
+            let read = await DeliveredNotificationRead.capture(machineID: profile.machineId, before: date)
+            guard isCurrent() else { return }
+            var sessions: Set<String> = [target.sessionID]
+            if read.hasOtherSessions(than: target.sessionID),
+               self.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true {
+                // The ledger, not names or dashboard rows, owns Home membership.
+                // An unavailable ledger must never widen this exact-chat cleanup.
+                if let value = try? await self.lifecycle.client.requestValue("home.chapterList", JSONValue.object([:]),
+                    expectedConnection: GatewayConnectionAdmission(connectionID: connectionID)),
+                   let chapters = try? HomeChapterListDTO.decode(value),
+                   chapters.chapters.contains(where: { $0.sessionId == target.sessionID }) {
+                    sessions.formUnion(chapters.chapters.map(\.sessionId))
+                }
+                guard isCurrent() else { return }
+            }
+            await read.remove(sessionIDs: sessions)
+        }
+    }
+
     func sessionPresentationStoreDidRequestCatalogRefresh() {
         scheduleSessionListRefresh()
     }

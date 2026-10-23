@@ -8,7 +8,7 @@ notification inbox.
 ## Owns
 
 `AppDelegate`, `PushNotificationCoordinator`, `NotificationInboxCoordinator`,
-`RetiredNotificationBadge`.
+`RetiredNotificationBadge`, `DeliveredNotificationRead`.
 
 ## Contract
 
@@ -32,6 +32,13 @@ notification inbox.
   presentation lease suppresses its own agent-terminal alert at the Gateway. Push Notifications
   settings toggle Input needed, Finished and Waiting through `push.registration.upsert`, rolling
   back on failure. A zero badge is written at launch to clear the retired badge implementation.
+- **Delivered reads.** A synchronized chat becoming visible captures a native delivered cut,
+  matching admitted machine/session routes at or before that visibility. Home membership comes
+  from `home.chapterList`, not dashboard names or rows; a failed ledger read never widens cleanup.
+  Profile, connection and presentation currency fence native reads and removal. Only captured
+  request IDs are removed, leaving other routes and later deliveries intact; the existing retired
+  badge owner restores zero. This is native presentation cleanup, not proof of canonical inbox
+  persistence: the Gateway's independent captured-ID read retries remain authoritative.
 - **Taps.** Admission rejects partial, oversized or non-opaque routes, resolves the machine only
   against a paired profile, marks the inbox row read without delaying navigation, and joins an
   in-flight same-profile reconnect at transport activation. A tap on the chapter the Gateway's
@@ -57,7 +64,8 @@ notification inbox.
 
 ## Entry points
 
-`PushNotificationCoordinator.swift`, `NotificationInboxCoordinator.swift`, `AppDelegate.swift`.
+`PushNotificationCoordinator.swift`, `NotificationInboxCoordinator.swift`, `AppDelegate.swift`,
+`DeliveredNotificationRead.swift`; `SessionPresentationStore`'s synchronized visibility callback.
 
 ## Signals
 
@@ -68,11 +76,14 @@ Registration stage label only.
 ```bash
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronNotificationInboxUITests \
   --only-testing TronMobileUITests/TronHomePushNavigationUITests \
+  --only-testing TronMobileUITests/TronDeliveredNotificationUITests \
   --only-testing TronMobileUITests/TronSmokeUITests/testPushReadinessAndRegistrationAreSeparateFromPolicyToggles
 scripts/validate-push-service-config.sh config/PushService.xcconfig
 ```
 
-Simulator tests inject notification, App Attest and HTTP seams; they never prove APNs delivery.
+Registration tests inject notification, App Attest and HTTP seams. Delivered-read tests use real
+Notification Center local deliveries and production chat visibility over a fixture Gateway;
+`HostedDeliveredNotificationFixture` owns exact-ID cleanup. Neither suite proves APNs delivery.
 `TRON_PUSH_SERVICE_ORIGIN` is shared with the Mac payload, so a change installs the Mac first.
 Before shipping an identity, check its signed entitlements, pair a physical device, rotate its
 token by reinstalling, and verify revoke, offline retry and the Settings registration stage.

@@ -209,6 +209,7 @@ struct HostedHomeDashboardFixture: View {
     @State private var dashboardChanged = false
     @State private var dashboardReads = "none"
     @State private var firstRevealAt: Date?
+    @State private var deliveredNotifications = HostedDeliveredNotificationFixture()
     private let actionProbe = HostedHomeActionProbe()
     private let arguments = ProcessInfo.processInfo.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
@@ -291,6 +292,12 @@ struct HostedHomeDashboardFixture: View {
                         }
                         .font(.system(size: 1)).opacity(0.01)
                     }
+                    .overlay(alignment: .top) {
+                        if arguments.contains("-delivered-notifications") {
+                            HostedDeliveredNotificationControls(fixture: deliveredNotifications,
+                                home: arguments.contains("-delivered-home")).padding(.top, 40)
+                        }
+                    }
                     .overlay(alignment: .center) {
                         if arguments.contains("-home-stale-route") {
                             Button("Invoke stale Home action") {
@@ -341,6 +348,7 @@ struct HostedHomeDashboardFixture: View {
                     + (arguments.contains("-home-sheet-dashboard-workers")
                         ? HostedHomeDashboardWorkers.sessions.map { $0.withGatewaySource(id: profile.id, label: profile.label) } : [])
                 }
+                if arguments.contains("-delivered-notifications") { try await deliveredNotifications.prepare() }
                 if arguments.contains("-home-dashboard-secondary") {
                     model.dashboardPoolDidUpdate(profileID: "competing-profile",
                         sessions: HostedHomeDashboardWorkers.sessions.filter { $0.id == "chat-recent-unread" }

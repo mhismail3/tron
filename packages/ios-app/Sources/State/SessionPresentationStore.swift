@@ -102,6 +102,7 @@ protocol SessionPresentationStoreDelegate: AnyObject {
         operationID: String?
     )
     func sessionPresentationStoreDidOpen(_ target: SessionPresentationIdentity)
+    func sessionPresentationStoreDidBecomeVisible(_ target: SessionPresentationIdentity, at date: Date)
     func sessionPresentationStoreDidPublishSnapshot(
         _ snapshot: SessionSnapshot,
         target: SessionPresentationIdentity
@@ -420,6 +421,10 @@ extension SessionPresentationStore {
         target == requested && revokedTarget != requested
     }
 
+    func isPresentationVisible(_ requested: SessionPresentationIdentity) -> Bool {
+        owns(requested) && visiblePresentationTarget == requested && isAuthoritative
+    }
+
     func setPresentationVisible(_ requested: SessionPresentationIdentity, visible: Bool) {
         if visible {
             guard owns(requested),
@@ -427,7 +432,9 @@ extension SessionPresentationStore {
                   subscribedSessionID == requested.sessionID,
                   subscriptionTarget == requested,
                   let token = subscriptionToken else { return }
+            let becameVisible = visiblePresentationTarget != requested
             visiblePresentationTarget = requested
+            if becameVisible { delegate?.sessionPresentationStoreDidBecomeVisible(requested, at: Date()) }
             startPresentationVisibilityLease(
                 target: requested,
                 subscriptionToken: token,
