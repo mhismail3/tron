@@ -104,7 +104,11 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   Settings, and the composer's Stop is the only Stop (#811). Home sheets are routed by `ChatView`'s `HomeSheetRoute`, open at medium,
   and read through `HomeSheetReadOwner`; Tasks follow the Gateway
   [Home contract](../../../../gateway/docs/home.md). Task Stop and Steer live in the worker's chat
-  (#911).
+  (#911). `HomeContextSummaryCard` shows a native used-fraction ring, state and pressure-colored
+  worker pills, cumulative Total tokens (`input + output + cacheRead + cacheWrite`) and the latest
+  cache-hit percentage. Normal sessions retain their own summary. Profile's Confirm pill alone
+  opens bulk confirmation; Retire uses destructive styling throughout. Chapter summaries keep
+  their message/reply/task counts in wrapping shared tags; Worker details use standard row subtext.
 - **New Session.** Settings, trust and Git preparation are fenced to the original profile,
   lifecycle and workspace; one command per gesture; a created route is consumed once and never
   replayed into a replacement Mac.

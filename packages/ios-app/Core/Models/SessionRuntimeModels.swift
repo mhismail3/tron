@@ -398,7 +398,7 @@ package struct SessionStats: Codable, Hashable, Sendable {
         package let output: Int
         package let cacheRead: Int
         package let cacheWrite: Int
-        let total: Int
+        package let total: Int
 
         package init(input: Int, output: Int, cacheRead: Int, cacheWrite: Int, total: Int) {
             self.input = input

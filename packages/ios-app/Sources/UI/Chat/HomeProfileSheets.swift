@@ -17,10 +17,17 @@ extension HomeSheet {
             if active.isEmpty { profileEmptyPlaceholder }
             if editable, inferred.count > 1 {
                 TronListGroup([HomeProfileConfirmAll(count: inferred.count)]) { row in
-                    TronListButton(TronListRowContent(title: profileEdit.working ? "Confirming…" : "Confirm all inferred",
-                                                      subtext: "\(row.count) items become binding on every Home turn"),
-                                   identifier: "home-profile-confirm-all") { profileEdit.confirmingAll = true }
+                    TronSettingsRow(icon: nil, title: "Confirm all inferred",
+                                    subtitle: "\(row.count) items become binding on every Home turn", accent: accent) {
+                        Button { profileEdit.confirmingAll = true } label: {
+                            TronInlineActionLabel("Confirm", isWorking: profileEdit.working, accent: accent)
+                        }
+                        .buttonStyle(.plain)
                         .disabled(profileEdit.working)
+                        .accessibilityIdentifier("home-profile-confirm-all-button")
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("home-profile-confirm-all")
                 }
                 .tronManagedSheet(isPresented: $profileEdit.confirmingAll, identity: "home.\(profileID).profile-confirm-all") {
                     TronConfirmationSheet(
@@ -147,7 +154,8 @@ extension HomeSheet {
                     }
                 } label: {
                     TronSettingsRow(icon: "archivebox", title: "Retire", subtitle: "Stop applying it",
-                                    accent: .tronError, titleColor: .tronError)
+                                    accent: .tronError, titleColor: .tronError, subtitleColor: .tronError)
+                        .tronSettingsVisualTheme(accent: .tronError)
                 }
                 .disabled(profileEdit.working)
                 .accessibilityIdentifier("home-profile-item-retire")

@@ -248,7 +248,12 @@ struct HomeTaskSheet: View {
     }
 
     /// The worker: its model, its subagents, the runs live right now and its token spend.
-    @ViewBuilder private func workerCard(_ task: HomeTaskDTO) -> some View {
+    private func workerCard(_ task: HomeTaskDTO) -> some View {
+        workerContents(task)
+            .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
+    }
+
+    @ViewBuilder private func workerContents(_ task: HomeTaskDTO) -> some View {
         let runs = task.subagentRuns.flatMap { $0.total > 0 ? $0 : nil }
         if task.workerModel != nil || task.subagents != nil || runs != nil || task.spend != nil || task.checkins?.last != nil {
             TronSettingsGroup("Worker", accent: accent) {

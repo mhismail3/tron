@@ -22,17 +22,6 @@ extension HomeSheet {
         VStack(alignment: .leading, spacing: 18) {
             chapterHeader(chapter, limits: limits)
             if let contents = chapter.contents {
-                let lines = HomeChapterPresentation.contentsLines(contents)
-                if !lines.isEmpty {
-                    TronGlassCard(accent: accent) {
-                        VStack(spacing: 0) {
-                            ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                                if index > 0 { divider() }
-                                TronSettingsRow(icon: line.icon, title: line.text, accent: accent)
-                            }
-                        }
-                    }
-                }
                 if let topics = contents.topics, !topics.isEmpty {
                     TronSettingsGroup("Topics", detail: "From Home's summaries of this chapter.", accent: accent) {
                         VStack(spacing: 0) {
@@ -101,6 +90,15 @@ extension HomeSheet {
                 .foregroundStyle(Color.tronTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("home-chapter-size")
+            if let contents = chapter.contents {
+                ToolChipFlowLayout(spacing: TronSpacing.sm) {
+                    ForEach(HomeChapterPresentation.contentsStats(contents), id: \.self) { stat in
+                        TronListTagPill(tag: TronListTag(text: stat))
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("home-chapter-stats")
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

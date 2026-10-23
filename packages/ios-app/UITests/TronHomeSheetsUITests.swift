@@ -11,6 +11,9 @@ final class TronHomeSheetsUITests: XCTestCase {
     // Native visual review journey; behavioral regressions are added after approval.
     @MainActor func testPolishReviewLight() { polishReview(arguments: [], name: "light") }
     @MainActor func testPolishReviewDark() { polishReview(arguments: ["-home-dark"], name: "dark") }
+    @MainActor func testPolishReviewInsetMetrics() {
+        polishReview(arguments: ["-home-summary-inset-metrics"], name: "inset", summaryOnly: true)
+    }
     @MainActor func testPolishReviewXXXL() {
         polishReview(arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"], name: "xxxl", summaryOnly: true)
     }

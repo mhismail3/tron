@@ -1,10 +1,8 @@
 import SwiftUI
 import TronMobileCore
 
-/// The Manage Home main sheet: the Home chat's context card (state pill, the
-/// last activation, and the context window split by section), Home sub-sheet
-/// rows, the consolidated settings destination, and the
-/// pause and disable controls.
+/// Manage Home's context ring, state and workers, its sub-sheet destinations,
+/// consolidated settings, and pause/disable controls.
 extension HomeSheet {
     /// The state pill's accent: a working or ready Home reads as success, a blocked
     /// or recovering one as an error, and a paused or disabled one as idle.
@@ -28,56 +26,12 @@ extension HomeSheet {
     }
 
     @ViewBuilder func usageHeader(_ read: HomeManageDTO) -> some View {
-        let status = read.status
         if let sessionID, let snapshot = model.sessionContextPresentation(for: sessionID) {
-            SessionContextUsageCard(
-                snapshot: snapshot,
-                accessory: contextHeader(status, breakdown: read.context.breakdown),
-                segments: read.context.breakdown.map(Self.contextSegments)
-            )
-            .accessibilityIdentifier("home-context-breakdown")
+            HomeContextSummaryCard(snapshot: snapshot, read: read)
             // Home-originated and Home-task settings requests belong to Manage Home.
             .settingsApprovals(.home)
         } else {
             TronLoadingState(label: "Loading Home chat…")
-        }
-    }
-
-    /// Home's state pill, then what started the last activation and when.
-    private func contextHeader(_ status: HomeStatusDTO, breakdown: HomeContextDTO.Breakdown?) -> some View {
-        HStack(spacing: 8) {
-            TronStatusPill(text: HomeStatusLinePresentation.state(status), accent: Self.statusAccent(status))
-                .accessibilityIdentifier("home-manage-state")
-            if let breakdown {
-                Text(HomeContextPresentation.activationLine(breakdown.activation))
-                    .font(SessionSummaryTypography.detail)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("home-context-activation")
-            }
-        }
-    }
-
-    /// The context window split by where the last activation's request went.
-    static func contextSegments(_ breakdown: HomeContextDTO.Breakdown) -> SessionContextSegments {
-        SessionContextSegments(
-            used: breakdown.effectiveTokens, window: breakdown.contextWindow,
-            segments: breakdown.sections.map { section in
-                .init(id: section.id.rawValue,
-                      label: HomeContextPresentation.sectionLabel(section.id, input: breakdown.activation.kind),
-                      tokens: section.tokens, color: sectionColor(section.id),
-                      detail: HomeContextPresentation.countLine(section))
-            })
-    }
-
-    static func sectionColor(_ id: HomeContextDTO.Breakdown.Section.ID) -> Color {
-        switch id {
-        case .instructions: .tronSlate
-        case .profile: .tronPurple
-        case .memory: .tronKnowledge
-        case .chapter: .tronChapter
-        case .results: .tronSuccess
-        case .input: .tronBlue
         }
     }
 
@@ -91,14 +45,6 @@ extension HomeSheet {
         let profileList = model.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
         return TronGlassCard(accent: accent) {
             VStack(spacing: 0) {
-                TronSettingsRow(icon: "desktopcomputer", title: "Host pressure",
-                                subtitle: HomeStatusLinePresentation.workers(status), accent: accent) {
-                    TronStatusPill(text: status.hostPressure.level.rawValue.capitalized,
-                                   accent: Self.hostPressureAccent(status.hostPressure.level))
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("home-manage-host")
-                if profileList || memoryBrowser || (status.chapter != nil && chapterList) || status.taskRecovery != nil { divider() }
                 // What Home has learned about you sits above what it remembers.
                 if profileList {
                     navigationRow(icon: "person.text.rectangle",
@@ -127,7 +73,7 @@ extension HomeSheet {
         }
     }
 
-    private static func hostPressureAccent(_ level: HomeStatusDTO.HostPressure.Level) -> Color {
+    static func hostPressureAccent(_ level: HomeStatusDTO.HostPressure.Level) -> Color {
         switch level {
         case .normal: .tronEmerald
         case .elevated: .tronWarning
