@@ -118,7 +118,7 @@ struct SettingsRendererView: View {
             // empty one never appears and so would never start its own read.
             if let snapshot { content(snapshot) } else { Color.clear.frame(height: 0) }
         } else {
-            TronSettingsSections(alignment: .leading, spacing: 20) {
+            TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
                 if let snapshot {
                     content(snapshot)
                 } else if let failure = loadError {
@@ -182,7 +182,7 @@ struct SettingsRendererView: View {
                 VStack(spacing: 0) { rows(only.keys, resolution: resolution, options: options, detailed: true, instanced: only.instanced) }
             }
         } else {
-            TronSettingsSections(alignment: .leading, spacing: 20) {
+            TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
                 if ownsDefaultTools {
                     DefaultToolsSettingsSection(projectCWD: target.objectValue?["cwd"]?.stringValue)
                 }
@@ -225,7 +225,7 @@ struct SettingsRendererView: View {
         }
         let sections = Self.sections(resolution)
         let groups = Dictionary(grouping: instances) { governed($0)?.group ?? "" }
-        TronSettingsSections(alignment: .leading, spacing: 20) {
+        TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
             if let help = instances.first?.presentation?.help { TronSettingsCaption(help).containerValue(\.tronSettingsSection, false) }
             ForEach(sections.map(\.id).filter { groups[$0] != nil } + (groups[""] == nil ? [] : [""]), id: \.self) { group in
                 TronSettingsGroup(sections.first { $0.id == group }?.title ?? (instances.first?.presentation?.label ?? key)) {

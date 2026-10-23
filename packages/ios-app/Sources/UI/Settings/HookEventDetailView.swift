@@ -31,7 +31,7 @@ struct HookEventDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true, hidesLoneHeading: true) {
                     Text(event.descriptor.purpose)
                         .font(TronTypography.body)
                         .foregroundStyle(Color.tronTextPrimary)

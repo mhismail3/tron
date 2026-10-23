@@ -432,7 +432,7 @@ private struct SettingsChangeDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                TronSettingsSections(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                     TronGlassCard(accent: statusAccent) {
                         VStack(spacing: 0) {
                             TronSettingsRow(icon: "circle.dashed", title: "Before",

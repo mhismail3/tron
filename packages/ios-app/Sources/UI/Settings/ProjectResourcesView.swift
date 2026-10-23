@@ -349,7 +349,7 @@ struct ProjectResourcesView: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+                TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
                     if model.resources?.objectValue != nil {
                         resourceGroup
                         .tronSettingsCaption("These are resolved resources actually available to this session, tagged by where they come from. Open a row to inspect its source, path, capabilities, or schema.")
@@ -516,7 +516,7 @@ struct ProjectResourceDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true, hidesLoneHeading: true) {
                     if !resolvedPurpose.isEmpty {
                         Text(resolvedPurpose)
                             .font(TronTypography.body)

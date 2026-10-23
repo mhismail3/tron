@@ -269,7 +269,7 @@ struct HookExtensionDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true, hidesLoneHeading: true) {
                     Text(record.handlers.isEmpty
                          ? "This extension is registered in the selected runtime but exposes no event handlers."
                          : "These handlers are registered in the selected runtime. Registration does not indicate recent execution or health.")

@@ -28,7 +28,7 @@ extension HomeTaskSheet.PendingRevocation.Target {
 
 extension HomeTaskSheet {
     func permissionList(_ permissions: HomeTaskPermissionsDTO) -> some View {
-        TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
+        TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, hidesLoneHeading: true) {
             TronSettingsGroup(permissionTitle) {
                 VStack(spacing: 0) {
                     if let permissionSettings {

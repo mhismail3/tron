@@ -104,7 +104,7 @@ struct MacReplacementSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                TronSettingsSections(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                     if let operation = status?.operation {
                         summaryGroup(operation)
                         stepsGroup(operation)

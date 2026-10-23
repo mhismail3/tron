@@ -23,7 +23,7 @@ struct ProvidersSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .center, spacing: 6, lazy: true) {
+            TronSettingsSections(alignment: .center, spacing: 6, lazy: true, hidesLoneHeading: true) {
                 TronGlassCard(accent: .tronPrimary) {
                     VStack(spacing: 0) {
                         modelCatalogRow

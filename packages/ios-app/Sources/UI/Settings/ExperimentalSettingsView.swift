@@ -6,7 +6,7 @@ struct ExperimentalSettingsContent: View {
     @PresentationState private var swiftApps = SwiftAppExperiment.shared
 
     var body: some View {
-        TronSettingsSections(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                 TronSettingsGroup("Swift Files", accent: .tronPrimary) {
                     TronToggleRow(
                         icon: "play.rectangle",

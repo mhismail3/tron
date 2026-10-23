@@ -43,7 +43,7 @@ struct PushNotificationsSettingsView: View {
         let policyEditable = model.connectionState == .connected && pushNotifications.readiness == .ready
             && !pushNotifications.isUpdatingNotificationPolicy
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                 TronSettingsGroup("Push Notifications", detail: "Private agent alerts for this iPhone.") {
                     TronSettingsRow(icon: pushStatus.icon, title: pushStatus.title,
                                     subtitle: "\(pushStatus.detail)\nRegistration stage: \(model.pushRegistrationDiagnostic.rawValue)",

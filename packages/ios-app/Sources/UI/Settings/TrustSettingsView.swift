@@ -86,7 +86,7 @@ struct TrustSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 16, lazy: true) {
+            TronSettingsSections(alignment: .leading, spacing: 16, lazy: true, hidesLoneHeading: true) {
                 if allowsGlobalDefault {
                     SettingsAutosaveNotice(key: .settings(.global, sessionID: nil))
                     globalDefaultSection

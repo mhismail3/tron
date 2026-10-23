@@ -30,7 +30,7 @@ struct DefaultToolsSettingsSection: View {
     private var otherTools: [String] { defaultTools.filter { !Self.managedTools.contains($0) } }
 
     var body: some View {
-        TronSettingsSections(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
             TronSettingsGroup("Default Tools", detail: "Tools the agent has in every new session. MCP servers turn codemode or tool search on by themselves when they need them.", accent: .tronCyan) {
                 ForEach(Self.managed, id: \.entry) { tool in
                     let loads = Self.builtinLoads(tool.builtin, extensions: extensions)

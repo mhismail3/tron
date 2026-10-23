@@ -31,7 +31,7 @@ struct TrustedProjectsSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 20) {
+            TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
                 TronSettingsGroup(nil) {
                     SettingsRendererView(target: target, writeLayer: "global", presentation: .keys([Self.policyKey]), detailedKeys: true)
                 }

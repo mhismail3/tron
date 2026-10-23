@@ -285,7 +285,7 @@ struct TronPresentationSurface<Content: View>: View {
         let _ = HostedPresentationProbe.record?("body", "\(token.id)#\(token.generation)")
         #endif
         content()
-            .environment(\.tronSettingsSectionCount, 1)
+            .environment(\.tronSettingsSectionCount, nil)
             .modifier(TronSheetLoadingHostModifier())
             .modifier(TronNativeSheetCanvas())
             #if HOSTED_TEST

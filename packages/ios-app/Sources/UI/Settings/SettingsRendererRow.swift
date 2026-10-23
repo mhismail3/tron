@@ -403,7 +403,7 @@ struct SettingsProjectInfo: View {
     let source: SettingsProjectSource
     var body: some View {
         ScrollView {
-            TronSettingsSections(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                 TronSettingsCaption("This is set by the current project's settings. Ask an agent to update them in the repo.").containerValue(\.tronSettingsSection, false)
                 TronSettingsGroup(nil) {
                     TronSettingsRow(icon: "doc.text", title: "File") {

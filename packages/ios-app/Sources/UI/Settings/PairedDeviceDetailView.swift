@@ -67,7 +67,7 @@ struct PairedDeviceDetailView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
                 deviceGroup
                 if usesServer {
                     installationGroup

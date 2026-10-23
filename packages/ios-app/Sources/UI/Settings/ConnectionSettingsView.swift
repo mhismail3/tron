@@ -93,7 +93,7 @@ struct ConnectionsSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
                 TronSettingsGroup("Paired Macs") {
                     VStack(spacing: 0) {
                         ForEach(Array(pairedProfiles.enumerated()), id: \.element.id) { index, profile in
@@ -517,7 +517,7 @@ struct GatewayConnectionDetailView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
                 TronSettingsGroup("Status", accent: statusColor) {
                     VStack(spacing: 0) {
                         TronValueRow(
@@ -1089,7 +1089,7 @@ struct GatewayServerInfoSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                TronSettingsSections(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                     if metadata.isEmpty && loading {
                         TronSheetLoadingState(label: "Loading server info…", accent: .tronCyan)
                     } else if metadata.isEmpty {

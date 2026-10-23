@@ -6,7 +6,7 @@ struct AppearanceSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 20, lazy: true) {
+            TronSettingsSections(alignment: .leading, spacing: 20, lazy: true, hidesLoneHeading: true) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Color Mode")
                         .tronSectionHeading()

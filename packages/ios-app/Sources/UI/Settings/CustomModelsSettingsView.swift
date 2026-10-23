@@ -43,7 +43,7 @@ struct CustomModelsSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
                 SettingsAutosaveNotice(key: .customModels(target))
                 providersSection
                     .disabled(advancedDocumentEdited)
@@ -198,7 +198,7 @@ struct CustomModelsSettingsView: View {
         let providerID = provider.wrappedValue.id
         let api = editedProviderBinding(provider.api, providerID: providerID)
         return ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
                 SettingsAutosaveNotice(key: .customModels(target))
                 TronSettingsGroup("Connection") {
                     VStack(spacing: 0) {

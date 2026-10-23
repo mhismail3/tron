@@ -36,12 +36,14 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   icon, container and pill tint share the adaptive ink without recreating navigation or chats.
   Semantic status and resource identities stay independent. UIKit inputs refresh primary ink
   on update, not only creation. The shared placeholder role retains 85% ink for text contrast.
-- `TronSettingsGroup` omits a lone heading by default and preserves its explanatory detail.
+- Section headings are visible by default, including dashboard and top-level Settings groups.
+  Settings drill-in pages opt in with `TronSettingsSections(hidesLoneHeading: true)`;
+  only a structurally lone section loses its heading, never its explanatory detail.
   `TronSettingsSections` counts structural section slots before eager or lazy layout; it supplies
   the count to groups and custom `tronSectionHeading` labels. Standalone captions opt out of
   the count with `containerValue`; attached captions stay with their section. Each presentation
   surface resets the scope, so a single-section child never inherits its parent’s section count.
-  `TronListGroup` likewise omits the heading/count when only one nonempty section remains.
+  `TronListGroup` likewise hides a lone heading/count only in an opted-in subsheet.
 - `ResourceTagLabel` is the one capsule for distribution (External, Module, Local) and scope
   (User, Project) tags; Project takes precedence and the tags are mutually exclusive.
 - `InAppNoticeHost` renders the State-owned notice center in one non-key, pass-through window per

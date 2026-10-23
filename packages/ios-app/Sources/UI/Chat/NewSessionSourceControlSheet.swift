@@ -19,7 +19,7 @@ struct NewSessionSourceControlSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                TronSettingsSections(alignment: .center, spacing: 12) {
+                TronSettingsSections(alignment: .center, spacing: 12, hidesLoneHeading: true) {
                     TronSettingsGroup(
                         "Checkout Strategy",
                         detail: inspectionDetail,

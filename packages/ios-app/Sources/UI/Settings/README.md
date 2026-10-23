@@ -39,8 +39,9 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - **Appearance.** Theme selection writes iPhone-local UserDefaults immediately and reloads in
   a fresh process. Emerald, Deep Burgundy and Olive Gold share adaptive primary roles;
   semantic statuses and resource identities do not change with the theme. Section layouts use
-  `TronSettingsSections`, including renderer-driven and conditional groups: one container has
-  no heading, multiple containers retain their headings, and explanatory detail remains.
+  `TronSettingsSections`, including renderer-driven and conditional groups. Settings subsheets
+  opt in with `hidesLoneHeading: true`: one container has no heading, multiple containers retain
+  their headings, and explanatory detail remains. Top-level settings keep all group headings.
 - **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `number`, `text`,
   `secret`, `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
   order. An unimplemented control renders its `display` read-only; an

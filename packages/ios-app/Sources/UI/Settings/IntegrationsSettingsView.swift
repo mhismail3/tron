@@ -92,7 +92,7 @@ struct IntegrationsSettingsView: View {
 
     var body: some View {
         ScrollView {
-            TronSettingsSections(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                 if let snapshot {
                     let definitions = snapshot.definitions
                     let configured = snapshot.instances.filter { instance in definitions.contains { $0.id == instance.definitionId } }

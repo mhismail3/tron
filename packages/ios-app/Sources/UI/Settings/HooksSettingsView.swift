@@ -190,7 +190,7 @@ struct HooksSettingsView: View {
             showsUnregisteredEvents: showUnregisteredEvents
         )
         return ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
                 TronSettingsCaption(scopeExplanation).containerValue(\.tronSettingsSection, false)
                 if HooksProjectTrustNote.isRequired(projectCWD: projectCWD, trust: trust) {
                     untrustedProjectRow

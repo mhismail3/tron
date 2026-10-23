@@ -1568,7 +1568,7 @@ struct TronSettingsGroup<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
-            if (sectionCount > 1 && title != nil) || detail != nil {
+            if (sectionCount != 1 && title != nil) || detail != nil {
                 VStack(alignment: .leading, spacing: TronSpacing.xs) {
                     if let heading {
                         heading
@@ -1594,7 +1594,7 @@ struct TronSettingsGroup<Content: View>: View {
 
     /// One wrapping header, not an HStack that strands or truncates the note.
     private var heading: Text? {
-        guard sectionCount > 1, let title else { return nil }
+        guard sectionCount != 1, let title else { return nil }
         let label = Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
         guard let inlineDetail else { return label }
         let note = Text(" (\(inlineDetail))").font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)

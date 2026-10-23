@@ -68,7 +68,7 @@ struct ExtensionsSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
                 resolutionSection
                 BuiltinExtensionsSettingsSection(projectCWD: projectCWD)
 
@@ -378,7 +378,7 @@ struct ExtensionsSettingsView: View {
 
     private var packageInstallSheet: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
                 VStack(alignment: .leading, spacing: 8) {
                     sheetSectionHeader(
                         "Source",

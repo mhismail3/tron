@@ -5,7 +5,7 @@ extension ContainerValues {
 }
 
 private struct TronSettingsSectionCountKey: EnvironmentKey {
-    static let defaultValue = 1
+    static let defaultValue: Int? = nil
 }
 
 extension View {
@@ -19,30 +19,32 @@ extension View {
 private struct TronSectionHeadingModifier: ViewModifier {
     @Environment(\.tronSettingsSectionCount) private var count
     func body(content: Content) -> some View {
-        if count > 1 { content.font(TronTypography.sheetSectionHeader) }
+        if count != 1 { content.font(TronTypography.sheetSectionHeader) }
     }
 }
 
 extension EnvironmentValues {
-    var tronSettingsSectionCount: Int {
+    var tronSettingsSectionCount: Int? {
         get { self[TronSettingsSectionCountKey.self] }
         set { self[TronSettingsSectionCountKey.self] = newValue }
     }
 }
 
 /// Counts structural sections before lazy layout, never just the currently visible
-/// cards. A lone group needs no heading; a multi-section layout keeps its headings.
+/// cards. Only settings drill-in pages opt in to hiding a lone heading.
 /// Each direct section-level subview owns one slot. Standalone explanatory
 /// captions opt out with a container value; lazy visibility never changes count.
 struct TronSettingsSections<Content: View>: View {
     var alignment: HorizontalAlignment = .leading
     var spacing: CGFloat? = nil
     var lazy = false
+    var hidesLoneHeading = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         Group(subviews: content()) { subviews in
-            let count = subviews.filter { $0.containerValues.tronSettingsSection }.count
+            let count: Int? = hidesLoneHeading
+                ? subviews.filter { $0.containerValues.tronSettingsSection }.count : nil
             if lazy {
                 LazyVStack(alignment: alignment, spacing: spacing) { content() }
                     .environment(\.tronSettingsSectionCount, count)
