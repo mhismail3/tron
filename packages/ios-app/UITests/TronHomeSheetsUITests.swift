@@ -8,6 +8,177 @@ import XCTest
 final class TronHomeSheetsUITests: XCTestCase {
     private var timings: [String: Double] = [:]
 
+    @MainActor private func launchPolishManage(_ arguments: [String] = []) -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + arguments
+        app.launch()
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
+        app.buttons["home-pinned-row"].tap()
+        let context = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(context, "enabled == true"))
+        open(app, context, ready: "home-manage-state", name: "manage-polish")
+        expand(app, done: "home-sheet-done-manage")
+        return app
+    }
+
+    @MainActor private func openPolishProfileItem(_ app: XCUIApplication) {
+        open(app, element(app, "home-manage-profile"), ready: "home-profile-items", name: "profile-polish")
+        expand(app, done: "home-sheet-done-profile")
+        open(app, element(app, "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc"),
+             ready: "home-profile-item-detail", name: "profile-item-polish")
+        expand(app, done: "home-sheet-done-profile-item")
+    }
+
+    @MainActor private func assertCompactHomeSummary(_ app: XCUIApplication, workers: String, level: String) {
+        for removed in ["home-context-activation", "context-segmented-bar", "home-manage-host",
+                        "context-segment-instructions", "context-segment-profile", "context-segment-memory",
+                        "context-segment-chapter", "context-segment-results", "context-segment-input"] {
+            XCTAssertFalse(element(app, removed).exists, "Removed Home-only summary content: \(removed)")
+        }
+        let summary = element(app, "home-context-summary")
+        XCTAssertTrue(summary.exists)
+        for label in ["Read / Write", "Input", "Output", "Cost"] {
+            XCTAssertFalse(summary.staticTexts[label].exists, "Home does not show the session's \(label) metric")
+        }
+        let pill = element(app, "home-manage-workers"), state = element(app, "home-manage-state")
+        XCTAssertTrue(pill.exists)
+        XCTAssertEqual(pill.label, workers)
+        XCTAssertTrue((pill.value as? String)?.lowercased().contains(level.lowercased()) == true)
+        XCTAssertGreaterThanOrEqual(pill.frame.minX, state.frame.maxX)
+        XCTAssertEqual(pill.frame.midY, state.frame.midY, accuracy: 1)
+        XCTAssertLessThanOrEqual(pill.frame.maxX, app.frame.maxX)
+        let color = ink(app, pill)
+        switch level {
+        case "Normal": XCTAssertGreaterThan(color[1], color[0] + 0.1)
+        case "Elevated":
+            XCTAssertGreaterThan(color[0], color[2] + 0.15)
+            XCTAssertGreaterThan(color[1], color[2] + 0.1)
+        default:
+            XCTAssertGreaterThan(color[0], color[1] + 0.2)
+            XCTAssertGreaterThan(color[0], color[2] + 0.2)
+        }
+        let ring = element(app, "home-context-ring")
+        XCTAssertTrue(ring.exists)
+        XCTAssertEqual(ring.value as? String, "3 percent")
+        XCTAssertEqual(ring.frame.width, ring.frame.height, accuracy: 0.5)
+        let title = app.staticTexts["969K tokens left"]
+        XCTAssertTrue(title.exists)
+        XCTAssertLessThan(ring.frame.maxX, title.frame.minX)
+        let detail = element(app, "home-context-detail").label.replacingOccurrences(of: "\u{00A0}", with: " ")
+        XCTAssertTrue(detail.contains("31K/1M") && detail.contains("3% used"), detail)
+        XCTAssertTrue(detail.contains("1.8M total tokens") && detail.contains("91.4% cache hit"), detail)
+    }
+
+    @MainActor func testBulkProfileConfirmationRequiresThePill() {
+        let app = launchPolishManage(); defer { app.terminate() }
+        open(app, element(app, "home-manage-profile"), ready: "home-profile-items", name: "profile-polish")
+        expand(app, done: "home-sheet-done-profile")
+        let row = element(app, "home-profile-confirm-all")
+        XCTAssertTrue(row.exists)
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
+        XCTAssertFalse(app.buttons["Confirm all"].firstMatch.exists, "The row itself is inert")
+        let pill = app.buttons["home-profile-confirm-all-button"]
+        XCTAssertTrue(pill.exists && pill.isHittable)
+        XCTAssertGreaterThan(pill.frame.midX, row.frame.midX, "Confirm is trailing")
+        pill.tap()
+        XCTAssertTrue(app.buttons["Confirm all"].firstMatch.waitForExistence(timeout: 5), "Only the pill opens the existing confirmation")
+        shot("1723-profile-pill-confirmation")
+    }
+
+    @MainActor func testRetireIconAndSubtextUseDestructiveInk() {
+        let app = launchPolishManage(); defer { app.terminate() }
+        openPolishProfileItem(app)
+        let row = element(app, "home-profile-item-retire")
+        let subtitle = element(app, "home-profile-item-retire-subtext")
+        for color in [ink(app, row, leading: 44), ink(app, subtitle)] {
+            XCTAssertGreaterThan(color[0], color[1] + 0.2)
+            XCTAssertGreaterThan(color[0], color[2] + 0.2)
+        }
+        shot("1723-retire-destructive")
+    }
+
+    @MainActor func testWorkerRowsUseStandardSubtext() {
+        let app = launchPolishManage(); defer { app.terminate() }
+        openPolishProfileItem(app)
+        let reference = element(app, "home-profile-item-retire-subtext")
+        XCTAssertTrue(reference.exists)
+        let lineHeight = reference.frame.height
+        XCTAssertGreaterThan(lineHeight, 0)
+        app.buttons["home-sheet-done-profile-item"].tap()
+        app.buttons["home-sheet-done-profile"].tap()
+        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks-polish")
+        expand(app, done: "home-sheet-done-tasks")
+        open(app, element(app, "home-task-active"), ready: "home-task-detail", name: "worker-polish")
+        expand(app, done: "home-sheet-done-task")
+        app.swipeUp()
+        for id in ["home-task-model", "home-task-subagents", "home-task-spend"] {
+            let value = element(app, "\(id)-subtext")
+            XCTAssertTrue(value.exists)
+            XCTAssertEqual(value.frame.height, lineHeight, accuracy: 0.25, "\(id) matches a standard row's rendered subtext")
+        }
+        let checkin = element(app, "home-task-checkin-subtext")
+        XCTAssertTrue(checkin.exists)
+        // The fixture's time, step, Done and Next each fit on one line here.
+        // Compare rendered line height to a real standard row, not a font constant.
+        XCTAssertEqual(checkin.frame.height / 4, lineHeight, accuracy: 0.25,
+                       "Latest check-in uses the same standard subtext as the single-line Worker values")
+        let measurement = XCTAttachment(string: "standardLine=\(lineHeight), latestCheckin=\(checkin.frame.height)")
+        measurement.name = "1723-worker-font-geometry"; measurement.lifetime = .keepAlways; add(measurement)
+        shot("1723-worker-standard-subtext")
+    }
+
+    @MainActor func testTaskCardsKeepBalancedInsetsAndMemoryRowsIntact() {
+        let app = launchPolishManage(["-home-task-padding-review"]); defer { app.terminate() }
+        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks-polish")
+        expand(app, done: "home-sheet-done-tasks")
+        for id in ["active", "terminal"] {
+            let card = element(app, "home-task-card-\(id)-container")
+            let title = element(app, "home-task-card-\(id)-title")
+            let status = element(app, "home-task-card-\(id)-status")
+            let footer = element(app, "home-task-card-\(id)-metadata")
+            XCTAssertTrue(card.exists && title.exists && status.exists && footer.exists)
+            let top = min(title.frame.minY, status.frame.minY) - card.frame.minY
+            let bottom = card.frame.maxY - footer.frame.maxY
+            XCTAssertEqual(top, bottom, accuracy: 0.5, "The painted card, not just its button's AX frame, has balanced insets")
+        }
+        shot("1723-tasks-balanced-light")
+        app.buttons["home-sheet-done-tasks"].tap()
+        open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory-polish")
+        expand(app, done: "home-sheet-done-memory")
+        let card = element(app, "home-memory-card-39-container")
+        let title = element(app, "home-memory-card-39-title")
+        let footer = element(app, "home-memory-card-39-metadata")
+        XCTAssertTrue(card.exists && title.exists && footer.exists)
+        XCTAssertEqual(title.frame.minY - card.frame.minY, card.frame.maxY - footer.frame.maxY, accuracy: 0.5,
+                       "The shared row still hugs a Memory preview and its metadata")
+        element(app, "home-memory-row-39").tap()
+        XCTAssertTrue(element(app, "home-memory-detail").waitForExistence(timeout: 5), "Memory row navigation remains intact")
+    }
+
+    @MainActor func testChapterStatsBelongToBothSummaryHeaders() {
+        let app = launchPolishManage(); defer { app.terminate() }
+        open(app, element(app, "home-manage-chapters"), ready: "home-chapter-list", name: "chapters-polish")
+        expand(app, done: "home-sheet-done-chapters")
+        for ordinal in [2, 1] {
+            open(app, element(app, "home-chapter-\(ordinal)"), ready: "home-chapter-detail", name: "chapter-polish")
+            expand(app, done: "home-sheet-done-chapter")
+            let header = element(app, "home-chapter-header"), stats = element(app, "home-chapter-stats")
+            XCTAssertTrue(stats.exists, "Active and sealed chapter counts belong to the summary, not a separate rows card")
+            let tags = stats.staticTexts.allElementsBoundByIndex
+            XCTAssertEqual(tags.count, 3)
+            for phrase in ["user message", "Home repl", "task"] { XCTAssertTrue(tags.contains { $0.label.contains(phrase) }) }
+            XCTAssertGreaterThanOrEqual(stats.frame.minY, element(app, "home-chapter-size").frame.maxY)
+            XCTAssertLessThanOrEqual(stats.frame.maxY, header.frame.maxY)
+            for tag in tags {
+                XCTAssertGreaterThanOrEqual(tag.frame.minX, header.frame.minX)
+                XCTAssertLessThanOrEqual(tag.frame.maxX, header.frame.maxX)
+            }
+            shot("1723-chapter-\(ordinal)-stats-inside-header")
+            app.buttons["home-sheet-done-chapter"].tap()
+        }
+    }
+
     @MainActor func testPolishTaskPaddingReview() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -116,22 +287,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(waitFor(ring, "enabled == true"))
         open(app, ring, ready: "home-manage-state", name: "host-status")
         expand(app, done: "home-sheet-done-manage")
-        let host = element(app, "home-manage-host")
-        // Hittable alone can mean only the title is visible at accessibility
-        // sizes. Bring the whole row, including the status pill, above the edge.
-        for _ in 0..<8 where !host.isHittable || host.frame.maxY > app.frame.maxY - 60 { app.swipeUp() }
-        XCTAssertTrue(host.isHittable, app.debugDescription)
-        XCTAssertLessThanOrEqual(host.frame.maxY, app.frame.maxY - 60, "The complete host status remains visible")
-        XCTAssertTrue(host.label.contains(workers), host.label)
-        XCTAssertTrue(host.label.contains(level), host.label)
-        XCTAssertFalse(host.label.lowercased().contains("queued"), "Home workers have no queue")
-        let memory = element(app, "home-manage-memory-browser")
-        if memory.isHittable {
-            XCTAssertEqual(host.frame.minX, memory.frame.minX, accuracy: 1, "Host uses the shared row alignment")
-            XCTAssertEqual(host.frame.width, memory.frame.width, accuracy: 1, "Host uses the shared row width")
-        }
-        XCTAssertGreaterThanOrEqual(host.frame.minX, 0)
-        XCTAssertLessThanOrEqual(host.frame.maxX, app.frame.maxX)
+        assertCompactHomeSummary(app, workers: workers.replacingOccurrences(of: " running", with: ""), level: level)
         keep("931-\(level)-manage")
     }
 
@@ -371,17 +527,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         expand(app, done: "home-sheet-done-manage")
         keep("01-manage")
 
-        // Manage Home's top card is Home's context: the state pill and the last
-        // activation, a section-segmented bar, then the legend above the metrics.
-        // There is no separate Home Context sheet.
+        // Home owns a compact summary, not the normal session's breakdown.
         XCTAssertFalse(element(app, "home-manage-context").exists, "Home Context is part of Manage Home")
-        XCTAssertTrue(element(app, "context-segmented-bar").exists)
-        XCTAssertTrue(element(app, "context-segment-memory").label.contains("260 summaries"))
-        XCTAssertTrue(element(app, "home-context-activation").label.hasPrefix("Your message"))
-        let cacheHit = element(app, "home-context-breakdown").descendants(matching: .any)
-            .matching(NSPredicate(format: "label BEGINSWITH 'Cache Hit'")).firstMatch
-        XCTAssertTrue(cacheHit.exists)
-        XCTAssertLessThanOrEqual(element(app, "context-segment-input").frame.maxY, cacheHit.frame.minY, "The legend sits above the metrics")
+        assertCompactHomeSummary(app, workers: "0 workers", level: "Normal")
 
         // Home Settings is its own container below the rows container.
         app.swipeUp()
@@ -817,14 +965,14 @@ final class TronHomeSheetsUITests: XCTestCase {
         // spans its group so the text keeps the full width. Rows still say Inferred or Confirmed.
         let inferred = "9a364c45-34fe-4f0a-93e6-fc507e2b0bdc", confirmed = "6a26bfb7-f0d1-44ce-b0ae-9da01da3e55c"
         let rowActions = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'home-profile-confirm-' AND identifier != 'home-profile-confirm-all'"))
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'home-profile-confirm-' AND NOT (identifier BEGINSWITH 'home-profile-confirm-all')"))
         XCTAssertEqual(rowActions.count, 0, "Profile rows carry no inline Confirm")
         let inferredRow = element(app, "home-profile-item-\(inferred)")
         XCTAssertTrue(inferredRow.label.contains("Inferred"), inferredRow.label)
         XCTAssertTrue(element(app, "home-profile-item-\(confirmed)").label.contains("Confirmed"))
         let group = element(app, "home-profile-items")
         XCTAssertLessThan(abs(inferredRow.frame.width - group.frame.width), 2, "The row spans its group: \(inferredRow.frame) in \(group.frame)")
-        XCTAssertTrue(element(app, "home-profile-confirm-all").label.contains("3 items"))
+        XCTAssertTrue(app.staticTexts["3 items become binding on every Home turn"].exists)
         keep("profile-edit-00-list")
 
         // An item is confirmed from its detail; the last change offers Undo, which restores it.
@@ -843,7 +991,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(waitFor(element(app, "home-profile-item-\(inferred)"), "label CONTAINS 'Inferred'"))
 
         // Confirm all asks first, then confirms every inferred item at once.
-        element(app, "home-profile-confirm-all").tap()
+        element(app, "home-profile-confirm-all-button").tap()
         let confirmAll = app.buttons["Confirm all"].firstMatch
         XCTAssertTrue(confirmAll.waitForExistence(timeout: 5))
         keep("profile-edit-02-confirm-all")

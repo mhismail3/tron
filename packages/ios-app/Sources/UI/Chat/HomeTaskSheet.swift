@@ -265,6 +265,7 @@ struct HomeTaskSheet: View {
                                         subtitleLineLimit: nil, accent: accent)
                             .accessibilityElement(children: .combine)
                             .accessibilityIdentifier("home-task-checkin")
+                            .tronListMarkers("home-task-checkin")
                         if !rows.isEmpty { TronSettingsDivider(accent: accent) }
                     }
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
@@ -273,6 +274,7 @@ struct HomeTaskSheet: View {
                         TronSettingsRow(icon: row.icon, title: row.title, subtitle: row.value, accent: accent)
                             .accessibilityElement(children: .combine)
                             .accessibilityIdentifier(row.id)
+                            .tronListMarkers(row.id)
                     }
                     if let runs {
                         TronSettingsDivider(accent: accent)

@@ -162,6 +162,8 @@ struct HomePagedListSheet: View {
                 else { child = .memorySummary(line, sessionID: memoryFilter) }
             }
         }
+        .tronListMarker(.container)
+        .tronListMarkers("home-memory-card-\(line.start)")
     }
 
     private func taskRow(_ row: HomeTaskPageDTO.Row) -> some View {

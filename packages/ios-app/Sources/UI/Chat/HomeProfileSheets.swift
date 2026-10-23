@@ -159,6 +159,7 @@ extension HomeSheet {
                 }
                 .disabled(profileEdit.working)
                 .accessibilityIdentifier("home-profile-item-retire")
+                .tronListMarkers("home-profile-item-retire")
             }
         }
     }

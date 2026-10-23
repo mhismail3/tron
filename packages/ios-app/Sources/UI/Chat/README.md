@@ -109,6 +109,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   cache-hit percentage. Normal sessions retain their own summary. Profile's Confirm pill alone
   opens bulk confirmation; Retire uses destructive styling throughout. Chapter summaries keep
   their message/reply/task counts in wrapping shared tags; Worker details use standard row subtext.
+  Shared list previews measure and place at the same line-limited height, keeping task-card
+  metadata insets balanced without changing other sheets' padding.
 - **New Session.** Settings, trust and Git preparation are fenced to the original profile,
   lifecycle and workspace; one command per gesture; a created route is consumed once and never
   replayed into a replacement Mac.

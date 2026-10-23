@@ -1753,6 +1753,7 @@ struct TronSettingsRow<Trailing: View>: View {
                         .lineLimit(subtitleLineLimit)
                         .truncationMode(.tail)
                         .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
+                        .tronListMarker(.subtext)
                 }
                 if let footnote {
                     Text(footnote)
