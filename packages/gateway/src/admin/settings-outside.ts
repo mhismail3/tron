@@ -7,7 +7,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { readJsonDocument } from "../util/json.js";
 import { gitHeadState, projectSettingsPath, stagedBlob, type GitHeadState } from "./project-settings-writer.js";
-import type { ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
+import type { ChangeEntry, SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { type GitResult, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
 import type { OutsideMark } from "./settings-resolver.js";
 import { KEYS, keyDefault, floorFor, recordSubject, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";

@@ -21,7 +21,6 @@ export function maxTier(...tiers: Tier[]): Tier {
   return TIERS[Math.max(...tiers.map(tier => TIERS.indexOf(tier)))]!;
 }
 export type Writer = "ui" | "home" | "worker" | "agent";
-export type Direction = "widen" | "narrow";
 export type Timing = "fixed" | "live";
 export type Effect = "next-turn" | "next-request" | "new-chat" | "reload" | "restart" | "next-memory-pass" | "next-compaction" | "next-change" | "delegate";
 export const CONTROLS = ["toggle", "choice", "number", "text", "secret", "list", "checklist", "catalog", "readOnly"] as const;

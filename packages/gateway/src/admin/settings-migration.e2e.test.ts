@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { SessionManager } from "../kernel/pi/coding-agent.js";
-import { approvalDigest, SettingsApprovals } from "./settings-approvals.js";
+import { approvalDigest, SettingsApprovals } from "../kernel/settings/settings-approvals.js";
 import { migrateSettings, SettingsMigration, type SettingsMigrationOptions } from "./settings-migration.js";
 import { migrationFileHash } from "./settings-migration-plan.js";
 import { PROTOCOL_VERSION } from "../version.js";

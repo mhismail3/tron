@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { it, onTestFinished } from "vitest";
 import { countRandomUUID } from "../../test-support/fixed-recording.js";
 import { storePathLock } from "../../test-support/store-path-lock.js";
-import { APPROVAL_TTL_MS, SettingsApprovals, type ApprovalRequest, type PendingChange } from "./settings-approvals.js";
+import { APPROVAL_TTL_MS, SettingsApprovals, type ApprovalRequest, type PendingChange } from "../kernel/settings/settings-approvals.js";
 import type { SettingsTarget } from "../kernel/settings/tool-contract.js";
 
 /**

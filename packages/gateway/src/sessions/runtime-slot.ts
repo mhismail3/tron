@@ -65,7 +65,7 @@ import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../kernel/host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
-import type { Actor } from "../admin/settings-record.js";
+import type { Actor } from "../kernel/settings/settings-record.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";

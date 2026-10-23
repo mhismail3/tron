@@ -1,11 +1,10 @@
-import { type ChangeStatus, type GitResult, type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
+import { type ChangeStatus, type GitResult, type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier, type Direction } from "./tool-contract.js";
 import { appendFile, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { GatewayError } from "../errors.js";
-import { AsyncMutex } from "../util/async-mutex.js";
+import { GatewayError } from "../../errors.js";
+import { AsyncMutex } from "../../util/async-mutex.js";
 import { createHash, randomUUID } from "node:crypto";
-import { durablePublishBoundedJson, syncDurably } from "../util/durable-json.js";
-import type { Direction } from "./settings-types.js";
+import { durablePublishBoundedJson, syncDurably } from "../../util/durable-json.js";
 
 /**
  * The settings change record (docs/settings-model.md 5.2, foundation F2).

@@ -15,8 +15,8 @@ import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../vers
 import { PI_VERSION } from "../kernel/pi/version.js";
 import type { ChangeContext, SessionAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
-import type { ApprovalRequest } from "../admin/settings-approvals.js";
-import type { Actor, ChangeEntry } from "../admin/settings-record.js";
+import type { ApprovalRequest } from "../kernel/settings/settings-approvals.js";
+import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { KEYS, SECTIONS, auditSubject, recordSubject, schemaKey } from "../admin/settings-schema.js";
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, type HomeProfileOp } from "../modules/home/home-profile.js";
 import type { ObservedStore } from "../admin/settings-outside.js";

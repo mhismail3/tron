@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { GatewayError } from "../errors.js";
-import { readJson, updateJsonLocked } from "../util/json.js";
+import { GatewayError } from "../../errors.js";
+import { readJson, updateJsonLocked } from "../../util/json.js";
 import type { Actor, TierBasis } from "./settings-record.js";
-import { type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
+import { type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier } from "./tool-contract.js";
 
 /**
  * Pending settings changes (docs/settings-model.md 5.5, decision 8, Q22).

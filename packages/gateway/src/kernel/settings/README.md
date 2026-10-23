@@ -2,20 +2,23 @@
 
 ## Purpose
 
-The kernel-neutral settings tool contract, shared by the session context and
-settings implementation. This boundary carries values, not settings owners.
+Shared settings vocabulary and durable audit/approval stores. The session context
+and settings change path use one contract and one persisted store format.
 
 ## Owns
 
 `tool-contract.ts`: layer/tier/qualifier vocabulary, retired scope-name mapping
 shared by session readers and store migration, and tool request, resolution,
-result and worker-state interfaces.
+result and worker-state interfaces. `settings-record.ts` owns append-only audit
+segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
+approvals, their admission bounds, settlement, expiry and untold outcomes.
 
 ## Contract
 
 `SettingsToolAccess` resolves and changes the current session settings and drains
-its pending outcomes. Concrete precedence, validation, approvals and writers stay
-in admin; the session runtime supplies its own identity and appliers.
+its pending outcomes. Concrete precedence, validation and change orchestration stay
+in admin; the session runtime supplies its own identity and appliers. Audit records
+are not settings truth, and pending approvals never apply themselves.
 
 ## Invariants
 
@@ -24,20 +27,23 @@ in admin; the session runtime supplies its own identity and appliers.
 
 ## Entry points
 
-`SettingsToolAccess`, `ChangeRequest`, `ChangeResult`, `Resolution`.
+`SettingsToolAccess`, `ChangeRequest`, `ChangeResult`, `Resolution`,
+`SettingsChangeRecord`, `SettingsApprovals`.
 
 ## Signals
 
-None; the settings implementation owns its change records.
+Callers own persistence failure diagnostics; these stores propagate write failures.
 
 ## Verify
 
 ```bash
-scripts/tron verify --changed
+scripts/tron test gateway src/admin/settings-approvals.lock.integration.test.ts \
+  src/admin/admin.store.lock.integration.test.ts \
+  src/admin/settings-change.integration.test.ts
 ```
 
 The real settings and run locks cover consumers of this contract.
 
 ## Not here
 
-Settings implementation and UI metadata: [admin](../../admin/README.md).
+Settings precedence, change orchestration and UI metadata: [admin](../../admin/README.md).

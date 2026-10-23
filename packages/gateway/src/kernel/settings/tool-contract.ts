@@ -3,6 +3,7 @@
 export const LAYERS = ["project", "session", "global"] as const;
 
 export type LayerId = typeof LAYERS[number];
+export type Direction = "widen" | "narrow";
 
 /** Scope names #1634 retired, as old session entries recorded them. Session JSONL
  * is never rewritten (#1649), so session readers map them to current names;

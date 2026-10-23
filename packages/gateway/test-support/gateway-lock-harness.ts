@@ -10,8 +10,8 @@ import {
 } from "@earendil-works/pi-ai";
 import { TrustService } from "../src/admin/trust-service.js";
 import { SettingsChangePath, SettingsModel } from "../src/admin/settings-model.js";
-import { SettingsChangeRecord } from "../src/admin/settings-record.js";
-import { SettingsApprovals } from "../src/admin/settings-approvals.js";
+import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
+import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import { OutsideChanges } from "../src/admin/settings-outside.js";
 import { PackageService } from "../src/admin/package-service.js";
 import { HookResources } from "../src/admin/hook-resources.js";
