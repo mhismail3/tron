@@ -10,7 +10,9 @@ Gateway-owned execution primitives layered on Pi's session loop.
   compaction routes, configuration/idle admission gates and actual model/thinking/context/tools/bash algorithms.
 - `run-events.ts`: agent, compaction and retry transitions, exact foreground/receipt
   settlement and successor fencing on the same run authority.
-- `run-runtime.ts`: abstract native frame contract; settings provenance stays opaque.
+- `run-runtime.ts`: native frame contract and canonical SDK readers; settings provenance stays opaque.
+  Selected-branch projections include the header; worker state and sealed task evidence remain file-wide.
+  Worker binding and live settlement controls stay with the concrete frame.
 - `bounded-tool-cancellation.ts`: per-call abort controllers, bounded cancellation
   settlement and rejection of late results.
 - `direct-bash-process-owner.ts`: foreground shell process trees, timeout and abort

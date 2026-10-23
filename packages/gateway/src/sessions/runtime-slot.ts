@@ -850,22 +850,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return isBuiltinMcpCommand(this.runtime.session.extensionRunner.getCommand("mcp"));
   }
 
-  /** Whether this is a Home task worker and whether its task operation still runs here.
-   * `settled`: a worker session whose last task stopped or ended; a maintainer message
-   * resumes it in place rather than being refused (#929). */
-  get homeTaskWorkerState(): "none" | "active" | "settled" {
-    if (this.taskWorker?.controlsActive) return "active";
-    return this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)
-      ? "settled" : "none";
-  }
-
-  /** Immutable task addresses are file-wide evidence, not the selected model
-   * branch. Harmless tree viewing must never lose an already sealed result. */
-  canonicalTaskEvidence(): FileEntry[] {
-    return this.sessionManager.getEntries().filter(entry => entry.type === "custom"
-      && (entry.customType === HOME_TASK_MARKER || entry.customType === HOME_TASK_REPORT));
-  }
-
   /** Live task settlement enters from outside the lane after terminal/Stop
    * joining. Keep late steering receipt writes out of its durable file cut.
    * Never await this seam from work already running on the session lane. */
@@ -875,14 +859,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       if (this.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
       return inspect(!this.hasActiveAgentRun && !this.isAgentAdmissionSettling && this.operation === undefined);
     });
-  }
-
-  /** Read-only owner seam for bounded derived projections; callers never
-   * mutate. Branch-sensitive consumers must use the SDK-selected branch, not
-   * the file-wide entry set (which also contains sibling fork history). */
-  canonicalSessionEntries(): FileEntry[] {
-    const header = this.sessionManager.getHeader();
-    return header ? [header, ...this.sessionManager.getBranch()] : [];
   }
 
   /** Exact owner seam for derived search. This is a bounded snapshot of the

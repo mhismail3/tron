@@ -1,11 +1,11 @@
 import type { SettingsManager, FileEntry, AgentSessionRuntime, AgentSession, SessionManager } from "../pi/coding-agent.js";
-import type { ChatOrigin } from "../../protocol/types.js";
+import { HOME_TASK_MARKER, HOME_TASK_REPORT } from "../delegation/task-report.js";
+import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, JsonValue } from "../../protocol/types.js";
 import type { InputTrigger } from "../host/input-admission.js";
 import type { TrustService } from "../../admin/trust-service.js";
 import type { ExtensionLifecycleCoordinator } from "../../sessions/extension-lifecycle-coordinator.js";
 import type { CanonicalAppendContext } from "../host/canonical-append.js";
 import type { ResourceExpansionCatalog } from "../../sessions/resource-invocation.js";
-import type { ChatSemanticMetadata, CommandInfo } from "../../protocol/types.js";
 import type { CanonicalAssistantCompletion } from "./completion-facts.js";
 import type { CommandReplacement } from "./run-invocations.js";
 import type { CompactionOperationPolicy } from "./compaction-policy.js";
@@ -17,9 +17,8 @@ import type { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { ToolProjectionMetadata } from "../projection/projection.js";
 import type { GatewayWorkHandle } from "./gateway-work-registry.js";
 import type { RunMarkerStore } from "./run-markers.js";
-import type { JsonValue } from "../../protocol/types.js";
 
-/** Native frame contract, not copied runtime state. FixedAt is an opaque settings
+/** Native frame and canonical readers, not copied runtime state. FixedAt is an opaque settings
  * provenance token: interpreted only by the concrete settings persistence owner. */
 export abstract class RunRuntime<FixedAt> {
   abstract readonly cwd: string;
@@ -73,7 +72,30 @@ export abstract class RunRuntime<FixedAt> {
   abstract scheduleSnapshot(): void;
   abstract resetToolExecutionProjection(): void;
   abstract resetStreamingProjection(): void;
-  abstract canonicalSessionEntries(): FileEntry[];
+  /** Whether this is a Home task worker and whether its task operation still runs here.
+   * `settled`: a worker session whose last task stopped or ended; a maintainer message
+   * resumes it in place rather than being refused (#929). */
+  get homeTaskWorkerState(): "none" | "active" | "settled" {
+    if (this.taskWorker?.controlsActive) return "active";
+    return this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)
+      ? "settled" : "none";
+  }
+
+  /** Immutable task addresses are file-wide evidence, not the selected model
+   * branch. Harmless tree viewing must never lose an already sealed result. */
+  canonicalTaskEvidence(): FileEntry[] {
+    return this.sessionManager.getEntries().filter(entry => entry.type === "custom"
+      && (entry.customType === HOME_TASK_MARKER || entry.customType === HOME_TASK_REPORT));
+  }
+
+  /** Read-only owner seam for bounded derived projections; callers never
+   * mutate. Branch-sensitive consumers must use the SDK-selected branch, not
+   * the file-wide entry set (which also contains sibling fork history). */
+  canonicalSessionEntries(): FileEntry[] {
+    const header = this.sessionManager.getHeader();
+    return header ? [header, ...this.sessionManager.getBranch()] : [];
+  }
+
   abstract publishConfiguration(): void;
   abstract releaseSettleWaiters(): void;
   abstract noteHomeIdle(): void;
