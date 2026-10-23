@@ -29,6 +29,32 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
+    /// The Instructions overview and its Tools, Rules and Skills subsheets, light and
+    /// dark at standard text and at XXXL.
+    @MainActor func testCaptureInstructionRows() {
+        for (mode, extra) in [("light", [String]()), ("dark", ["-home-dark"]),
+                              ("xxxl", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"])] {
+            for section in ["tools", "rules", "skills"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-agent-instructions-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
+                app.launch()
+                XCTAssertTrue(element(app, "agent-instructions-section-preamble").waitForExistence(timeout: 10), app.debugDescription)
+                expandSheet(app, title: "Instructions")
+                if section == "tools" { shot("instructions-\(mode)") }
+                let row = app.buttons["agent-instructions-section-\(section)"]
+                for _ in 0..<4 where !row.isHittable { app.swipeUp() }
+                row.tap()
+                let title = ["tools": "Tools", "rules": "Rules", "skills": "Skills"][section]!
+                expandSheet(app, title: title)
+                let entry = element(app, "agent-instructions-entry-\(section).0")
+                for _ in 0..<4 where !entry.isHittable { app.swipeUp() }
+                Thread.sleep(forTimeInterval: 0.6)
+                shot("\(section)-\(mode)")
+                app.terminate()
+            }
+        }
+    }
+
     @MainActor private func captureHome(dark: Bool) {
         continueAfterFailure = false
         let mode = dark ? "dark" : "light"
