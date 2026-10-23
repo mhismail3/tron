@@ -93,7 +93,13 @@ struct HostedDiagnosticsExportFixture: View {
             }
         }
         .tronManagedSheet(isPresented: $logsPresented, identity: "fixture.diagnostics-logs") {
-            NavigationStack { GatewayLogsSettingsView() }.tronSettingsLayout()
+            NavigationStack {
+                GatewayLogsSettingsView().toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Close Logs") { logsPresented = false }
+                    }
+                }
+            }.tronSettingsLayout()
         }
         .environment(model)
         .environment(\.hostedDiagnosticsPreparation, { await gate.prepare() })

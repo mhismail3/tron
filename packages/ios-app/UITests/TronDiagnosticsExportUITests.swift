@@ -69,7 +69,7 @@ final class TronDiagnosticsExportUITests: XCTestCase {
         XCTAssertTrue(export.waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "synthetic-original-evidence")).firstMatch.waitForExistence(timeout: 15))
         export.tap()
-        app.navigationBars.firstMatch.swipeDown()
+        app.buttons["Close Logs"].tap()
         XCTAssertTrue(app.buttons["Open Logs"].waitForExistence(timeout: 15))
         XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:1 released:0"))
         let release = app.buttons["fixture.release-export-preparation"]
