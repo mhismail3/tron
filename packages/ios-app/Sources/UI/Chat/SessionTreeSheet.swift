@@ -532,6 +532,8 @@ struct HistoryEntryDetailsSheet: View {
                 .foregroundStyle(Color.tronTextPrimary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
         }
         .font(TronTypography.bodySM)
+        // Match the header’s 22-point icon column and 8-point title gap.
+        .padding(.leading, 22 + 8)
     }
 
     private struct ActionRow: Identifiable { let id: String; let icon: String; let tone: Color; let title: String; let detail: String; let run: () -> Void }

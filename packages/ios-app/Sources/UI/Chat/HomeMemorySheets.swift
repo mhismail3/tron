@@ -225,7 +225,7 @@ enum HomeMemoryPresentation {
 
     static func title(_ line: HomeMemoryViewDTO.Line) -> String {
         if let item = line.item { return HomeSheet.attributionLabel(item.attribution) }
-        return "Summary of \(line.span.formatted()) messages"
+        return "Summary of \(line.span.formatted()) \(line.span == 1 ? "message" : "messages")"
     }
 
     static func text(_ line: HomeMemoryViewDTO.Line) -> String {

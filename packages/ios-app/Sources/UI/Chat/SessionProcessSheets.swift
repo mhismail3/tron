@@ -98,6 +98,7 @@ struct ProcessHistorySheet: View {
     private func history(_ store: SessionProcessHistoryStore) -> some View {
         let rows = rows(store)
         let caption = TronSettingsCaption("Newest first. Open a run to read its transcript.")
+            .padding(.top, 8)
         if rows.isEmpty, hasPlaceholder(store, empty: true) {
             TronFeedEmptyState(identifier: "process-history-feed") { caption } placeholder: {
                 placeholder(store, hasMounted: false)

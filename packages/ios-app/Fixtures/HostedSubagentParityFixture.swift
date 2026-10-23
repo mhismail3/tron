@@ -94,24 +94,27 @@ struct HostedSubagentParityFixture: View {
         }
         if arguments.contains("-history-grouping") {
             // A session that never ran a subagent: no mounted runs and an empty canonical page.
-            snapshot.processActivities = arguments.contains("-history-empty") ? [] : Self.historyProcesses(sequence: 1,
+            snapshot.processActivities = arguments.contains("-history-empty") || arguments.contains("-history-long") ? [] : Self.historyProcesses(sequence: 1,
                 stage: arguments.contains("-history-lifecycle") ? 0 : 1)
         }
         self.snapshot = snapshot
     }
 
-    private static func historyProcesses(sequence: Int, stage: Int,
+    nonisolated static func historyProcesses(sequence: Int, stage: Int,
                                          outcome: SessionProcessLifecycleState = .completed,
                                          resumed: Bool = true) -> [SessionProcessActivity] {
         let now = Date.now
         func row(_ id: String, _ title: String, _ state: SessionProcessLifecycleState,
                  settled: Bool = false) -> SessionProcessActivity {
             let terminal = state.isTerminal || settled
+            // Canonical history is ordered by observation time; keep the newest run first.
+            let age = id == "completed" ? 1 : (Int(id.replacingOccurrences(of: "earlier-", with: "")).map { $0 + 1 } ?? 0)
+            let observedAt = now.addingTimeInterval(-Double(age))
             return SessionProcessActivity(
                 processId: id, kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
                 lifecycle: .init(state: state, sequence: sequence,
-                    observedAt: now.ISO8601Format(), terminalAt: terminal ? now.ISO8601Format() : nil,
-                    recentUntil: terminal ? now.addingTimeInterval(300).ISO8601Format() : nil),
+                    observedAt: observedAt.ISO8601Format(), terminalAt: terminal ? observedAt.ISO8601Format() : nil,
+                    recentUntil: terminal ? observedAt.addingTimeInterval(300).ISO8601Format() : nil),
                 visibility: terminal ? .recent : .active,
                 startedAt: now.addingTimeInterval(-282).ISO8601Format(), title: title,
                 model: "openai/gpt-6.1-sol", thinking: "medium",
@@ -277,8 +280,15 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
             {"skills":{"skills":[{"name":"pi-subagents","description":"Technical guidance for operator-requested delegation","path":"/provider/skills/pi-subagents/SKILL.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"prompts":{"prompts":[{"name":"council","description":"Run a bounded supervisor-mediated council of advisors and write a decision memo","argumentHint":"<question>","path":"/provider/prompts/council.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"subagents":[{"name":"parity-worker","description":"Read-only parity child","model":"parity-child/child","source":"project","distribution":"local"}],"subagentDiagnostics":"1 invalid subagent definition(s): Agent 'parity-invalid.md' uses removed frontmatter field 'fallbackModels'. Configure one model instead.","commands":[]}
             """#.utf8))
         } else if method == "session.processHistory.list" {
+            if ProcessInfo.processInfo.arguments.contains("-history-long") {
+                // Let the loading feed lay out before its canonical page arrives.
+                try await Task.sleep(for: .milliseconds(750))
+            }
             result = .object([
-                "historyRevision": .string("fixture-history"), "activities": .array([]), "nextCursor": .null
+                "historyRevision": .string("fixture-history"),
+                "activities": ProcessInfo.processInfo.arguments.contains("-history-long")
+                    ? try JSONValue.encode(HostedSubagentParityFixture.historyProcesses(sequence: 1, stage: 1)) : .array([]),
+                "nextCursor": .null
             ])
         } else if method == "session.processTranscript.open" {
             result = .object([
