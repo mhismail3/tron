@@ -26,12 +26,13 @@ class Landing(unittest.TestCase):
         self.git(self.repo, "add", ".")
         self.git(self.repo, "commit", "-m", "base")
         self.git(self.repo, "push", "origin", "main")
-        for directory in ("scripts", "tools/work", ".github"):
+        for directory in ("scripts", "tools/work", "tools/ownership", ".github"):
             (self.repo / directory).mkdir(parents=True, exist_ok=True)
         shutil.copy(ROOT / "scripts/tron", self.repo / "scripts/tron")
         # Copy executable work tooling, not a parallel landing implementation.
         for path in (ROOT / "tools/work").glob("*.py"):
             shutil.copy(path, self.repo / "tools/work" / path.name)
+        shutil.copy(ROOT / "tools/ownership/ownership.py", self.repo / "tools/ownership/ownership.py")
         (self.repo / ".github/work.json").write_text('{"claim":{"remote":"origin","baseBranch":"main"}}')
         self.git(self.repo, "add", ".")
         self.git(self.repo, "commit", "-m", "tooling")
