@@ -166,7 +166,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   `TronFeed` of `TronFeedCard`s, with the next page loaded by `FeedStore` while 5 rows remain
   and the chip overlaid on long feeds (tap: newest).
   Each `TronListRow` has: a centred kind icon or ordinal, the title, one status pill top-right,
-  12 pt subtext, then tags and time. Actions are in the detail and a matching long-press menu.
+  12 pt subtext, then tags and time; a row with neither status nor time carries its tags top-right
+  (below the title when both do not fit). Actions are in the detail and a matching long-press menu.
+  Instructions subsheet entries are `TronSettingsRow`s: centred icon, trailing source tag.
 - Technical detail uses `TronMetadataTable` for metadata and JSON (field, short type, trailing code
   preview; stacked at accessibility sizes); the raw JSON reader is one selectable, wrapping,
   vertically scrolling sheet, never a horizontal viewport.
