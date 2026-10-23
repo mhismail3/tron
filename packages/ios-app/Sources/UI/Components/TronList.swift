@@ -56,7 +56,7 @@ struct TronListRowContent {
 
 enum TronListMetrics {
     static let horizontalPadding: CGFloat = 14
-    static let verticalPadding: CGFloat = 12
+    static let verticalPadding: CGFloat = 10
     static let slotGap: CGFloat = 12
     static let lineGap: CGFloat = 4
     static let leadingWidth: CGFloat = 26
@@ -75,6 +75,8 @@ enum TronListMetrics {
 
 /// A row's anatomy: leading slot (vertically centred) → title or preview with
 /// one status pill top-right → subtext → tags on the left and time on the right.
+/// A row with neither status nor time (a fixed set: Instructions, Resources)
+/// carries its tags top-right instead, so it reads in two lines.
 struct TronListRow: View {
     let content: TronListRowContent
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -94,7 +96,7 @@ struct TronListRow: View {
                         .truncationMode(content.monoSubtext ? .middle : .tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if !content.tags.isEmpty || content.timestamp != nil { metadataLine }
+                if !tagsOnTitleLine && (!content.tags.isEmpty || content.timestamp != nil) { metadataLine }
             }
         }
         .padding(.horizontal, TronListMetrics.horizontalPadding)
@@ -107,26 +109,41 @@ struct TronListRow: View {
         .accessibilityHint(content.accessibilityHint ?? "")
     }
 
+    private var tagsOnTitleLine: Bool { content.status == nil && content.timestamp == nil && !content.tags.isEmpty }
+
     @ViewBuilder private var titleLine: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
-        layout {
-            Text(content.title)
-                .font(content.monoTitle ? TronTypography.code(size: TronTypography.sizeBody3)
-                    : TronTypography.sans(size: TronTypography.sizeBody, weight: content.preview ? .regular : .semibold))
-                .foregroundStyle(Color.tronTextPrimary)
-                .lineLimit(content.preview ? 3 : 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let status = content.status {
-                TronListStatusPill(status: status).tronListMarker(.status)
+        if tagsOnTitleLine {
+            // Tags ride the title line when both fit on it; otherwise they wrap
+            // below the whole title rather than squeezing it or dropping a tag.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 10) { titleText; TronListTags(tags: content.tags) }
+                VStack(alignment: .leading, spacing: TronListMetrics.lineGap) { titleText; TronListTags(tags: content.tags) }
+            }
+        } else {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+            layout {
+                titleText
+                if let status = content.status {
+                    TronListStatusPill(status: status).tronListMarker(.status)
+                }
             }
         }
     }
 
+    private var titleText: some View {
+        Text(content.title)
+            .font(content.monoTitle ? TronTypography.code(size: TronTypography.sizeBody3)
+                : TronTypography.sans(size: TronTypography.sizeBody, weight: content.preview ? .regular : .semibold))
+            .foregroundStyle(Color.tronTextPrimary)
+            .lineLimit(content.preview ? 3 : 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var metadataLine: some View {
         HStack(alignment: .center, spacing: 8) {
-            TronListTags(tags: content.tags)
+            TronListTags(tags: content.tags).frame(maxWidth: .infinity, alignment: .leading)
             if let timestamp = content.timestamp {
                 Text(timestamp)
                     .font(TronTypography.bodySM)
@@ -194,7 +211,6 @@ struct TronListTags: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .tronListMarker(.tags)
     }
 }

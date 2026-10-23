@@ -481,63 +481,21 @@ private struct AgentInstructionsSectionSheet: View {
     }
 }
 
-/// One attributed tool, rule, or skill in the settings row metrics: a named
-/// entry leads with its name, an unnamed rule leads with its text.
+/// One attributed tool, rule, or skill as a settings row: its icon centred on
+/// the row and its source tag trailing. A named entry leads with its name, an
+/// unnamed rule leads with its text.
 private struct AgentInstructionsEntryRow: View {
     let entry: AgentInstructionsProjection.Entry
     let icon: String
-    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
     var body: some View {
-        let accent = Color.tronEmerald
-        let secondary = TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment)
-        HStack(alignment: .top, spacing: TronSpacing.xl) {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(accent)
-                .frame(width: TronSettingsLayoutPolicy.iconSize, height: TronSettingsLayoutPolicy.iconSize)
-                .accessibilityHidden(true)
-                .tronListMarker(.leading)
-            VStack(alignment: .leading, spacing: 3) {
-                let tag = ResourceTagLabel(title: AgentInstructionsPresentation.sourceTag(entry.source), accent: accent)
-                if let name = entry.name {
-                    HStack(spacing: TronSpacing.sm) {
-                        Text(name)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                        tag
-                    }
-                    Text(verbatim: entry.text)
-                        .font(secondary)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text(verbatim: entry.text)
-                        .font(TronTypography.body)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if entry.name == nil || attribution != nil {
-                    HStack(spacing: TronSpacing.sm) {
-                        if entry.name == nil { tag }
-                        if let attribution {
-                            Text(attribution)
-                                .font(secondary)
-                                .foregroundStyle(Color.tronTextMuted)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-        .padding(.vertical, TronSpacing.xl)
-        .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
-        .textSelection(.enabled)
-        .accessibilityElement(children: .combine)
+        let tag = ResourceTagLabel(title: AgentInstructionsPresentation.sourceTag(entry.source), accent: .tronEmerald)
+        TronSettingsRow(icon: icon, title: entry.name ?? entry.text,
+                        subtitle: entry.name == nil ? nil : entry.text, subtitleLineLimit: nil,
+                        titleFont: entry.name == nil ? TronTypography.body
+                            : TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
+                        footnote: attribution) { tag }
+            .textSelection(.enabled)
     }
 
     /// Contributing tools for a rule; otherwise where a non-Pi entry comes from.

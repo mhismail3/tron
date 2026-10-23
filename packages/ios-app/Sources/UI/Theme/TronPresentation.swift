@@ -1621,6 +1621,9 @@ struct TronSettingsRow<Trailing: View>: View {
     /// this short value trailing on its line, the subtitle in body type, and
     /// tighter vertical insets.
     let feedTrailing: String?
+    /// One muted line under the subtitle naming where the row comes from;
+    /// a path shortens in the middle.
+    let footnote: String?
     let trailing: Trailing
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
@@ -1641,6 +1644,7 @@ struct TronSettingsRow<Trailing: View>: View {
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
         feedTrailing: String? = nil,
+        footnote: String? = nil,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
@@ -1654,6 +1658,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.titleColor = titleColor
         self.subtitleColor = subtitleColor
         self.feedTrailing = feedTrailing
+        self.footnote = footnote
         self.trailing = trailing()
     }
 
@@ -1696,6 +1701,7 @@ struct TronSettingsRow<Trailing: View>: View {
                         alignment: .center
                     )
                     .accessibilityHidden(true)
+                    .tronListMarker(.leading)
             }
             VStack(alignment: .leading, spacing: 3) {
                 if titleIsIdentifier && !title.contains(where: \.isWhitespace) {
@@ -1747,6 +1753,13 @@ struct TronSettingsRow<Trailing: View>: View {
                         .lineLimit(subtitleLineLimit)
                         .truncationMode(.tail)
                         .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
+                }
+                if let footnote {
+                    Text(footnote)
+                        .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
+                        .foregroundStyle(Color.tronTextMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
 
