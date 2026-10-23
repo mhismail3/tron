@@ -195,6 +195,7 @@ struct TronListTags: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .tronListMarker(.tags)
     }
 }
 
@@ -510,7 +511,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
 
 // MARK: - Geometry markers (hosted UI tests only)
 
-enum TronListMarkerKind: String { case leading, status }
+enum TronListMarkerKind: String { case leading, status, tags }
 
 private struct TronListMarkerKey: PreferenceKey {
     static let defaultValue: [TronListMarkerKind: Anchor<CGRect>] = [:]

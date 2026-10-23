@@ -446,6 +446,7 @@ private struct AgentInstructionsSectionSheet: View {
                 } else {
                     AgentInstructionsEntryRow(entry: entry, icon: copy.icon)
                         .accessibilityIdentifier("agent-instructions-entry-\(entry.id)")
+                        .tronListMarkers("agent-instructions-entry-\(entry.id)")
                 }
             }
         }
@@ -496,6 +497,7 @@ private struct AgentInstructionsEntryRow: View {
                 .foregroundStyle(accent)
                 .frame(width: TronSettingsLayoutPolicy.iconSize, height: TronSettingsLayoutPolicy.iconSize)
                 .accessibilityHidden(true)
+                .tronListMarker(.leading)
             VStack(alignment: .leading, spacing: 3) {
                 let tag = ResourceTagLabel(title: AgentInstructionsPresentation.sourceTag(entry.source), accent: accent)
                 if let name = entry.name {
