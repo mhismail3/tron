@@ -244,13 +244,11 @@ describe("gateway/notifications delivery locks", () => {
     const enqueue = service.enqueue.bind(service);
     let reached!: () => void;
     const admitted = new Promise<void>(resolve => { reached = resolve; });
-    let successorReached!: () => void;
-    const successorAdmission = new Promise<void>(resolve => { successorReached = resolve; });
-    let admissions = 0;
+    let heldFirst = false;
     service.enqueue = async input => {
       const result = await enqueue(input);
-      if (++admissions === 2) successorReached();
-      if (input.kind === "waiting") {
+      if (input.kind === "waiting" && !heldFirst) {
+        heldFirst = true;
         reached();
         await held;
       }
@@ -265,13 +263,52 @@ describe("gateway/notifications delivery locks", () => {
     expect((await lock.prompt("start background work")).ok).toBe(true);
     await awaitsWithin(admitted, "the predecessor's waiting admission");
     await waitFor(() => pushes(relay).length === 1, "the predecessor's waiting push");
+    let successorSettled!: () => void;
+    const successorTerminal = new Promise<void>(resolve => { successorSettled = resolve; });
+    const notify = slot.runTerminal.notifyAgentTerminal.bind(slot.runTerminal);
+    // Observe the real successor's terminal return, whether its policy enqueues
+    // or suppresses. The predecessor is already held inside the real service.
+    slot.runTerminal.notifyAgentTerminal = async (...args) => {
+      await notify(...args);
+      successorSettled();
+    };
     expect((await lock.prompt("check the same background work")).ok).toBe(true);
     await waitFor(() => gateway.record().providerRequests.length === 3 && !slot.snapshot().operation, "the successor turn to end");
-    await awaitsWithin(successorAdmission, "the successor notification admission");
+    await awaitsWithin(successorTerminal, "the successor terminal owner to settle while its predecessor is held");
     release();
     await waitFor(() => gateway.registry.administrativeDrainSnapshot().blockers.every(blocker => blocker.category === "detached-extension-run"), "both terminal owners to settle");
     await waitFor(async () => (await lock.document()).pending.length === 0, "the successor push to settle");
     expect(slot.snapshot().extensionActivities?.some(activity => activity.status === "running")).toBe(true);
+    expect(pushes(relay)).toEqual([
+      "200 waiting [start background work]: The agent is waiting on 1 background task.",
+    ]);
+  }, 60_000);
+
+  it("a rejected waiting admission leaves the same live episode eligible for the next turn", async () => {
+    const lock = await pushLock("notifications-waiting-rejected", [{ name: "lock-background.ts", source: DETACHED_RUN }]);
+    const { gateway, relay, sessionId } = lock;
+    const service = lock.service();
+    const enqueue = service.enqueue.bind(service);
+    let rejected!: () => void;
+    const failed = new Promise<void>(resolve => { rejected = resolve; });
+    service.enqueue = async input => {
+      if (input.kind === "waiting") {
+        service.enqueue = enqueue;
+        rejected();
+        throw new Error("Controlled notification admission rejection");
+      }
+      return enqueue(input);
+    };
+    gateway.script([
+      () => fauxAssistantMessage([fauxToolCall("lock_background", {}, { id: "rejected-background-call" })], { stopReason: "toolUse" }),
+      () => fauxAssistantMessage("Background work started."),
+      () => fauxAssistantMessage("Still waiting."),
+    ]);
+    expect((await lock.prompt("start background work")).ok).toBe(true);
+    await awaitsWithin(failed, "the controlled admission rejection");
+    await waitFor(() => gateway.registry.administrativeDrainSnapshot().blockers.every(blocker => blocker.category === "detached-extension-run"), "the failed notification's terminal owner to settle");
+    expect((await lock.prompt("check background work")).ok).toBe(true);
+    await waitFor(() => pushes(relay).length === 1, "the next turn's waiting notification");
     expect(pushes(relay)).toEqual([
       "200 waiting [start background work]: The agent is waiting on 1 background task.",
     ]);

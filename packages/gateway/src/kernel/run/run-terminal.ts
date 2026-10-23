@@ -71,9 +71,15 @@ export class RunTerminalOwner {
     if (this.operations.taskWorker) return;
     const runTerminal = this.operations.dependencies.modules.policy("runTerminal")?.();
     if (!runTerminal) return;
+    const previousEpisode = this.waitingNotificationEpisode;
+    let claimedEpisode: string | undefined;
     try {
       const pendingBackgroundProcesses = this.operations.pendingBackgroundProcesses();
       const waitingEpisode = pendingBackgroundProcesses.join("\0");
+      claimedEpisode = waitingEpisode || undefined;
+      // Claim before policy admission can suspend: a successor terminal shares
+      // this episode even while the first notification is persisting.
+      this.waitingNotificationEpisode = claimedEpisode;
       await runTerminal({
         sessionId: this.operations.id,
         sourceId,
@@ -81,10 +87,11 @@ export class RunTerminalOwner {
         sessionTitle: this.operations.notificationTitle(),
         observed: this.completionObserved(sourceId),
         pendingBackgroundWork: pendingBackgroundProcesses.length,
-        waitingEpisode: waitingEpisode !== "" && waitingEpisode === this.waitingNotificationEpisode,
+        waitingEpisode: waitingEpisode !== "" && waitingEpisode === previousEpisode,
       });
-      this.waitingNotificationEpisode = waitingEpisode || undefined;
     } catch {
+      // A failed admission may retry, but cannot roll back a newer episode.
+      if (this.waitingNotificationEpisode === claimedEpisode) this.waitingNotificationEpisode = previousEpisode;
       // Push admission is best-effort and must never fail canonical settlement.
       this.operations.emit("session.diagnostic", { code: "terminal-notification-failed" });
     }

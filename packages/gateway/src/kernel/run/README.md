@@ -39,6 +39,8 @@ Gateway-owned execution primitives layered on Pi's session loop.
   runtime ownership lane, full settlement/reconciliation and rebind scope.
 - `run-terminal.ts`: operation observation and the bounded presentation latch,
   final-run notification, exact terminal observers and held task/wake dispatch.
+  A waiting episode is claimed before notification admission suspends, so overlapping
+  terminals share it; failed admission releases only its still-current episode.
 - `run-invocations.ts`: live invocation/failure state, canonical terminal dedupe,
   exact Stop attribution, transferred joins and bounded origin-command handoff.
 - `manual-compaction.ts`: manual admission/claim, deferred receipt, lane handoff,
