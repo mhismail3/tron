@@ -142,7 +142,7 @@ Classes under `TronMobileUITests/`: `TronHomeControlsUITests`, `TronHomeDashboar
 `TronSessionRowClockUITests`, and the Home, Manage Session and Ask User journeys in
 `TronSmokeUITests` ([runbook](../../../docs/development.md#efficient-focused-tests)). Real
 boundaries: `scripts/ios-gateway-e2e-test run-ui` and `scripts/tron test gateway
-src/home/home-session-catalog.e2e.test.ts src/sessions/home-activation.e2e.test.ts`. Motion,
+src/modules/home/home-session-catalog.e2e.test.ts src/sessions/home-activation.e2e.test.ts`. Motion,
 gestures, the private top blur and the keyboard need a `Tron Device` check.
 
 ## Not here

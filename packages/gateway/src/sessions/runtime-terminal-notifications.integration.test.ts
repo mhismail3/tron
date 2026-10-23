@@ -20,7 +20,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "../kernel/delegation/delegated-provider.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
-import { HOME_SOFT_BYTES } from "../home/home-chapter-state.js";
+import { HOME_SOFT_BYTES } from "../modules/home/home-chapter-state.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
 import { INVOCATION_RECEIPT_TYPE } from "../kernel/run/invocation-receipts.js";
 import { waitFor } from "../../test-support/wait-for.js";

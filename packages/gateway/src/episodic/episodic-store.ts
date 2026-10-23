@@ -1,4 +1,4 @@
-import { HOME_MAX_CHAPTERS } from "../home/home-chapter-state.js";
+import { HOME_MAX_CHAPTERS } from "../modules/home/home-chapter-state.js";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, rename, rm, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";

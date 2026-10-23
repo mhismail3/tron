@@ -14,7 +14,7 @@ same ordering, sync/async shape and failure handling.
 | `RuntimeSlot` (11,165 lines) builds the Pi runtime, module host, Home profile, request pipeline and task-worker role in one closure | `sessions/runtime-slot.ts:2212-2608` (`runtimeFactory`) |
 | Slot dependencies: 60 fields (18 `home*`, plus `validateTaskMarker`); hooks: 10 (3 Home); 14 more branches on `liveProfile()` | `sessions/runtime-slot.ts:522-635`, `:455-486`, `:1290-10431` |
 | The registry (5,030 lines) is also a composition root: it builds Swift apps, display, workspace, model queues and `HomeOwner`, and passes itself to Home | `sessions/runtime-registry.ts:762-866` (`taskSessions: this` `:865`) |
-| Home and automations reach the concrete registry | `home/home-owner.ts:162`, `home/home-task-dispatcher.ts:217`, `home/home-session-read.ts:29`, `sessions/owned-session-dispatch.ts:20` |
+| Home and automations reach the concrete registry | `modules/home/home-owner.ts:162`, `modules/home/home-task-dispatcher.ts:217`, `modules/home/home-session-read.ts:29`, `sessions/owned-session-dispatch.ts:20` |
 | The module host is one interface carrying every module's service | `extensions/tron-modules.ts:32-80` (`TronModuleHost`), lists `:102-224`, `:236-301` |
 | Upward edges in the layer ratchet | `gateway/run` → 13 L3/L4 modules, `gateway/extensions` → 11, `gateway/projection` → display (`packages/gateway/layer-baseline.json`) |
 | Pi: 50 production files import runtime values (39 more types only), plus 4 `import.meta.resolve` sites | §4 |
@@ -48,7 +48,7 @@ lists in composition order, because four owners observe session removal today
 | Hook | Shape | Replaces (call site today) | Implementer |
 |---|---|---|---|
 | `profileDecision` | sync `(sessionId, cwd) → name \| "unrecorded"`; `unrecorded` uses the creation profile given to K1 `create`, once | `homeProfile` + `explicitHomeSessionId` (`runtime-slot.ts:607`, `:997`, `:2199-2205`, cleared `:2273`) | Home |
-| `requestPolicy` | per runtime: `admit`, `deliveryHeadroom`, `settle`, `cancel`, `transferOperation`, `contextEvidence`, `wrapStream` (innermost), `wrapTransformContext`, `wrapPrepareRequest` (outermost) | `HomeRequestPolicy` (`home/home-request-policy.ts:313-521`); calls `runtime-slot.ts:8826`, `:8844`, `:9390`, settle ×4, transfer ×2, wraps `:2551-2568` | Home |
+| `requestPolicy` | per runtime: `admit`, `deliveryHeadroom`, `settle`, `cancel`, `transferOperation`, `contextEvidence`, `wrapStream` (innermost), `wrapTransformContext`, `wrapPrepareRequest` (outermost) | `HomeRequestPolicy` (`modules/home/home-request-policy.ts:313-521`); calls `runtime-slot.ts:8826`, `:8844`, `:9390`, settle ×4, transfer ×2, wraps `:2551-2568` | Home |
 | `inputAdmission` | async in the lane before SDK admission; may return a wake trigger; `release`, `settle` | `homeInboxAdmission` (`:8833-8858`), `homeInboxRelease` (`:8274`), `homeInboxSettlement` (`:4111`), `admitHomeWake` (`:8230-8320`) | Home |
 | `appendGuard` | sync around each canonical append (throw refuses); `committed` observer queued in a microtask; `admission(metrics)` sync after admission awaits | write guard body (`:1022-1029`), `homeChapterState`, `homeChapterAdmission` (`:11063-11117`), `homeMemory.entriesCommitted` (`:7173`) | Home |
 | `runSettled` | `quiescent` (awaited), `idle` (sync) | `homeQuiescent` (`:4487`), `homeIdle` (`:8322`) | Home |
@@ -201,7 +201,7 @@ Automations already use the worker-session boundary (`automations/automation-exe
 | `home-task-report.ts`, `home-task-checkin.ts`, `home-task-subagents.ts`, `home-task-worker-extension.ts` (the worker prompt at `:55` is model-visible text and moves byte-identical) | Profile `home`, hooks `profileDecision`, `requestPolicy`, `inputAdmission`, `appendGuard`, `runSettled` |
 | Subagents: `managed-subagents.ts`, `child-session-admission.ts`, `delegated-provider.ts`, `subagent-catalog.ts`, artifact tracking `runtime-slot.ts:5560-7100`, run control `:7927-8116` | `HomeOwner` construction leaves `runtime-registry.ts:796-866` for Home's `start` |
 
-`HomeOwner`'s ports today are `HomeSessionPort` (`home/home-owner.ts:90`: `createHomeSession`,
+`HomeOwner`'s ports today are `HomeSessionPort` (`modules/home/home-owner.ts:90`: `createHomeSession`,
 `currentSessionModel`, `applySessionModel`, `sessionPresent`, `sessionFile`, `hasLiveRuntime`,
 `waitingForUser`, `homeChaptersChanged`, `serializeSessionMutation`, `chapterMetrics`,
 `hasConversation`, `replaceRuntimeForProfile`, `beginHomePublicationReconciliation`,

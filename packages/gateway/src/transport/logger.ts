@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
-import type { HomeHardBoundary } from "../home/home-diagnostic.js";
+import type { HomeHardBoundary } from "../modules/home/home-diagnostic.js";
 import type { CommandReceiptRouteCategory } from "./command-receipts.js";
 
 /*

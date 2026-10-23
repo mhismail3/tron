@@ -1,4 +1,4 @@
-import { HOME_MAX_CHAPTERS } from "../home/home-chapter-state.js";
+import { HOME_MAX_CHAPTERS } from "../modules/home/home-chapter-state.js";
 import type { HomeMemoryEvidence } from "../protocol/types.js";
 import { constants, type Stats } from "node:fs";
 import { lstat, open } from "node:fs/promises";

@@ -53,14 +53,14 @@ import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../kernel/run/compaction-policy.js";
 import type { RequestPolicy } from "../kernel/host/request-policy.js";
-import { HomeChapterIdentityReplacementError } from "../home/home-chapter-state.js";
+import { HomeChapterIdentityReplacementError } from "../modules/home/home-chapter-state.js";
 import type { SessionLineageState } from "../kernel/host/session-lineage.js";
-import type { HomeMaterializationAuthority } from "../home/home-append-guard.js";
+import type { HomeMaterializationAuthority } from "../modules/home/home-append-guard.js";
 import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { openAIModelEligibility, type OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../kernel/delegation/task-worker-extension.js";
-import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
+import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../modules/home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../kernel/host/session-profile.js";
@@ -332,7 +332,7 @@ export interface RuntimeSlotDependencies {
     taskId: string; sessionId: string; operationId: string | null; state: string; resolvedFrom?: string; slot: RuntimeSlot;
   }>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
-  homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
+  homeTaskDiagnostic?: (record: import("../modules/home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
   /** The model fallback queues (providers/model-queue.ts). */
   modelQueue?: import("../providers/model-queue.js").ModelQueueOwner;
@@ -5869,14 +5869,14 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }
   }
 
-  async steerHomeTask(control: import("../home/home-task-dispatcher.js").HomeTaskControlRequest, text: string) {
+  async steerHomeTask(control: import("../modules/home/home-task-dispatcher.js").HomeTaskControlRequest, text: string) {
     return this.prompt(text, [], "steer", undefined, undefined, {
       operationId: randomUUID(), taskFence: structuredClone(control),
       origin: { kind: "gateway", ownerId: control.taskId, title: "Home steering", confidence: "boundary" }, onTerminal: () => {},
     });
   }
 
-  async stopHomeTask(control: import("../home/home-task-dispatcher.js").HomeTaskControlRequest): Promise<void> {
+  async stopHomeTask(control: import("../modules/home/home-task-dispatcher.js").HomeTaskControlRequest): Promise<void> {
     if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
       || this.taskWorker.identity.operationId !== control.operationId) {
       throw new GatewayError("conflict", "Task operation changed before Stop");
@@ -5887,7 +5887,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** Interrupts only the task worker's in-flight tool calls (#1189): each ends with a result
    * naming `by`, and the worker's turn continues with the optional steering `text`. Returns the
    * interrupted tools' names. */
-  async interruptHomeTask(control: import("../home/home-task-dispatcher.js").HomeTaskControlRequest, by: string, text?: string): Promise<string[]> {
+  async interruptHomeTask(control: import("../modules/home/home-task-dispatcher.js").HomeTaskControlRequest, by: string, text?: string): Promise<string[]> {
     if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
       || this.taskWorker.identity.operationId !== control.operationId) {
       throw new GatewayError("conflict", "Task operation changed before Interrupt");

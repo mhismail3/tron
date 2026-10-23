@@ -146,5 +146,5 @@ rows). Locks: `run.lock`, `run.store.lock`, `run-markers.lock` (`.integration.te
   [`kernel/projection`](../kernel/projection/README.md). Delegated activity:
   [delegated activity](../kernel/delegation/delegated-activity.md).
 - Settings applied through the slot: [admin](../admin/README.md). Home:
-  [home](../home/README.md). Terminal alerts: [notifications](../notifications/README.md).
+  [home](../modules/home/README.md). Terminal alerts: [notifications](../notifications/README.md).
 - SDK upgrades and the behavior trace: [Pi SDK maintenance](../../docs/pi-sdk-maintenance.md).

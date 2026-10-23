@@ -33,10 +33,10 @@ import { logUnresolvedDrainOwners, RestartDrainProgress } from "./sessions/resta
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
-import { logHomeDiagnostic } from "./home/home-diagnostic.js";
-import type { HomeComposition } from "./home/home-module.js";
-import type { HomeTaskDiagnostic } from "./home/home-task-dispatcher.js";
-import { homeWorkspaceDirectory } from "./home/home-owner.js";
+import { logHomeDiagnostic } from "./modules/home/home-diagnostic.js";
+import type { HomeComposition } from "./modules/home/home-module.js";
+import type { HomeTaskDiagnostic } from "./modules/home/home-task-dispatcher.js";
+import { homeWorkspaceDirectory } from "./modules/home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
@@ -64,7 +64,7 @@ import { GatewayScheduleToolOperations } from "./automations/automation-tool-ope
 import type { ScheduleToolOperations } from "./automations/tron-schedule-extension.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
-import { HomeProfileItems } from "./home/home-profile.js";
+import { HomeProfileItems } from "./modules/home/home-profile.js";
 import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, QueueKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";

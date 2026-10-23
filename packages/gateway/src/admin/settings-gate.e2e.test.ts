@@ -7,7 +7,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ToolCall } from 
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
-import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
+import { HOME_TOOL_NAMES } from "../modules/home/home-runtime-policy.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "./trust-service.js";
 import { APPROVAL_TTL_MS } from "./settings-approvals.js";
@@ -17,7 +17,7 @@ import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
-import type { HomeDiagnosticRecord } from "../home/home-diagnostic.js";
+import type { HomeDiagnosticRecord } from "../modules/home/home-diagnostic.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { disposeFixtures, fixture as homeTaskFixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai";

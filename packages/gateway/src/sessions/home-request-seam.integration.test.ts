@@ -55,9 +55,9 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import type { SessionSnapshot } from "../protocol/types.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
-import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
-import type { HomeRecord } from "../home/home-owner.js";
-import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason, type HomeRequestRecord } from "../home/home-request-policy.js";
+import { HOME_MEMORY_VIEW_MARKER } from "../modules/home/home-memory.js";
+import type { HomeRecord } from "../modules/home/home-owner.js";
+import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason, type HomeRequestRecord } from "../modules/home/home-request-policy.js";
 import { ModuleHost } from "../kernel/host/module-host.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 

@@ -1,8 +1,8 @@
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { startGatewayModules, type ModuleOwners } from "../src/main/modules.js";
 import type { SessionSearchService } from "../src/sessions/session-search-service.js";
-import type { HomeComposition } from "../src/home/home-module.js";
-import type { HomeOwner } from "../src/home/home-owner.js";
+import type { HomeComposition } from "../src/modules/home/home-module.js";
+import type { HomeOwner } from "../src/modules/home/home-owner.js";
 
 type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules">;
 /** Home's composition inputs a test may supply; the rest are the registry's own. */

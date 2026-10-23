@@ -18,7 +18,7 @@ See [independent landing](../../../tools/work/README.md).
 
 ## Host-pressure signal
 
-`HostPressure` (`packages/gateway/src/home/host-pressure.ts`) owns the level. It reads
+`HostPressure` (`packages/gateway/src/modules/home/host-pressure.ts`) owns the level. It reads
 kernel CPU ticks from `os.cpus()` and event-loop utilisation, and derives one level
 from the busy share of all CPUs and the event-loop utilisation:
 

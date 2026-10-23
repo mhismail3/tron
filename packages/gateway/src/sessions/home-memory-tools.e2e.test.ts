@@ -37,9 +37,9 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicMessageRecord, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicStore } from "../episodic/episodic-store.js";
-import { HOME_MEMORY_VIEW_MARKER, type HomeMemoryUnavailableReason } from "../home/home-memory.js";
-import type { HomeRequestRecord } from "../home/home-request-policy.js";
-import type { HomeMemoryToolDetails } from "../home/home-memory-tools.js";
+import { HOME_MEMORY_VIEW_MARKER, type HomeMemoryUnavailableReason } from "../modules/home/home-memory.js";
+import type { HomeRequestRecord } from "../modules/home/home-request-policy.js";
+import type { HomeMemoryToolDetails } from "../modules/home/home-memory-tools.js";
 import type { HomeMemoryStatus } from "../protocol/types.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 

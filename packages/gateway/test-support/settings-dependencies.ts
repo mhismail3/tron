@@ -6,9 +6,9 @@ import { SettingsChangePath, SettingsModel } from "../src/admin/settings-model.j
 import { SettingsChangeRecord } from "../src/admin/settings-record.js";
 import { SettingsApprovals } from "../src/admin/settings-approvals.js";
 import type { TrustService } from "../src/admin/trust-service.js";
-import type { HomeOwner } from "../src/home/home-owner.js";
+import type { HomeOwner } from "../src/modules/home/home-owner.js";
 import type { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
-import { HomeProfileItems } from "../src/home/home-profile.js";
+import { HomeProfileItems } from "../src/modules/home/home-profile.js";
 import type { KnowledgeService } from "../src/knowledge/knowledge-service.js";
 import { homeOwnerOf } from "./gateway-registry.js";
 

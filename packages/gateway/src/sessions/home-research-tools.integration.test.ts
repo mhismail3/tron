@@ -35,8 +35,8 @@ import {
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";
-import type { HomeRequestRecord } from "../home/home-request-policy.js";
-import type { HomeResearchToolDetails } from "../home/home-research-tools.js";
+import type { HomeRequestRecord } from "../modules/home/home-request-policy.js";
+import type { HomeResearchToolDetails } from "../modules/home/home-research-tools.js";
 import { legacyEntriesDigest, seedLegacyChronicle } from "../../test-support/legacy-chronicle.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";

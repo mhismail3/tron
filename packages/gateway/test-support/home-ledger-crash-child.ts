@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { HomeOwner } from "../src/home/home-owner.js";
+import { HomeOwner } from "../src/modules/home/home-owner.js";
 import { TronWorkspace } from "../src/workspace/tron-workspace.js";
 
 const [tronHome, sessionId, marker] = process.argv.slice(2);

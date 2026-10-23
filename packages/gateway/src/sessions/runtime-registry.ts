@@ -1,8 +1,8 @@
-import { HOME_SESSION_PROFILE_NAME } from "../home/home-session-profile.js";
+import { HOME_SESSION_PROFILE_NAME } from "../modules/home/home-session-profile.js";
 import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
 import type { SessionLineagePolicy } from "../kernel/host/session-lineage.js";
 import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../kernel/host/kernel-lifecycle.js";
-import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
+import { HOME_TOOL_NAMES } from "../modules/home/home-runtime-policy.js";
 import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
@@ -70,8 +70,8 @@ import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
 import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import { scanReservedHomeSession } from "../home/home-session-recovery.js";
-import type { HomeRuntimePort } from "../home/home-chapter-materialization.js";
+import { scanReservedHomeSession } from "../modules/home/home-session-recovery.js";
+import type { HomeRuntimePort } from "../modules/home/home-chapter-materialization.js";
 import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
 import { syncDurably } from "../util/durable-json.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
@@ -100,14 +100,14 @@ import {
 } from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
-import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
+import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../modules/home/home-task-worker-choice.js";
+import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../modules/home/home-task-subagents.js";
 import { ModelQueueOwner, modelQueueKey, modelQueueProjectionPath, type ModelQueueRecord } from "../providers/model-queue.js";
 import type { ModelQueueRole } from "../providers/model-queue-extension.js";
 import { ProviderUsageOwner } from "../providers/provider-usage.js";
 import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
-import { applyHomeCacheRetention } from "../home/home-request-policy.js";
-import type { HomeKernelPorts } from "../home/home-module.js";
+import { applyHomeCacheRetention } from "../modules/home/home-request-policy.js";
+import type { HomeKernelPorts } from "../modules/home/home-module.js";
 import {
   CatalogDiscovery,
   DEFAULT_CATALOG_DISCOVERY_LIMITS,
@@ -721,7 +721,7 @@ export class RuntimeRegistry {
        * on it (#480). Only a registry without a Gateway, as in tests, omits it;
        * Home then gets a runtime of its own, as an ordinary session does. */
       gatewayModelRuntime?: ModelRuntime;
-      homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
+      homeTaskDiagnostic?: (record: import("../modules/home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
     },
   ) {
     this.openAIModelEligibility = options.openAIModelEligibility ?? new OpenAIModelEligibility();

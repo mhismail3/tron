@@ -1,0 +1,2218 @@
+import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import * as fileSystem from "node:fs/promises";
+import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
+import { spawn, spawnSync } from "node:child_process";
+import os from "node:os";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { chmod, cp, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { HomeTaskStore, taskIntentDigest } from "./home-task-store.js";
+import { HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "./home-task-dispatcher.js";
+import { HomeMemoryRefusal } from "./home-request-policy.js";
+import { UploadStore } from "../../machine/upload-store.js";
+import { EpisodicMemoryError } from "../../episodic/episodic-contract.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { SessionCatalog } from "../../sessions/session-catalog.js";
+import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch, type OwnedSessionDispatchOver } from "../../kernel/delegation/owned-session-dispatch.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayLogger } from "../../transport/logger.js";
+import { runHomeInput } from "../../client/terminal-chat.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { GatewayError } from "../../errors.js";
+import { freezeHomeLedgerWriter } from "../../../test-support/home-ledger-crash-frozen-owner.js";
+import { dispatch, disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
+import { issueGrant } from "../../../test-support/home-task-grant.js";
+
+const evidence: Array<Record<string, unknown>> = [];
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await disposeFixtures();
+});
+afterAll(async () => {
+  if (process.env.HOME_TASK_REPORT) await writeFile(process.env.HOME_TASK_REPORT, JSON.stringify({ suite: "home-task-dispatch", evidence }, null, 2));
+});
+
+async function taskFile(f: Awaited<ReturnType<typeof fixture>>, id: string): Promise<string> {
+  const directory = join(f.tronHome, "gateway/home/tasks");
+  return join(directory, (await readdir(directory)).find(name => name.endsWith(`-${id}.json`))!);
+}
+/** `ps` state of one process: empty when absent, `Z` when it has exited and awaits its reap. */
+function processStat(pid: number): string {
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8", timeout: 2_000 });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && result.status !== 1) throw new Error(`Cannot inspect owned process ${pid}: ${result.stderr}`);
+  return result.stdout.trim();
+}
+/** Terminal: absent, or exited and awaiting its reap (`Z`), which cannot write. Reaping belongs to the
+ * parent or launchd, so waiting for it measures host load; `kill(pid, 0)` succeeds on a zombie and would
+ * count exited work as live. */
+function processTerminal(pid: number): boolean {
+  const state = processStat(pid);
+  return state === "" || state.startsWith("Z");
+}
+async function waitForTaskAcknowledgement(f: Awaited<ReturnType<typeof fixture>>, taskId: string): Promise<void> {
+  await waitFor(async () => (await homeOwnerOf(f.registry).taskResult(taskId)).wake?.state === "acknowledged", "durable task acknowledgement");
+}
+
+// Hold the real terminal → acknowledged publication so presentation retirement
+// cannot accidentally satisfy either route test's consumption cut.
+async function observeTaskAcknowledgement<T>(f: Awaited<ReturnType<typeof fixture>>, taskId: string, start: () => Promise<T>): Promise<T> {
+  const owner = homeOwnerOf(f.registry);
+  const store: HomeTaskStore = (owner as any).tasks.store;
+  const update = store.updateWake.bind(store);
+  let release!: () => void;
+  let held = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const hook = vi.spyOn(store, "updateWake").mockImplementation(async (id, change) => {
+    const current = await store.read(id);
+    if (id === taskId && current?.wake && change(structuredClone(current.wake)).state === "acknowledged") {
+      held = true;
+      await gate;
+    }
+    return update(id, change);
+  });
+  let ready = false;
+  let acknowledgement: Promise<unknown> | undefined;
+  let accepted!: T;
+  try {
+    accepted = await start();
+    await waitFor(() => held, "task acknowledgement publication gate");
+    expect((await owner.taskResult(taskId)).wake?.state).toBe("terminal");
+    acknowledgement = waitForTaskAcknowledgement(f, taskId).then(() => { ready = true; });
+    await awaitsWithin(new Promise<void>(resolve => setImmediate(resolve)), "acknowledgement observation turn");
+    expect(ready, "actionable work retirement is not task acknowledgement").toBe(false);
+  } finally {
+    release();
+    hook.mockRestore();
+    await acknowledgement;
+  }
+  return accepted;
+}
+
+describe("Home task authorization RPC", () => {
+  async function controls() {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    await (await dispatch(f, "scope-setup")).completion;
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+      receipts: new CommandReceiptStore(join(f.root, "authorization-receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { id: "authorization-terminal", identity: "device:authorization-test", isLocal: true } as unknown as ClientContext;
+    const rpc = async (method: string, params: unknown = {}) => await service.invoke(client, method, params) as any;
+    const list = () => rpc("home.taskPermissions");
+    const scope = (await list()).scopes.find((scope: any) => scope.active);
+    await rpc("home.revokeTaskScope", { commandId: "revoke-initial-scope", scopeId: scope.id });
+    return { f, rpc, list, scope };
+  }
+  async function refused(f: Awaited<ReturnType<typeof fixture>>, taskId: string, intent = "Finite work") {
+    let refusal: any;
+    // These durable-authorization journeys also run after an unmaterialized Home
+    // has been evicted. Choose a model explicitly rather than reading that absent chat.
+    const model = f.faux.getModel();
+    try { const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd, model: { provider: model.provider, id: model.id } }); await run.completion; }
+    catch (error) { refusal = error; }
+    expect(refusal).toMatchObject({ code: "grant-required", requestId: expect.any(String) });
+    expect(refusal.requestId.length).toBeGreaterThan(0);
+    return refusal.requestId as string;
+  }
+  it("reports no reconfirmation for an active valid scope without changing authority", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    await (await dispatch(f, "valid-scope")).completion;
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+      receipts: new CommandReceiptStore(join(f.root, "valid-scope-receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { identity: "device:authorization-test", isLocal: true } as ClientContext;
+    const before = await homeOwnerOf(f.registry).taskPermissions();
+    const permissions = await service.invoke(client, "home.taskPermissions", {}) as any;
+    expect(permissions.needsReconfirmation).toBe(false);
+    expect(permissions.scopes).toContainEqual(expect.objectContaining({ active: true }));
+    expect(await homeOwnerOf(f.registry).taskPermissions()).toEqual(before);
+    evidence.push({ case: "rpc-valid-scope-no-reconfirmation", permissions });
+  });
+  it("revokes standing scope through terminal RPC and prevents the next dispatch", async () => {
+    const { f, rpc, list, scope } = await controls();
+    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runHomeInput({ request: rpc } as any, "/home permissions");
+    expect(stdout.mock.calls.map(call => call[0]).join("")).toContain(scope.id);
+    await runHomeInput({ request: rpc } as any, `/home revoke-scope ${scope.id}`);
+    const requestId = await refused(f, "scope-refused");
+    const permissions = await list();
+    expect(permissions.scopes).toMatchObject([{ id: scope.id, active: false }]);
+    expect(permissions.requests).toMatchObject([{ id: requestId, request: { target: await fileSystem.realpath(f.cwd), authorizationScope: "full-work" } }]);
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.authorization", outcome: "request-recorded", referenceHash: expect.any(String) }));
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    let modelRefusal: unknown;
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("delegate", { taskId: "model-grant-request", intent: "Finite work", target: f.cwd })], { stopReason: "toolUse" }), context => {
+      const refusal = context.messages.find(message => message.role === "toolResult" && message.toolName === "delegate") as any;
+      modelRefusal = refusal;
+
+      return fauxAssistantMessage("Maintainer approval required");
+    }]);
+    await home.prompt("Try the finite work");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home authorization refusal terminal");
+    expect(modelRefusal).toMatchObject({ isError: true });
+    // The model entrypoint fixes its worker choice into the authorized brief.
+    // Bind the error to that exact durable request, not the lower-level raw brief.
+    const modelTask = await homeOwnerOf(f.registry).taskResult("model-grant-request");
+    expect(modelTask.intent.text).toContain("Finite work");
+    expect(modelTask.intent.text).toContain("Worker choice: model");
+    const modelRequest = (await list()).requests.find((pending: any) => pending.request.intentDigest === modelTask.intentDigest);
+    expect(modelRequest).toBeDefined();
+    expect(JSON.stringify(modelRefusal)).toContain(modelRequest.id);
+    expect(JSON.stringify(modelRefusal)).toContain("grant-required");
+    expect(await refused(f, "model-grant-retry", modelTask.intent.text)).toBe(modelRequest.id);
+    evidence.push({ case: "rpc-scope-revocation", requestId, permissions, modelRefusal, modelRequest });
+  });
+  it("approves an exact one-use grant through RPC and refuses mismatches expiry and reuse", async () => {
+    const { f, rpc, list } = await controls();
+    const requestId = await refused(f, "grant-request");
+    const command = { commandId: "approve-exact-grant", requestId, approved: true, expiresAt: Date.now() + 60_000 };
+    let decision: any;
+    await runHomeInput({ request: async (method, params) => { const result = await rpc(method, params); if (method === "home.decideTaskGrant") decision = result; return result; } }, `/home approve-grant ${requestId} ${command.expiresAt}`);
+    expect(decision.grant).toMatchObject({ state: "available", decisionId: decision.decision.id, expiresAt: command.expiresAt,
+      ...(await list()).requests.find((pending: any) => pending.id === requestId).request });
+    await refused(f, "grant-mismatch", "Different intent");
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f, "grant-admitted")).completion;
+    expect(task.grantRef).toBe(decision.grant.id);
+    expect(await refused(f, "grant-reuse")).toBe(requestId);
+    const otherId = await refused(f, "expiry-request", "Expired work");
+    await expect(rpc("home.decideTaskGrant", { ...command, commandId: "expired-grant-input", requestId: otherId, expiresAt: Date.now() - 1 })).rejects.toThrow(/invalid-decision/);
+    const expiringId = await refused(f, "expiring-request", "Expiring work");
+    const expiresAt = Date.now() + 60_000;
+    await rpc("home.decideTaskGrant", { ...command, commandId: "approve-expiring-grant", requestId: expiringId, expiresAt });
+    const authority = (homeOwnerOf(f.registry) as any).tasks.authorization;
+    const clock = vi.spyOn(authority, "now").mockReturnValue(expiresAt);
+    try { expect(await refused(f, "expired-admission", "Expiring work")).toBe(expiringId); }
+    finally { clock.mockRestore(); }
+    const owner = homeOwnerOf(f.registry);
+    await expect(owner.taskTool(f.home.sessionId, { action: "approve", taskId: task.taskId } as any)).rejects.toThrow();
+    evidence.push({ case: "rpc-one-use-grant", task, permissions: await list() });
+  });
+  it("records a deny durably through RPC without a grant", async () => {
+    const { f, rpc, list } = await controls();
+    const requestId = await refused(f, "deny-request");
+    let decision: any;
+    await runHomeInput({ request: async (method, params) => { const result = await rpc(method, params); if (method === "home.decideTaskGrant") decision = result; return result; } }, `/home deny-grant ${requestId} ${Date.now() + 60_000}`);
+    expect(decision).toMatchObject({ decision: { requestId, approved: false }, grant: null });
+    const before = await list();
+    f.registry = await f.restart();
+    // A fresh production RPC owner must read the same durable decision.
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+      receipts: new CommandReceiptStore(join(f.root, "authorization-receipts")) } as unknown as GatewayServiceDependencies);
+    expect(await service.invoke({ identity: "device:authorization-test", isLocal: true } as ClientContext, "home.taskPermissions", {})).toEqual(before);
+    expect(await refused(f, "after-deny")).toBe(requestId);
+    expect(before.decisions).toMatchObject([{ requestId, approved: false }]);
+    expect(before.grants).toHaveLength(0);
+    evidence.push({ case: "rpc-durable-deny", permissions: before });
+  });
+  it("replays the original decision receipt and rejects stale new decisions", async () => {
+    const { f, rpc, list } = await controls();
+    const requestId = await refused(f, "replay-request");
+    const command = { commandId: "replay-exact-grant", requestId, approved: true, expiresAt: Date.now() + 60_000 };
+    const first = await rpc("home.decideTaskGrant", command);
+    await runHomeInput({ request: rpc } as any, `/home revoke-grant ${first.grant.id}`);
+    expect(await rpc("home.decideTaskGrant", command)).toEqual(first);
+    expect(await rpc("home.decideTaskGrant", { ...command, approved: false })).toEqual(first);
+    await expect(rpc("home.decideTaskGrant", { ...command, commandId: "stale-new-command" })).rejects.toThrow(/invalid-decision/);
+    await expect(rpc("home.decideTaskGrant", { ...command, commandId: "missing-new-command", requestId: "missing-request" })).rejects.toThrow(/invalid-decision/);
+    const permissions = await list();
+    expect(permissions.decisions).toHaveLength(1);
+    expect(permissions.grants).toMatchObject([{ id: first.grant.id, state: "revoked" }]);
+    await refused(f, "revoked-grant-refused");
+    evidence.push({ case: "rpc-receipt-stale-decision", permissions });
+  });
+  it.each(["revoke-first", "consume-first"])("orders revoke versus consumption at the owner mutex: %s", async order => {
+    const { f, rpc, list } = await controls();
+    const requestId = await refused(f, "race-request");
+    const { grant } = await rpc("home.decideTaskGrant", { commandId: "approve-racing-grant", requestId, approved: true, expiresAt: Date.now() + 60_000 });
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
+    const save = store.authorization.save.bind(store.authorization);
+    let reached = false;
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(store.authorization, "save").mockImplementation(async state => {
+      if (!reached && state.grants.find(item => item.id === grant.id)?.state === (order === "revoke-first" ? "revoked" : "consumed")) {
+        reached = true; await barrier;
+      }
+      await save(state);
+    });
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const revoke = () => rpc("home.revokeTaskGrant", { commandId: "revoke-racing-grant", grantId: grant.id });
+    const consume = () => dispatch(f, "race-admission").then(async run => ({ task: await run.completion }), error => ({ error }));
+    const first = order === "revoke-first" ? revoke().catch(error => ({ error })) : consume();
+    let secondSettled = false;
+    let blocked = false;
+    let second: Promise<any> | undefined;
+    try {
+      await waitFor(() => reached, "authorization write held");
+      second = (order === "revoke-first" ? consume() : revoke()).then(value => { secondSettled = true; return value; }, error => { secondSettled = true; return { error }; });
+      // Join queued work only after confirming that it cannot cross the held durable write.
+      await new Promise(resolve => setTimeout(resolve, 20));
+      blocked = !secondSettled;
+    } finally { release(); await first; await second; }
+    expect(blocked).toBe(true);
+    const results = await Promise.all([first, second]);
+    expect(results[order === "revoke-first" ? 0 : 1]).toEqual({ accepted: true });
+    const consumed = results[order === "revoke-first" ? 1 : 0];
+    if (order === "revoke-first") expect(consumed.error).toMatchObject({ code: "grant-required" });
+    else expect(consumed.task).toMatchObject({ grantRef: grant.id, lifecycle: "terminal" });
+    const permissions = await list();
+    expect(permissions.grants[0].state).toBe(order === "revoke-first" ? "revoked" : "consumed");
+    await refused(f, "race-reuse");
+    evidence.push({ case: `rpc-authorization-race-${order}`, permissions });
+  });
+});
+
+describe("Home task bounded backlogs", () => {
+  it("delivers a backlog across bounded activations exactly once in order without context-overflow", async () => {
+    const f = await fixture(undefined, false, 32_000);
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const tasks = [];
+    // A paused Home takes no wake, so the settled results accumulate as a backlog.
+    await homeOwnerOf(f.registry).pauseMemory();
+    for (let i = 0; i < 3; i++) {
+      f.faux.setResponses([fauxAssistantMessage([reportCall(`backlog-${i}`, String(i).repeat(65536))], { stopReason: "toolUse" })]);
+      tasks.push(await (await dispatch(f, `backlog-${i}`)).completion);
+    }
+    await homeOwnerOf(f.registry).resumeMemory();
+    const home = await f.registry.acquire(f.home.sessionId);
+    const batches: string[][] = [];
+    // The user's oversized input starves the inbox. When that activation settles, Home is idle and
+    // the backlog is delivered by wakes: each bounded activation takes what fits, in order.
+    const collect = (context: unknown) => {
+      // Task identity is metadata, not raw record JSON in the model text. Match
+      // the verbatim report bodies that actually reached this provider request.
+      const request = JSON.stringify(context);
+      batches.push(tasks.filter((_task, index) => request.includes(String(index).repeat(1000))).map(task => task.taskId));
+      expect(JSON.stringify(context)).not.toContain("u".repeat(1000));
+      return fauxAssistantMessage("Reviewed results");
+    };
+    f.faux.setResponses([(context) => {
+      expect(JSON.stringify(context)).toContain("3 more task results pending");
+      expect(JSON.stringify(context)).not.toContain("Home task backlog-");
+      return fauxAssistantMessage("Results wait for a shorter activation");
+    }, collect, collect, collect, collect, collect, collect]);
+    await home.prompt("u".repeat(60000));
+    await waitFor(() => batches.flat().length === tasks.length, "backlog delivered by bounded activations");
+    expect(f.signals.filter(record => record.reason === "context-overflow")).toEqual([]);
+    expect(batches.length).toBeGreaterThan(1);
+    expect(batches.flat()).toEqual(tasks.map(t => t.taskId));
+    expect(f.signals).not.toContainEqual(expect.objectContaining({ reason: "context-overflow" }));
+    for (const task of tasks) {
+      await waitForTaskAcknowledgement(f, task.taskId);
+      expect(await homeOwnerOf(f.registry).taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    }
+    evidence.push({ case: "bounded-backlog", batches });
+  }, 30_000);
+
+  it("delivers a never-fit report by reference before its successor and reads immutable bounded pages", async () => {
+    // A window the fixed Home prefix fits with room for one small result: the 64 KB report never does.
+    const f = await fixture(undefined, false, 8_000); const model = f.faux.getModel();
+    const owner = homeOwnerOf(f.registry);
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    f.faux.setResponses([fauxAssistantMessage([reportCall("large", "🦊".repeat(16384))], { stopReason: "toolUse" })]);
+    const large = await (await dispatch(f, "large")).completion;
+    f.faux.setResponses([fauxAssistantMessage([reportCall("small", "Small complete report")], { stopReason: "toolUse" })]);
+    const small = await (await dispatch(f, "small")).completion;
+    const home = await f.registry.acquire(f.home.sessionId); let request = "";
+    f.faux.setResponses([(context) => { request = JSON.stringify(context); return fauxAssistantMessage("Read references"); }]);
+    await home.prompt("Review"); await waitFor(() => home.snapshot().configurationBlocker === null, "reference inbox");
+    const messages = home.canonicalSessionEntries().filter(e => e.type === "custom_message" && e.customType === "tron.home-task-result.v1") as any[];
+    expect(messages.map(m => m.details.taskId)).toEqual([large.taskId, small.taskId]);
+    expect(messages[0].content).toMatch(/immutable report.*task.*report/s);
+    expect(messages[0].content).toContain(`taskId=${large.taskId}`);
+    expect(messages[0].content).not.toContain("x".repeat(100));
+    expect(request).toContain("Small complete report");
+    const pages: any[] = []; let offset = 0;
+    for (let i = 0; i < 100; i++) {
+      const page = await owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset, limit: 1024 } as any) as any;
+      pages.push(page); expect(Buffer.byteLength(page.text)).toBeLessThanOrEqual(1024);
+      if (page.nextOffset === null) break;
+      expect(page.nextOffset).toBeGreaterThan(offset); offset = page.nextOffset;
+    }
+    const report = JSON.parse(pages.map(p => p.text).join(""));
+    expect(report.text).toBe("🦊".repeat(16384));
+    await expect(owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset: -1, limit: 1024 } as any)).rejects.toThrow(/page/);
+    await expect(owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset: 0, limit: 1_000_000 } as any)).rejects.toThrow(/page/);
+    await waitForTaskAcknowledgement(f, large.taskId);
+    await waitForTaskAcknowledgement(f, small.taskId);
+    expect(await owner.taskResult(large.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    expect(await owner.taskResult(small.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    evidence.push({ case: "never-fit-reference-and-pages", messages, pages: pages.length, bytes: pages.reduce((n, p) => n + Buffer.byteLength(p.text), 0) });
+  }, 30_000);
+
+  it.each(["initial", "replacement", "rollover"] as const)("admits the first %s backlog activation and refuses later canonical loss", async kind => {
+    const f = await fixture(); const owner = homeOwnerOf(f.registry); const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    let sessionId = f.home.sessionId;
+    if (kind !== "initial") {
+      const first = await f.registry.acquire(sessionId);
+      f.faux.setResponses([fauxAssistantMessage("Initial conversation")]);
+      await first.prompt("First"); await waitFor(() => first.snapshot().configurationBlocker === null, "first chapter activation");
+      const port = (owner as any).options.sessions;
+      if (kind === "replacement") {
+        const present = port.sessionPresent.bind(port);
+        const missing = vi.spyOn(port, "sessionPresent").mockImplementation((id: string) => id === sessionId ? Promise.resolve(false) : present(id));
+        sessionId = (await owner.designate({ model: { provider: model.provider, id: model.id } })).sessionId;
+        missing.mockRestore();
+      } else {
+        (first as any).sessionManager.appendCustomEntry("large-prior-metadata", { payload: "x".repeat(2 * 1024 * 1024) });
+        const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 25 * 1024 * 1024, entries: 10, quiescent: true });
+        await owner.chapterQuiescent(sessionId); metrics.mockRestore();
+        sessionId = (await owner.open()).sessionId;
+        await homeOwnerOf(f.registry).materializer.materialize(sessionId);
+      }
+    }
+    const home = await f.registry.acquire(sessionId);
+    const path = (home as any).sessionManager.getSessionFile();
+    const before = JSON.parse(await readFile(join(f.tronHome, "gateway/home/home.json"), "utf8"));
+    expect(before.chapters.at(-1).activationStarted).toBe(false);
+    f.faux.setResponses([fauxAssistantMessage([reportCall(`report-${kind}`)], { stopReason: "toolUse" })]);
+    const task = await (await owner.dispatchTask(sessionId, { taskId: `task-${kind}`, intent: "Finite work", target: f.cwd })).completion;
+    let request = "";
+    f.faux.setResponses([(context) => { request = JSON.stringify(context); return fauxAssistantMessage("Reviewed first backlog"); }]);
+    await home.prompt("Review pending"); await waitFor(() => home.snapshot().configurationBlocker === null, "first backlog activation");
+    expect(request).toContain("Verified result");
+    if (kind !== "initial") expect(request).toContain("Initial conversation");
+    await waitForTaskAcknowledgement(f, task.taskId);
+    expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    await rm(path);
+    await expect((owner as any).memoryView({ operationId: "lost", nonce: "lost", boundaryEntryId: null }, undefined)).rejects.toThrow();
+    let providers = 0;
+    f.faux.setResponses([() => { providers++; return fauxAssistantMessage("Must not see provider"); }]);
+    await home.prompt("After data loss"); await waitFor(() => home.snapshot().configurationBlocker === null, "canonical loss refuses before provider");
+    expect(providers).toBe(0);
+    expect(f.signals.filter(record => record.event === "refused")).toContainEqual(expect.objectContaining({ reason: expect.stringMatching(/memory-blocked|memory-unavailable/) }));
+    evidence.push({ case: `chapter-${kind}-first-backlog-and-loss`, consumed: task.taskId });
+  });
+
+  it("Stop cancels the activation-owned envelope memory wait without admitting results or provider work", async () => {
+    const f = await fixture(); const owner = homeOwnerOf(f.registry); const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f)).completion;
+    const home = await f.registry.acquire(f.home.sessionId);
+    const policy = owner.requestPolicyFor(f.home.sessionId)!;
+    let entered = false; let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const view = (policy as any).options.prepareMemoryView;
+    const barrier = vi.spyOn((policy as any).options, "prepareMemoryView").mockImplementation(async (activation: any, signal: any) => {
+      entered = true;
+      await new Promise<void>((resolve, reject) => {
+        // The memory owner's own cancellation refusal, not a generic failure.
+        const abort = () => { signal?.removeEventListener("abort", abort); reject(new HomeMemoryRefusal("memory-wait-cancelled", "the activation's wait for the Home memory was cancelled")); };
+        signal?.addEventListener("abort", abort, { once: true });
+        void gate.then(() => { signal?.removeEventListener("abort", abort); resolve(); });
+      });
+      return view(activation, signal);
+    });
+    let settled = false;
+    const prompting = home.prompt("Review").finally(() => { settled = true; }); void prompting.catch(() => {});
+    try {
+      await waitFor(() => entered, "envelope waits for memory", { boundMs: 1000 });
+      const operation = home.snapshot().operation;
+      expect(operation?.kind).toBe("prompt");
+      await home.abort("agent", operation!.id);
+      await waitFor(() => settled, "Stop cancels envelope wait", { boundMs: 1000 });
+      await expect(prompting).rejects.toThrow("Home request refused (memory-wait-cancelled)");
+      expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "pending" } });
+      expect(home.canonicalSessionEntries().filter(e => e.type === "custom_message" && e.customType === "tron.home-task-result.v1")).toHaveLength(0);
+      evidence.push({ case: "activation-envelope-wait-stop", pending: task.taskId });
+    } finally { release(); barrier.mockRestore(); await prompting.catch(() => {}); }
+  });
+
+  it("cold recovery retains only its current abandoned task", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const base = await (await dispatch(f)).completion;
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
+    for (let i = 0; i < 24; i++) await store.put({ ...base, taskId: `abandoned-${i}`, revision: 1, lifecycle: "pending", sessionId: null, operationId: null, reportRef: null, terminalEvidence: null, wake: null, spend: null }, null);
+    const retained = new Set<string>(); let peak = 0;
+    const observe = (task: any) => { if (task.lifecycle !== "terminal") { retained.add(task.taskId); peak = Math.max(peak, retained.size); } };
+    const records = HomeTaskStore.prototype.records;
+    vi.spyOn(HomeTaskStore.prototype, "records").mockImplementation(async function*(this: HomeTaskStore) { for await (const task of records.call(this)) { observe(task); yield task; } });
+    const update = HomeTaskStore.prototype.update;
+    vi.spyOn(HomeTaskStore.prototype, "update").mockImplementation(async function(taskId, change) { const task = await update.call(this, taskId, change); retained.delete(taskId); return task; });
+    const cold = await f.restart();
+    expect(await (homeOwnerOf(cold) as any).tasks.recoveryStatus()).toEqual({ available: true });
+    expect(peak).toBe(1); expect(retained.size).toBe(0);
+    for (let i = 0; i < 24; i++) expect(await homeOwnerOf(cold).taskResult(`abandoned-${i}`)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown" } });
+    evidence.push({ case: "streaming-cold-recovery", tasks: 24, peakRetainedTasks: peak });
+  }, 30_000);
+});
+
+describe("Home task cold reconciliation", () => {
+  it.each(["before-report", "after-report", "after-terminal"])("recovers %s without replay and keeps terminal outbox/authorization", async cut => {
+    const f = await fixture();
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
+    const authorization = (homeOwnerOf(f.registry) as any).tasks.authorization;
+    await store.initialize();
+    await issueGrant(authorization, { intentDigest: "a".repeat(64), target: f.cwd,
+      authorizationScope: "full-work", restoreEpoch: await store.restoreEpoch() },
+      { decisionId: "unspent", expiresAt: Date.now() + 60_000 });
+    await authorization.enableInitialScope(await store.restoreEpoch());
+    const authorizationPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
+    const beforeAuthority = await readFile(authorizationPath, "utf8");
+    let providers = 0;
+    const effect = join(f.cwd, "effect");
+    f.faux.setResponses([() => { providers++; return fauxAssistantMessage([fauxToolCall("write", { path: effect, content: "once" })], { stopReason: "toolUse" }); },
+      () => { providers++; return fauxAssistantMessage(cut === "before-report" ? "No report" : [reportCall()], { stopReason: cut === "before-report" ? "stop" : "toolUse" }); }]);
+    const update = store.update.bind(store);
+    if (cut === "after-terminal") {
+      vi.spyOn(store, "update").mockImplementation(freezeHomeLedgerWriter(update, task => task.lifecycle === "terminal"));
+    } else {
+      vi.spyOn(store, "update").mockImplementation(async (id, change) => {
+        if (change((await store.read(id))!).lifecycle === "terminal") throw new Error("frozen before terminal publication");
+        return update(id, change);
+      });
+    }
+    const run = await dispatch(f);
+    await expect(run.completion).rejects.toThrow(/frozen/);
+    expect(await readFile(effect, "utf8")).toBe("once");
+    const frozen = await store.read(run.taskId);
+    expect(frozen?.lifecycle).toBe(cut === "after-terminal" ? "terminal" : "active");
+    expect(f.notifications).toHaveLength(0);
+    vi.restoreAllMocks();
+    const recovered = await f.restart();
+    const task = await homeOwnerOf(recovered).taskResult(run.taskId);
+    expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: cut === "before-report" ? "unknown" : "final" }, wake: { state: "pending", push: "decided" } });
+    expect(await readFile(authorizationPath, "utf8")).toBe(beforeAuthority);
+    expect(providers).toBe(2);
+    expect(f.notifications).toHaveLength(1);
+    await expect(homeOwnerOf(recovered).dispatchTask(f.home.sessionId, { taskId: run.taskId, intent: "Finite work", target: f.cwd,
+      model: { provider: f.faux.getModel().provider, id: f.faux.getModel().id } })).rejects.toThrow(/already exists/);
+    const again = await f.restart();
+    expect(await homeOwnerOf(again).taskResult(run.taskId)).toEqual(task);
+    expect(f.notifications).toHaveLength(1);
+    expect(providers).toBe(2);
+    evidence.push({ case: `cold-${cut}`, frozen, task, providers, effect: await readFile(effect, "utf8"), authorizationUnchanged: true });
+  }, 20_000);
+
+  it.each(["missing-marker", "duplicate-marker", "wrong-marker", "missing-report", "malformed-report", "wrong-report", "duplicate-report", "torn", "interrupted", "off-branch", "report-without-terminal", "missing-session", "bad-header", "old-format", "bad-graph", "sync-refused"])("reconciles %s evidence conservatively without constructing a worker", async mode => {
+    const f = await fixture();
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
+    const update = store.update.bind(store);
+    vi.spyOn(store, "update").mockImplementation(async (id, change) => {
+      if (change((await store.read(id))!).lifecycle === "terminal") throw new Error("frozen before terminal publication");
+      return update(id, change);
+    });
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f);
+    await expect(run.completion).rejects.toThrow(/frozen/);
+    const worker = await f.registry.acquire(run.sessionId);
+    const path = worker.sessionFile!;
+    const rows = (await readFile(path, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
+    const marker = rows.find(row => row.customType === "tron-home-task");
+    const report = rows.find(row => row.customType === "tron-home-task-report");
+    expect(report).toBeDefined();
+    if (mode === "missing-marker") rows.splice(rows.indexOf(marker), 1);
+    if (mode === "duplicate-marker") rows.push({ ...marker, id: "duplicate-marker", parentId: rows.at(-1).id });
+    if (mode === "wrong-marker") marker.data.operationId = "other-operation";
+    if (mode === "bad-header") rows[0].id = "other-session";
+    if (mode === "old-format") rows[0].version = 2;
+    if (mode === "bad-graph") report.parentId = report.id;
+    if (mode === "interrupted") {
+      // A sealed report completes its run; interrupted evidence is the terminal
+      // receipt of a run that a Stop ended before any report.
+      const terminal = rows.find(row => row.customType === "tron.chat-invocation.v1" && row.data.receiptKind === "terminal" && row.data.operationId === run.operationId);
+      expect(terminal?.data.lifecycle).toBe("completed");
+      terminal.data = { ...terminal.data, lifecycle: "interrupted", errorCode: "user-abort" };
+    }
+    if (mode === "missing-report" || mode === "interrupted") {
+      for (const row of rows) if (row.parentId === report.id) row.parentId = report.parentId;
+      rows.splice(rows.indexOf(report), 1);
+    }
+    if (mode === "malformed-report") report.data.outcome = "invented-success";
+    if (mode === "wrong-report") report.data.receiptId = "report:other-operation";
+    if (mode === "duplicate-report") rows.push({ ...report, id: "duplicate-report", parentId: rows.at(-1).id });
+    if (mode === "off-branch") rows.push({ type: "custom", id: "view-other-branch", parentId: marker.id, timestamp: new Date().toISOString(), customType: "view-only", data: {} });
+    if (mode === "report-without-terminal") {
+      for (let index = rows.length - 1; index >= 0; index--) {
+        const row = rows[index];
+        if (row.customType !== "tron.chat-invocation.v1" || row.data.receiptKind !== "terminal") continue;
+        for (const child of rows) if (child.parentId === row.id) child.parentId = row.parentId;
+        rows.splice(index, 1);
+      }
+    }
+    vi.restoreAllMocks();
+    // Retire the old process owner before changing its frozen canonical cut.
+    await f.registry.dispose();
+    await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    if (mode === "missing-session") await rm(path);
+    else await writeFile(path, rows.map(row => JSON.stringify(row)).join("\n") + "\n" + (mode === "torn" ? '{"partial":' : ""));
+    if (mode === "sync-refused") {
+      const anchor = await fileSystem.open(f.cwd, "r");
+      const prototype = Object.getPrototypeOf(anchor); const sync = prototype.sync; await anchor.close();
+      const target = await fileSystem.stat(path);
+      vi.spyOn(prototype, "sync").mockImplementation(async function(this: import("node:fs/promises").FileHandle) {
+        const current = await this.stat();
+        if (current.dev === target.dev && current.ino === target.ino) throw new Error("task evidence sync refused");
+        return sync.call(this);
+      });
+    }
+    const frozenCanonical = mode === "missing-session" ? undefined : await readFile(path, "utf8");
+    const open = vi.spyOn(RuntimeRegistry.prototype, "acquire");
+    const recovered = await f.restart();
+    expect(open).not.toHaveBeenCalled();
+    const task = await (homeOwnerOf(recovered) as any).tasks.store.read(run.taskId);
+    const reportProven = mode === "off-branch" || mode === "report-without-terminal";
+    expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: reportProven ? "final" : "unknown" }, wake: { state: "pending", push: "decided" } });
+    expect(f.notifications).toHaveLength(1);
+    if (frozenCanonical !== undefined) expect(await readFile(path, "utf8")).toBe(frozenCanonical);
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", reason: reportProven ? "cold-explicit-report" : expect.stringMatching(/^cold-/) }));
+    evidence.push({ case: `cold-evidence-${mode}`, task, runtimeConstructed: false });
+  }, 20_000);
+
+  it("confines a typed recovery refusal to every task surface until the next start", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    const taskPath = await taskFile(f, run.taskId);
+    const authPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
+    const taskBytes = await readFile(taskPath, "utf8"); const authBytes = await readFile(authPath, "utf8");
+    await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    await chmod(f.tronHome, 0o755);
+    const cold = await f.restart();
+    const owner = homeOwnerOf(cold);
+    expect(await owner.status()).toMatchObject({ taskRecovery: { available: false, reason: "unsafe-state" } });
+    const control = { taskId: run.taskId, operationId: run.operationId, text: "Steer" };
+    const operations: Array<[string, () => Promise<unknown>]> = [
+      ["dispatch", () => owner.dispatchTask(f.home.sessionId, { taskId: "new-task", intent: "Finite", target: f.cwd })],
+      ["status", () => owner.taskResult(run.taskId)],
+      ["task-tool", () => owner.taskTool(f.home.sessionId, { action: "status", taskId: run.taskId })],
+      ["home-steer", () => owner.steerTask(f.home.sessionId, control)],
+      ["maintainer-steer", () => owner.maintainTask(control)],
+      ["stop", () => owner.stopTask(control)],
+      ["reconfirm", () => owner.reconfirmTaskPermissions()],
+      ["redelivery", () => owner.redeliverTaskResult(run.taskId, { homeId: f.home.homeId, routeGeneration: 1 })],
+      ["worker-open", () => cold.acquire(run.sessionId)],
+    ];
+    const result: string[] = [];
+    // Repair does not lift the per-process refusal or re-attempt recovery.
+    await chmod(f.tronHome, 0o700);
+    for (const [name, operation] of operations) {
+      await expect(operation(), name).rejects.toMatchObject({ code: "conflict", details: { reason: "unsafe-state" } });
+      result.push(name);
+    }
+    // Inbox delivery is a no-op while recovery is refused: nothing is appended and nothing settles.
+    await expect(owner.admitTaskResults(f.home.sessionId, "activation", "user", async () => { throw new Error("delivery while fenced"); }, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }))).resolves.toBeUndefined();
+    await expect(owner.settleTaskResults(f.home.sessionId, "activation")).resolves.toBeUndefined();
+    result.push("inbox-admit", "inbox-ack");
+    expect(f.signals.filter(signal => signal.event === "home.task.store-refused" && signal.reason === "unsafe-state")).toHaveLength(1);
+    const ordinary = await cold.create(f.cwd);
+    f.faux.setResponses([fauxAssistantMessage("Ordinary sessions still work")]);
+    await ordinary.prompt("ordinary input"); await waitFor(() => ordinary.snapshot().configurationBlocker === null, "ordinary fenced-owner prompt");
+    expect(ordinary.canonicalSessionEntries()).toContainEqual(expect.objectContaining({ type: "message", message: expect.objectContaining({ role: "assistant", content: expect.arrayContaining([expect.objectContaining({ text: "Ordinary sessions still work" })]) }) }));
+    expect(await readFile(taskPath, "utf8")).toBe(taskBytes); expect(await readFile(authPath, "utf8")).toBe(authBytes);
+    const again = await f.restart();
+    expect(await homeOwnerOf(again).status()).toMatchObject({ taskRecovery: { available: true } });
+    expect(await homeOwnerOf(again).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+    evidence.push({ case: "task-recovery-fence", operations: result, ordinaryPrompt: true, bytesPreserved: true, restartAvailable: true });
+  }, 20_000);
+
+  it("admits a real Home prompt during a task-recovery refusal without stranding work or blocking disable", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const before = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home started before the refusal")]);
+    await before.prompt("Start Home"); await waitFor(() => before.snapshot().configurationBlocker === null, "Home before the refusal");
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    // A malformed task record refuses recovery while the workspace and Home memory stay available.
+    const bogus = join(f.tronHome, "gateway/home/tasks/0000000000001-bogus.json");
+    await writeFile(bogus, "{}", { mode: 0o600 });
+    const cold = await f.restart();
+    expect(await homeOwnerOf(cold).status()).toMatchObject({ taskRecovery: { available: false, reason: "invalid-record" } });
+    const home = await cold.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home answers while task recovery is refused")]);
+    await home.prompt("Review while recovery is refused");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home prompt during the refusal");
+    expect(JSON.stringify(home.canonicalSessionEntries())).toContain("Home answers while task recovery is refused");
+    expect(cold.administrativeWorkRegistry.size).toBe(0);
+    // Removing the cause does not lift the per-process refusal, and Home can still be disabled.
+    await rm(bogus);
+    expect(await homeOwnerOf(cold).status()).toMatchObject({ taskRecovery: { available: false } });
+    await cold.administrativeWorkRegistry.waitUntilSettled();
+    await expect(homeOwnerOf(cold).disable()).resolves.toBeDefined();
+    expect(await homeOwnerOf(cold).status()).toMatchObject({ enabled: false });
+    evidence.push({ case: "prompt-during-task-recovery-refusal", workEntries: 0, disabled: true });
+  }, 60_000);
+
+  it("logs a failed inbox settlement after its terminal receipt and still settles the operation's work", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home started")]);
+    await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home before the result");
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    const owner = homeOwnerOf(f.registry);
+    const settle = vi.spyOn(owner, "settleTaskResults").mockRejectedValueOnce(new Error("settlement store refused"));
+    const diagnostic = vi.spyOn(home as any, "emit");
+    f.faux.setResponses([fauxAssistantMessage("Result read although settlement failed")]);
+    await home.prompt("Review the result"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home terminal after failed settlement");
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(diagnostic).toHaveBeenCalledWith("session.diagnostic", expect.objectContaining({ code: "home-inbox-settlement-failed" }));
+    expect(JSON.stringify(home.canonicalSessionEntries())).toContain("Result read although settlement failed");
+    await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    expect(f.registry.administrativeWorkRegistry.size).toBe(0);
+    expect(await owner.taskResult(run.taskId)).toMatchObject({ wake: { state: "admitted" } });
+  }, 60_000);
+
+  it("retires an uncertain Home runtime only after its in-flight operation settles", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home started")]);
+    await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home before the in-flight run");
+    let release!: () => void; let entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([async () => { entered = true; await gate; return fauxAssistantMessage("Finished after the uncertain publication"); }]);
+    const running = home.prompt("Mid-run"); void running.catch(() => {});
+    await waitFor(() => entered, "Home run in flight");
+    // Stands in for the fence an uncertain ledger publication sets.
+    homeOwnerOf(f.registry).publicationUncertain = true;
+    const live = () => (f.registry as any).slots.has(f.home.sessionId) as boolean;
+    let retired = false;
+    const retirement = (f.registry as any).retireUncertainHomeRuntimes().then(() => { retired = true; });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(retired).toBe(false);
+      expect(live()).toBe(true);
+    } finally {
+      release();
+    }
+    await retirement;
+    expect(live()).toBe(false);
+    await running;
+  }, 60_000);
+
+  it("removes a crash-leftover task temporary at the next start, and Home activates", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    // Home's chapter file exists only after its first activation; a cold start
+    // can re-acquire that session only once it has been written.
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const before = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home started before restart")]);
+    await before.prompt("Start Home"); await waitFor(() => before.snapshot().configurationBlocker === null, "Home before restart");
+    const leftover = `${await taskFile(f, run.taskId)}.4242.0123456789ab.tmp`;
+    await writeFile(leftover, "{\"partial\":", { mode: 0o600 });
+    await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    const cold = await f.restart();
+    expect(await homeOwnerOf(cold).status()).toMatchObject({ taskRecovery: { available: true } });
+    await expect(readFile(leftover)).rejects.toMatchObject({ code: "ENOENT" });
+    const home = await cold.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home activates after temporary cleanup")]);
+    await home.prompt("Continue after restart"); await waitFor(() => home.snapshot().configurationBlocker === null, "activation after temporary cleanup");
+    expect(JSON.stringify(home.canonicalSessionEntries())).toContain("Home activates after temporary cleanup");
+    expect(await homeOwnerOf(cold).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+  }, 20_000);
+
+  it("settles a delivery whose canonical proof cannot be read as outcome-unknown, and later Home prompts still work", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    const owner = homeOwnerOf(f.registry) as any;
+    // The first settlement proof fails to read its chapter (the failure an
+    // over-bound line produces). Only that delivery is affected.
+    const unreadable = vi.spyOn(owner, "inboxEvidence").mockRejectedValueOnce(new EpisodicMemoryError("source", "Canonical session has an incomplete tail"));
+    f.faux.setResponses([fauxAssistantMessage("Result delivered before the unreadable proof")]);
+    await home.prompt("Review the result"); await waitFor(() => home.snapshot().configurationBlocker === null, "delivery with an unreadable proof");
+    expect(unreadable).toHaveBeenCalledTimes(1);
+    expect(await owner.taskResult(run.taskId)).toMatchObject({ wake: { state: "outcome-unknown" } });
+    unreadable.mockRestore();
+    f.faux.setResponses([fauxAssistantMessage("Later Home prompt still works")]);
+    await home.prompt("Continue after the unprovable delivery"); await waitFor(() => home.snapshot().configurationBlocker === null, "later Home prompt");
+    expect(JSON.stringify(home.canonicalSessionEntries())).toContain("Later Home prompt still works");
+    expect(await owner.taskResult(run.taskId)).toMatchObject({ wake: { state: "outcome-unknown" } });
+    evidence.push({ case: "unreadable-inbox-proof", wake: "outcome-unknown", laterPrompt: true });
+  }, 60_000);
+
+  it("joins the fresh catalog cut before irreversibly qualifying a cold report", async () => {
+    const f = await fixture();
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
+    vi.spyOn(store, "update").mockRejectedValue(new Error("frozen terminal owner"));
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await expect(run.completion).rejects.toThrow(/frozen/);
+    vi.restoreAllMocks();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ready = SessionCatalog.prototype.whenReconciled;
+    const barrier = vi.spyOn(SessionCatalog.prototype, "whenReconciled").mockImplementation(async function(this: SessionCatalog) {
+      await gate; await ready.call(this);
+    });
+    const starting = f.restart(); void starting.catch(() => {});
+    try {
+      await waitFor(() => barrier.mock.calls.length > 0, "cold task joins catalog readiness", { boundMs: 1000 });
+      expect(JSON.parse(await readFile(await taskFile(f, run.taskId), "utf8")).lifecycle).toBe("active");
+    } finally { release(); await starting; }
+    const recovered = await starting;
+    expect(await homeOwnerOf(recovered).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+    evidence.push({ case: "cold-catalog-readiness", task: await homeOwnerOf(recovered).taskResult(run.taskId) });
+  }, 20_000);
+
+  it("reaches readiness before a cold task recovery joins the catalog cut", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
+    vi.spyOn(store, "update").mockRejectedValue(new Error("frozen terminal owner"));
+    const run = await dispatch(f); await expect(run.completion).rejects.toThrow(/frozen/);
+    vi.restoreAllMocks();
+    await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ready = SessionCatalog.prototype.whenReconciled;
+    const barrier = vi.spyOn(SessionCatalog.prototype, "whenReconciled").mockImplementation(async function(this: SessionCatalog) {
+      await gate; await ready.call(this);
+    });
+    let blockedTimer: NodeJS.Timeout | undefined;
+    const startup = f.restartToReadiness();
+    const readiness = await Promise.race([
+      startup.then(() => "ready" as const),
+      new Promise<"blocked">(resolve => { blockedTimer = setTimeout(() => resolve("blocked"), 2_000); }),
+    ]);
+    clearTimeout(blockedTimer);
+    release();
+    const cold = await startup;
+    expect(readiness).toBe("ready");
+    expect(await homeOwnerOf(cold).status()).toMatchObject({ taskRecovery: { available: false, reason: "not-started" } });
+    await homeOwnerOf(cold).recoverTasks();
+    expect(barrier).toHaveBeenCalled();
+    expect(await homeOwnerOf(cold).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+  }, 20_000);
+
+  it.each(["pending", "grant-consumed", "worker-created", "operation-bound"])("retires the %s admission cut without replay or renewing grants", async cut => {
+    const f = await fixture();
+    const tasks = (homeOwnerOf(f.registry) as any).tasks;
+    const store = tasks.store as HomeTaskStore;
+    await store.initialize();
+    const epoch = await store.restoreEpoch();
+    await issueGrant(tasks.authorization, { intentDigest: taskIntentDigest("Finite work"),
+      target: f.cwd, authorizationScope: "full-work", restoreEpoch: epoch },
+      { decisionId: "single-use", expiresAt: Date.now() + 60_000 });
+    const put = store.put.bind(store);
+    let frozen = false;
+    vi.spyOn(store, "put").mockImplementation(async (task, expected) => {
+      if (frozen) throw new Error("frozen admission owner");
+      if (cut === "worker-created" && task.lifecycle === "active") { frozen = true; throw new Error("frozen admission owner"); }
+      const published = await put(task, expected);
+      if (task.lifecycle === (cut === "pending" ? "pending" : "active") && cut !== "grant-consumed" && cut !== "worker-created") { frozen = true; throw new Error("frozen admission owner"); }
+      return published;
+    });
+    if (cut === "grant-consumed") {
+      const save = store.authorization.save;
+      vi.spyOn(store.authorization, "save").mockImplementation(async state => {
+        await save(state); frozen = true; throw new Error("frozen admission owner");
+      });
+    }
+    const calls = vi.fn(() => fauxAssistantMessage("Never replay")); f.faux.setResponses([calls]);
+    await expect(dispatch(f)).rejects.toThrow(/frozen/);
+    const authorizationPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
+    const before = await readFile(authorizationPath, "utf8");
+    vi.restoreAllMocks();
+    const recovered = await f.restart();
+    const task = await (homeOwnerOf(recovered) as any).tasks.store.read("task-one");
+    expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown" }, wake: { state: "pending", push: "decided" } });
+    expect(await readFile(authorizationPath, "utf8")).toBe(before);
+    expect(JSON.parse(before).grants[0].state).toBe(cut === "pending" ? "available" : "consumed");
+    expect(calls).not.toHaveBeenCalled();
+    expect(f.notifications).toHaveLength(1);
+    evidence.push({ case: `cold-admission-${cut}`, task, authorityPreserved: true, providers: calls.mock.calls.length });
+  }, 20_000);
+});
+
+// Host pressure is observational; it never admits or queues Home workers.
+describe("Home workers without a cap", () => {
+  it("labels pressure from CPU busy ticks, never load average, and starts a worker at once under real busy CPU", async () => {
+    // The sampler reads kernel CPU ticks from `os.cpus()`, so the fake host is installed before the
+    // fixture builds the sampler: its first window starts from these counters. A 4x-per-CPU load
+    // average stands in for a host whose run queue reads high while its CPUs idle.
+    const FAKE_CPUS = 4;
+    const kernelCpus = Array.from({ length: FAKE_CPUS }, () => ({ model: "fixture", speed: 0, times: { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 } }));
+    vi.spyOn(os, "cpus").mockImplementation(() => structuredClone(kernelCpus));
+    vi.spyOn(os, "loadavg").mockReturnValue([FAKE_CPUS * 4, 0, 0]);
+    const f = await fixture();
+    const owner = homeOwnerOf(f.registry);
+    // Cumulative per-CPU ticks, as the kernel counts them: `busy` is user, nice, sys and irq.
+    const advanceTicks = (busy: number, idle: number, cpus = kernelCpus) => {
+      for (const cpu of cpus) { cpu.times.user += busy; cpu.times.idle += idle; }
+    };
+    // A measured window is at least 2 s of real time (host-pressure.ts); the wait keeps the event loop idle.
+    const readAfterWindow = async () => {
+      await new Promise(resolve => setTimeout(resolve, 2_100));
+      return (await owner.status()).hostPressure;
+    };
+    // Startup: no window has closed, so nothing is measured yet and load alone labels nothing.
+    expect((await owner.status()).hostPressure).toMatchObject({ level: "normal", load1PerCpu: 4 });
+    // The first measured window also absorbs the fixture's own setup; its event-loop share is not under test.
+    await readAfterWindow();
+    // Idle CPUs under a 4x load average are not pressure.
+    advanceTicks(0, 2_100);
+    expect(await readAfterWindow()).toMatchObject({ level: "normal", load1PerCpu: 4 });
+    // Every CPU busy for the whole window is critical, and a worker starts at once under it.
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "critical", load1PerCpu: 4 });
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const handle = await owner.dispatchTask(f.home.sessionId, { taskId: "pressured", intent: "Work under pressure", target: f.cwd });
+    expect(typeof handle.sessionId).toBe("string");
+    expect((await handle.completion).terminalEvidence).toMatchObject({ outcome: "final" });
+    // The transition reaches the persisted Gateway log with its level and busy CPU, not only a log
+    // level: the writer keeps only its own field vocabulary (#1103).
+    const transition = f.signals.find(record => record.event === "host.pressure" && record.state === "critical");
+    expect(transition).toMatchObject({ transition: "normal", counts: { cpuBusyPercent: 100, loadPerCpuPercent: 400 } });
+    const logPath = join(f.root, "host-pressure-log", "gateway.jsonl");
+    new GatewayLogger(logPath).log("warning", "Home task lifecycle", { source: "home", ...transition });
+    const persisted = JSON.parse((await readFile(logPath, "utf8")).trim().split("\n").at(-1)!);
+    expect(persisted).toMatchObject({ event: "host.pressure", level: "warning", state: "critical", transition: "normal" });
+    expect(persisted.counts).toMatchObject({ cpuBusyPercent: 100, loadPerCpuPercent: 400 });
+    // Settle the dispatch's own window (its event-loop share is not under test), then idle again.
+    await readAfterWindow();
+    // Busy share between the elevated and critical bands.
+    advanceTicks(1_680, 420);
+    expect(await readAfterWindow()).toMatchObject({ level: "elevated" });
+    // Counters that go backwards (a reset) and a changed CPU count (hotplug) leave the CPU part unmeasured:
+    // a finite, not-critical level, never a negative busy share.
+    kernelCpus.forEach(cpu => { cpu.times = { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 }; });
+    advanceTicks(0, 2_100);
+    const reset = await readAfterWindow();
+    expect(reset).toMatchObject({ level: "normal" });
+    expect(Number.isFinite(reset.eventLoopUtilization)).toBe(true);
+    kernelCpus.pop();
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "normal" });
+    // The next window on the new CPU count measures again.
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "critical" });
+    evidence.push({ case: "worker-starts-under-cpu-pressure", logged: persisted, reset });
+  }, 60_000);
+});
+
+describe("Home task list RPC", () => {
+  it("pages durable summaries across new arrivals and refuses foreign cursors and recovery fences", async () => {
+    const f = await fixture();
+    const owner = homeOwnerOf(f.registry);
+    const store = (owner as any).tasks.store as HomeTaskStore;
+    await store.initialize();
+    const service = new GatewayService({ sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
+    const client = { clientId: "task-list-reader" } as ClientContext;
+    const intent = { text: "Finite work" };
+    for (let i = 0; i < 5; i++) {
+      await store.put({ version: 1, taskId: `list-${i}`, revision: 1, homeId: f.home.homeId, generation: 1, routeGeneration: 1,
+        intent, intentDigest: taskIntentDigest(intent.text), target: f.cwd,
+        grantRef: null, scopeRef: null, lifecycle: "pending",
+        sessionId: null, operationId: null, stopIntent: null, spend: null,
+        reportRef: null, terminalEvidence: null, wake: null }, null);
+      await new Promise(resolve => setTimeout(resolve, 2));
+    }
+    const first = await service.invoke(client, "home.taskList", { limit: 2 }) as any;
+    expect(first.items.map((row: any) => row.taskId)).toEqual(["list-4", "list-3"]);
+    // The result counts the whole store, not the page: five pending tasks, two on this page.
+    expect(first.counts).toEqual({ active: 5, finished: 0 });
+    expect(first.items[0]).toMatchObject({ createdAt: expect.any(Number), updatedAt: expect.any(Number), title: "Finite work", lifecycle: "pending", spend: null });
+    const oldestPath = await taskFile(f, "list-0");
+    const oldestBytes = await readFile(oldestPath);
+    try {
+      // Exact counts read every record, so one torn record refuses the list rather than hiding it.
+      await writeFile(oldestPath, "{torn", { mode: 0o600 });
+      await expect(service.invoke(client, "home.taskList", { limit: 1 })).rejects.toMatchObject({ code: "conflict" });
+    } finally { await writeFile(oldestPath, oldestBytes, { mode: 0o600 }); }
+    expect((await service.invoke(client, "home.taskList", { limit: 1 }) as any).counts).toEqual({ active: 5, finished: 0 });
+    const base = (await store.read("list-4"))!;
+    await store.put({ ...base, taskId: "arrived", revision: 1 }, null);
+    const second = await service.invoke(client, "home.taskList", { limit: 2, cursor: first.nextCursor }) as any;
+    const third = await service.invoke(client, "home.taskList", { limit: 2, cursor: second.nextCursor }) as any;
+    expect([...second.items, ...third.items].map((row: any) => row.taskId)).toEqual(["list-2", "list-1", "list-0"]);
+    const copy = join(f.root, "tasks-copy"); const directory = join(f.tronHome, "gateway/home/tasks");
+    await cp(directory, copy, { recursive: true }); await rm(directory, { recursive: true }); await rename(copy, directory);
+    await expect(service.invoke(client, "home.taskList", { cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict" });
+    await chmod(f.tronHome, 0o755);
+    const cold = await f.restart();
+    const fenced = new GatewayService({ sessions: cold, home: homeOwnerOf(cold) } as unknown as GatewayServiceDependencies);
+    await chmod(f.tronHome, 0o700);
+    await expect(fenced.invoke(client, "home.taskList", {})).rejects.toMatchObject({ code: "conflict", details: { reason: "unsafe-state" } });
+    evidence.push({ case: "task-list-pages", first, second, third, staleCursorRefused: true, recoveryFenceRefused: true });
+  }, 20_000);
+
+  // #906: on Stable (100 records, most of them delivered results) a Home prompt
+  // waited minutes in admission while the phone re-read the task list: every scan
+  // re-read the store several times, recovery re-finished every historical wake
+  // operation, and each list read re-read every record, behind the same mutex.
+  // Counting record reads at the file boundary makes that cost exact.
+  it("reads the task store once per list and per Home admission, however many lists are in flight", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.faux.getModel().provider, id: f.faux.getModel().id }]);
+    const owner = homeOwnerOf(f.registry);
+    const store = (owner as any).tasks.store as HomeTaskStore;
+    f.faux.setResponses([fauxAssistantMessage([reportCall("seed", "Seed result")], { stopReason: "toolUse" }), fauxAssistantMessage("Wake reply")]);
+    const seed = await dispatch(f, "seed");
+    await seed.completion;
+    await waitFor(async () => (await owner.taskResult("seed")).wake?.state === "acknowledged", "seed result acknowledged");
+    const delivered = (await store.read("seed"))!;
+    // History like Stable's: each record a result some earlier wake delivered and acknowledged.
+    for (let i = 0; i < 99; i++) {
+      const { createdAt: _c, updatedAt: _u, ...write } = structuredClone(delivered);
+      await store.put({ ...write, taskId: `history-${i}`, revision: 1,
+        wake: { ...write.wake!, eventId: `task-result-${createHash("sha256").update(`history-${i}`).digest("hex")}`, delivery: { ...write.wake!.delivery!, operationId: `history-operation-${i}` } } }, null);
+    }
+    const directory = join(f.tronHome, "gateway/home/tasks");
+    const records = new Set<string>();
+    for (const name of await readdir(directory)) {
+      if (name === "authorization.json") continue;
+      const info = await fileSystem.stat(join(directory, name));
+      records.add(`${info.dev}:${info.ino}`);
+    }
+    expect(records.size).toBe(100);
+    const anchor = await fileSystem.open(f.cwd, "r");
+    const prototype = Object.getPrototypeOf(anchor); const stat = prototype.stat;
+    await anchor.close();
+    let reads = 0;
+    // A secure record read stats its open handle twice: before and after the read.
+    vi.spyOn(prototype, "stat").mockImplementation(async function(this: import("node:fs/promises").FileHandle, ...args: unknown[]) {
+      const info = await stat.apply(this, args);
+      if (records.has(`${info.dev}:${info.ino}`)) reads += 0.5;
+      return info;
+    });
+    const service = new GatewayService({ sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
+    const client = { clientId: "task-list-reader" } as ClientContext;
+    reads = 0;
+    const lists = await Promise.all(Array.from({ length: 20 }, () => service.invoke(client, "home.taskList", { limit: 50 }))) as Array<{ items: unknown[]; counts: { finished: number } }>;
+    expect(lists.every(page => page.items.length === 50 && page.counts.finished === 100)).toBe(true);
+    const listReads = reads;
+    const home = await f.registry.acquire(f.home.sessionId);
+    // One whole Home turn: lane admission, the run, and its inbox settlement.
+    const turn = async (text: string) => {
+      f.faux.setResponses([fauxAssistantMessage("Home answered")]);
+      reads = 0;
+      await home.prompt(text);
+      const admission = reads;
+      await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle");
+      return { admission, turn: reads };
+    };
+    // The first turn after startup proves the inbox quiet with one validating and one
+    // reading pass; every later turn reads no task record until a task write (#922).
+    const first = await turn("are you there?");
+    const quiet = await turn("still there?");
+    // A new result is a task write, so the quiet proof no longer holds: its wake
+    // delivers it, the next turn proves the inbox quiet again, and the one after reads nothing.
+    f.faux.setResponses([fauxAssistantMessage([reportCall("late", "Late result")], { stopReason: "toolUse" }), fauxAssistantMessage("Late result read")]);
+    await (await dispatch(f, "late")).completion;
+    await waitFor(async () => (await owner.taskResult("late")).wake?.state === "acknowledged", "late result delivered once");
+    await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle after wake");
+    const reproved = await turn("anything new?");
+    const quietAgain = await turn("and now?");
+    evidence.push({ case: "task-store-reads-per-list-and-admission", records: records.size + 1, listReads, first, quiet, reproved, quietAgain });
+    // Twenty identical reads in flight share one pass over the records.
+    expect(listReads).toBe(100);
+    expect(first.turn).toBeLessThanOrEqual(200);
+    expect(quiet).toEqual({ admission: 0, turn: 0 });
+    expect(reproved.turn).toBeLessThanOrEqual(202);
+    expect(quietAgain).toEqual({ admission: 0, turn: 0 });
+  }, 60_000);
+});
+
+describe("Home task production dispatch", () => {
+  // A settlement that cannot prove its evidence durable never publishes a result from it, and
+  // never leaves the task running without an owner either (#1166): it settles `unknown`.
+  it.each(["file", "directory"] as const)("settles unknown without replay when the live canonical %s sync is refused", async target => {
+    const f = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let providers = 0;
+    f.faux.setResponses([async () => { providers++; await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
+    try {
+      const run = await dispatch(f);
+      const worker = await f.registry.acquire(run.sessionId);
+      const anchor = await fileSystem.open(f.cwd, "r");
+      const prototype = Object.getPrototypeOf(anchor); const sync = prototype.sync;
+      await anchor.close();
+      let failedSync = false;
+      vi.spyOn(prototype, "sync").mockImplementation(async function(this: import("node:fs/promises").FileHandle) {
+        const path = worker.sessionFile;
+        const expected = path ? await fileSystem.stat(target === "file" ? path : dirname(path)).catch(() => undefined) : undefined;
+        const current = await this.stat();
+        if (expected && current.dev === expected.dev && current.ino === expected.ino) { failedSync = true; throw new Error("live canonical sync refused"); }
+        return sync.call(this);
+      });
+      release();
+      const task = await run.completion;
+      expect(failedSync).toBe(true);
+      expect(task).toMatchObject({ lifecycle: "terminal", reportRef: null, wake: { state: "pending" },
+        terminalEvidence: { outcome: "unknown", reason: "evidence-unavailable", entryIds: [], detail: "live canonical sync refused" } });
+      expect(f.notifications).toHaveLength(1);
+      vi.restoreAllMocks();
+      const recovered = await f.restart();
+      expect(await homeOwnerOf(recovered).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: task.terminalEvidence, reportRef: null });
+      expect(providers).toBe(1);
+      expect(f.notifications).toHaveLength(1);
+      evidence.push({ case: `live-canonical-${target}-sync-before-settlement`, task, providers });
+    } finally { release(); }
+  }, 20_000);
+
+  it("settles absent canonical evidence without a durable Stop intent as unknown, never interrupted", async () => {
+    const f = await fixture();
+    const create = OwnedSessionDispatch.prototype.createWorker;
+    vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
+      const lease = await create.call(this, cwd, reports);
+      vi.spyOn((lease.slot as any).runtime.session, "prompt").mockRejectedValue(new Error("preflight refused"));
+      return lease;
+    });
+    let providers = 0;
+    f.faux.setResponses([() => { providers++; return fauxAssistantMessage("must not start"); }]);
+    const run = await dispatch(f);
+    const task = await run.completion;
+    expect(task).toMatchObject({ lifecycle: "terminal", stopIntent: null, reportRef: null,
+      terminalEvidence: { outcome: "unknown", reason: "evidence-unavailable", entryIds: [], detail: "Task canonical evidence is unavailable" } });
+    expect(providers).toBe(0);
+    evidence.push({ case: "absent-without-stop", task, providers });
+  });
+
+  // #1166: a worker whose provider hit its usage limit ended its turn, live settlement then threw
+  // (an extension notice landed mid-cut), and the record stayed active with no owner: its lease
+  // retired, the idle runtime was evicted, Stop was refused forever and claims could not move.
+  const USAGE_LIMIT = "The ChatGPT user has reached their Subscription Sharing usage limit. Ask the user to try again after their usage limit resets.";
+  async function evictWorker(f: Awaited<ReturnType<typeof fixture>>, sessionId: string): Promise<void> {
+    const registry = f.registry as any;
+    registry.options.idleRuntimeMs = 0;
+    // The settled worker keeps no lease or run, so idle eviction retires its runtime.
+    await waitFor(async () => { await registry.evictIdle(); return !registry.slots.has(sessionId); }, "the ownerless worker's runtime is evicted");
+  }
+  async function resumeInPlace(f: Awaited<ReturnType<typeof fixture>>, taskId: string, sessionId: string): Promise<void> {
+    f.faux.setResponses([fauxAssistantMessage([reportCall("resumed", "Resumed after the limit")], { stopReason: "toolUse" })]);
+    const resumed = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "resume", taskId }) as { taskId: string; sessionId: string };
+    expect(resumed.sessionId).toBe(sessionId);
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskResult(resumed.taskId)).lifecycle === "terminal", "resumed task settles");
+    expect((await homeOwnerOf(f.registry).taskResult(resumed.taskId)).terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report", sessionId });
+  }
+
+  it("settles a usage-limited task whose live settlement fails, from its canonical file, and keeps it resumable", async () => {
+    const f = await fixture();
+    let providers = 0;
+    const limited = () => { providers++; return fauxAssistantMessage("", { stopReason: "error", errorMessage: USAGE_LIMIT }); };
+    f.faux.setResponses([limited, limited, limited, limited]);
+    vi.spyOn(f.registry, "readLiveTaskEvidence").mockRejectedValueOnce(new GatewayError("conflict", "Canonical session changed during inspection"));
+    const run = await dispatch(f);
+    const task = await run.completion;
+    expect(task).toMatchObject({ lifecycle: "terminal", stopIntent: null, wake: { state: "pending" },
+      terminalEvidence: { outcome: "unknown", reason: "settlement-failed", sessionId: run.sessionId, detail: "Canonical session changed during inspection" } });
+    expect(task.terminalEvidence!.entryIds).toHaveLength(1);
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", reason: "settlement-failed" }));
+    const status = await homeOwnerOf(f.registry).taskStatus(run.taskId);
+    expect(status).toMatchObject({ subagents: { started: 0, stoppedAtEnd: 0 }, subagentRuns: { total: 0, runs: [] } });
+    await evictWorker(f, run.sessionId);
+    await resumeInPlace(f, run.taskId, run.sessionId);
+    evidence.push({ case: "usage-limit-settlement-failure", task, providers });
+  });
+
+  it("stops a task left active without a live worker: Stop settles it interrupted and steering starts no turn", async () => {
+    const f = await fixture();
+    let providers = 0;
+    const limited = () => { providers++; return fauxAssistantMessage("", { stopReason: "error", errorMessage: USAGE_LIMIT }); };
+    f.faux.setResponses([limited, limited, limited, limited]);
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
+    const update = store.update.bind(store);
+    let refusals = 0;
+    vi.spyOn(f.registry, "readLiveTaskEvidence").mockRejectedValueOnce(new GatewayError("conflict", "Canonical session changed during inspection"));
+    // The live settlement and its canonical fallback both fail: the record stays active with no owner.
+    vi.spyOn(store, "update").mockImplementation(async (id, change) => {
+      const current = await store.read(id);
+      if (current?.lifecycle === "active" && change(structuredClone(current)).lifecycle === "terminal" && refusals++ < 1) throw new Error("terminal write refused");
+      return update(id, change);
+    });
+    const run = await dispatch(f);
+    await expect(run.completion).rejects.toThrow("terminal write refused");
+    vi.mocked(store.update).mockRestore();
+    expect(await store.read(run.taskId)).toMatchObject({ lifecycle: "active", stopIntent: null, terminalEvidence: null });
+    await evictWorker(f, run.sessionId);
+    const before = providers;
+    const tool = (input: Record<string, unknown>) => homeOwnerOf(f.registry).taskTool(f.home.sessionId, { taskId: run.taskId, ...input });
+    await expect(tool({ action: "steer", text: "Are you still there?" })).rejects.toThrow(/no live worker/);
+    expect(providers, "steering an ownerless task starts no turn").toBe(before);
+    await expect(tool({ action: "stop", operationId: run.operationId })).resolves.toMatchObject({ accepted: true, action: "stop", taskId: run.taskId });
+    const task = await homeOwnerOf(f.registry).taskResult(run.taskId);
+    expect(task).toMatchObject({ lifecycle: "terminal", stopIntent: { operationId: run.operationId },
+      terminalEvidence: { outcome: "interrupted", reason: "task-stop", sessionId: run.sessionId } });
+    expect(task.terminalEvidence!.entryIds).toHaveLength(1);
+    expect(task.terminalEvidence).not.toHaveProperty("failureCause");
+    expect(providers).toBe(before);
+    await resumeInPlace(f, run.taskId, run.sessionId);
+    evidence.push({ case: "ownerless-task-stop", task, providers });
+  });
+
+  it("ends a task at its sealed report: no later tool in the batch runs, no further model request, a completed receipt", async () => {
+    const f = await fixture();
+    await writeFile(join(f.cwd, "after-report.txt"), "must not be read\n");
+    let calls = 0;
+    f.faux.setResponses([() => { calls++; return fauxAssistantMessage([reportCall(),
+      fauxToolCall("read", { path: join(f.cwd, "after-report.txt") }, { id: "after-report" })], { stopReason: "toolUse" }); },
+    () => { calls++; return fauxAssistantMessage("must never be requested"); }]);
+    const run = await dispatch(f);
+    const task = await run.completion;
+    expect(task.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(calls).toBe(1);
+    const rows = (await f.registry.readTaskEvidence(run.sessionId)) as any[];
+    const after = rows.find(row => row.type === "message" && row.message?.role === "toolResult" && row.message.toolCallId === "after-report")?.message;
+    expect(after).toMatchObject({ isError: true });
+    expect(JSON.stringify(after.content)).toContain("report is sealed");
+    expect(JSON.stringify(after.content)).not.toContain("must not be read");
+    const receipt = rows.find(row => row.customType === "tron.chat-invocation.v1" && row.data?.receiptKind === "terminal" && row.data.operationId === run.operationId);
+    expect(receipt?.data).toMatchObject({ lifecycle: "completed" });
+    expect(rows.some(row => row.type === "message" && row.message?.role === "assistant" && row.message.stopReason === "aborted")).toBe(false);
+  });
+
+  it("wakes Home on a settled result: the wake consumes the immutable report and sends one push for itself", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const eventsBeforeWake = f.events.length;
+    let request = "";
+    let instructions = "";
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }), (context) => {
+      request = JSON.stringify(context);
+      instructions = JSON.stringify(context.messages.filter(message => message.role === "system"));
+      return fauxAssistantMessage("Result consumed by the wake");
+    }]);
+    const run = await dispatch(f);
+    await run.completion;
+    const home = await f.registry.acquire(f.home.sessionId);
+    await waitForTaskAcknowledgement(f, run.taskId);
+    // The wake's one push is its turn's own terminal push: the inbox sends no notice for the reply.
+    await waitFor(() => f.notifications.some(input => input.sessionId === f.home.sessionId), "wake reply push");
+    const eventId = (await homeOwnerOf(f.registry).taskResult(run.taskId)).wake!.eventId;
+    // The inbox delivery raises no client error (#730): its context receipt is the inbox's own.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(f.events.slice(eventsBeforeWake).filter(event => event.topic === "session.extensionError")).toEqual([]);
+    // The wake delivered the result, and no per-task push went out for it.
+    expect(request).toContain("Verified result");
+    expect(instructions).toMatch(/settled result wakes Home/);
+    expect(instructions).toMatch(/advisory push|task-finished push/);
+    expect(instructions).toContain("do not assume task success from admission");
+    expect(instructions).not.toContain("not yet delivered into Home");
+    expect(f.notifications.filter(input => input.sourceId === eventId)).toHaveLength(0);
+    expect(f.notifications.filter(input => input.sourceId.startsWith("home-wake:"))).toHaveLength(0);
+    expect(f.notifications.filter(input => input.sessionId === f.home.sessionId)).toHaveLength(1);
+    const attributed = home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1");
+    expect(attributed).toHaveLength(1);
+    expect(home.canonicalSessionEntries()).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.context-delivery.v4",
+      data: expect.objectContaining({ targetEntryId: attributed[0]!.id, origin: { source: "gateway:home-task", owner: { id: run.taskId, title: "Home task", source: "gateway:home-task" } } }) }));
+    expect(f.signals.filter(record => record.event === "home.task.inbox")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ state: "admitted", reason: "canonical-admission" }), expect.objectContaining({ state: "acknowledged", reason: "canonical-consumed" })]));
+    expect(JSON.stringify(f.signals.filter(record => record.event === "home.task.inbox"))).not.toMatch(/Verified result|task-one|Finite work/);
+    // Nothing is delivered twice: the next user message finds no pending result.
+    f.faux.setResponses([fauxAssistantMessage("No duplicate")]);
+    await home.prompt("Again"); await waitFor(() => home.snapshot().configurationBlocker === null, "second Home terminal");
+    expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
+    expect(f.notifications.filter(input => input.sourceId === eventId)).toHaveLength(0);
+    evidence.push({ case: "settled-result-wakes-home", request: request.length, homePushes: f.notifications.filter(input => input.sessionId === f.home.sessionId).length });
+  }, 20_000);
+
+  it("refuses inbox acknowledgement until canonical message and terminal receipt are durably synced", async () => {
+    const f = await fixture(); const owner = homeOwnerOf(f.registry); const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f)).completion;
+    const home = await f.registry.acquire(f.home.sessionId);
+    const path = (home as any).sessionManager.getSessionFile();
+    const anchor = await fileSystem.open(f.cwd, "r");
+    const prototype = Object.getPrototypeOf(anchor);
+    const sync = prototype.sync;
+    await anchor.close();
+    let failedSync = false;
+    vi.spyOn(prototype, "sync").mockImplementation(async function(this: import("node:fs/promises").FileHandle) {
+      const target = await fileSystem.stat(path).catch(() => undefined);
+      const current = await this.stat();
+      if (target && current.dev === target.dev && current.ino === target.ino) { failedSync = true; throw new Error("canonical sync refused"); }
+      return sync.call(this);
+    });
+    f.faux.setResponses([fauxAssistantMessage("result received")]);
+    await home.prompt("Read the result").catch(() => {});
+    await waitFor(() => home.snapshot().configurationBlocker === null, "failed sync Home terminal");
+    expect((await owner.taskResult(task.taskId)).wake?.state).not.toBe("acknowledged");
+    expect(failedSync).toBe(true);
+    vi.restoreAllMocks();
+    f.faux.setResponses([fauxAssistantMessage("reconciled")]);
+    await home.prompt("Continue"); await waitFor(() => home.snapshot().configurationBlocker === null, "reconciled sync terminal");
+    await waitForTaskAcknowledgement(f, task.taskId);
+    expect((await owner.taskResult(task.taskId)).wake?.state).toBe("acknowledged");
+    expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
+    evidence.push({ case: "canonical-fsync-before-ack", failedSync, recovered: await owner.taskResult(task.taskId) });
+  }, 20_000);
+
+  it("keeps one logical inbox route through repeated disable and re-enable", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f)).completion;
+    const before = (await homeOwnerOf(f.registry).status()) as any;
+    for (let i = 0; i < 3; i++) {
+      await homeOwnerOf(f.registry).disable();
+      expect(await homeOwnerOf(f.registry).taskResult(task.taskId)).toMatchObject({ wake: { state: "pending" } });
+      await homeOwnerOf(f.registry).designate({});
+    }
+    const after = (await homeOwnerOf(f.registry).status()) as any;
+    expect(after.routeGeneration).toBe(before.routeGeneration);
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "status", taskId: task.taskId })], { stopReason: "toolUse" }), fauxAssistantMessage("consumed once")]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    await observeTaskAcknowledgement(f, task.taskId, () => home.prompt("Continue"));
+    expect(await homeOwnerOf(f.registry).taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    expect(home.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "task")).toContainEqual(expect.objectContaining({ message: expect.objectContaining({ isError: false }) }));
+    evidence.push({ case: "inbox-disable-reenable", before, after });
+  }, 20_000);
+  it("blocks replacement until receipted maintainer redelivery and follows the logical route across chapter rollover", async () => {
+    const f = await fixture();
+    const owner = homeOwnerOf(f.registry); const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    let home = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);
+    await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "initial Home terminal");
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f)).completion;
+    const port = (owner as any).options.sessions;
+    const present = port.sessionPresent.bind(port);
+    const missing = vi.spyOn(port, "sessionPresent").mockImplementation((id: string) => id === f.home.sessionId ? Promise.resolve(false) : present(id));
+    const replacement = await owner.designate({ model: { provider: model.provider, id: model.id } }); missing.mockRestore();
+    expect(replacement.sessionId).not.toBe(f.home.sessionId);
+    expect((await owner.status() as any).routeGeneration).toBe(task.routeGeneration + 1);
+    home = await f.registry.acquire(replacement.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("replacement sees no old result")]);
+    await home.prompt("Continue after replacement"); await waitFor(() => home.snapshot().configurationBlocker === null, "replacement terminal");
+    expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "blocked" } });
+    expect(JSON.stringify(home.canonicalSessionEntries())).not.toContain("Verified result");
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: owner,
+      uploads: new UploadStore(join(f.root, "redelivery-uploads"), 1024),
+      receipts: new CommandReceiptStore(join(f.root, "redelivery-receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { id: "inbox-terminal", identity: "device:inbox-test", isLocal: true } as unknown as ClientContext;
+    let command: unknown;
+    const terminal = { request: async (method: string, params: unknown) => { if (method === "home.redeliverTaskResult") command = params; return service.invoke(client, method, params); } };
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await runHomeInput(terminal as any, `/home redeliver ${task.taskId}`);
+    expect(output).toHaveBeenCalledWith(expect.stringContaining("redelivery accepted")); output.mockRestore();
+    expect(await service.invoke(client, "home.redeliverTaskResult", command)).toEqual({ accepted: true });
+    const pending = await owner.taskResult(task.taskId);
+    expect(pending).toMatchObject({ wake: { state: "pending", redeliveries: [{ from: task.routeGeneration, to: task.routeGeneration + 1 }] } });
+    const oldPath = (await port.sessionFile(replacement.sessionId))!;
+    const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 25 * 1024 * 1024, entries: 10, quiescent: true });
+    await owner.chapterQuiescent(replacement.sessionId); metrics.mockRestore();
+    const sealed = await readFile(oldPath);
+    f.faux.setResponses([fauxAssistantMessage("current chapter receives result")]);
+    const accepted = await observeTaskAcknowledgement(f, task.taskId, () => service.invoke(client, "home.prompt", { commandId: "next-chapter-message", text: "Review the task" })) as any;
+    expect(accepted.sessionId).not.toBe(replacement.sessionId);
+    const current = await f.registry.acquire(accepted.sessionId);
+    expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    // Once consumed, redelivery is ineligible. Only the original command's
+    // receipt may still return its accepted result without invoking the owner.
+    const consumed = await owner.taskResult(task.taskId);
+    expect(await service.invoke(client, "home.redeliverTaskResult", command)).toEqual({ accepted: true });
+    expect(await owner.taskResult(task.taskId)).toEqual(consumed);
+    expect(current.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
+    expect(await readFile(oldPath)).toEqual(sealed);
+    evidence.push({ case: "replacement-redelivery-rollover", pending, accepted, consumed: await owner.taskResult(task.taskId), sealedBytesUnchanged: true });
+  }, 20_000);
+
+  it("keeps the sealed predecessor openable while a rollover is pending, and routes attachments through home.prompt", async () => {
+    const f = await fixture();
+    const owner = homeOwnerOf(f.registry); const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const predecessor = f.home.sessionId;
+    const home = await f.registry.acquire(predecessor);
+    f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);
+    await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "initial Home terminal");
+    const port = (owner as any).options.sessions;
+    const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 25 * 1024 * 1024, entries: 10, quiescent: true });
+    await owner.chapterQuiescent(predecessor); metrics.mockRestore();
+    // A reserved successor has no session yet: the sealed predecessor is the one
+    // openable route, and its successor is named only by the logical route.
+    const pending = await owner.status();
+    expect(pending).toMatchObject({ phase: "rollover-pending", sessionPresent: false, openSessionId: predecessor });
+    expect(pending.sessionId).not.toBe(predecessor);
+    // The openable predecessor is a readable canonical session, not just a name.
+    expect((await f.registry.acquire(predecessor)).id).toBe(predecessor);
+    const uploads = new UploadStore(join(f.root, "uploads"), 1024);
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: owner, uploads,
+      receipts: new CommandReceiptStore(join(f.root, "attachment-receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { id: "attachment-client", identity: "device:attachment-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
+    // The sealed predecessor stays read-only: a physical prompt to it is refused.
+    await expect(service.invoke(client, "session.prompt", { sessionId: predecessor, text: "write to the sealed chapter", commandId: "sealed-chapter-command" }))
+      .rejects.toMatchObject({ code: "conflict", details: { reason: "sealed-chapter" } });
+    const upload = await uploads.save("notes.txt", "text/plain", Buffer.from("attached notes"));
+    // Extension commands never carry attachments, on the logical route as well.
+    await expect(service.invoke(client, "home.prompt", { commandId: "extension-attachment-command", text: "", uploadIds: [upload.id], resourceInvocations: [{ source: "extension", name: "goal", arguments: "" }] }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    f.faux.setResponses([fauxAssistantMessage("attachment received")]);
+    const accepted = await service.invoke(client, "home.prompt", { commandId: "attachment-command-one", text: "Review the attachment", uploadIds: [upload.id] }) as unknown as { sessionId: string; operationId: string; logicalSessionId: string };
+    expect(accepted).toMatchObject({ logicalSessionId: "home", sessionId: pending.sessionId });
+    const successor = await f.registry.acquire(accepted.sessionId);
+    await waitFor(() => successor.snapshot().configurationBlocker === null, "attachment Home terminal");
+    const prompted = successor.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "user");
+    expect(JSON.stringify(prompted)).toContain("notes.txt");
+    expect(await owner.status()).toMatchObject({ sessionPresent: true, sessionId: accepted.sessionId, openSessionId: accepted.sessionId });
+    evidence.push({ case: "rollover-pending-attachment-route", pending: { phase: pending.phase, openSessionId: pending.openSessionId }, accepted: accepted.sessionId });
+  }, 30_000);
+
+  it("wires Home's real task tool to exact-operation shared steering", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    let release!: () => void;
+    let entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([async () => { entered = true; await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    const home = await f.registry.acquire(f.home.sessionId);
+    try {
+      await waitFor(() => entered, "worker provider barrier");
+      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "steer", taskId: run.taskId, operationId: run.operationId, text: "Home tool instruction" })], { stopReason: "toolUse" }), fauxAssistantMessage("shared steering accepted")]);
+      await home.prompt("Steer the active task");
+      await waitFor(() => home.snapshot().configurationBlocker === null, "Home task tool terminal");
+      expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home tool instruction"]);
+      release(); await run.completion;
+      evidence.push({ case: "home-task-tool", steering: "accepted" });
+    } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  it("orders Home and maintainer steering in the same lane and refuses stale or post-report work", async () => {
+    const f = await fixture();
+    let entered = false;
+    let release!: () => void;
+    let releaseSteer: (() => void) | undefined;
+    let firstSteer: Promise<unknown> | undefined;
+    let secondSteer: Promise<unknown> | undefined;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    // Pi consumes steering one-at-a-time. Give both accepted controls a turn
+    // before report seals the task; queued controls after report are undelivered.
+    f.faux.setResponses([async () => { entered = true; await gate; return fauxAssistantMessage([fauxToolCall("read", { path: "missing" })], { stopReason: "toolUse" }); },
+      fauxAssistantMessage([fauxToolCall("read", { path: "missing" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    try {
+      await waitFor(() => entered, "task provider active");
+      const control = { taskId: run.taskId, operationId: run.operationId };
+      const session = (slot as any).runtime.session;
+      const prompt = session.prompt.bind(session);
+      let steeringEntered = false;
+      const steeringGate = new Promise<void>(resolve => { releaseSteer = resolve; });
+      const called: string[] = [];
+      vi.spyOn(session, "prompt").mockImplementation(async (text: string, options: unknown) => {
+        called.push(text);
+        if (text === "Home first") { steeringEntered = true; await steeringGate; }
+        return prompt(text, options);
+      });
+      const first = firstSteer = homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, text: "Home first" });
+      void first.catch(() => {});
+      await waitFor(() => steeringEntered, "Home steering in session lane");
+      const second = secondSteer = slot.prompt("Maintainer second", [], "steer");
+      void second.catch(() => {});
+      let observationTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        // Observe non-admission while the SDK gate is held, rather than testing
+        // before the second command's asynchronous persistence can run.
+        const admittedWhileHeld = await Promise.race([second.then(() => true),
+          new Promise<false>(resolve => { observationTimer = setTimeout(() => resolve(false), 100); })]);
+        expect(admittedWhileHeld).toBe(false);
+        expect(called).toEqual(["Home first"]);
+      } finally { if (observationTimer) clearTimeout(observationTimer); releaseSteer?.(); }
+      await Promise.all([first, second]);
+      expect(called).toEqual(["Home first", "Maintainer second"]);
+      expect(f.signals.filter(record => record.event === "home.task.control" && record.action === "steer")).toHaveLength(2);
+      expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home first", "Maintainer second"]);
+      await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, operationId: "stale-operation", text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
+      await expect(slot.steerHomeTask({ ...control, operationId: "stale-operation" }, "stale slot control")).rejects.toThrow(/stale|changed|conflict/i);
+      // The removed controller generation is an unknown RPC parameter, refused before any Stop intent is written.
+      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+        receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
+      const client = { id: "control-terminal", identity: "device:control-test", isLocal: true } as unknown as ClientContext;
+      await expect(service.invoke(client, "home.stopTask",
+        { commandId: "stop-with-removed-fence", taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 })).rejects.toThrow(/unknown fields/);
+      release();
+      const result = await run.completion;
+      expect(result.terminalEvidence?.outcome).toBe("final");
+      const canonicalUser = JSON.stringify(slot.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "user"));
+      expect(canonicalUser).toContain("Home first");
+      expect(canonicalUser.indexOf("Maintainer second")).toBeGreaterThan(canonicalUser.indexOf("Home first"));
+      await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, text: "late" })).rejects.toThrow(/active|stale|settled|terminal/i);
+      evidence.push({ case: "shared-control-order", order: ["Home first", "Maintainer second"], staleRefused: true, afterReportRefused: true });
+    } finally { releaseSteer?.(); release(); await Promise.allSettled([firstSteer, secondSteer]); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  it.each([
+    { owner: "prompt", surface: "taskRPC" },
+    { owner: "automatic-compaction", surface: "taskRPC" },
+    { owner: "automatic-compaction", surface: "sessionStop" },
+  ] as const)("persists exact task Stop outside blocked SDK preflight ($owner/$surface) and reconciles interrupted evidence", async ({ owner, surface }) => {
+    const f = await fixture();
+    let release!: () => void;
+    let entered = false;
+    let cancelled = false;
+    let providerCalls = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([() => { providerCalls += 1; return fauxAssistantMessage("must not start"); }]);
+    const create = OwnedSessionDispatch.prototype.createWorker;
+    vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
+      const lease = await create.call(this, cwd, reports);
+      const session = (lease.slot as any).runtime.session;
+      const prompt = session.prompt.bind(session);
+      vi.spyOn(session, "prompt").mockImplementation(async (...args: any[]) => {
+        if (owner === "automatic-compaction") (lease.slot as any).onEvent({ type: "compaction_start", reason: "threshold" });
+        entered = true; await gate; return prompt(...args);
+      });
+      const abortCompaction = session.abortCompaction.bind(session);
+      vi.spyOn(session, "abortCompaction").mockImplementation(() => {
+        if (owner === "automatic-compaction") (lease.slot as any).onEvent({ type: "compaction_end", reason: "threshold", result: undefined, aborted: true, willRetry: false });
+        abortCompaction();
+      });
+      const abort = session.abort.bind(session);
+      vi.spyOn(session, "abort").mockImplementation(async () => { cancelled = true; release(); await abort(); });
+      return lease;
+    });
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    try {
+      await waitFor(() => entered, "SDK preflight barrier");
+      const control = { taskId: run.taskId, operationId: run.operationId };
+      await expect(homeOwnerOf(f.registry).stopTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
+      await expect(slot.stopHomeTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
+      expect(cancelled).toBe(false);
+      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+        receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
+      // A draining transport must keep status/exact Stop available; this is an
+      // isolated service flag, never a live Gateway restart.
+      (service as any).restartRequested = true;
+      const client = { id: "control-terminal", identity: "device:control-test", isLocal: true } as unknown as ClientContext;
+      let stopParams: unknown;
+      const terminal = { request: async (method: string, params: unknown) => { if (method === "home.stopTask") stopParams = params; return service.invoke(client, method, params); } };
+      const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const stopping = surface === "sessionStop" ? slot.abort("compaction", slot.snapshot().operation!.id)
+        : runHomeInput(terminal as any, `/home stop ${run.taskId}`);
+      void stopping.catch(() => {});
+      await waitFor(() => cancelled, "task Stop bypasses blocked admission lane");
+      await stopping;
+      if (surface === "taskRPC") expect(output).toHaveBeenCalledWith(expect.stringContaining("Stop joined"));
+      output.mockRestore();
+      expect(cancelled).toBe(true);
+      const result = await run.completion.catch(() => undefined);
+      const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
+      expect(await store.read(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "interrupted", reason: "stopped-before-conversation" } });
+      if (!result) throw new Error("Live Stop did not settle");
+      if (surface === "taskRPC") expect(await service.invoke(client, "home.stopTask", stopParams)).toEqual({ accepted: true });
+      expect(await homeOwnerOf(f.registry).taskResult(run.taskId)).toEqual(result);
+      expect(providerCalls).toBe(0);
+      expect(result.stopIntent).toMatchObject({ operationId: run.operationId });
+      expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "stopped-before-conversation", entryIds: [] });
+      expect(result.reportRef).toBeNull();
+      expect(result.wake).toMatchObject({ state: "pending", push: "decided" });
+      expect(f.notifications).toHaveLength(1);
+      await expect(fileSystem.stat(slot.sessionFile!)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(slot.isBusy).toBe(false);
+      expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "stop", disposition: "persisted" }));
+      evidence.push({ case: `task-preflight-stop-${owner}-${surface}`, providerCalls, intent: result.stopIntent, evidence: result.terminalEvidence });
+    } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  // Failure mode: ordinary Stop recovery replays accepted steering after a
+  // finite task is sealed, or removes it without exact not-delivered receipts.
+  it.each(["taskRPC", "sessionStop", "deadline"] as const)("settles queued task steering without delivery or a new turn on %s", async surface => {
+    const f = await fixture();
+    let entered = false;
+    let calls = 0;
+    let release!: () => void;
+    let expire: (() => void) | undefined;
+    const originalTimer = globalThis.setTimeout;
+    if (surface === "deadline") {
+      vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: any, ms: number, ...args: any[]) => {
+        if (ms === OWNED_OPERATION_DEADLINE_MS) expire = callback;
+        return originalTimer(callback, ms, ...args);
+      }) as typeof setTimeout);
+    }
+    f.faux.setResponses([(_context, options) => new Promise(resolve => {
+      entered = true; calls += 1;
+      const finish = () => {
+        options?.signal?.removeEventListener("abort", finish);
+        resolve(fauxAssistantMessage("stopped provider"));
+      };
+      release = finish;
+      options?.signal?.addEventListener("abort", finish, { once: true });
+    }), () => { calls += 1; return fauxAssistantMessage("must not continue"); }]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    try {
+      await waitFor(() => entered, "task provider running before queued Stop");
+      const first = await slot.steerHomeTask({ taskId: run.taskId, operationId: run.operationId }, "not delivered Home steer");
+      const second = await slot.prompt("not delivered maintainer steer", [], "steer");
+      expect(slot.snapshot().queuedItems.map(item => item.id)).toEqual([first.operationId, second.operationId]);
+      if (surface === "taskRPC") await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
+      else if (surface === "sessionStop") await slot.abort("agent", run.operationId);
+      else { expect(expire).toBeDefined(); expire!(); }
+      const result = await run.completion;
+      expect(result.terminalEvidence?.outcome).toBe(surface === "deadline" ? "limited" : "interrupted");
+      const entries = slot.canonicalSessionEntries();
+      const terminals = entries.filter(entry => entry.type === "custom" && entry.customType === "tron.chat-invocation.v1"
+        && (entry.data as any)?.receiptKind === "terminal").map(entry => (entry as any).data);
+      expect(terminals.filter(row => row.operationId === run.operationId)).toHaveLength(1);
+      expect(terminals.find(row => row.operationId === run.operationId)?.lifecycle).toBe("interrupted");
+      for (const operationId of [first.operationId, second.operationId]) {
+        expect(terminals.filter(row => row.operationId === operationId)).toEqual([expect.objectContaining({
+          operationId, sessionId: slot.id, lifecycle: "interrupted", errorCode: "task-stopped-before-delivery",
+        })]);
+      }
+      expect(JSON.stringify(entries.filter(entry => entry.type === "message" && entry.message.role === "user"))).not.toContain("not delivered");
+      expect(slot.snapshot().queuedItems).toEqual([]);
+      expect(slot.isBusy).toBe(false);
+      expect(calls).toBe(1);
+      evidence.push({ case: `queued-task-stop-${surface}`, providerCalls: calls, terminals, noSteeringDelivered: true });
+    } finally { release?.(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  it("refuses steering whose SDK preflight resumes after an immutable report", async () => {
+    const f = await fixture();
+    let releaseWorker!: () => void;
+    let releaseSteer!: () => void;
+    let workerEntered = false;
+    let steerEntered = false;
+    const workerGate = new Promise<void>(resolve => { releaseWorker = resolve; });
+    const steerGate = new Promise<void>(resolve => { releaseSteer = resolve; });
+    let afterReportCalls = 0;
+    f.faux.setResponses([async () => { workerEntered = true; await workerGate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); },
+      () => { afterReportCalls += 1; return fauxAssistantMessage("forbidden successor"); }]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    const anchor = await fileSystem.open(f.cwd, "r");
+    const prototype = Object.getPrototypeOf(anchor); const sync = prototype.sync; await anchor.close();
+    let canonicalSynced = false;
+    vi.spyOn(prototype, "sync").mockImplementation(async function(this: import("node:fs/promises").FileHandle) {
+      const target = slot.sessionFile ? await fileSystem.stat(slot.sessionFile).catch(() => undefined) : undefined;
+      const current = await this.stat();
+      if (target && current.dev === target.dev && current.ino === target.ino) canonicalSynced = true;
+      return sync.call(this);
+    });
+    let inspectionRequested = false;
+    const inspect = f.registry.readLiveTaskEvidence.bind(f.registry);
+    vi.spyOn(f.registry, "readLiveTaskEvidence").mockImplementation((...args) => { inspectionRequested = true; return inspect(...args); });
+    let steer: Promise<unknown> | undefined;
+    try {
+      await waitFor(() => workerEntered, "worker report gate");
+      const session = (slot as any).runtime.session;
+      const prompt = session.prompt.bind(session);
+      vi.spyOn(session, "prompt").mockImplementation(async (...args: any[]) => { steerEntered = true; await steerGate; return prompt(...args); });
+      steer = slot.prompt("racing maintainer", [], "steer");
+      void steer.catch(() => {});
+      await waitFor(() => steerEntered, "steer SDK preflight gate");
+      releaseWorker();
+      await waitFor(() => slot.canonicalSessionEntries().some(entry => entry.type === "custom" && entry.customType === "tron-home-task-report"), "immutable report append");
+      await waitFor(() => inspectionRequested, "live settlement queued behind steer");
+      // The existing lane still owns SDK preflight/refusal receipt publication.
+      // A bounded observation proves durability cannot race that canonical write.
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        expect(canonicalSynced).toBe(false);
+      }
+      releaseSteer();
+      await expect(steer).rejects.toThrow(/cancel|stopped|outcome|admission/i);
+      const result = await run.completion;
+      expect(result.terminalEvidence?.outcome).toBe("final");
+      expect(canonicalSynced).toBe(true);
+      expect(afterReportCalls).toBe(0);
+      evidence.push({ case: "report-steer-race", afterReportCalls, serializedCanonicalSync: canonicalSynced });
+    } finally { releaseWorker(); releaseSteer(); await steer?.catch(() => {}); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  it("publishes deduplicated live usage before status and retains the same tokens at settlement", async () => {
+    const f = await fixture();
+    let entered = false;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("read", { path: "missing" })], { stopReason: "toolUse", usage: { input: 7, output: 3, cacheRead: 2, cacheWrite: 1 } }),
+      async () => { entered = true; await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    try {
+      await waitFor(() => entered, "second provider turn");
+      const entries = slot.canonicalSessionEntries.bind(slot);
+      vi.spyOn(slot, "canonicalSessionEntries").mockImplementation(() => { const values = entries(); const usage = values.find(value => value.type === "message" && value.message.role === "assistant"); return usage ? [...values, usage] : values; });
+      const one = await homeOwnerOf(f.registry).taskResult(run.taskId);
+      const two = await homeOwnerOf(f.registry).taskResult(run.taskId);
+      const canonical = entries().find(value => value.type === "message" && value.message.role === "assistant")!;
+      const usage = (canonical as any).message.usage;
+      expect(one.spend).toMatchObject({ inputTokens: usage.input, cacheReadTokens: usage.cacheRead, cacheWriteTokens: usage.cacheWrite, outputTokens: usage.output });
+      expect(two).toEqual(one);
+      const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const terminal = { request: (_method: string, params: any) => homeOwnerOf(f.registry).taskResult(params.taskId) };
+      await runHomeInput(terminal as any, `/home task ${run.taskId}`);
+      expect(output).toHaveBeenCalledWith(expect.stringContaining(`${one.spend!.inputTokens} input + ${one.spend!.cacheReadTokens} cache read + ${one.spend!.cacheWriteTokens} cache write + ${one.spend!.outputTokens} output tokens.`));
+      output.mockRestore();
+      release();
+      const final = await run.completion;
+      expect(final.spend!.inputTokens).toBeGreaterThanOrEqual(one.spend!.inputTokens);
+      expect(final.spend!.cacheReadTokens).toBeGreaterThanOrEqual(one.spend!.cacheReadTokens!);
+      expect(final.spend!.outputTokens).toBeGreaterThanOrEqual(one.spend!.outputTokens);
+      evidence.push({ case: "live-spend", live: one.spend, final: final.spend });
+    } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  it("reconfirms copied-namespace scopes only through explicit RPC and terminal control", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    await (await dispatch(f)).completion;
+    const namespace = join(f.tronHome, "gateway/home/tasks");
+    const copy = join(f.root, "restored-tasks");
+    await cp(namespace, copy, { recursive: true, preserveTimestamps: true });
+    await rm(namespace, { recursive: true }); await rename(copy, namespace);
+    await expect(dispatch(f, "before-confirmation")).rejects.toThrow(/reconfirmation/);
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+      receipts: new CommandReceiptStore(join(f.root, "receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { id: "terminal-test", identity: "device:task-test", isLocal: true } as unknown as ClientContext;
+    await expect(service.invoke(client, "home.reconfirmPermissions", { commandId: "confirm-permissions", unexpected: true })).rejects.toThrow(/unexpected|unknown/i);
+    const restored = await service.invoke(client, "home.taskPermissions", {}) as any;
+    expect(restored.needsReconfirmation).toBe(true);
+    expect(restored.scopes).toContainEqual(expect.objectContaining({ active: true }));
+    // Reading the projection must not silently renew the restored authority.
+    await expect(dispatch(f, "after-permission-read")).rejects.toThrow(/reconfirmation/);
+    const terminal = { request: (method: string, params: unknown) => service.invoke(client, method, params) };
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    expect(await runHomeInput(terminal as any, "/home reconfirm-permissions")).toBe(true);
+    expect((await service.invoke(client, "home.taskPermissions", {}) as any).needsReconfirmation).toBe(false);
+    expect(output).toHaveBeenCalledWith(expect.stringContaining("reconfirmed"));
+    output.mockRestore();
+    f.faux.setResponses([fauxAssistantMessage([reportCall("after-confirmation")], { stopReason: "toolUse" })]);
+    expect((await (await dispatch(f, "after-confirmation")).completion).terminalEvidence?.outcome).toBe("final");
+    evidence.push({ case: "explicit-permission-reconfirmation", refusedBefore: true, admittedAfter: true });
+  }, 20_000);
+
+  it("refuses a same-named unmanaged subagent provider at the tool-call boundary", async () => {
+    const f = await fixture(true);
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("subagent", { agent: "worker", task: "work", async: true })], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const result = await (await dispatch(f)).completion;
+    expect(existsSync(join(f.cwd, "subagent-effect.json"))).toBe(false);
+    expect(result.terminalEvidence?.outcome).toBe("final");
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.producer-refused", reason: "unverified-provider" }));
+    evidence.push({ case: "producer-subagent-unmanaged-provider", executed: false, injectedProducer: true });
+  }, 20_000);
+
+  it("refuses a same-named unmanaged bg_wait before it can install later work", async () => {
+    const f = await fixture(true);
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bg_wait", { id: "run", nonBlocking: false })], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const result = await (await dispatch(f)).completion;
+    expect(existsSync(join(f.cwd, "wait-effect.json"))).toBe(false);
+    expect(result.terminalEvidence?.outcome).toBe("final");
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.producer-refused", reason: "unverified-provider" }));
+    evidence.push({ case: "wait-unmanaged-provider", executed: false });
+  }, 20_000);
+
+  it("applies the same producer refusal to nested codemode calls", async () => {
+    const f = await fixture(true, true);
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("codemode", { code: 'await tools.subagent({agent:"worker",task:"work",async:false});' })], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const result = await (await dispatch(f)).completion;
+    expect(existsSync(join(f.cwd, "subagent-effect.json"))).toBe(false);
+    expect(result.terminalEvidence?.outcome).toBe("final");
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.producer-refused", reason: "unverified-provider" }));
+    evidence.push({ case: "nested-producer-gate", executed: false });
+  }, 20_000);
+
+  it("seals a nested report before codemode can start later effects", async () => {
+    const f = await fixture(undefined, true);
+    const later = join(f.cwd, "after-report.txt");
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("codemode", { code: `await tools.report({resultId:"nested-result",outcome:"final",text:"Verified",evidence:[]}); await tools.write({path:${JSON.stringify(later)},content:"forbidden"});` })], { stopReason: "toolUse" }), fauxAssistantMessage("must not continue")]);
+    const result = await (await dispatch(f)).completion;
+    expect(result.terminalEvidence?.outcome).toBe("final");
+    expect(result.reportRef?.resultId).toBe("nested-result");
+    expect(existsSync(later)).toBe(false);
+    evidence.push({ case: "nested-report-stop", postReportEffect: false });
+  }, 20_000);
+
+  it("refuses Tron's schedule tool before its producer executes", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("schedule", { action: "list" })], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const result = await (await dispatch(f)).completion;
+    expect(existsSync(join(f.cwd, "schedule-effect"))).toBe(false);
+    expect(result.terminalEvidence?.outcome).toBe("final");
+    evidence.push({ case: "schedule-gate", producerExecuted: false });
+  }, 20_000);
+
+  it("does not apply the task producer gate to ordinary async subagent calls", async () => {
+    const f = await fixture(true);
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("subagent", { agent: "worker", task: "work", async: true })], { stopReason: "toolUse" }), fauxAssistantMessage("ordinary completion")]);
+    const slot = await f.registry.create(f.cwd); await slot.prompt("ordinary delegation");
+    await waitFor(() => existsSync(join(f.cwd, "subagent-effect.json")), "ordinary async producer invocation");
+    await waitFor(() => slot.snapshot().configurationBlocker === null, "ordinary producer terminal");
+    evidence.push({ case: "ordinary-async-negative-control", admitted: true, injectedProducer: true });
+  }, 20_000);
+
+  it("records unknown rather than final when tracked detached work outlives an explicit report", async () => {
+    const f = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([async () => { await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    // Inject the existing tracking projection, not a real leaked child process.
+    const tracked = vi.spyOn(slot, "catalogHasActiveSubagents", "get").mockReturnValue(true);
+    release();
+    const result = await run.completion;
+    tracked.mockRestore();
+    expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "detached-work-outlived-task" });
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.detached-work", taskHash: expect.any(String) }));
+    evidence.push({ case: "unknown-detached-backstop", injectedTracking: true, outcome: "unknown" });
+  }, 20_000);
+
+  it("dispatches through Home's real delegate tool, not an unwired internal API", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    let homeCalls = 0;
+    const response = (context: unknown) => {
+      if (JSON.stringify(context).includes("This is a finite Home task")) return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      homeCalls += 1;
+      return homeCalls === 1 ? fauxAssistantMessage([fauxToolCall("delegate", { taskId: "task-via-tool", intent: "Finite work", target: f.cwd })], { stopReason: "toolUse" }) : fauxAssistantMessage("Task admitted, not yet consumed");
+    };
+    f.faux.setResponses([response, response, response, response]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.prompt("Delegate this finite work");
+    await waitFor(async () => {
+      try { return (await homeOwnerOf(f.registry).taskResult("task-via-tool")).lifecycle === "terminal"; }
+      catch { return false; }
+    }, "delegate task terminal");
+    expect((await homeOwnerOf(f.registry).taskResult("task-via-tool")).terminalEvidence?.outcome).toBe("final");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home tool activation terminal");
+    // The settled result wakes Home: the third Home request is that wake.
+    await waitFor(() => homeCalls === 3, "wake request for the settled result");
+    evidence.push({ case: "production-delegate", taskOutcome: "final", homeRequests: homeCalls });
+  }, 20_000);
+  // #919: a dispatch step that never returns once the task record exists. Stop must
+  // end Home's turn, the task must settle terminal with the stage named, and no
+  // worker prompt may start. The held step ignores the signal, as a stalled store does.
+  it.each(["authorize", "restore-epoch", "create-worker"] as const)("Stop ends a Home turn held in delegate dispatch at %s and settles the task", async stage => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    const tasks = (homeOwnerOf(f.registry) as any).tasks;
+    let entered = false; let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    // The held step's late completion is joined before disposal removes its files.
+    let late: Promise<unknown> | undefined;
+    const hold = <T>(run: () => Promise<T>) => { entered = true; const step = gate.then(run); late = step.catch(() => {}); return step; };
+    const created = () => f.signals.some(signal => signal.event === "home.task.transition" && signal.reason === "created");
+    if (stage === "authorize") {
+      const authorize = tasks.authorization.authorize.bind(tasks.authorization);
+      vi.spyOn(tasks.authorization, "authorize").mockImplementation((request: any) => hold(() => authorize(request)));
+    } else if (stage === "restore-epoch") {
+      const restoreEpoch = tasks.store.restoreEpoch.bind(tasks.store);
+      vi.spyOn(tasks.store, "restoreEpoch").mockImplementation(() => created() ? hold(restoreEpoch) : restoreEpoch());
+    } else {
+      const createWorker = OwnedSessionDispatch.prototype.createWorker;
+      vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(function (this: OwnedSessionDispatchOver<RuntimeRegistry>, ...args) { return hold(() => createWorker.apply(this, args)); });
+    }
+    let workerPrompts = 0; let homeRequests = 0;
+    const response = (context: unknown) => {
+      if (JSON.stringify(context).includes("This is a finite Home task")) { workerPrompts += 1; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }
+      homeRequests += 1;
+      // Later Home requests are the refused task's one result wake.
+      return homeRequests > 1 ? fauxAssistantMessage("Dispatch was stopped")
+        : fauxAssistantMessage([fauxToolCall("delegate", { taskId: "task-held", title: "Held dispatch", intent: "Finite work", target: f.cwd })], { stopReason: "toolUse" });
+    };
+    f.faux.setResponses([response, response, response]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const prompting = home.prompt("Delegate this finite work"); void prompting.catch(() => {});
+    try {
+      await waitFor(() => entered, `dispatch held at ${stage}`, { boundMs: 10_000 });
+      expect(created(), "the task record exists before the held step").toBe(true);
+      const operation = home.snapshot().operation;
+      expect(operation?.kind).toBe("prompt");
+      const stopping = home.abort("agent", operation!.id); void stopping.catch(() => {});
+      await waitFor(() => !home.snapshot().operation, "Stop ends the Home turn held in delegate dispatch", { boundMs: 5_000 });
+      await stopping;
+      await waitFor(async () => (await tasks.store.read("task-held"))?.lifecycle === "terminal", "held task settles terminal", { boundMs: 5_000 });
+      const task = await tasks.store.read("task-held");
+      expect(task).toMatchObject({ lifecycle: "terminal", sessionId: null, operationId: null,
+        terminalEvidence: { outcome: "unknown", reason: "admission-cancelled" } });
+      expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.dispatch-stage", stage, outcome: "cancelled" }));
+      expect(workerPrompts).toBe(0);
+      evidence.push({ case: `held-dispatch-stop-${stage}`, reason: task.terminalEvidence.reason, workerPrompts, homeRequests });
+    } finally { release(); await prompting.catch(() => {}); await late; }
+    // Like every terminal task, the refusal wakes Home once with its result. The held
+    // step's late result goes back to its owner, never into the cancelled admission.
+    await waitFor(async () => (await tasks.store.read("task-held"))?.wake?.state === "acknowledged", "refusal result consumed once", { boundMs: 5_000 });
+    await waitFor(() => !home.snapshot().operation, "wake turn settled", { boundMs: 5_000 });
+    expect(homeRequests).toBe(2);
+    expect(workerPrompts, "a released step never starts the cancelled task's worker").toBe(0);
+    expect(await tasks.store.read("task-held")).toMatchObject({ lifecycle: "terminal", terminalEvidence: { reason: "admission-cancelled" } });
+  }, 30_000);
+
+  it("refuses a dispatch step that outlives its deadline and settles the task with the stage", async () => {
+    const f = await fixture();
+    const tasks = (homeOwnerOf(f.registry) as any).tasks;
+    const originalTimer = globalThis.setTimeout;
+    let expire: (() => void) | undefined;
+    // Test-only deadline seam, as the 24-hour task deadline journey uses.
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: any, ms: number, ...args: any[]) => {
+      if (ms === HOME_TASK_DISPATCH_STAGE_DEADLINE_MS) expire = callback;
+      return originalTimer(callback, ms, ...args);
+    }) as typeof setTimeout);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const authorize = tasks.authorization.authorize.bind(tasks.authorization);
+    let entered = false; let late: Promise<unknown> | undefined;
+    vi.spyOn(tasks.authorization, "authorize").mockImplementation((request: any) => {
+      entered = true; const step = gate.then(() => authorize(request)); late = step.catch(() => {}); return step;
+    });
+    const run = dispatch(f, "task-deadline"); void run.catch(() => {});
+    try {
+      await waitFor(() => entered && expire !== undefined, "authorize held under its deadline", { boundMs: 10_000 });
+      expire!();
+      await expect(run).rejects.toMatchObject({ code: "busy" });
+      await waitFor(async () => (await tasks.store.read("task-deadline"))?.lifecycle === "terminal", "expired task settles terminal", { boundMs: 5_000 });
+      const task = await tasks.store.read("task-deadline");
+      expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown", reason: "admission-timeout" } });
+      expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.dispatch-stage", stage: "authorize", outcome: "timeout" }));
+      evidence.push({ case: "held-dispatch-deadline", reason: task.terminalEvidence.reason });
+    } finally { release(); await late; }
+    // The late grant decision never revives the expired admission.
+    expect(await tasks.store.read("task-deadline")).toMatchObject({ lifecycle: "terminal", sessionId: null, terminalEvidence: { reason: "admission-timeout" } });
+    // Home is idle and unmaterialized here, so the result goes out as its one push.
+    await waitFor(async () => (await tasks.store.read("task-deadline"))?.wake?.push === "decided", "expired task result published once", { boundMs: 5_000 });
+  }, 30_000);
+
+  it("admits once, seals exact canonical report evidence and refuses replay or conflicting reports", async () => {
+    const f = await fixture();
+    let postReport = 0;
+    f.faux.setResponses([
+      fauxAssistantMessage([reportCall(), reportCall("report-two", "conflict")], { stopReason: "toolUse" }),
+      () => { postReport += 1; return fauxAssistantMessage("must never execute after report"); },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(result.terminalEvidence.outcome).toBe("final");
+    expect(result.reportRef).not.toBeNull();
+    expect(result.terminalEvidence).not.toHaveProperty("failureCause");
+    const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
+    const ref = result.reportRef!;
+    const canonical = entries.find(entry => entry.id === ref.entryId) as any;
+    expect(canonical).toMatchObject({ type: "custom", customType: "tron-home-task-report", data: {
+      resultId: "report-one", taskId: "task-one",
+      homeId: f.home.homeId, generation: f.home.generation, sessionId: run.sessionId,
+      operationId: run.operationId, outcome: "final", text: "Verified result", evidence: ["focused check passed"],
+    } });
+    expect(entries.filter((entry: any) => entry.customType === "tron-home-task-report")).toHaveLength(1);
+    expect(postReport).toBe(0);
+    expect(f.notifications.filter(record => record.sessionId === run.sessionId)).toEqual([]);
+    await expect(dispatch(f)).rejects.toThrow(/already|conflict/i);
+    expect(await homeOwnerOf(f.registry).taskResult("task-one")).toEqual(result);
+    const worker = await f.registry.acquire(run.sessionId);
+    const path = worker.sessionFile!;
+    const original = await readFile(path, "utf8");
+    const changed = original.trimEnd().split("\n").map(line => JSON.parse(line));
+    changed.find(entry => entry.id === ref.entryId).data.text = "edited evidence";
+    try {
+      await writeFile(path, changed.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+      await expect(homeOwnerOf(f.registry).taskResult("task-one")).rejects.toThrow(/contradictory|changed/);
+    } finally { await writeFile(path, original); }
+    const inputEntry = entries.find((entry: any) => entry.type === "message" && entry.message.role === "user")!;
+    await worker.navigate(inputEntry.id, { summarize: false });
+    expect(await homeOwnerOf(f.registry).taskResult("task-one")).toEqual(result);
+    await expect(worker.fork(inputEntry.id)).rejects.toThrow(/task|identity/);
+    expect(f.signals.filter(record => record.event === "home.task.transition").map(record => record.transition)).toEqual(["pending", "active", "terminal"]);
+    expect(f.signals.find(record => record.event === "home.task.spend")).toMatchObject({ inputTokens: expect.any(Number) });
+    evidence.push({ case: "explicit-report", ref, canonicalReport: canonical.data, outcome: result.terminalEvidence.outcome, postReport });
+  }, 20_000);
+
+  it("refuses a missing task referenced by a cold worker marker before executable runtime construction", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    await f.registry.dispose();
+    await rm(await taskFile(f, "task-one"));
+    let constructions = 0;
+    const cold = await createTestRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      modelRuntimeFactory: async () => {
+        constructions += 1;
+        throw new Error("Executable runtime constructed before task reference check");
+      },
+    });
+    try {
+      await cold.initialize(); await (cold as any).sessionCatalog.whenPublished();
+      await homeOwnerOf(cold).recoverTasks();
+      await expect(cold.acquire(run.sessionId)).rejects.toThrow(/Referenced task/);
+      expect(constructions).toBe(0);
+      evidence.push({ case: "cold-missing-task", constructions, refused: true });
+    } finally { await cold.dispose(); }
+  }, 20_000);
+
+  it.each([
+    { error: "The user has reached their subscription usage limit. Try again after the limit resets.", cause: "provider-usage-limit" },
+    { error: "Provider authentication failed: fixture-private-provider-detail", cause: "provider-error" },
+  ].flatMap(scenario => [false, true].map(cold => ({ ...scenario, cold }))))("preserves $cause on a no-report task (cold=$cold)", async ({ error, cause, cold }) => {
+    const f = await fixture();
+    const store = (homeOwnerOf(f.registry) as any).tasks.store as HomeTaskStore;
+    if (cold) {
+      const update = store.update.bind(store);
+      vi.spyOn(store, "update").mockImplementation(async (id, change) => {
+        if (change((await store.read(id))!).lifecycle === "terminal") throw new Error("frozen before terminal publication");
+        return update(id, change);
+      });
+    }
+    f.faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: error })]);
+    const run = await dispatch(f);
+    let registry = f.registry;
+    if (cold) {
+      await expect(run.completion).rejects.toThrow("frozen before terminal publication");
+      vi.restoreAllMocks();
+      registry = await f.restart();
+    } else await run.completion;
+    const result = await homeOwnerOf(registry).taskResult(run.taskId);
+    expect(result).toMatchObject({ lifecycle: "terminal", reportRef: null, terminalEvidence: {
+      outcome: "unknown", reason: cold ? "cold-no-report" : "no-report", failureCause: cause,
+      sessionId: run.sessionId, entryIds: [expect.any(String)],
+    } });
+    const status = await homeOwnerOf(registry).taskStatus(run.taskId);
+    expect(status.terminalEvidence).toEqual(result.terminalEvidence);
+    expect(await homeOwnerOf(registry).taskTool(f.home.sessionId, { action: "list" })).toMatchObject({ tasks: expect.arrayContaining([
+      expect.objectContaining({ taskId: run.taskId, outcome: "unknown", failureCause: cause }),
+    ]) });
+    expect(status.subagentRuns.total).toBe(0);
+    // This fixture installs no subagents, so zero runs is not settlement proof.
+    expect(status.ownerSettlement).toBeNull();
+    const entries = await registry.readTaskEvidence(run.sessionId);
+    const last = entries.find(entry => entry.id === result.terminalEvidence!.entryIds[0]) as any;
+    expect(last.message).toMatchObject({ role: "assistant", stopReason: "error", errorMessage: error });
+    expect(entries).toContainEqual(expect.objectContaining({ customType: "tron.chat-invocation.v1", data: expect.objectContaining({
+      receiptKind: "terminal", lifecycle: "failed", errorCode: "agent-error", operationId: run.operationId,
+    }) }));
+    expect(JSON.stringify(result)).not.toContain("fixture-private-provider-detail");
+    expect(f.signals.filter(signal => signal.event === "home.task.report-reminder")).toHaveLength(0);
+    expect(JSON.parse(await readFile(await taskFile(f, run.taskId), "utf8")).terminalEvidence).toEqual(result.terminalEvidence);
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", failureCause: cause }));
+    const restarted = await f.restart();
+    expect((await homeOwnerOf(restarted).taskResult(run.taskId)).terminalEvidence).toEqual(result.terminalEvidence);
+    evidence.push({ case: `provider-failure-${cause}-cold-${cold}`, task: result, ownerSettlement: status.ownerSettlement });
+  }, 20_000);
+
+  it.each(["progress", "needs-input", "final"] as const)("recovers a normal unreported reply with one report-only reminder: %s", async outcome => {
+    const f = await fixture();
+    let reminderContext = "";
+    f.faux.setResponses([
+      fauxAssistantMessage("Partial work is committed; validation is unfinished."),
+      context => {
+        reminderContext = JSON.stringify(context.messages);
+        return fauxAssistantMessage([fauxToolCall("report", { resultId: "reminded-report", outcome,
+          text: "Partial work is committed; validation is unfinished.", evidence: ["checkpoint created; final checks not run"] })], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome, reason: "explicit-report" });
+    expect(result.reportRef?.resultId).toBe("reminded-report");
+    expect(f.faux.state.callCount).toBe(2);
+    expect(reminderContext).toContain("Call report now");
+    expect(reminderContext).toContain("partial evidence");
+    expect(f.signals.filter(signal => signal.event === "home.task.report-reminder")).toHaveLength(1);
+    const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
+    expect(entries.filter(entry => entry.type === "message" && entry.message.role === "user")).toHaveLength(1);
+    expect(entries.filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-report-reminder.v1")).toHaveLength(1);
+    evidence.push({ case: `report-reminder-${outcome}`, result, requests: f.faux.state.callCount });
+  }, 20_000);
+
+  it.each(["stop", "length"] as const)("never substitutes the last %s reply for a report", async stopReason => {
+    const f = await fixture();
+    f.faux.setResponses([
+      fauxAssistantMessage("I claim everything succeeded", { stopReason }),
+      fauxAssistantMessage("I still decline to report", { stopReason }),
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(result.terminalEvidence.outcome).toBe(stopReason === "length" ? "limited" : "unknown");
+    expect(result.reportRef).toBeNull();
+    expect(result.terminalEvidence).not.toHaveProperty("failureCause");
+    expect(f.faux.state.callCount).toBe(stopReason === "stop" ? 2 : 1);
+    expect(f.signals.filter(signal => signal.event === "home.task.report-reminder")).toHaveLength(stopReason === "stop" ? 1 : 0);
+    const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
+    const last = entries.find(entry => entry.id === result.terminalEvidence.entryIds[0]) as any;
+    expect(last.message.role).toBe("assistant");
+    expect(last.message.stopReason).toBe(stopReason);
+    evidence.push({ case: `no-report-${stopReason}`, outcome: result.terminalEvidence.outcome, entryIds: result.terminalEvidence.entryIds, assistantEvidence: { stopReason: last.message.stopReason, content: last.message.content } });
+  }, 20_000);
+
+  it("keeps ordinary chat capabilities and completion unchanged without delegate or report", async () => {
+    const f = await fixture();
+    const ordinary = await f.registry.create(f.cwd);
+    const requests: unknown[] = [];
+    f.faux.setResponses([(context) => { requests.push(context); return fauxAssistantMessage("Ordinary reply"); }]);
+    await ordinary.prompt("hello");
+    await waitFor(() => ordinary.snapshot().configurationBlocker === null, "ordinary terminal");
+    const tools = JSON.stringify((await ordinary.context() as any).availableTools);
+    expect(requests).toHaveLength(1);
+    expect(tools).not.toMatch(/"name":"(?:report|delegate)"/);
+    expect(ordinary.canonicalSessionEntries().some((entry: any) => entry.customType?.startsWith("tron-home-task"))).toBe(false);
+    expect(f.signals).toEqual([]);
+    await waitFor(() => f.notifications.some(record => record.sessionId === ordinary.id), "ordinary terminal notification");
+    evidence.push({ case: "ordinary-negative-control", taskTools: false, taskSignals: 0, ordinaryNotification: true });
+  }, 20_000);
+
+  // Live and exited-unreaped children are real processes. The fixture parent reaps its own child before it exits.
+  it.skipIf(process.platform === "win32")("observes a live child as not terminal and an exited but unreaped child as terminal", async () => {
+    const live = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    // `close`, not `exit`: a spawn that fails (no python3) emits `error` and `close` only, and the cleanup must still settle.
+    const liveExited = new Promise<void>(resolve => live.once("close", () => resolve()));
+    const parent = spawn("python3", ["-c", "import os, sys\npid = os.fork()\nif pid == 0: os._exit(0)\nprint(pid, flush=True)\nsys.stdin.read()\nos.waitpid(pid, 0)"], { stdio: ["pipe", "pipe", "ignore"] });
+    const parentExited = new Promise<void>(resolve => parent.once("close", () => resolve()));
+    try {
+      const zombie = await new Promise<number>((resolve, reject) => {
+        parent.once("error", reject);
+        parent.stdout.once("data", chunk => resolve(Number(String(chunk).trim())));
+      });
+      await waitFor(() => processStat(zombie).startsWith("Z"), "the unreaped control child to exit");
+      expect(processTerminal(live.pid!)).toBe(false);
+      expect(processTerminal(zombie)).toBe(true);
+    } finally {
+      live.kill("SIGKILL");
+      await liveExited;
+      parent.stdin.end();
+      await parentExited;
+    }
+  }, 20_000);
+
+  it.each(["no-effect", "successful-read", "blocked-provider", "foreground-process", "foreground-process-publication-gap"] as const)("task deadline cancels and joins %s with spend-correlated diagnostic", async scenario => {
+    const f = await fixture();
+    const originalTimer = globalThis.setTimeout;
+    let expire: (() => void) | undefined;
+    // Test-only deadline seam: expire after the adversary is demonstrably live,
+    // rather than making cancellation proof depend on this shared Mac's speed.
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: any, ms: number, ...args: any[]) => {
+      if (ms === OWNED_OPERATION_DEADLINE_MS) expire = callback;
+      return originalTimer(callback, ms, ...args);
+    }) as typeof setTimeout);
+    let turns = 0;
+    let aborted = false;
+    let providerStarted = false;
+    const foreground = scenario.startsWith("foreground-process");
+    const pidPath = join(f.cwd, "child.pid");
+    const releasePath = join(f.cwd, "publish-pid");
+    await writeFile(join(f.cwd, "readable.txt"), "real tool effect\n");
+    if (scenario === "blocked-provider") {
+      f.faux.setResponses([(_context, options) => new Promise((_resolve, reject) => {
+        providerStarted = true;
+        options?.signal?.addEventListener("abort", () => { aborted = true; reject(new Error("faux aborted")); }, { once: true });
+      })]);
+    } else if (foreground) {
+      // Expose the real open(O_TRUNC) -> write interval without loading the Mac.
+      const publicationGate = scenario === "foreground-process-publication-gap"
+        ? `: > ${JSON.stringify(pidPath)}; while [ ! -f ${JSON.stringify(releasePath)} ]; do sleep 0.01; done; ` : "";
+      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bash", { command: `sleep 120 & owned=$!; ${publicationGate}echo $owned > ${JSON.stringify(pidPath)}; wait` })], { stopReason: "toolUse" })]);
+    } else {
+      const response = () => {
+        turns += 1;
+        if (turns < 256) f.faux.appendResponses([response]);
+        return fauxAssistantMessage([fauxToolCall("read", { path: join(f.cwd, scenario === "no-effect" ? "missing" : "readable.txt") }, { id: `read-${turns}` })], { stopReason: "toolUse" });
+      };
+      f.faux.setResponses([response]);
+    }
+    const run = await dispatch(f);
+    expect(expire).toBeDefined();
+    let childPid: number | undefined;
+    let unpublishedObserved = false;
+    // File creation is not PID publication: cancellation in between used to
+    // turn Number("") into PID 0 and probe the test runner's process group.
+    await waitFor(async () => {
+      if (!foreground) return scenario === "blocked-provider" ? providerStarted : turns >= 3;
+      const text = await readFile(pidPath, "utf8").catch(() => undefined);
+      if (text === undefined) return false;
+      if (!/^[1-9]\d*\s*$/.test(text) || !Number.isSafeInteger(Number(text))) {
+        if (scenario === "foreground-process-publication-gap") {
+          expect(text).toBe("");
+          unpublishedObserved = true;
+          await writeFile(releasePath, "release");
+        }
+        return false;
+      }
+      childPid = Number(text);
+      return true;
+    }, "task adversary live with published process identity");
+    if (scenario === "foreground-process-publication-gap") expect(unpublishedObserved).toBe(true);
+    const processState = () => childPid === undefined ? null : spawnSync("ps", ["-p", String(childPid), "-o", "pid=,ppid=,pgid=,stat=,lstart=,comm="], { encoding: "utf8", timeout: 2_000 }).stdout.trim();
+    const processAtAdmission = processState();
+    if (foreground) expect(processAtAdmission).toMatch(/sleep/);
+    expire!();
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "limited", reason: "deadline" });
+    const slot = await f.registry.acquire(run.sessionId);
+    expect(slot.isBusy).toBe(false);
+    const entriesAtStop = slot.canonicalSessionEntries().length;
+    const turnsAtStop = turns;
+    await new Promise(resolve => originalTimer(resolve, 40));
+    expect(turns).toBe(turnsAtStop); expect(slot.canonicalSessionEntries()).toHaveLength(entriesAtStop);
+    if (scenario === "blocked-provider") expect(aborted).toBe(true);
+    if (foreground) {
+      expect(existsSync(pidPath)).toBe(true);
+      const pid = childPid!;
+      expect(Number(await readFile(pidPath, "utf8"))).toBe(pid);
+      // The stop SIGKILLs the shell's process group and joins the shell. The background
+      // child is killed too; its exit is what the stop guarantees, and the zombie that
+      // remains until launchd reaps it is terminal. The wait does not ask for the reap.
+      try {
+        await waitFor(() => processTerminal(pid), "the killed background child to exit");
+      } catch (error) {
+        // One-step evidence distinguishes a live owned process, an orphaned
+        // zombie and PID reuse, without logging the fixture's private path.
+        const diagnostic = { case: scenario, childPid, processAtAdmission, processAtFailure: processState(), unpublishedObserved };
+        evidence.push(diagnostic);
+        throw new Error(`Owned child exit not observed: ${JSON.stringify(diagnostic)}`, { cause: error });
+      }
+    } else if (scenario !== "blocked-provider") expect(turns).toBeGreaterThanOrEqual(3);
+    const signal = f.signals.find(record => record.event === "home.task.runaway-stop");
+    expect(signal).toMatchObject({ taskHash: expect.stringMatching(/^[a-f0-9]{16}$/), spendReference: expect.any(String), cancelAndJoin: "joined", elapsedMs: expect.any(Number) });
+    expect(JSON.stringify(signal)).not.toContain(f.cwd);
+    expect(result.spend!.inputTokens + result.spend!.outputTokens).toBeGreaterThanOrEqual(scenario === "blocked-provider" ? 0 : 1);
+    evidence.push({ case: scenario, turnsAtStop, entriesAtStop, spend: result.spend, signal, noFurtherEffects: true,
+      ...(foreground ? { childPid, processAtAdmission, processAtStop: processState(), unpublishedObserved } : {}) });
+  }, 20_000);
+
+  it("records a failed exact deadline join as unknown with durable correlated evidence", async () => {
+    const f = await fixture();
+    let expire: (() => void) | undefined;
+    const originalTimer = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: any, ms: number, ...args: any[]) => {
+      if (ms === OWNED_OPERATION_DEADLINE_MS) expire = callback;
+      return originalTimer(callback, ms, ...args);
+    }) as typeof setTimeout);
+    let started = false;
+    f.faux.setResponses([(_context, options) => new Promise((_resolve, reject) => {
+      started = true;
+      options?.signal?.addEventListener("abort", () => reject(new Error("faux stopped")), { once: true });
+    })]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    await waitFor(() => started, "failed join provider live");
+    const stop = vi.spyOn(slot, "abort").mockRejectedValue(new Error("injected exact join failure"));
+    expire!();
+    const result = await run.completion;
+    stop.mockRestore();
+    expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "deadline-stop-failed" });
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.runaway-stop", cancelAndJoin: "failed", elapsedMs: expect.any(Number), spendReference: expect.any(String) }));
+    try {
+      const before = slot.canonicalSessionEntries().length;
+      await expect((slot as any).taskWorker.accept(slot.id, run.operationId,
+        { resultId: "late-result", outcome: "final", text: "late report", evidence: [] },
+        (data: unknown) => (slot as any).persistCanonicalCustomEntry("tron-home-task-report", data, "late-report"))).rejects.toThrow(/retired/);
+      expect(slot.canonicalSessionEntries()).toHaveLength(before);
+    } finally { await slot.abort("agent", run.operationId); }
+    evidence.push({ case: "deadline-join-failed", injectedFailure: true, outcome: "unknown", lateReportRefused: true, actualStopCleanedUp: true });
+  }, 20_000);
+
+});

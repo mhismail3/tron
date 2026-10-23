@@ -18,7 +18,7 @@ scripts/tron docs settings                   # settings keys and record subjects
 scripts/tron docs signals                    # Signals rows of every module README
 ```
 
-Cross-module contracts live in [`docs/`](docs/): wire families (below), [settings
+Cross-module contracts live in [`docs/`](docs): wire families (below), [settings
 contract](docs/settings-contract.md), [Pi SDK maintenance](docs/pi-sdk-maintenance.md),
 [connection resilience](docs/connection-resilience.md),
 [observability](docs/observability.md), [scenario locks](docs/scenario-locks.md).
@@ -65,7 +65,7 @@ See [Pi SDK maintenance](docs/pi-sdk-maintenance.md#pi-sdk-behavior-trace).
 ## Ownership
 
 The Gateway owns mobile infrastructure: enrollment and device credentials
-([security](src/security/)), HTTP/WebSocket serving ([transport](src/transport/README.md)),
+([security](src/security)), HTTP/WebSocket serving ([transport](src/transport/README.md)),
 one serialized lane and live runtime per session ([gateway/run](src/sessions/README.md)),
 filesystem/Git/PTY access ([machine](src/machine/README.md)), administration and
 settings ([admin](src/admin/README.md), [settings contract](docs/settings-contract.md)),
@@ -89,7 +89,7 @@ workspace](docs/internal-workspace.md) and [Swift apps](docs/swift-apps.md).
 
 ## Tron Home
 
-See [Home module](src/home/README.md), [Home tasks](src/home/tasks.md) and
+See [Home module](src/modules/home/README.md), [Home tasks](src/modules/home/tasks.md) and
 [host load](docs/host-load.md).
 
 ## Runtime and state

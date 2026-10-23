@@ -7,11 +7,11 @@ import { defineConfig } from "vitest/config";
  * starve and miss those bounds (#655, #707). They run one file at a time in their own
  * pass after the parallel suite; the main config excludes this list. */
 export const nestedTestFiles = [
-  "src/home/home-task-managed-provider.e2e.test.ts",
-  "src/home/home-task-subagents-controls.e2e.test.ts",
-  "src/home/home-task-subagents-model-queue.e2e.test.ts",
-  "src/home/home-task-subagents-reports.e2e.test.ts",
-  "src/home/home-task-subagents-settlement.e2e.test.ts",
+  "src/modules/home/home-task-managed-provider.e2e.test.ts",
+  "src/modules/home/home-task-subagents-controls.e2e.test.ts",
+  "src/modules/home/home-task-subagents-model-queue.e2e.test.ts",
+  "src/modules/home/home-task-subagents-reports.e2e.test.ts",
+  "src/modules/home/home-task-subagents-settlement.e2e.test.ts",
   "src/lifecycle/exit-after-shutdown.e2e.test.ts",
   "src/machine/terminal-idle.e2e.test.ts",
   "src/kernel/delegation/home-managed-provider.integration.test.ts",

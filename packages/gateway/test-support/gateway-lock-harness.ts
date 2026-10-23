@@ -26,7 +26,7 @@ import { AutomationScheduler } from "../src/automations/automation-scheduler.js"
 import { AutomationService } from "../src/automations/automation-service.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
 import { GatewayScheduleToolOperations } from "../src/automations/automation-tool-operations.js";
-import { homeWorkspaceDirectory } from "../src/home/home-owner.js";
+import { homeWorkspaceDirectory } from "../src/modules/home/home-owner.js";
 import type { EpisodicSummarizer } from "../src/episodic/episodic-contract.js";
 import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { GatewayService, type GatewayServiceDependencies } from "../src/transport/gateway-service.js";

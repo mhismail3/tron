@@ -144,7 +144,7 @@ settings, running-worker changes and Home profile adoption.
 
 ## Not here
 
-- Home's learned profile store and task authorization: `src/home/`.
+- Home's learned profile store and task authorization: `src/modules/home/`.
 - Model fallback queue availability and routing: `src/providers/model-queue.ts`.
 - The iOS renderer: `packages/ios-app` (`SettingsRendererView`).
 - RPC dispatch: `src/transport/gateway-service.ts`.

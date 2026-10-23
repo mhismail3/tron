@@ -1,4 +1,4 @@
-import { HOME_MAX_CHAPTERS } from "../home/home-chapter-state.js";
+import { HOME_MAX_CHAPTERS } from "../modules/home/home-chapter-state.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
 import { maximumPromptLineBytes } from "../machine/upload-store.js";
 import { PROMPT_TEXT_MAX_BYTES } from "../sessions/resource-invocation.js";

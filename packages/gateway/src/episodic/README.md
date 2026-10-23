@@ -6,7 +6,7 @@
 layer reads at constant size. The algorithms are the public OptChat recipe's (cited
 as `gist §N` in the code); Tron's departures are listed below. Home is the only
 caller: one memory keyed by `homeId` across chapters
-([Home README](../home/README.md)).
+([Home README](../modules/home/README.md)).
 
 ## Owns
 
@@ -135,5 +135,5 @@ the memory tools: `src/sessions/home-memory-tools.e2e.test.ts`.
 ## Not here
 
 The memory tools' names, schemas and bounds and the typed browser:
-[Home README](../home/README.md). Model queues:
+[Home README](../modules/home/README.md). Model queues:
 [settings model](../../docs/settings-model.md).
