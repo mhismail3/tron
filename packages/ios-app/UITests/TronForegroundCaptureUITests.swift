@@ -219,6 +219,35 @@ final class TronForegroundCaptureUITests: XCTestCase {
         evidence(app, name: "deferred-chat-ready")
     }
 
+    /// Foregrounding an open, unchanged chat reconnects its transport but keeps
+    /// the installed transcript on screen: the chat never re-enters its opening
+    /// cover (a ready exit) and the rows stay where they were.
+    @MainActor func testForegroundKeepsUnchangedOpenChatTranscriptOnScreen() throws {
+        continueAfterFailure = false
+        let app = try launch(false, arguments: ["-home-tool-transcript"]); defer { app.terminate() }
+        app.buttons["home-pinned-row"].tap()
+        let lifecycle = app.descendants(matching: .any)["chat.hosted.presentation-lifecycle"].firstMatch
+        XCTAssertTrue(lifecycle.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(waitFor { (lifecycle.value as? String)?.hasSuffix("ready-exits=0") == true
+            && app.textViews["Message input"].exists }, "The chat never became ready: \(app.debugDescription)")
+        Thread.sleep(forTimeInterval: 1)
+        let opened = try XCTUnwrap(lifecycle.value as? String)
+        let composerTop = app.textViews["Message input"].frame.minY
+        let rows = app.staticTexts.allElementsBoundByIndex.filter {
+            $0.frame.height > 10 && $0.frame.minY > 120 && $0.frame.maxY < composerTop && !$0.label.isEmpty
+        }
+        let row = try XCTUnwrap(rows.last, "The open chat shows no transcript row: \(app.debugDescription)")
+        let rowLabel = row.label, rowFrame = row.frame
+        try capture(app, name: "open-chat")
+        let after = try XCTUnwrap(lifecycle.value as? String)
+        evidence(app, name: "open-chat-lifecycle-\(after)")
+        XCTAssertEqual(after.components(separatedBy: " ").last, opened.components(separatedBy: " ").last,
+                       "Foregrounding must not send the open chat back through its opening cover (\(opened) -> \(after))")
+        let settled = app.staticTexts.matching(NSPredicate(format: "label == %@", rowLabel)).firstMatch
+        XCTAssertTrue(settled.exists, "The transcript row left the screen")
+        XCTAssertEqual(settled.frame.minY, rowFrame.minY, accuracy: 2, "The transcript moved on foreground")
+    }
+
     @MainActor func testDashboardUsageRefreshesItsVisibleProviderCatalog() throws {
         continueAfterFailure = false
         let app = try launch(false, arguments: ["-home-sheet-dashboard-workers", "-dashboard-view-home", "-foreground-provider-change"])

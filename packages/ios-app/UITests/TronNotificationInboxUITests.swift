@@ -97,12 +97,48 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["No notifications yet"].exists)
     }
 
+    /// Mark Read on Unread removes the rows once: the empty state replaces them
+    /// and stays while the reconciling refresh (a real round trip) runs. The
+    /// refresh never swaps the settled list for the loading pulse and back.
+    @MainActor func testMarkReadOnUnreadSettlesOnceWhileTheRefreshRuns() throws {
+        continueAfterFailure = false
+        let app = launch("mixed", arguments: ["-notification-inbox-list-latency"]); defer { app.terminate() }
+        openInbox(app)
+        let ask = row(app, "inbox-row-ask")
+        XCTAssertTrue(ask.waitForExistence(timeout: 20), app.debugDescription)
+        let pulse = app.descendants(matching: .any)["sheet-loading"]
+        XCTAssertTrue(waitFor { !pulse.exists }, "the first load never settled: \(app.debugDescription)")
+        try capture(app, "unread-before-mark-read")
+
+        app.buttons["Mark all notifications read"].tap()
+        let empty = app.staticTexts["No unread notifications"]
+        XCTAssertTrue(empty.waitForExistence(timeout: 10), app.debugDescription)
+        // Mark-all reconciliation plus the Gateway's change event: two list
+        // round trips at the fixture's latency, observed with margin.
+        let observeUntil = Date().addingTimeInterval(4)
+        var transitions: [String] = []
+        while Date() < observeUntil {
+            let state = pulse.exists ? "pulse" : empty.exists ? "empty" : ask.exists ? "rows" : "blank"
+            guard transitions.last != state else { continue }
+            transitions.append(state)
+            if state != "empty" { try capture(app, "unread-after-mark-read-\(transitions.count)-\(state)") }
+        }
+        XCTAssertEqual(transitions, ["empty"], "Mark Read must settle the Unread list once, not reload it")
+        XCTAssertFalse(ask.exists)
+        try capture(app, "unread-after-mark-read-settled")
+    }
+
     // MARK: - Helpers
 
-    @MainActor private func launch(_ scenario: String) -> XCUIApplication {
+    @MainActor private func waitFor(_ condition: @escaping () -> Bool, timeout: TimeInterval = 20) -> Bool {
+        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)],
+                       timeout: timeout) == .completed
+    }
+
+    @MainActor private func launch(_ scenario: String, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-notification-inbox-fixture", "-notification-inbox-scenario", scenario,
-                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + arguments
         app.launch()
         return app
     }

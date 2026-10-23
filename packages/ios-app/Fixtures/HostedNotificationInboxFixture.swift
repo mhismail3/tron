@@ -11,7 +11,9 @@ import TronMobileCore
 /// The UI test changes the Gateway's inbox while the sheet is open by posting
 /// Darwin notifications: `deliver` admits a new unread alert and `read-newest`
 /// marks the newest unread row read, as another device would.
-/// Scenario `empty` starts with no notifications.
+/// Scenario `empty` starts with no notifications. `-notification-inbox-list-latency`
+/// gives every list read a real Gateway round trip's delay, so a refresh is
+/// observable on screen.
 struct HostedNotificationInboxFixture: View {
     static let deliverNotification = "com.tron.hosted.notification-inbox.deliver"
     static let readNewestNotification = "com.tron.hosted.notification-inbox.read-newest"
@@ -173,13 +175,19 @@ private actor NotificationInboxGateway {
         ])
     }
 
+    /// The position the app derives from the wired millisecond timestamp, so a
+    /// `readAll` cut taken from a shown row always covers that row.
     private func position(_ row: Row) -> NotificationInboxPosition {
-        NotificationInboxPosition(milliseconds: Int((row.createdAt.timeIntervalSince1970 * 1_000).rounded()), id: row.id)
+        let wired = GatewayTimestamp.parse(GatewayTimestamp.string(from: row.createdAt)) ?? row.createdAt
+        return NotificationInboxPosition(milliseconds: Int((wired.timeIntervalSince1970 * 1_000).rounded()), id: row.id)
     }
 
     func handle(_ method: String, params: [String: JSONValue]) async -> Result<JSONValue, GatewayFailure>? {
         switch method {
         case "notification.inbox.list":
+            if ProcessInfo.processInfo.arguments.contains("-notification-inbox-list-latency") {
+                try? await Task.sleep(for: .milliseconds(800))
+            }
             let unreadOnly = params["filter"]?.stringValue == "unread"
             let page = ordered.filter { !unreadOnly || $0.readAt == nil }
             return .success(.object([
