@@ -13,7 +13,7 @@ from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ownership"))
-from ownership import module_id
+from ownership import STEM, SUFFIX, module_id
 
 import bootstrap
 import claim as claims
@@ -374,12 +374,16 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
     # Match the canonical module identity, not an arbitrary maintenance issue.
     module_parent = False
     if "kind:maintenance" in epic_labels and epic.get("state") == "open":
-        manifests = subprocess.run(
-            ["git", "ls-files", "-z", "--", "*.module.json"],
-            cwd=repo, check=True, capture_output=True, text=True,
-        ).stdout.split("\0")
+        try:
+            manifests = subprocess.run(
+                ["git", "ls-files", "-z", "--", "*.module.json"],
+                cwd=repo, check=True, capture_output=True, text=True,
+            ).stdout.split("\0")
+        except (subprocess.CalledProcessError, OSError) as error:
+            raise TrackingError("could not read tracked module manifests") from error
         module_parent = epic.get("title") in {
-            f"Module: {module_id(path)}" for path in manifests if path
+            f"Module: {module_id(path)}" for path in manifests
+            if path and STEM.fullmatch(Path(path).name[:-len(SUFFIX)])
         }
     # Phase and area epics retain their links; module issues remain maintenance.
     if child_number == epic_number or not (

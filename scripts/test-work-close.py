@@ -508,6 +508,19 @@ def run() -> None:
             reset(**module)
             state, _ = parent("module under itself refused", False, 53, 53)
             assert not state["writes"]
+            nested = repo / "packages/fixture/src/run.module.json"
+            nested.parent.mkdir(parents=True)
+            nested.write_text('{"layer":"L3","owns":["**"]}\n')
+            git("add", "packages/fixture/src/run.module.json")
+            reset(**{**module, "issue_titles": {"53": "Module: fixture/run"}})
+            state, _ = parent("package module identity admitted", True, 52, 53)
+            assert state["writes"] == ["sub-issue"]
+            invalid = repo / "Bad.module.json"
+            invalid.write_text('{"layer":"L5","owns":["**"]}\n')
+            git("add", "Bad.module.json")
+            reset(**{**module, "issue_titles": {"53": "Module: repo/Bad"}})
+            state, _ = parent("invalid manifest identity refused", False, 52, 53)
+            assert not state["writes"]
             git("rm", "--cached", "work.module.json")
             reset(**module)
             state, _ = parent("untracked manifest cannot admit a parent", False, 52, 53)

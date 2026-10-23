@@ -96,7 +96,7 @@ def main(argv: list) -> int:
     reopen_issue.add_argument("issue", type=int)
     reopen_issue.add_argument("--comment-file", required=True, type=Path,
                               help="Markdown reason for reopening (required, posted publicly); not logged")
-    parent_issue = issue_commands.add_parser("parent", help="link an issue under an epic or checked maintenance module")
+    parent_issue = issue_commands.add_parser("parent", help="link an issue under an epic or open tracked maintenance module")
     parent_issue.add_argument("issue", type=int)
     parent_issue.add_argument("--epic", required=True, type=int)
     parent_issue.add_argument("--replace-parent", action="store_true",
