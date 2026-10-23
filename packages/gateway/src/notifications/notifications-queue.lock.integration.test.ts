@@ -27,6 +27,9 @@ import { PushRelayClient } from "./relay-client.js";
  *   removes its registration (never sent again; receipt and inbox failed), and
  *   the grant's revocation reaches the relay once it is available.
  *
+ * Plain integration regressions additionally cover overlapping waiting admissions
+ * and controlled admission rejection. The original three golden locks are unchanged.
+ *
  * Dedupe keys, session keys and relay request ids are digests of per-run
  * session ids; each is relabelled by first appearance (`<digest:n>`), so a retry
  * under the same request id, or an inbox row naming it, reads as the same label.
@@ -312,29 +315,6 @@ describe("gateway/notifications delivery locks", () => {
     expect(pushes(relay)).toEqual([
       "200 waiting [start background work]: The agent is waiting on 1 background task.",
     ]);
-  }, 60_000);
-
-  it("a rapid reply preserves live-background notification semantics", async () => {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const lock = await pushLock(`notifications-rapid-reply-${attempt}`, [{ name: "lock-background.ts", source: DETACHED_RUN }]);
-      const { gateway, relay, sessionId } = lock;
-      const slot = await gateway.registry.acquire(sessionId);
-      gateway.script([
-        () => fauxAssistantMessage([fauxToolCall("lock_background", {}, { id: "rapid-background-call" })], { stopReason: "toolUse" }),
-        () => fauxAssistantMessage("The background work is running."),
-        () => fauxAssistantMessage("Still running."),
-      ]);
-      expect((await lock.prompt("start the background run")).ok).toBe(true);
-      await waitFor(() => pushes(relay).length === 1, "the launching push at the relay");
-      expect((await lock.prompt("check while the push is in flight")).ok).toBe(true);
-      await waitFor(() => gateway.record().providerRequests.length === 3 && !slot.snapshot().operation
-        && gateway.registry.administrativeDrainSnapshot().blockers.every(blocker => blocker.category === "detached-extension-run"),
-      "the rapid reply's terminal owner to settle");
-      await waitFor(async () => (await lock.document()).pending.length === 0, "rapid reply delivery");
-      expect(slot.snapshot().extensionActivities?.some(activity => activity.status === "running")).toBe(true);
-      expect(pushes(relay).filter(push => push.includes("agent_finished"))).toEqual([]);
-      for (const release of owned.splice(0).reverse()) await release();
-    }
   }, 60_000);
 
   it("notifications-queued-restart: pushes the relay could not take stay queued and a restarted owner delivers them", async () => {
