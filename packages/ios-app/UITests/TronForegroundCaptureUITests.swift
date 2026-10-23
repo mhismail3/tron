@@ -232,20 +232,33 @@ final class TronForegroundCaptureUITests: XCTestCase {
             && app.textViews["Message input"].exists }, "The chat never became ready: \(app.debugDescription)")
         Thread.sleep(forTimeInterval: 1)
         let opened = try XCTUnwrap(lifecycle.value as? String)
-        let composerTop = app.textViews["Message input"].frame.minY
-        let rows = app.staticTexts.allElementsBoundByIndex.filter {
-            $0.frame.height > 10 && $0.frame.minY > 120 && $0.frame.maxY < composerTop && !$0.label.isEmpty
-        }
-        let row = try XCTUnwrap(rows.last, "The open chat shows no transcript row: \(app.debugDescription)")
-        let rowLabel = row.label, rowFrame = row.frame
+        // A transcript label shown once, so the row found after foreground is the same row.
+        let before = try transcriptTexts(app)
+        let (rowLabel, rowFrame) = try XCTUnwrap(before.last { label, _ in before.filter { $0.0 == label }.count == 1 },
+                                                 "The open chat shows no transcript row: \(app.debugDescription)")
         try capture(app, name: "open-chat")
         let after = try XCTUnwrap(lifecycle.value as? String)
         evidence(app, name: "open-chat-lifecycle-\(after)")
         XCTAssertEqual(after.components(separatedBy: " ").last, opened.components(separatedBy: " ").last,
                        "Foregrounding must not send the open chat back through its opening cover (\(opened) -> \(after))")
-        let settled = app.staticTexts.matching(NSPredicate(format: "label == %@", rowLabel)).firstMatch
-        XCTAssertTrue(settled.exists, "The transcript row left the screen")
-        XCTAssertEqual(settled.frame.minY, rowFrame.minY, accuracy: 2, "The transcript moved on foreground")
+        let settled = try XCTUnwrap(try transcriptTexts(app).first { $0.0 == rowLabel }, "The transcript row left the screen")
+        XCTAssertEqual(settled.1.minY, rowFrame.minY, accuracy: 2, "The transcript moved on foreground")
+    }
+
+    /// Visible transcript text between the navigation bar and the composer, read
+    /// from one accessibility snapshot.
+    @MainActor private func transcriptTexts(_ app: XCUIApplication) throws -> [(String, CGRect)] {
+        let composerTop = app.textViews["Message input"].frame.minY
+        var texts: [(String, CGRect)] = []
+        func walk(_ element: XCUIElementSnapshot) {
+            if element.elementType == .staticText, !element.label.isEmpty, element.frame.height > 10,
+               element.frame.minY > 120, element.frame.maxY < composerTop {
+                texts.append((element.label, element.frame))
+            }
+            element.children.forEach(walk)
+        }
+        walk(try app.snapshot())
+        return texts
     }
 
     @MainActor func testDashboardUsageRefreshesItsVisibleProviderCatalog() throws {
