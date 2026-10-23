@@ -1325,17 +1325,36 @@ private actor HostedHomeShellGateway {
         ("talk", "Will email the summary Thursday morning."),
     ]
 
+    private func memoryMessage(_ index: Int) -> (kind: String, text: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-memory-redesign") else {
+            return Self.memoryMessages[index % Self.memoryMessages.count]
+        }
+        switch index {
+        case 37: return ("talk", "[call read_file {\"path\":\"/workspace/tron/episodic-contract.ts\"}]")
+        case 38: return ("echo", "tool read_file: /workspace/tron/episodic-contract.ts lines 1–347 of 347\nimport { Memory } from './memory.js';\n\n/**\n * Canonical memory contract.\n * Preserve source identity.\n */\nexport interface MemoryRecord {\n  index: number;\n  text: string;\n}")
+        case 35: return ("talk", "I reviewed the **memory contract** and found that the canonical transcript preserves the original tool output.\n\nThe memory browser should explain the action without exposing raw output in its rows.")
+        default: return Self.memoryMessages[index % Self.memoryMessages.count]
+        }
+    }
+
     private func memoryItem(_ index: Int) -> JSONValue {
-        let message = Self.memoryMessages[index % Self.memoryMessages.count]
+        let message = memoryMessage(index)
         let attribution = ["user": "user", "talk": "assistant", "echo": "tool", "event": "event"][message.kind]!
         let session = index < Self.memorySealedEnd ? "home-chapter-sealed" : "home-session"
-        let summary: JSONValue = index % 6 == 1 ? .null : .object(["format": .string("memory-summary"),
-            "text": .string(message.kind + ": " + message.text), "truncated": .bool(false)])
+        let redesign = ProcessInfo.processInfo.arguments.contains("-memory-redesign")
+        let summaryText = redesign && [35, 37, 38].contains(index)
+            ? "Reviewed the memory contract and preserved the canonical source identity." : message.kind + ": " + message.text
+        let summary: JSONValue = !redesign && index % 6 == 1 ? .null : .object(["format": .string("memory-summary"),
+            "text": .string(summaryText), "truncated": .bool(false)])
+        let display: JSONValue = .object(["kind": .string(index == 37 ? "tool-call" : index == 38 ? "tool-result" : "message"),
+            "toolName": .string("read_file"), "target": .string("episodic-contract.ts"), "toolCount": .number(1),
+            "status": .string("ok")])
         return .object([
+            "display": redesign ? display : .object(["kind": .string("message")]),
             "index": .number(Double(index)), "kind": .string(message.kind), "attribution": .string(attribution),
             "timestamp": .string(memoryTime(index)), "evidence": evidence(index: index, sessionID: session),
             "projection": .object(["format": .string("memory-projection"), "text": .string(message.text),
-                "omitted": .bool(false), "omissions": .array([])]),
+                "omitted": .bool(false), "omissions": .array(redesign && [35, 38].contains(index) ? [.string("browser-cap")] : [])]),
             "summary": summary,
         ])
     }
@@ -1357,7 +1376,7 @@ private actor HostedHomeShellGateway {
         var line: [String: JSONValue] = ["start": .number(Double(start)), "span": .number(Double(span)),
             "truncated": .bool(false), "firstAt": .string(memoryTime(start)), "lastAt": .string(memoryTime(start + span - 1))]
         if span == 1 {
-            let message = Self.memoryMessages[start % Self.memoryMessages.count]
+            let message = memoryMessage(start)
             line["text"] = .string(message.text); line["kind"] = .string(message.kind); line["item"] = memoryItem(start)
         } else {
             line["text"] = .string(memorySummaryText(start: start, span: span))
