@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, displayStoreOf } from "../../test-support/gateway-registry.js";
 import type { RunPersistence } from "../kernel/run/run-persistence.js";
 import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
@@ -7,7 +7,6 @@ import { spawn, spawnSync } from "node:child_process";
 import { Worker } from "node:worker_threads";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
-import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { appendFile, copyFile, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
@@ -1449,7 +1448,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
   it("initializes storage without requiring catalog presentation metadata", async () => {
     const fixture = await coldFixture("storage-without-catalog-preview");
-    const store = (fixture.registry as unknown as { displayArtifacts: DisplayArtifactStore }).displayArtifacts;
+    const store = displayStoreOf(fixture.registry);
     await store.initialize();
     await writeFile(join(fixture.cwd, "retained.txt"), "retained display artifact");
     const display = await store.ingest(fixture.cwd, "retained.txt", fixture.manager.getSessionId());
@@ -8092,11 +8091,7 @@ export default function (pi) {
   it("authorizes display artifacts only from the exact active canonical branch", async () => {
     const fixture = await coldFixture("active-display-artifact-branch");
     await fixture.registry.initializeBlobStorage();
-    const store = (fixture.registry as unknown as { displayArtifacts: {
-      ingest: (cwd: string, path: string, sessionID: string) => Promise<{
-        id: string; name: string; mimeType: string; size: number; kind: string;
-      }>;
-    } }).displayArtifacts;
+    const store = displayStoreOf(fixture.registry);
     const png = Buffer.concat([
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
       Buffer.from("payload"),

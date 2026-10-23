@@ -19,6 +19,13 @@ type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" |
 const homes = new WeakMap<RuntimeRegistry, () => HomeOwner>();
 const recents = new WeakMap<RuntimeRegistry, RecentModelStore>();
 const queues = new WeakMap<RuntimeRegistry, ModelQueueOwner>();
+const displays = new WeakMap<RuntimeRegistry, DisplayArtifactStore>();
+
+export function displayStoreOf(registry: RuntimeRegistry): DisplayArtifactStore {
+  const owner = displays.get(registry);
+  if (!owner) throw new Error("This registry was not built by createTestRegistry");
+  return owner;
+}
 
 export function queueOwnerOf(registry: RuntimeRegistry): ModelQueueOwner | undefined {
   return queues.get(registry);
@@ -58,6 +65,7 @@ export async function createTestRegistry(options: RegistryOptions & HomeTestOpti
     () => ({ registry, home, display, openAIModelEligibility, connections, scheduleToolOperations, recentModelsChanged, persistenceDiagnostic: options.persistenceDiagnostic, sessionSearch: sessionSearch?.() }));
   const registry: RuntimeRegistry = new RuntimeRegistry({ ...registryOptions, modules, displayArtifacts: display.artifacts,
     createModelRuntime: () => createProviderModelRuntime(options.agentDir, modelRuntimeFactory) });
+  displays.set(registry, display.artifacts);
   if (modelQueue) queues.set(registry, modelQueue);
   homes.set(registry, owner);
   recents.set(registry, recentModels);
