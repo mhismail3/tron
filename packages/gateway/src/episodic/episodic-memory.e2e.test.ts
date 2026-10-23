@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { singleModelSummarizer } from "../../test-support/settings-dependencies.js";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -557,6 +557,41 @@ describe("episodic memory end to end", () => {
       expect(record.text).toContain("start");
       expect((record.text as string).endsWith("end")).toBe(true);
     } finally { await memory.dispose(); }
+  });
+
+  it.each(["", " \t\u2028\r\n "])("blocks an empty or whitespace-only provider reply and resumes without losing source", async reply => {
+    const fx = await fixture("empty-provider", {}, () => fauxAssistantMessage(reply));
+    fx.manager.appendMessage(userMessage("source remains available ".repeat(100)));
+    const memory = await openMemory(fx);
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      expect(memory.status().blocked?.reason).toBe("permanent-failure");
+      expect(fx.compactor.calls).toBe(1);
+      expect(memory.zoomLines(1, 1)![0]).toContain("source remains available");
+    } finally { await memory.dispose(); }
+    const recovered = await openMemory(fx, async () => fauxAssistantMessage("Source retained; outcome open."));
+    try {
+      await recovered.resumeIngested();
+      await recovered.entriesCommitted(fx.sessionId);
+      expect(recovered.status().blocked).toBeNull();
+      expect(recovered.renderView(2).text).toContain("Source retained; outcome open.");
+    } finally { await recovered.dispose(); }
+  });
+
+  it("refuses a complete oversized store record on reopen, even across read chunks", async () => {
+    const fx = await fixture("oversized-read", {}, () => fauxAssistantMessage("Recorded source."));
+    fx.manager.appendMessage(userMessage("canonical evidence ".repeat(100)));
+    const memory = await openMemory(fx);
+    await memory.entriesCommitted(fx.sessionId);
+    await memory.dispose();
+    const records = await readFile(fx.nodesPath, "utf8");
+    const original = readJsonlSafe(fx.nodesPath).find(record => record.level === 0 && record.index === 1)!;
+    const forged = { ...original, revision: 1_000_000, text: "q".repeat(1_024 * 1_024 + 10) };
+    await writeFile(fx.nodesPath, records + JSON.stringify(forged) + "\n");
+    let reopened: EpisodicMemory | undefined;
+    try {
+      await expect(openMemory(fx).then(value => { reopened = value; return value; })).rejects.toMatchObject({ kind: "invalid-store" });
+    } finally { await reopened?.dispose(); }
   });
 
   it("admits higher summaries only while the retained view exceeds its budget", async () => {

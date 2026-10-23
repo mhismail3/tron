@@ -507,6 +507,7 @@ async function readJsonl<T>(path: string, maxLineBytes: number, isRecord: (value
       let chunk = Buffer.concat([pending, buffer.subarray(0, read.bytesRead)]);
       let newline = chunk.indexOf(0x0a);
       while (newline >= 0) {
+        if (newline + 1 > maxLineBytes) throw new EpisodicMemoryError("invalid-store", `Episodic store record exceeds ${maxLineBytes} bytes`);
         const line = chunk.subarray(0, newline).toString("utf8");
         if (line.trim() === "") {
           if (strict) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint contains an empty record");

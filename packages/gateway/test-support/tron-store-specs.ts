@@ -414,8 +414,12 @@ export const STORES: readonly StoreSpec[] = [
         const sessionId = manager.getSessionId();
         const memory = await EpisodicMemory.open({
           workspace, sessionId, sessionSource: singleChapterSource(sessionId, manager.getSessionFile()!),
-          // A deterministic compactor: the last turn's text, never a model provider.
-          summarizer: async (request) => fauxAssistantMessage(`Corpus summary: ${request.turns.at(-1)!.text.replace(/\s+/gu, " ").trim().slice(-120)}`),
+          // Summarize the source, not the instruction suffix: this locks stored
+          // records independently of summary-prompt wording.
+          summarizer: async (request) => {
+            const stretch = /<stretch>\n([\s\S]*)\n<\/stretch>/u.exec(request.turns[0]!.text)![1]!;
+            return fauxAssistantMessage(`Corpus summary: ${stretch.replace(/\s+/gu, " ").trim().slice(-120)}`);
+          },
           limits: { viewBytes: 4_096, jobs: 1, retryMs: 0 },
         });
         try { await memory.entriesCommitted(sessionId); } finally { await memory.dispose(); }
