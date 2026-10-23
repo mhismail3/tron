@@ -72,7 +72,10 @@ final class TronDiagnosticsExportUITests: XCTestCase {
         app.navigationBars.firstMatch.swipeDown()
         XCTAssertTrue(app.buttons["Open Logs"].waitForExistence(timeout: 15))
         XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:1 released:0"))
-        app.buttons["fixture.release-export-preparation"].tap()
+        let release = app.buttons["fixture.release-export-preparation"]
+        let releaseReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: release)
+        XCTAssertEqual(XCTWaiter.wait(for: [releaseReady], timeout: 15), .completed)
+        release.tap()
         XCTAssertTrue(observe(app, "fixture.export-original", "exports:1 commands:1 repeats:0 originalEvidence:true"))
         let staleNotice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Diagnostics"), object: app.staticTexts["fixture.export-notices"])
         XCTAssertEqual(XCTWaiter.wait(for: [staleNotice], timeout: 2), .timedOut)
