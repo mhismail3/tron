@@ -29,6 +29,7 @@
     "task-worker-extension.ts"
   ],
   "dependsOn": [
-    "gateway/pi"
+    "gateway/pi",
+    "gateway/host"
   ]
 }
