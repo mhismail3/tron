@@ -933,37 +933,75 @@ export class RuntimeRegistry {
 
   /** Builds and publishes a runtime over a caller-prepared manager inside one slot admission (K1). */
   private async createRuntimeOver(sessionId: string, build: Parameters<HomeRuntimePort["createRuntimeOver"]>[1]): Promise<RuntimeSlot> {
+    return this.startRuntime<RuntimeSlot>({
+      reason: "create", failed: build.failed, manager: build.prepare, admitted: build.admitted, published: build.published,
+      create: manager => {
+        const authority = build.authority();
+        return RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, this.options.modules.profile(build.profile), authority);
+      },
+      publish: () => { if (this.slots.has(sessionId)) throw new GatewayError("conflict", "Reserved Home chapter runtime is already active"); },
+    });
+  }
+
+  /** One fresh runtime admission (K1): slot admission, capacity, one reservation,
+   * construction and publication. Callers add their gates and identity checks at
+   * the reservation (`reserve`, which may return an existing owner instead) and at
+   * publication (`publish`, which runs before the runtime becomes visible). */
+  private async startRuntime<R = RuntimeSlot>(start: {
+    reason: "create" | "automation";
+    /** Runs first inside the admission (the caller's trust resolution). */
+    admit?(): Promise<void>;
+    evictFor?: string;
+    reserve?: () => R | undefined;
+    manager(): SessionManager | Promise<SessionManager>;
+    create(manager: SessionManager): Promise<RuntimeSlot>;
+    admitted?(slot: RuntimeSlot): void;
+    publish(slot: RuntimeSlot, manager: SessionManager): R | void;
+    /** After publication, still inside the admission and its failure handling. */
+    published?(slot: RuntimeSlot): Promise<void>;
+    failed?(): void;
+  }): Promise<R> {
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;
     try {
-      await this.evictIdle(true);
-      await this.mutex.run(() => {
+      await start.admit?.();
+      await this.evictIdle(true, start.evictFor);
+      // A session that has not written a transcript yet holds no bytes, so this
+      // admission adds none to the byte budget's live charge and calls no byte
+      // pass: there is no room to make for it.
+      const existing = await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
+        const owner = start.reserve?.();
+        if (owner !== undefined) return owner;
         this.requireLiveSlotCapacity();
         this.reservedSlotStarts += 1;
         reserved = true;
+        return undefined;
       });
-      const manager = await build.prepare();
-      const authority = build.authority();
-      slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, this.options.modules.profile(build.profile), authority);
-      build.admitted(slot);
-      const transcriptBytes = await sessionFileBytes(slot.persistedSessionFile);
-      await this.mutex.run(() => {
-        if (this.slots.has(sessionId)) throw new GatewayError("conflict", "Reserved Home chapter runtime is already active");
+      if (existing !== undefined) return existing;
+      const manager = await start.manager();
+      slot = await start.create(manager);
+      start.admitted?.(slot);
+      const transcriptBytes = await sessionFileBytes(slot.sessionFile);
+      const result = await this.mutex.run(() => {
+        const result = start.publish(slot!, manager) ?? slot as R;
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
         reserved = false;
-        this.publishRuntime(sessionId, slot!, transcriptBytes, "create");
+        this.publishRuntime(manager.getSessionId(), slot!, transcriptBytes, start.reason);
         this.invalidateCatalogAdmission();
+        // A fresh session is live before Pi writes its first canonical entry;
+        // the slot's own `changed` commit point adds the row when it does.
         void this.sessionCatalog.refresh(slot!.persistedSessionFile);
         this.revision += 1;
         this.options.sessionListChanged();
+        return result;
       });
-      await build.published(slot);
-      return slot;
+      await start.published?.(slot);
+      return result;
     } catch (error) {
-      build.failed();
-      if (slot && this.slots.get(sessionId) !== slot) await slot.dispose().catch(() => {});
+      start.failed?.();
+      if (slot && this.slots.get(slot.id) !== slot) await slot.dispose().catch(() => {});
       throw error;
     } finally {
       if (reserved) {
@@ -2680,51 +2718,26 @@ export class RuntimeRegistry {
     operationId: string,
     automationId: string,
   ): Promise<{ slot: RuntimeSlot; release: () => void }> {
-    const finishAdmission = this.beginSlotAdmission();
-    let reserved = false;
-    let slot: RuntimeSlot | undefined;
-    let published = false;
-    try {
-      const trust = await stage(
-        "automation.session.trust",
-        () => this.options.trust.requireResolved(cwdInput),
-      );
-      await this.evictIdle(true, sessionId);
-      // A session that has not written a transcript yet holds no bytes, so this
-      // admission adds none to the byte budget's live charge and calls no byte
-      // pass: there is no room to make for it.
-      const existing = await this.mutex.run(() => {
-        this.assertSlotAdmissionOpen();
+    let trust!: { cwd: string; projectDir: string };
+    return this.startRuntime({
+      reason: "automation", evictFor: sessionId,
+      admit: async () => { trust = await stage("automation.session.trust", () => this.options.trust.requireResolved(cwdInput)); },
+      reserve: () => {
         if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         const current = this.slots.get(sessionId);
-        if (current) {
-          const owner = this.automationSessionOwners.get(current);
-          if (current.isDisposed || current.cwd !== trust.cwd
-            || owner?.operationId !== operationId || owner.automationId !== automationId) {
-            throw new GatewayError("conflict", "Automation execution session identity is already owned");
-          }
-          return { slot: current, release: current.retainLease() };
+        if (!current) return undefined;
+        const owner = this.automationSessionOwners.get(current);
+        if (current.isDisposed || current.cwd !== trust.cwd
+          || owner?.operationId !== operationId || owner.automationId !== automationId) {
+          throw new GatewayError("conflict", "Automation execution session identity is already owned");
         }
-        this.requireLiveSlotCapacity();
-        this.reservedSlotStarts += 1;
-        reserved = true;
-        return undefined;
-      });
-      if (existing) return existing;
-
-      const manager = SessionManager.create(
-        trust.cwd,
-        this.sessionDirectoryFor(trust.cwd),
-        { id: sessionId },
-      );
-      slot = await stage(
-        "automation.session.runtime",
-        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false),
-      );
-      const transcriptBytes = await sessionFileBytes(slot.sessionFile);
-      return await this.mutex.run(() => {
+        return { slot: current, release: current.retainLease() };
+      },
+      manager: () => SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd), { id: sessionId }),
+      create: manager => stage("automation.session.runtime", () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false)),
+      publish: slot => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Automation session was retired before publication", true);
@@ -2732,29 +2745,11 @@ export class RuntimeRegistry {
         if (this.slots.has(sessionId)) {
           throw new GatewayError("conflict", "Automation execution session identity is already owned");
         }
-        const release = slot!.retainLease();
-        this.automationSessionOwners.set(slot!, { operationId, automationId });
-        this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
-        reserved = false;
-        this.publishRuntime(sessionId, slot!, transcriptBytes, "automation");
-        published = true;
-        this.invalidateCatalogAdmission();
-        void this.sessionCatalog.refresh(slot!.persistedSessionFile);
-        this.revision += 1;
-        this.options.sessionListChanged();
-        return { slot: slot!, release };
-      });
-    } catch (error) {
-      if (slot && !published) await slot.dispose().catch(() => {});
-      throw error;
-    } finally {
-      if (reserved) {
-        await this.mutex.run(() => {
-          this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
-        });
-      }
-      finishAdmission();
-    }
+        const release = slot.retainLease();
+        this.automationSessionOwners.set(slot, { operationId, automationId });
+        return { slot, release };
+      },
+    });
   }
 
   async canonicalTaskTarget(target: string): Promise<string> {
@@ -2798,62 +2793,28 @@ export class RuntimeRegistry {
   }
 
   async create(cwdInput: string, profile: string = ORDINARY_SESSION_PROFILE.name, taskWorker?: import("../kernel/delegation/task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {
-    const finishAdmission = this.beginSlotAdmission();
-    let reserved = false;
-    let slot: RuntimeSlot | undefined;
-    try {
-      const trust = await stage(
-        "session.create.trust",
-        () => this.options.trust.requireResolved(cwdInput),
-      );
-      await this.evictIdle(true);
-      // A session that has not written a transcript yet holds no bytes, so this
-      // admission adds none to the byte budget's live charge and calls no byte
-      // pass: there is no room to make for it.
-      await this.mutex.run(() => {
-        this.assertSlotAdmissionOpen();
+    let trust!: { cwd: string; projectDir: string };
+    return this.startRuntime<RuntimeSlot>({
+      reason: "create",
+      admit: async () => { trust = await stage("session.create.trust", () => this.options.trust.requireResolved(cwdInput)); },
+      reserve: () => {
         if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
-        this.requireLiveSlotCapacity();
-        this.reservedSlotStarts += 1;
-        reserved = true;
-      });
-      const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
-      slot = await stage(
-        "session.create.runtime",
-        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, this.options.modules.profile(profile), undefined, taskWorker),
-      );
-      const transcriptBytes = await sessionFileBytes(slot.sessionFile);
-      await this.mutex.run(() => {
+        return undefined;
+      },
+      manager: () => SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd)),
+      create: manager => stage("session.create.runtime",
+        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, this.options.modules.profile(profile), undefined, taskWorker)),
+      publish: (_slot, manager) => {
         if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Session creation was retired before publication", true);
         }
         if (this.slots.has(manager.getSessionId())) {
           throw new GatewayError("conflict", "Replacement session is already active");
         }
-        this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
-        reserved = false;
-        this.publishRuntime(manager.getSessionId(), slot!, transcriptBytes, "create");
-        this.invalidateCatalogAdmission();
-        // A fresh session is live before Pi writes its first canonical entry;
-        // the slot's own `changed` commit point adds the row when it does.
-        void this.sessionCatalog.refresh(slot!.persistedSessionFile);
-        this.revision += 1;
-        this.options.sessionListChanged();
-      });
-      return slot;
-    } catch (error) {
-      if (slot && this.slots.get(slot.id) !== slot) await slot.dispose().catch(() => {});
-      throw error;
-    } finally {
-      if (reserved) {
-        await this.mutex.run(() => {
-          this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
-        });
-      }
-      finishAdmission();
-    }
+      },
+    });
   }
 
   /** Resolves an opaque child identity only while its live parent still proves
