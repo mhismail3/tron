@@ -15,6 +15,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | SDK scope admission and operational model selection | `settings-sdk-manager.ts`, `settings-admission.ts` |
 | Resolution and presentation | `settings-resolver.ts`, `settings-model.ts` (`SettingsModel`), `settings-presentation.ts`, `settings-project-diagnostics.ts` |
 | Change path and policy | `settings-model.ts` (`SettingsChangePath`), `settings-risk.ts`; audit/approvals: [kernel settings](../kernel/settings/README.md) |
+| Migration transaction, backups and publication | `settings-migration.ts`, `settings-migration-plan.ts`; shared-store value transforms: [kernel settings](../kernel/settings/README.md) |
 | Appliers and outside writers | `project-settings-writer.ts`, `trust-service.ts`, `settings-outside.ts` (`OutsideChanges`) |
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
 | Provider auth and model catalog | `auth-broker.ts`, `model-config-service.ts`, `global-provider-resources.ts` |

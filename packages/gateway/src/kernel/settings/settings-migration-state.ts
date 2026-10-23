@@ -1,6 +1,6 @@
-import { GatewayError } from "../errors.js";
-import { RETIRED_SCOPES } from "../kernel/settings/tool-contract.js";
-import { approvalDigest } from "../kernel/settings/settings-approvals.js";
+import { GatewayError } from "../../errors.js";
+import { RETIRED_SCOPES } from "./tool-contract.js";
+import { approvalDigest } from "./settings-approvals.js";
 
 type Document = Record<string, unknown>;
 export const migrationRefusal = (file: string, reason: string): never => {

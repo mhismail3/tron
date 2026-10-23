@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { KEYS, schemaKey } from "./settings-schema.js";
 import { migrateApprovals, migrateAuditEntry, migrateObserved, migrationObject,
-  migrationRefusal, migrationSetPath, parseMigrationObject } from "./settings-migration-state.js";
+  migrationRefusal, migrationSetPath, parseMigrationObject } from "../kernel/settings/settings-migration-state.js";
 
 type Document = Record<string, unknown>;
 type FileKind = "json" | "audit";

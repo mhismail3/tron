@@ -12,6 +12,8 @@ shared by session readers and store migration, and tool request, resolution,
 result and worker-state interfaces. `settings-record.ts` owns append-only audit
 segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
 approvals, their admission bounds, settlement, expiry and untold outcomes.
+`settings-migration-state.ts` owns shared-store value transformation and digest
+validation; admin owns the migration transaction, backups and publication.
 
 ## Contract
 
@@ -39,7 +41,7 @@ Callers own persistence failure diagnostics; these stores propagate write failur
 ```bash
 scripts/tron test gateway src/admin/settings-approvals.lock.integration.test.ts \
   src/admin/admin.store.lock.integration.test.ts \
-  src/admin/settings-change.integration.test.ts
+  src/admin/settings-change.integration.test.ts src/admin/settings-migration.e2e.test.ts
 ```
 
 The real settings and run locks cover consumers of this contract.
