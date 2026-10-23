@@ -69,7 +69,7 @@ export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice {
   taskId: string; intent: string; target: string; title?: string; reason?: string;
   /** Internal Home boundary metadata, never accepted by the delegate tool schema. */
   provenance?: { model: Pick<FixedSetting, "via" | "reason">; thinking: Pick<FixedSetting, "via" | "reason"> };
-  modelQueues?: import("../../providers/model-queue.js").TaskModelQueues;
+  modelQueues?: import("../../kernel/settings/tool-contract.js").TaskModelQueues;
 }
 /** The durable record plus the worker's model from its own transcript. The model is
  * projected per read, never persisted with the task. */

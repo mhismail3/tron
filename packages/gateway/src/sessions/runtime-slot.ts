@@ -1,10 +1,8 @@
 import * as activityProjection from "../kernel/projection/activity.js";
 import * as sessionPages from "../kernel/projection/session-pages.js";
 import { SnapshotProjection } from "../kernel/projection/snapshot.js";
-import { modelQueueSessionExtension } from "../providers/model-queue-session.js";
 import { createSettingsManager } from "../admin/settings-sdk-manager.js";
 import { applyModelAdmission, compactionAdmission } from "../admin/settings-admission.js";
-import { readWorkerQueueSelection } from "../providers/model-queue-extension.js";
 import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
@@ -328,8 +326,6 @@ export interface RuntimeSlotDependencies {
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../modules/home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
-  /** The model fallback queues (providers/model-queue.ts). */
-  modelQueue?: import("../providers/model-queue.js").ModelQueueOwner;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
@@ -1058,7 +1054,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     const choiceIndex = modelChoice ? branch.findIndex(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY
       && (entry.data as { fixed?: Record<string, { ref: string }> } | null)?.fixed?.["model.ref[role=chat]"]?.ref === modelChoice.ref) : -1;
     const choice = (key: string, runtime: unknown) => !fixed[key] ? runtime : fixed[key].from === "session" || fixed[key].from === "delegate" ? fixed[key].value : undefined;
-    const model = readWorkerQueueSelection(branch, choiceIndex) ?? choice("model.ref[role=chat]",
+    const model = this.dependencies.modules.policy("modelRuntimeInstalled")?.().modelChoice(branch, choiceIndex) ?? choice("model.ref[role=chat]",
       session.model && { provider: session.model.provider, id: session.model.id }) as { provider: string; id: string } | undefined;
     const thinking = choice("model.thinking[role=chat]", session.thinkingLevel) as string | undefined;
     return {
@@ -1600,6 +1596,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         sessionId: () => this.id,
         cwd: () => this.cwd,
         modelRuntime, profile: () => this.liveProfile(),
+        fixedSettings: () => readSessionFixedSettings(this.sessionManager.getBranch()),
+        delegatedWorker: () => Boolean(this.taskWorker),
         title: () => this.notificationTitle(),
         // Notify samples automatic alerts' foreground lease at its own admission.
         presented: () => this.dependencies.isSessionPresented(this.id),
@@ -1640,18 +1638,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
             ...tronModuleFactories(this.dependencies.modules, sessionContext),
-            ...(this.dependencies.modelQueue ? [{ name: "tron-model-queue", factory: modelQueueSessionExtension({
-              source: this.dependencies.modelQueue.source(role => this.taskQueueSelection(role)), worker: Boolean(this.taskWorker),
-              publishProjection: () => {
-                const queue = this.taskQueueSelection("subagent");
-                return this.dependencies.modelQueue!.publishProjection(queue === undefined ? undefined : { sessionId: this.id, queue });
-              },
-              releaseProjection: () => this.dependencies.modelQueue!.releaseTaskProjection(this.id),
-              taskChildExtension: (implementation: string) => this.taskQueueSelection("subagent") === undefined
-                ? Promise.resolve(implementation) : this.dependencies.modelQueue!.taskChildExtension(this.id, implementation),
-              ...(managedSubagents ? { requireChildExtensions: (sessionId: string, extensions: readonly { id: string; path: string }[]) =>
-                managedSubagents.requireChildExtensions(sessionId, extensions) } : {}),
-            }) }] : []),
+            ...(modelRuntimePolicy?.extensions(sessionContext,
+              managedSubagents?.requireChildExtensions.bind(managedSubagents)) ?? []),
             ...(this.taskWorker ? [{ name: "tron-home-task-worker", factory: createHomeTaskWorkerExtension({
               providerVersion: toolName => delegatedProviderToolVersion(this.runtime?.session.resourceLoader.getExtensions().extensions ?? [], toolName),
               refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
@@ -1879,7 +1867,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   /** Home’s explicit launch policy is canonical worker state, not a live Home
    * inheritance layer. Cold opens read the same branch-local fixed evidence. */
-  async setHomeTaskModelQueues(queues: import("../providers/model-queue.js").TaskModelQueues): Promise<void> {
+  async setHomeTaskModelQueues(queues: import("../kernel/settings/tool-contract.js").TaskModelQueues): Promise<void> {
     return this.lane.run(async () => {
       this.assertConfigurationIdle();
       if (!this.taskWorker) throw new GatewayError("invalid_request", "Only an admitted Home task owns task queue launch inputs");
@@ -1892,16 +1880,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       }
       await this.persistSessionSettings({ fixed });
     });
-  }
-
-  private taskQueueSelection(role: string): readonly string[] | undefined {
-    // Canonical launch inputs outlive the active task runtime. A cold-opened
-    // completed worker still owns its recorded child policy; no marker flag or
-    // current Home profile may replace that evidence.
-    const value = readSessionFixedSettings(this.sessionManager.getBranch())[`model.queue[role=${role}]`]?.value;
-    if (value === undefined) return undefined;
-    if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw new GatewayError("conflict", "Invalid canonical task queue");
-    return value;
   }
 
   protected async recordFixedSetting(key: string, value: unknown, origin?: FixedSetting): Promise<void> {

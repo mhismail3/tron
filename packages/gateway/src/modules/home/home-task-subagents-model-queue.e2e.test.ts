@@ -11,7 +11,7 @@ import { setModelQueue, settingsDependencies } from "../../../test-support/setti
 import { waitFor } from "../../../test-support/wait-for.js";
 import { closeSubagentFixtures, launchResults } from "../../../test-support/home-task-subagents-support.js";
 import { modelQueueProjectionPath } from "../../providers/model-queue.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { homeOwnerOf, queueOwnerOf } from "../../../test-support/gateway-registry.js";
 
 /** A scripted OpenAI-compatible provider with two models: `limited` answers every
  * request with OpenCode Go's plan-limit 429, `fallback` answers `CHILD-DONE`. */
@@ -149,8 +149,8 @@ describe("Home task subagents: the subagent model queue", () => {
     // Shared usage failures remain useful, but a Mac child must not receive
     // unrelated model identities from Home/worker queue failure history.
     const unrelated = `${f.model.provider}/${f.model.id}`;
-    activeRegistry.modelQueue!.recordUsageLimit("worker", unrelated, "fixture plan limit");
-    await activeRegistry.modelQueue!.publishProjection();
+    queueOwnerOf(activeRegistry)!.recordUsageLimit("worker", unrelated, "fixture plan limit");
+    await queueOwnerOf(activeRegistry)!.publishProjection();
     const projection = JSON.parse(await readFile(modelQueueProjectionPath(f.tronHome), "utf8"));
     expect(projection.queues.subagent).toEqual(["queue-child/mac"]);
     expect(projection.unavailable).not.toHaveProperty(unrelated);

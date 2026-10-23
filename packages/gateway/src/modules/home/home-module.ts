@@ -1,3 +1,6 @@
+import { GatewayError } from "../../errors.js";
+import { createQueueSummarizer } from "../../episodic/episodic-compactor.js";
+import type { ModelQueueOwner } from "../../providers/model-queue.js";
 import { homeSessionProfile, type HomeSessionProfileServices } from "./home-session-profile.js";
 import type { GatewayHost, ModuleDescriptor, RunSettledPolicy, SessionContext } from "../../kernel/host/module-host.js";
 import { createTronHomeExtension } from "./tron-home-extension.js";
@@ -60,6 +63,7 @@ export interface HomeComposition {
   homeMemoryDiagnostic?: ((record: HomeMemoryDiagnostic) => void) | undefined;
   homeRequestDiagnostic?: ((record: HomeRequestRecord) => void) | undefined;
   homeTaskDiagnostic?: ((record: HomeTaskDiagnostic) => void) | undefined;
+  modelQueue?: ModelQueueOwner | undefined;
   /** Home memory's compactor calls; production omits it and uses the background model queue. */
   homeMemorySummarizer?: (() => EpisodicSummarizer) | undefined;
   /** Transport injection for Home's web research tools; production uses the pinned DNS-safe transport. */
@@ -67,11 +71,11 @@ export interface HomeComposition {
 }
 
 /** The registry's generic operations and reads Home is built over (k0-kernel.md §5). */
-export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "sessions" | "runtimes" | "taskSessions" | "memoryModels" | "memorySummarizer" | "knowledge"> {
+export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "sessions" | "runtimes" | "taskSessions" | "memoryModels" | "knowledge"> {
   readSearchCut: Pick<RuntimeRegistry, "readSearchCut">["readSearchCut"];
   runtime: HomeSessionProfileServices["runtime"];
   changes(): SettingsChangePath | undefined;
-  workerChoice: HomeWorkerChoicePort;
+  workerChoice: Omit<HomeWorkerChoicePort, "availability">;
 }
 
 /** Home's one owner, built on first use over the composition and the registry's ports. */
@@ -86,7 +90,12 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
       sessions: ports.sessions, runtimes: ports.runtimes,
       ...(composition.homeDiagnostic ? { diagnostic: composition.homeDiagnostic } : {}),
       workspace, memoryModels: ports.memoryModels,
-      memorySummarizer: composition.homeMemorySummarizer ?? ports.memorySummarizer,
+      memorySummarizer: composition.homeMemorySummarizer ?? (() => {
+        const queue = composition.modelQueue;
+        if (!queue) throw new GatewayError("unsupported", "Home memory needs the Gateway model runtime");
+        return createQueueSummarizer({ complete: async (role, request, signal) =>
+          queue.complete(role, request, signal, await ports.memoryModels()) });
+      }),
       ...(composition.homeMemoryDiagnostic ? { memoryDiagnostic: composition.homeMemoryDiagnostic } : {}),
       ...(composition.homeRequestDiagnostic ? { requestDiagnostic: composition.homeRequestDiagnostic } : {}),
       taskSessions: ports.taskSessions,
@@ -101,9 +110,12 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
 
 /** Home owns its extension closures; the registry supplies only generic operations. */
 export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, ports: HomeKernelPorts): Omit<HomeModuleServices, "search"> {
+  const workerChoice: HomeWorkerChoicePort = { ...ports.workerChoice,
+    availability: (role, signal, queue) => platform.modelQueue?.availability(role, signal, queue),
+  };
   return {
     knowledge: ports.knowledge(), read: (request, signal) => readHomeSessionEntry(ports, owner, request, signal),
-    delegate: (sessionId, request, signal) => dispatchWithWorkerChoice(owner, ports.workerChoice, sessionId, request, signal),
+    delegate: (sessionId, request, signal) => dispatchWithWorkerChoice(owner, workerChoice, sessionId, request, signal),
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
     lifecycle: {
       // The designation is read before any runtime is built.

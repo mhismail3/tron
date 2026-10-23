@@ -7,7 +7,7 @@ import { OwnedSessionDispatch } from "../../kernel/delegation/owned-session-disp
 import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../sessions/session-settings.js";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { homeOwnerOf, queueOwnerOf } from "../../../test-support/gateway-registry.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -103,7 +103,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
       await owners.settingsChanges.change({ kind: "global" }, [{ key: `model.queue[role=${role}]`, layer: "global", op: "set", value: [mac] }],
         { actor: { kind: "ui", id: "fixture" }, commandId: `mac-${role}` });
       await setModelQueue(queueOwners(f), role, [home]);
-      expect(await f.registry.modelQueue!.queue(role), `ordinary ${role} queue must not inherit Home`).toEqual([mac]);
+      expect(await queueOwnerOf(f.registry)!.queue(role), `ordinary ${role} queue must not inherit Home`).toEqual([mac]);
       const homeResolution = await owners.settingsModel.resolve({ kind: "home" }, undefined, [`model.queue[role=${role}]`]);
       expect(homeResolution.keys[0]?.value).toEqual([home]);
     }
@@ -255,7 +255,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(entries.filter(entry => entry.type === "custom" && entry.customType === "tron.model-queue").map(entry => entry.type === "custom" ? entry.data : undefined))
       .toEqual([{ role: "worker", skipped: `${f.model.provider}/${f.model.id}`, reason: expect.stringContaining("usage-limit error: 429"), next: `${f.model.provider}/${TASK_REASONING_MODEL_ID}` }]);
     // The next delegation skips the model that just hit its limit.
-    const queue = await f.registry.modelQueue!.availability("worker", undefined, await f.registry.modelQueueOf("worker", "home"));
+    const queue = await queueOwnerOf(f.registry)!.availability("worker", undefined, await f.registry.modelQueueOf("worker", "home"));
     expect(queue.models[0]).toMatchObject({ available: false, reason: expect.stringContaining("GoUsageLimitError") });
   });
 

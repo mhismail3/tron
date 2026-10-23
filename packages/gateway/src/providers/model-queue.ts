@@ -51,7 +51,6 @@ async function writeProjectionFile(path: string, contents: string): Promise<void
   } finally { await rm(temporary, { force: true }); }
 }
 
-export type TaskModelQueues = Readonly<Record<"worker" | "subagent", readonly string[]>>;
 
 export interface QueueAvailability { role: ModelQueueRole; models: QueueModelState[] }
 

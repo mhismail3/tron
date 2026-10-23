@@ -1,4 +1,7 @@
 import type { ContextPolicy, ModuleDescriptor } from "../kernel/host/module-host.js";
+import { modelQueueSessionExtensions } from "./model-queue-session.js";
+import { readWorkerQueueSelection } from "./model-queue-extension.js";
+import type { ModelQueueOwner } from "./model-queue.js";
 import { RecentModelStore, type RecentModelSignals } from "./recent-models.js";
 import { safeJson } from "../kernel/projection/projection.js";
 import { initialModel, type OpenAIModelEligibility } from "./openai-model-eligibility.js";
@@ -257,7 +260,8 @@ export class SessionContextWindowPolicy {
   }
 }
 
-export const createContextWindowModule = (eligibility: () => OpenAIModelEligibility, signals: () => RecentModelSignals): ModuleDescriptor<RecentModelStore> => ({
+export const createContextWindowModule = (eligibility: () => OpenAIModelEligibility, signals: () => RecentModelSignals,
+  queues: () => ModelQueueOwner | undefined): ModuleDescriptor<RecentModelStore> => ({
   name: "tron-context-window",
   purpose: "Keeps the session's model context window applied as the model changes.",
   tools: [], commands: [],
@@ -267,7 +271,13 @@ export const createContextWindowModule = (eligibility: () => OpenAIModelEligibil
       contract: recents,
       rpc: { "model.recent": { kind: "read", handle: async () => safeJson({ models: recents.entries() }) } },
       hooks: {
-        modelRuntimeInstalled: () => ({ attach: runtime => eligibility().attachRuntime(runtime), initialModel, contextPolicy: session => new SessionContextWindowPolicy(session) }),
+        modelRuntimeInstalled: () => ({
+          attach: runtime => eligibility().attachRuntime(runtime),
+          initialModel,
+          contextPolicy: session => new SessionContextWindowPolicy(session),
+          modelChoice: readWorkerQueueSelection,
+          extensions: (session, children) => modelQueueSessionExtensions(queues(), session, children),
+        }),
         modelUsed: (sessionId, model) => {
           void recents.record(model.provider, model.id).then(changed => {
             if (changed) signals().recentModelsChanged?.();

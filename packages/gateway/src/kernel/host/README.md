@@ -37,7 +37,9 @@ construction/publication with an opaque issuer-interpreted authority object.
   carries per-runtime identity, presentation, receipt joining, late-bound settings
   access for the session actor and policy operations;
   concrete policy owners remain outside the host and are resolved at each callback.
-  The session model runtime and live profile are kernel facts, not module services.
+  The session model runtime, live profile, canonical fixed settings and delegated
+  worker fact are kernel reads, not cached module services. The model-runtime policy
+  owns physical-choice decoding and its post-module ordinary-session registrations.
   `registrations(names, session)` keeps each profile's exact order and optionality;
   `summaries(names)` reads those same descriptors' metadata.
 - **Profiles (D7).** Started instances own named recipes; `profile(name)` reads

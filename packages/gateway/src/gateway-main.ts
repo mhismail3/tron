@@ -229,7 +229,22 @@ const homeTaskDiagnostic = (record: HomeTaskDiagnostic) => logger.log(record.eve
     || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.state === "critical")
     || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
     "Home task lifecycle", { source: "home", ...record });
+const modelQueue = new ModelQueueOwner({
+  runtime: modelRuntime,
+  usage: providerUsage,
+  queue: role => sessions.modelQueueOf(role),
+  projectionPath: modelQueueProjectionPath(config.tronHome),
+  log: (record) => {
+    if (record.event === "model-queue.skip") logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
+      event: record.event, source: "models", code: record.role,
+    });
+    else logger.log(record.status === "failed" ? "warning" : "info",
+      `Child model queue from ${record.scope}: ${record.status === "published" ? record.models.join(", ") || "empty" : `publication failed (${record.reason})`}`,
+      { event: record.event, source: "models", code: record.role, ...(record.sessionId ? { sessionId: record.sessionId } : {}) });
+  },
+});
 const homeComposition: HomeComposition = {
+  modelQueue,
   tronHome: config.tronHome, agentDir: config.agentDir, trust, notifications, machineId: config.machineId,
   homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
   homeMemoryDiagnostic: (record) => {
@@ -340,22 +355,6 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
     : logger.log("info", `Archived session returned to the dashboard on new work (${diagnostic.trigger})`, {
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
-  // Home's memory compactor and Knowledge's calls run on the background model
-  // queue, on the Gateway's own ModelRuntime (providers/model-queue.ts).
-  modelQueue: new ModelQueueOwner({
-    runtime: modelRuntime,
-    usage: providerUsage,
-    queue: role => sessions.modelQueueOf(role),
-    projectionPath: modelQueueProjectionPath(config.tronHome),
-    log: (record) => {
-      if (record.event === "model-queue.skip") logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
-        event: record.event, source: "models", code: record.role,
-      });
-      else logger.log(record.status === "failed" ? "warning" : "info",
-        `Child model queue from ${record.scope}: ${record.status === "published" ? record.models.join(", ") || "empty" : `publication failed (${record.reason})`}`,
-        { event: record.event, source: "models", code: record.role, ...(record.sessionId ? { sessionId: record.sessionId } : {}) });
-    },
-  }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
   // Load and eviction are transitions at info: the byte budget's decisions have
   // to be attributable to one session from the log alone, and the reason has to
@@ -491,7 +490,7 @@ const knowledge = new KnowledgeService(
   {
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),
   },
-  (knowledgeConfig) => sessions.modelQueue ? new QueueKnowledgeModel(sessions.modelQueue, knowledgeModelLimits(knowledgeConfig)) : undefined,
+  (knowledgeConfig) => new QueueKnowledgeModel(modelQueue, knowledgeModelLimits(knowledgeConfig)),
   workRegistry,
   async operation => {
     if (operation !== "tags") return { ok: true };

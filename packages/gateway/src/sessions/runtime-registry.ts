@@ -98,9 +98,7 @@ import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-bound
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../modules/home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
-import type { ModelQueueOwner } from "../providers/model-queue.js";
 import { modelQueueKey } from "../kernel/settings/tool-contract.js";
-import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
 import { applyHomeCacheRetention } from "../modules/home/home-request-policy.js";
 import type { HomeKernelPorts } from "../modules/home/home-module.js";
 import {
@@ -548,8 +546,6 @@ export class RuntimeRegistry {
   private knowledgeService: KnowledgeService | undefined;
   private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
   /** The one owner of Tron Home's designation for this installation. */
-  /** The model fallback queues (providers/model-queue.ts); absent without a Gateway model runtime. */
-  readonly modelQueue: ModelQueueOwner | undefined;
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
@@ -701,8 +697,6 @@ export class RuntimeRegistry {
        * examined by a later pass; the report keeps the stop visible. */
       artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
       extensionArtifactWarning?: (warning: { reason: import("../kernel/projection/extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
-      /** The composition's provider queue owner, shared with background callers. */
-      modelQueue?: ModelQueueOwner;
       /** The Gateway-wide user-scope runtime, where user provider packages (for
        * example CortexKit's `anthropic` override) are registered. Home's chat runs
        * on it (#480). Only a registry without a Gateway, as in tests, omits it;
@@ -735,7 +729,6 @@ export class RuntimeRegistry {
       ...(options.catalogChanged ? { onChanged: options.catalogChanged } : {}),
       ...(options.catalogWatcherReset ? { onWatcherReset: options.catalogWatcherReset } : {}),
     });
-    this.modelQueue = options.modelQueue;
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.readHeapSample = options.heapSample ?? (() => ({
       usedBytes: process.memoryUsage().heapUsed,
@@ -833,12 +826,6 @@ export class RuntimeRegistry {
         createRuntimeOver: (sessionId, build) => this.createRuntimeOver(sessionId, build),
       },
       memoryModels: () => this.modelQueueOf("background", "home"),
-      memorySummarizer: () => {
-        const queue = this.modelQueue;
-        if (!queue) throw new GatewayError("unsupported", "Home memory needs the Gateway model runtime");
-        return createQueueSummarizer({ complete: async (role, request, signal) =>
-          queue.complete(role, request, signal, await this.modelQueueOf(role, "home")) });
-      },
       taskSessions: this,
       knowledge: () => this.knowledgeService,
       readSearchCut: sessionId => this.readSearchCut(sessionId),
@@ -851,7 +838,6 @@ export class RuntimeRegistry {
         homeRuntime: async sessionId => (await this.acquire(sessionId)).snapshot(),
         settings: () => this.settingsOwners?.model,
         modelQueues: () => this.homeTaskModelQueues(),
-        availability: (role, signal, queue) => this.modelQueue?.availability(role, signal, queue),
         model: (provider, id) => this.options.gatewayModelRuntime?.getModel(provider, id),
       },
     };
@@ -1695,7 +1681,6 @@ export class RuntimeRegistry {
     return {
       agentDir: this.options.agentDir,
       ...(this.options.managedSubagents ? { managedSubagents: this.options.managedSubagents } : {}),
-      ...(this.modelQueue ? { modelQueue: this.modelQueue } : {}),
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
       createModelRuntime: this.options.createModelRuntime,

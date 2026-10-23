@@ -1,8 +1,8 @@
 import type { SessionLineagePolicy } from "./session-lineage.js";
 import type { KernelLifecycleObserver, TaskLedgerPolicy } from "./kernel-lifecycle.js";
 import type { Model } from "../pi/ai.js";
-import type { AgentSession, ExtensionFactory, ModelRuntime, SettingsManager, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
-import type { SettingsToolAccess } from "../settings/tool-contract.js";
+import type { AgentSession, ExtensionFactory, ModelRuntime, SessionEntry, SettingsManager, SessionBeforeCompactEvent } from "../pi/coding-agent.js";
+import type { FixedSetting, SettingsToolAccess } from "../settings/tool-contract.js";
 import type { ContextWindowPolicy, ModelRef, JsonValue, TronModuleSummary } from "../../protocol/types.js";
 import type { ToolResultProjection } from "../projection/tool-result.js";
 import type { RequestPolicyHook } from "./request-policy.js";
@@ -40,6 +40,10 @@ export interface ModelRuntimePolicy {
   attach(runtime: ModelRuntime): () => void;
   initialModel(runtime: ModelRuntime, settings: Pick<SettingsManager, "getDefaultProvider" | "getDefaultModel">): Promise<Model<never> | undefined>;
   contextPolicy(session: AgentSession): ContextPolicy;
+  modelChoice(entries: readonly SessionEntry[], afterIndex: number): ModelRef | undefined;
+  extensions(session: SessionContext,
+    requireChildren: ((sessionId: string, extensions: readonly { id: string; path: string }[]) => Promise<{ dispose(): void }>) | undefined,
+  ): readonly { name: string; factory: ExtensionFactory }[];
 }
 
 /** One log line from a module, in the Gateway logger's shape. */
@@ -76,6 +80,8 @@ export interface SessionContext {
   sessionId(): string;
   cwd(): string;
   modelRuntime: ModelRuntime;
+  fixedSettings(): Readonly<Record<string, FixedSetting>>;
+  delegatedWorker(): boolean;
   profile(): SessionProfile;
   /** The chat's title as notifications show it. */
   title(): string;

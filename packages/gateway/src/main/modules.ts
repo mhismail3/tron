@@ -39,7 +39,7 @@ export function gatewayModules(owners: () => ModuleOwners) {
     const owner = owners().sessionSearch;
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));
-  const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners);
+  const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners, () => owners().home.modelQueue);
   return { home: home.owner, providers, modules: [
     workspaceModule,
     settlementModule,

@@ -5,6 +5,7 @@ export const LAYERS = ["project", "session", "global"] as const;
 export type LayerId = typeof LAYERS[number];
 export type Direction = "widen" | "narrow";
 
+export type TaskModelQueues = Readonly<Record<"worker" | "subagent", readonly string[]>>;
 export const MODEL_QUEUE_ROLES = ["worker", "subagent", "background"] as const;
 export function modelQueueKey(role: typeof MODEL_QUEUE_ROLES[number]): string { return `model.queue[role=${role}]`; }
 
