@@ -26,7 +26,9 @@ extension HomeSheet {
                         .disabled(profileEdit.working)
                         .accessibilityIdentifier("home-profile-confirm-all-button")
                     }
-                    .accessibilityElement(children: .contain)
+                    // Like SettingsRendererRow, an accessory keeps the real
+                    // value control separate instead of combining it into the row.
+                    .environment(\.tronSettingsRowAccessory, { AnyView(EmptyView()) })
                 }
                 .tronManagedSheet(isPresented: $profileEdit.confirmingAll, identity: "home.\(profileID).profile-confirm-all") {
                     TronConfirmationSheet(
