@@ -114,7 +114,11 @@ extension HomeSheet {
     /// The canonical history of one memory entry, paged in bounded characters.
     func evidenceSheet(_ page: HomeMemoryEvidencePageDTO) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            ToolDetailCodeBlock(text: page.text, accent: accent)
+            Text(page.text)
+                .font(TronFont.mono())
+                .foregroundStyle(Color.tronTextPrimary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("home-evidence-text")
             if let previous = page.previousOffset {
                 pageRow(title: "Previous evidence page", icon: "arrow.up", id: "home-evidence-previous") {

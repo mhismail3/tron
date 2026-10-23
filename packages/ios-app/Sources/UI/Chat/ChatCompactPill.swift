@@ -35,9 +35,9 @@ extension ChatNotificationTone {
 
     var surfaceColor: Color {
         switch self {
-        case .accent: .tronEmerald
+        case .accent: .tronPrimary
         case .command: .tronIndigo
-        case .tool: .tronEmerald
+        case .tool: .tronPrimary
         case .information: .tronBlue
         case .purple: .tronPurple
         case .subagent: .tronSubagent
@@ -518,7 +518,7 @@ enum UserPromptTextTone: Hashable {
     case user
     case automation
 
-    var color: Color {
+    @MainActor var color: Color {
         switch self {
         case .user: .userMessageText
         case .automation: .tronAutomationText

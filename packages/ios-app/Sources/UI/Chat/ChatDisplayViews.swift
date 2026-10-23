@@ -443,7 +443,7 @@ private struct DisplayThumbnailSurface: View {
                         .foregroundStyle(Color.tronTextSecondary)
                 } else {
                     ProgressView()
-                        .tint(.tronEmerald)
+                        .tint(.tronPrimary)
                 }
             case .symbol(let symbol, let title):
                 VStack(spacing: 8) {
@@ -459,7 +459,7 @@ private struct DisplayThumbnailSurface: View {
                 .padding(10)
             case .preparing:
                 ProgressView()
-                    .tint(.tronEmerald)
+                    .tint(.tronPrimary)
             }
         }
         .frame(

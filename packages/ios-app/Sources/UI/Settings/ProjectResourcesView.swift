@@ -373,13 +373,13 @@ struct ProjectResourcesView: View {
                             .environment(\.tronSettingsVisualTheme, nil)
                         }
                     } else if loading {
-                        TronSheetLoadingState(label: "Loading resources…", accent: .tronEmerald)
+                        TronSheetLoadingState(label: "Loading resources…", accent: .tronPrimary)
                     } else {
                         TronPlaceholderState(
                             title: "Resources Unavailable",
                             detail: "Reload the session resources and try again.",
                             icon: "shippingbox",
-                            accent: .tronEmerald
+                            accent: .tronPrimary
                         )
                     }
                 }
@@ -396,19 +396,19 @@ struct ProjectResourcesView: View {
                             systemImage: "arrow.clockwise",
                             isWorking: loading || reloading
                         )
-                        .tronToolbarAction(accent: .tronEmerald)
+                        .tronToolbarAction(accent: .tronPrimary)
                     }
                     .disabled(loading || reloading)
                     .accessibilityValue(loading || reloading ? "In progress" : "")
                 }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: Self.title, accent: .tronEmerald)
+                    TronSheetTitle(title: Self.title, accent: .tronPrimary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -433,8 +433,8 @@ struct ProjectResourcesView: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronEmerald)
-        .tint(Color.tronEmerald)
+        .tronSettingsVisualTheme(accent: .tronPrimary)
+        .tint(Color.tronPrimary)
     }
 
     /// One container per kind, in the kind's own tint; a kind with nothing loaded says so.

@@ -16,7 +16,7 @@ extension Color {
 
     static let tronEmerald = Color(lightHex: "#059669", darkHex: "#10B981")
     static let tronEmeraldDark = Color(lightHex: "#047857", darkHex: "#047857")
-    static let tronAccentText = Color(lightHex: "#065F46", darkHex: "#6EE7B7")
+    @MainActor static var tronAccentText: Color { .tronPrimary }
     static let tronMint = Color(lightHex: "#10B981", darkHex: "#34D399")
     static let tronSuccess = Color(lightHex: "#15803D", darkHex: "#22C55E")
     static let tronWarning = Color(lightHex: "#D97706", darkHex: "#F59E0B")
@@ -57,11 +57,11 @@ extension Color {
     static let tronTextSecondary = Color(lightHex: "#4B5563", darkHex: "#AAB2BF")
     static let tronTextMuted = Color(lightHex: "#6B7280", darkHex: "#8B949E")
     static let tronTextDisabled = Color(lightHex: "#9CA3AF", darkHex: "#5B6472")
-    static let userMessageText = Color(lightHex: "#059669", darkHex: "#10B981")
+    @MainActor static var userMessageText: Color { .tronPrimary }
     static let assistantMessageText = Color(lightHex: "#111827", darkHex: "#E8E9EA")
-    static let inputText = Color(lightHex: "#059669", darkHex: "#10B981")
-    static let inputPlaceholder = Color(lightHex: "#6EE7B7", darkHex: "#047857")
-    static let userBubble = Color(lightHex: "#059669", darkHex: "#10B981")
+    @MainActor static var inputText: Color { .tronPrimary }
+    @MainActor static var inputPlaceholder: Color { .tronPrimary.opacity(0.65) }
+    @MainActor static var userBubble: Color { .tronPrimary }
     static let assistantBubble = Color(lightHex: "#EEF2F6", darkHex: "#252A32")
     static let systemBubble = Color(lightHex: "#E6EBF1", darkHex: "#323842")
     static let toolBubble = Color(lightHex: "#E0F2FE", darkHex: "#14324A")

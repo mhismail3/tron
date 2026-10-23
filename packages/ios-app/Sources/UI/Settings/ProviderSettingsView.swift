@@ -24,7 +24,7 @@ struct ProvidersSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 6) {
-                TronGlassCard(accent: .tronEmerald) {
+                TronGlassCard(accent: .tronPrimary) {
                     VStack(spacing: 0) {
                         modelCatalogRow
                         TronSettingsDivider()
@@ -40,7 +40,7 @@ struct ProvidersSettingsView: View {
                 .padding(.bottom, TronSpacing.section)
                 if let catalogError { TronSettingsNotice(message: catalogError, accent: .tronError) }
                 if loading && providers.isEmpty {
-                    TronLoadingState(label: "Loading providers…", accent: .tronEmerald)
+                    TronLoadingState(label: "Loading providers…", accent: .tronPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if providers.isEmpty {
                     if loadFailed {
@@ -123,9 +123,9 @@ struct ProvidersSettingsView: View {
     }
 
     private var modelCatalogRow: some View {
-        TronSettingsRow(icon: "list.bullet.rectangle", title: "Model Catalog", subtitle: modelCatalogSummary, accent: .tronEmerald) {
+        TronSettingsRow(icon: "list.bullet.rectangle", title: "Model Catalog", subtitle: modelCatalogSummary, accent: .tronPrimary) {
             Button { Task { await refreshModelCatalog() } } label: {
-                TronInlineActionLabel("Refresh", icon: "arrow.clockwise", isWorking: refreshingCatalog, accent: .tronEmerald)
+                TronInlineActionLabel("Refresh", icon: "arrow.clockwise", isWorking: refreshingCatalog, accent: .tronPrimary)
             }
             .buttonStyle(.plain)
             .disabled(refreshingCatalog)

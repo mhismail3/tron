@@ -134,8 +134,7 @@ struct SettingsRendererRow: View {
         let sessionID = target.objectValue?["sessionId"]?.stringValue
         let catalog = model.providerCatalog(for: sessionID.map { .session(id: $0) } ?? .global)?.models ?? []
         let selected = catalog.first { $0.provider == provider && $0.id == id }
-        return TronSettingsRow(icon: nil, title: selected?.displayName ?? display,
-                               subtitle: selected?.displayProviderName ?? provider.map { ModelRef(provider: $0, id: id ?? "").displayProviderName },
+        return TronSettingsRow(icon: "cpu", title: selected?.displayName ?? display,
                                titleFont: SessionSummaryTypography.headline) {
             TronProgressiveSheetLink(accessibilityLabel: "Switch Model", identity: "manage.model.switch", detents: .contentFit) {
                 SettingsModelPicker(setting: setting, target: target, title: "Models",
@@ -146,6 +145,7 @@ struct SettingsRendererRow: View {
             .disabled(!editable || control == .readOnly || setting.projectSetting != nil)
             .accessibilityIdentifier("manage-model-switch")
         }
+        .lineLimit(1)
     }
 
     /// Always present, even empty: the shared row then keeps its value control a
@@ -168,7 +168,7 @@ struct SettingsRendererRow: View {
     /// Session and Home overrides name their state beside the title, never in
     /// the value's trailing room (#1651); Global values are not overrides.
     private var overriddenStatus: String? {
-        canReset && editable && control != .readOnly && setting.projectSetting == nil
+        !modelConfiguration && canReset && editable && control != .readOnly && setting.projectSetting == nil
             && target.objectValue?["kind"]?.stringValue != "global" ? "Overridden" : nil
     }
 
@@ -178,7 +178,7 @@ struct SettingsRendererRow: View {
 
     private var resetButton: some View {
         Button { if !resetDisabled { TronHaptics.shared.play(.selectionChanged); onChange(nil) } } label: {
-            TronInlineActionLabel("", icon: "arrow.uturn.backward", accent: theme?.accent ?? .tronEmerald)
+            TronInlineActionLabel("", icon: "arrow.uturn.backward", accent: theme?.accent ?? .tronPrimary)
         }
             .controlSize(.small)
             .buttonStyle(.plain)
@@ -200,7 +200,7 @@ struct SettingsRendererRow: View {
         case .toggle:
             TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
                 Button { TronHaptics.shared.changeToggle(from: setting.value?.boolValue == true) { onChange(.bool($0)) } } label: {
-                    TronToggleControl(isOn: setting.value?.boolValue == true, accent: theme?.accent ?? .tronEmerald)
+                    TronToggleControl(isOn: setting.value?.boolValue == true, accent: theme?.accent ?? .tronPrimary)
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
@@ -357,7 +357,7 @@ struct SettingsRendererRow: View {
         } else {
             TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
                 if modelConfiguration {
-                    TronInlineActionLabel(display, accent: .tronEmerald)
+                    TronInlineActionLabel(display, accent: .tronPrimary)
                         .textSelection(.enabled)
                 } else {
                     TronDynamicValue(text: display, color: .tronTextSecondary)

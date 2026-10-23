@@ -11,7 +11,7 @@ enum TronDateComponent: String, Identifiable {
 struct TronDateValueButton: View {
     let date: Date
     let component: TronDateComponent
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     let action: () -> Void
 
     var body: some View {
@@ -33,7 +33,7 @@ struct TronDatePickerSheet: View {
     let component: TronDateComponent
     @Binding var date: Date
     var earliestDate: Date?
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     @Environment(\.dismiss) private var dismiss
 
     private var picker: DatePicker<Text> {

@@ -209,7 +209,7 @@ struct ChatView: View {
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .background(InteractivePopGestureEnabler())
-        .tint(Color.tronEmerald)
+        .tint(Color.tronPrimary)
         .toolbar {
             toolbar(titleWidth: ChatToolbarTitleLayout.width(containerWidth: toolbarContainerWidth))
         }
@@ -1932,7 +1932,7 @@ struct ChatView: View {
                     TronBackdrop()
                         .ignoresSafeArea(.container, edges: .top)
                 }
-                TronPulseLoadingIndicator(accent: .tronEmerald, size: 44)
+                TronPulseLoadingIndicator(accent: .tronPrimary, size: 44)
                     .padding(18)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2834,7 +2834,7 @@ struct ChatView: View {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(Color.tronEmerald)
+                    .foregroundStyle(Color.tronPrimary)
             }
             .accessibilityLabel("Back")
         }
@@ -2850,7 +2850,7 @@ struct ChatView: View {
                 } else {
                     Text(chatTitle)
                         .font(TronTypography.headline)
-                        .foregroundStyle(Color.tronEmerald)
+                        .foregroundStyle(Color.tronPrimary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(width: titleWidth)
@@ -2868,7 +2868,7 @@ struct ChatView: View {
             Button { sessionPresentation.showSettings = true } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                    .foregroundStyle(Color.tronEmerald)
+                    .foregroundStyle(Color.tronPrimary)
             }
             .accessibilityLabel("Settings")
         }

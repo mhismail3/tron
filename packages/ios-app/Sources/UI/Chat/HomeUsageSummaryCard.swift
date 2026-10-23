@@ -137,7 +137,7 @@ struct HomeUsageSummaryCard: View {
                     .coordinateSpace(.named(HomeUsageCardLayout.coordinateSpace))
                 }
                 .buttonStyle(.plain)
-                .tronGlassSurface(accent: .tronEmerald, cornerRadius: 12, tintOpacity: 0.14, interactive: true)
+                .tronGlassSurface(accent: .tronPrimary, cornerRadius: 12, tintOpacity: 0.14, interactive: true)
                 .accessibilityElement(children: .ignore)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityLabel(accessibilitySummary)
@@ -254,7 +254,7 @@ struct HomeUsageSummaryCard: View {
             .padding(.bottom, part.usedPercent == nil ? 0 : HomeUsageCardLayout.barGap + HomeUsageCardLayout.barHeight)
             .overlay(alignment: .bottom) {
                 if let percent = part.usedPercent {
-                    ProviderUsageProgress(percent: percent, accent: part.level.accent ?? .tronEmerald, fillProbe: probe.map { "\($0).fill" })
+                    ProviderUsageProgress(percent: percent, accent: part.level.accent ?? .tronPrimary, fillProbe: probe.map { "\($0).fill" })
                         .homeUsageLayoutProbe(probe.map { "\($0).bar" })
                         .homeUsageLayoutProbe(part.level == .normal ? nil : probe.map { "\($0).\(part.level)" })
                 }
@@ -352,7 +352,7 @@ struct HomeUsageProvidersSheet: View {
         let hidden = HomeUsageCardPreferences.hidden(hiddenProviders)
         TronDashboardFilterSheet(
             title: "Usage Providers",
-            accent: .tronEmerald,
+            accent: .tronPrimary,
             detents: [.medium, .large],
             onDone: onDone
         ) {
@@ -364,7 +364,7 @@ struct HomeUsageProvidersSheet: View {
                 TronDashboardFilterOption(
                     title: provider.displayName,
                     selected: !hidden.contains(provider.id),
-                    accent: .tronEmerald,
+                    accent: .tronPrimary,
                     inactiveAccent: .tronCyan
                 ) {
                     hiddenProviders = HomeUsageCardPreferences.toggling(provider.id, in: hiddenProviders)

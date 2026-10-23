@@ -447,7 +447,7 @@ struct BoundedTrailingContentLayout: Layout {
 struct UserPromptGlassModifier: ViewModifier {
     let accent: Color
 
-    init(accent: Color = .tronEmerald) {
+    init(accent: Color = .tronPrimary) {
         self.accent = accent
     }
 
@@ -873,13 +873,13 @@ struct ThinkingTraceDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: title, accent: .tronEmerald)
+                    TronSheetTitle(title: title, accent: .tronPrimary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Done")
                 }

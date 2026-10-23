@@ -156,7 +156,8 @@ struct HomeSheet: View {
 
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
     /// This sheet's family accent: the row that opened it, else Home's own green.
-    var accent: Color { visualTheme?.accent ?? .tronEmerald }
+    var accent: Color { visualTheme?.accent ?? .tronPrimary }
+    private var isEvidence: Bool { if case .evidence = destination { true } else { false } }
     var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     var body: some View {
         Group {
@@ -166,6 +167,8 @@ struct HomeSheet: View {
                 HomePagedListSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
             } else if destination.isTaskSurface {
                 HomeTaskSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
+            } else if isEvidence {
+                TronDocumentSheet(title: destination.title) { sheetContent }
             } else {
                 NavigationStack { sheetContent }
             }
@@ -173,7 +176,7 @@ struct HomeSheet: View {
         .tronTopBlur(.sheet)
         // Every Manage Home sheet opens at medium and drags to large, as Manage
         // Session's sub-sheets do (#799, #811).
-        .presentationDetents([.medium, .large])
+        .presentationDetents(isEvidence ? [.large] : [.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(accent)
         .onPresentationRetire { owner.retire() }
@@ -217,6 +220,7 @@ struct HomeSheet: View {
                     .accessibilityIdentifier("home-memory-info")
                 }
             }
+            if !isEvidence {
             ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: accent) }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
@@ -230,6 +234,7 @@ struct HomeSheet: View {
                 }
                 .accessibilityLabel("Done")
                 .accessibilityIdentifier("home-sheet-done-\(destination.id)")
+            }
             }
         }
         .tronConfigurationSliderHost(sliderPresentation)

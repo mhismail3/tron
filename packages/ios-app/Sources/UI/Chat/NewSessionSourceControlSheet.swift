@@ -23,7 +23,7 @@ struct NewSessionSourceControlSheet: View {
                     TronSettingsGroup(
                         "Checkout Strategy",
                         detail: inspectionDetail,
-                        accent: .tronTeal
+                        accent: .tronPrimary
                     ) {
                         VStack(spacing: 0) {
                             ForEach(Array(SessionSourceControlMode.allCases.enumerated()), id: \.element) { index, mode in
@@ -31,7 +31,7 @@ struct NewSessionSourceControlSheet: View {
                                 Button { choose(mode) } label: {
                                     HStack(alignment: .center, spacing: 12) {
                                         Image(systemName: selection.mode == mode ? "checkmark.circle.fill" : "circle")
-                                            .foregroundStyle(selection.mode == mode ? Color.tronTeal : Color.tronTextMuted)
+                                            .foregroundStyle(selection.mode == mode ? Color.tronPrimary : Color.tronTextMuted)
                                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                                             .frame(width: 22)
                                         VStack(alignment: .leading, spacing: 3) {
@@ -59,7 +59,7 @@ struct NewSessionSourceControlSheet: View {
                         TronSettingsGroup(
                             selection.mode == .newBranchWorktree ? "New Branch" : "Existing Branch",
                             detail: branchDetail,
-                            accent: .tronTeal,
+                            accent: .tronPrimary,
                             surfaceStyle: .uncontained
                         ) {
                             VStack(alignment: .leading, spacing: 10) {
@@ -70,8 +70,8 @@ struct NewSessionSourceControlSheet: View {
                                         .tronField(
                                             monospaced: true,
                                             compact: true,
-                                            surfaceTint: Color.tronTeal.opacity(0.10),
-                                            border: Color.tronTeal.opacity(0.30)
+                                            surfaceTint: Color.tronPrimary.opacity(0.10),
+                                            border: Color.tronPrimary.opacity(0.30)
                                         )
 
                                     TronSelectionRow(icon: "arrow.triangle.branch", title: "Start From", value: selection.base ?? "Current commit") {
@@ -87,7 +87,7 @@ struct NewSessionSourceControlSheet: View {
                                             }
                                         }
                                     }
-                                    .tronGlassSurface(accent: .tronTeal)
+                                    .tronGlassSurface(accent: .tronPrimary)
                                 } else {
                                     TronSelectionRow(icon: "arrow.triangle.branch", title: "Branch", value: selection.branch ?? "Choose a branch") {
                                         ForEach(inspection?.branches ?? []) { branch in
@@ -98,7 +98,7 @@ struct NewSessionSourceControlSheet: View {
                                         }
                                     }
                                     .disabled(inspection?.branches.contains(where: { !$0.checkedOut }) != true)
-                                    .tronGlassSurface(accent: .tronTeal)
+                                    .tronGlassSurface(accent: .tronPrimary)
                                 }
                             }
                         }
@@ -127,7 +127,7 @@ struct NewSessionSourceControlSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Done")
                 }

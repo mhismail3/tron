@@ -301,7 +301,7 @@ struct SessionShellView: View {
         NavigationStack {
             sessionDashboardScreen
         }
-        .tint(Color.tronEmerald)
+        .tint(Color.tronPrimary)
     }
 
     private var automationViewPreferencesBinding: Binding<AutomationDashboardViewPreferences> {
@@ -609,7 +609,7 @@ struct SessionShellView: View {
         ZStack {
             if isSessionDashboardInitiallyLoading {
                 TronPulseLoadingIndicator(
-                    accent: .tronEmerald,
+                    accent: .tronPrimary,
                     size: SessionDashboardPresentationPolicy.initialLoadingPulseSize
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -895,7 +895,7 @@ struct SessionShellView: View {
             }
         }
         .font(TronTypography.sheetSectionHeader)
-        .foregroundStyle(Color.tronEmerald)
+        .foregroundStyle(Color.tronPrimary)
         .textCase(nil)
         // Symmetric insets: View All lines up with the rows' trailing timestamps.
         .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
@@ -1068,7 +1068,7 @@ struct SessionShellView: View {
                 }
                 TronDisclosureChevron(isExpanded: isExpanded, size: SessionDashboardLayout.headerChevronSize)
             }
-            .foregroundStyle(Color.tronEmerald)
+            .foregroundStyle(Color.tronPrimary)
             .padding(.leading, SessionDashboardLayout.headerLeadingPadding)
             .padding(.trailing, SessionDashboardLayout.rowContainerHorizontalInset)
             .padding(.top, SessionDashboardLayout.headerTopPadding)
@@ -1350,7 +1350,7 @@ struct SessionListExpansionControls: View {
                     .font(TronTypography.sans(size: SessionDashboardLayout.headerChevronSize, weight: .bold))
                     .accessibilityHidden(true)
             }
-            .foregroundStyle(Color.tronEmerald)
+            .foregroundStyle(Color.tronPrimary)
             .frame(minHeight: SessionDashboardLayout.expansionControlMinimumHeight)
             .contentShape(Rectangle())
         }
@@ -1455,7 +1455,7 @@ struct HistoricalSessionRow: View {
         return DashboardListRow(
             title: session.title,
             subtitle: showsContext ? projectServerContext : nil,
-            accent: .tronEmerald
+            accent: .tronPrimary
         ) {
             DashboardIndicatorSwap(state: indicatorState) { _ in sessionIndicator }
         } trailing: {
@@ -1469,7 +1469,7 @@ struct HistoricalSessionRow: View {
                 if session.isFork {
                     Image(systemName: "arrow.triangle.branch")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(Color.tronEmerald)
+                        .foregroundStyle(Color.tronPrimary)
                         .accessibilityHidden(true)
                 }
                 SessionRowRelativeTime(text: trailingStatus, isWaiting: activity == .waitingForUser)
@@ -1493,7 +1493,7 @@ struct HistoricalSessionRow: View {
                 isVisible: isVisible
             )
         case .active, .resuming:
-            TronPulseLoadingIndicator(accent: .tronEmerald, size: 18)
+            TronPulseLoadingIndicator(accent: .tronPrimary, size: 18)
         case .waitingForUser:
             Image(systemName: "questionmark.bubble.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
@@ -1507,11 +1507,11 @@ struct HistoricalSessionRow: View {
         case .idleUnread:
             Image(systemName: session.isHomeWorker ? "checkmark.circle.fill" : "circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                .foregroundStyle(Color.tronEmerald.opacity(0.82))
+                .foregroundStyle(Color.tronPrimary.opacity(0.82))
         case .idleRead:
             Image(systemName: session.isHomeWorker ? "checkmark.circle" : "circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                .foregroundStyle(Color.tronEmerald.opacity(0.82))
+                .foregroundStyle(Color.tronPrimary.opacity(0.82))
         }
     }
 

@@ -15,13 +15,13 @@ struct ProjectSettingsLink: View {
     static let setupCardCaption = "Read-only repository overrides in .pi."
     let cwd: String
     let profileID: String
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
 
     var body: some View {
         TronProgressiveSheetLink(
             accessibilityLabel: "Project Settings",
             identity: "project.settings.\(profileID).\(cwd)",
-            accent: .tronEmerald,
+            accent: .tronPrimary,
             destination: { ProjectSettingsContent(cwd: cwd, profileID: profileID) }
         ) {
             TronSetupCardLabel(icon: "folder.badge.gearshape", title: "Project Settings",
@@ -45,7 +45,7 @@ struct ProjectSettingsSheet: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                                .tronToolbarAction(accent: .tronEmerald)
+                                .tronToolbarAction(accent: .tronPrimary)
                         }
                         .accessibilityLabel("Done")
                     }
@@ -122,7 +122,7 @@ struct ProjectSettingsSections: View {
                 // The rows are fixed once the overrides arrive (the sheet's pulse
                 // hides them until then); trust and Git fill values in place.
                 TronSettingsGroup(sessionSettings == nil ? "Project" : "Settings",
-                                  detail: sessionSettings == nil ? cwd : nil, accent: .tronEmerald) {
+                                  detail: sessionSettings == nil ? cwd : nil, accent: .tronPrimary) {
                     if let sessionSettings {
                         sessionSettings
                         TronSettingsDivider()

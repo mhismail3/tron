@@ -240,7 +240,7 @@ struct SessionContextSheet: View {
                         settingsSection(snapshot)
                         exportSection
                     } else {
-                        TronSheetLoadingState(label: "Loading session…", accent: .tronEmerald)
+                        TronSheetLoadingState(label: "Loading session…", accent: .tronPrimary)
                     }
                 }
                 .padding(18)
@@ -256,14 +256,14 @@ struct SessionContextSheet: View {
                     } label: {
                         Image(systemName: "pencil")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .disabled(displayedPresentation == nil)
                     .accessibilityLabel("Rename Session")
                     .accessibilityIdentifier("manage-session-rename")
                 }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Manage Session", accent: .tronEmerald)
+                    TronSheetTitle(title: "Manage Session", accent: .tronPrimary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -273,7 +273,7 @@ struct SessionContextSheet: View {
                     } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -338,7 +338,7 @@ struct SessionContextSheet: View {
                 // Manage Session summary's local adjustment.
                 .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
                 // Every destination follows Manage Session's emerald sheet theme.
-                .tronSettingsVisualTheme(accent: .tronEmerald)
+                .tronSettingsVisualTheme(accent: .tronPrimary)
             }
             .tronTextEntrySheet(
                 "Rename Session",
@@ -356,7 +356,7 @@ struct SessionContextSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(Color.tronEmerald)
+        .tint(Color.tronPrimary)
         .tronConfigurationSliderHost(sliderPresentation)
         .environment(\.configurationSliderSignposts, model.performanceSignposts)
         .onAppear {
@@ -446,7 +446,7 @@ struct SessionContextSheet: View {
             icon: "clock.arrow.circlepath",
             title: ProcessHistorySheet.title,
             subtitle: subtitle,
-            accent: .tronEmerald
+            accent: .tronPrimary
         ) { destination = .processHistory }
     }
 
@@ -455,7 +455,7 @@ struct SessionContextSheet: View {
     }
 
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
-        TronGlassCard(accent: .tronEmerald) {
+        TronGlassCard(accent: .tronPrimary) {
             VStack(spacing: 0) {
                 if snapshot.archivedAt != nil {
                     archiveRow
@@ -464,16 +464,16 @@ struct SessionContextSheet: View {
                 gitRow
                 divider()
                 manageRow(icon: "doc.text.magnifyingglass", title: AgentInstructionsSheet.title,
-                          subtitle: "The complete assembled instructions", accent: .tronEmerald) { destination = .agentInstructions }
+                          subtitle: "The complete assembled instructions", accent: .tronPrimary) { destination = .agentInstructions }
                 divider()
                 manageRow(icon: "shippingbox", title: ProjectResourcesView.title,
-                          subtitle: "Loaded skills, subagents, prompts, and commands", accent: .tronEmerald) { destination = .projectResources }
+                          subtitle: "Loaded skills, subagents, prompts, and commands", accent: .tronPrimary) { destination = .projectResources }
                 divider()
                 manageRow(
                     icon: "point.3.connected.trianglepath.dotted",
                     title: SessionTreeSheet.title,
                     subtitle: "Review history, continue, or fork",
-                    accent: .tronEmerald
+                    accent: .tronPrimary
                 ) { destination = .history }
                 divider()
                 processHistoryRow(snapshot)
@@ -483,7 +483,7 @@ struct SessionContextSheet: View {
                         icon: "exclamationmark.triangle",
                         title: diagnostic.message,
                         subtitle: diagnostic.type,
-                        accent: .tronEmerald
+                        accent: .tronPrimary
                     )
                 }
             }
@@ -492,15 +492,15 @@ struct SessionContextSheet: View {
 
     /// This chat's settings and, below them, its project's, in Settings' own accent.
     private func settingsSection(_ snapshot: SessionContextPresentation) -> some View {
-        TronGlassCard(accent: .tronEmerald) {
+        TronGlassCard(accent: .tronPrimary) {
             VStack(spacing: 0) {
                 TronProgressiveSheetLink(accessibilityLabel: Self.settingsTitle, identity: "session.\(sessionID).settings",
-                                         accent: .tronEmerald) {
+                                         accent: .tronPrimary) {
                     SessionSettingsView(sessionID: sessionID, ownedLayers: ["session"], projectCWD: snapshot.cwd)
                         .tronNavigationTitle(Self.settingsTitle)
                 } label: {
                     TronSettingsRow(icon: "slider.horizontal.3", title: Self.settingsTitle,
-                                    subtitle: "Session overrides and project settings", accent: .tronEmerald)
+                                    subtitle: "Session overrides and project settings", accent: .tronPrimary)
                 }
                 .accessibilityIdentifier("chat-settings-link")
             }
@@ -559,7 +559,7 @@ struct SessionContextSheet: View {
                 icon: "archivebox",
                 title: "Archived",
                 subtitle: "Hidden from the dashboard. Sending a message unarchives it.",
-                accent: .tronEmerald
+                accent: .tronPrimary
             ) {
                 TronInlineActionLabel("Unarchive", icon: "arrow.uturn.backward", isWorking: unarchiving)
             }
@@ -572,14 +572,14 @@ struct SessionContextSheet: View {
 
     private var gitRow: some View {
         Button { destination = .workspace } label: {
-            SessionWorkspaceSummaryRow(presentation: workspacePresentation, accent: .tronEmerald)
+            SessionWorkspaceSummaryRow(presentation: workspacePresentation, accent: .tronPrimary)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(WorkspaceInspectorSheet.title)
     }
 
     private func divider() -> some View {
-        TronSettingsDivider(accent: .tronEmerald)
+        TronSettingsDivider(accent: .tronPrimary)
     }
 
     private func manageRow(

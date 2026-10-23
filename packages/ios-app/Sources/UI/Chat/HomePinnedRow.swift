@@ -65,7 +65,7 @@ struct HomePinnedRow: View {
         .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)
         .padding(.vertical, 5)
         .frame(minHeight: 34)
-        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 12, tintOpacity: 0.14, interactive: true)
+        .tronGlassSurface(accent: .tronPrimary, cornerRadius: 12, tintOpacity: 0.14, interactive: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Home, \(detail), \(trailing)")
         .accessibilityIdentifier("home-pinned-row-content")
@@ -97,7 +97,7 @@ struct HomePinnedRow: View {
     private var icon: some View {
         Image(systemName: "house.fill")
             .font(TronTypography.sans(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
-            .foregroundStyle(Color.tronEmerald)
+            .foregroundStyle(Color.tronPrimary)
             .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
             .accessibilityHidden(true)
     }
@@ -124,7 +124,7 @@ struct HomePinnedRow: View {
             }
             Text(trailing)
                 .font(TronTypography.settingsRowSubtext)
-                .foregroundStyle(action == .unavailable ? Color.tronTextMuted : Color.tronEmerald)
+                .foregroundStyle(action == .unavailable ? Color.tronTextMuted : Color.tronPrimary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

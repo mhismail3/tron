@@ -19,7 +19,7 @@ struct HomePagedListSheet: View {
 
     private var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
     private var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
-    private var accent: Color { theme?.accent ?? .tronEmerald }
+    private var accent: Color { theme?.accent ?? .tronPrimary }
     private var isMemory: Bool { if case .memory = destination { return true }; return false }
     private var identifier: String { isMemory ? "home-memory" : "home-tasks" }
     private var canAct: Bool { active && identity != nil && store.identity == identity }
@@ -210,7 +210,7 @@ extension HomeMemoryPresentation {
             return (icon, ChatSemanticPillRole.tool.accent, item.kind == .echo ? "Tool result" : "Tool call")
         }
         return switch item.attribution {
-        case .user: ("person", .tronEmerald, "You")
+        case .user: ("person", .tronPrimary, "You")
         case .assistant: ("text.bubble", .tronTeal, "Home")
         case .tool: ("wrench.adjustable", .tronInfo, "Tool")
         case .event: ("bolt", .tronAmber, "Result")

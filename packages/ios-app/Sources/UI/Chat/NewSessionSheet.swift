@@ -53,7 +53,7 @@ struct NewSessionSheet: View {
                         TronCardRail(
                             items: quickSelections,
                             identity: \.id,
-                            accent: .tronEmerald,
+                            accent: .tronPrimary,
                             isSelected: isSelectedQuickSelection,
                             accessibilityLabel: { "\($0.projectName), \($0.serverName)" },
                             accessibilityValue: { isSelectedQuickSelection($0) ? "Selected" : "" },
@@ -71,7 +71,7 @@ struct NewSessionSheet: View {
                         title: "Server",
                         value: selectedServer?.label ?? "Select",
                         caption: selectedServer.map { "\($0.host):\($0.port)" } ?? "Choose the server for this new session.",
-                        accent: .tronBurgundy
+                        accent: .tronPrimary
                     ) { if pinnedProfileID == nil { showServers = true } }
 
                     setupCard(
@@ -79,7 +79,7 @@ struct NewSessionSheet: View {
                         title: "Workspace",
                         value: workspace.isEmpty ? "Select" : abbreviated(workspace),
                         caption: "Directory where Tron will operate.",
-                        accent: .tronEmerald
+                        accent: .tronPrimary
                     ) { showBrowser = true }
 
                     if !workspace.isEmpty, let profileID = activeProfileID {
@@ -91,7 +91,7 @@ struct NewSessionSheet: View {
                         title: "Source Control",
                         value: sourceControl.displayName,
                         caption: sourceControl.displayDescription,
-                        accent: .tronTeal
+                        accent: .tronPrimary
                     ) { showSourceControl = true }
 
                     setupCard(
@@ -99,7 +99,7 @@ struct NewSessionSheet: View {
                         title: "Model",
                         value: selectedModel?.displayName ?? "Default",
                         caption: selectedModel?.displayDescription ?? "Use the current agent default.",
-                        accent: .tronPurple
+                        accent: .tronPrimary
                     ) { showModels = true }
 
                     if needsTrust {
@@ -172,7 +172,7 @@ struct NewSessionSheet: View {
                 NavigationStack {
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(alignment: .leading, spacing: 16) {
-                            TronSettingsGroup("Paired Servers", detail: "New sessions will be created on the selected server.", accent: .tronBurgundy) {
+                            TronSettingsGroup("Paired Servers", detail: "New sessions will be created on the selected server.", accent: .tronPrimary) {
                                 VStack(spacing: 0) {
                                     ForEach(Array(pairedServers.enumerated()), id: \.element.id) { index, profile in
                                         if index > 0 { TronSettingsDivider() }
@@ -185,7 +185,7 @@ struct NewSessionSheet: View {
                                                 detail: profile.isEnabled
                                                     ? "\(profile.host):\(profile.port)"
                                                     : "Disabled · \(profile.host):\(profile.port)",
-                                                accent: .tronBurgundy
+                                                accent: .tronPrimary
                                             )
                                             .contentShape(Rectangle())
                                         }
@@ -198,20 +198,20 @@ struct NewSessionSheet: View {
                         .padding(20)
                     }
                     .tronScrollEdgeChrome()
-                    .tronNavigationTitle("Select Server", accent: .tronBurgundy)
+                    .tronNavigationTitle("Select Server", accent: .tronPrimary)
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button { showServers = false } label: {
                                 Image(systemName: "checkmark")
                                     .font(TronTypography.buttonSM)
-                                    .tronToolbarAction(accent: .tronBurgundy)
+                                    .tronToolbarAction(accent: .tronPrimary)
                             }
                             .accessibilityLabel("Done")
                         }
                     }
                 }
                 .tronTopBlur(.sheet)
-                .tronSettingsVisualTheme(accent: .tronBurgundy)
+                .tronSettingsVisualTheme(accent: .tronPrimary)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
             }
@@ -223,19 +223,19 @@ struct NewSessionSheet: View {
                     )
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
-                            ToolbarItem(placement: .principal) { TronSheetTitle(title: "Model", accent: .tronPurple) }
+                            ToolbarItem(placement: .principal) { TronSheetTitle(title: "Model", accent: .tronPrimary) }
                             ToolbarItem(placement: .confirmationAction) {
                                 Button { showModels = false } label: {
                                     Image(systemName: "checkmark")
                                         .font(TronTypography.buttonSM)
-                                        .tronToolbarAction(accent: .tronPurple)
+                                        .tronToolbarAction(accent: .tronPrimary)
                                 }
                                 .accessibilityLabel("Done")
                             }
                         }
                 }
                 .tronTopBlur(.sheet)
-                .tronSettingsVisualTheme(accent: .tronPurple)
+                .tronSettingsVisualTheme(accent: .tronPrimary)
                 .tronContentFitDetents()
                 .presentationDragIndicator(.hidden)
             }
@@ -363,6 +363,7 @@ struct NewSessionSheet: View {
                 )
             }
         }
+        .tronSettingsVisualTheme(accent: .tronPrimary)
         .interactiveDismissDisabled(creating)
     }
 

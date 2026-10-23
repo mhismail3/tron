@@ -11,7 +11,7 @@ struct AppLocalBehaviorSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
-                TronSettingsGroup("Dashboard", accent: .tronEmerald) {
+                TronSettingsGroup("Dashboard", accent: .tronPrimary) {
                     TronChoiceRow(icon: "rectangle.3.group", title: "Dashboard View",
                                   choices: DashboardSessionSortMode.allCases.map { TronChoice(id: $0, label: $0.rawValue, detail: $0.detail) },
                                   selected: settings.dashboardFilter.sortMode) { settings.dashboardFilter.setSortMode($0) }
@@ -28,17 +28,17 @@ struct AppLocalBehaviorSettingsView: View {
                         value: $settings.dashboardChatsPerProject
                     )
                 }
-                .tronSettingsVisualTheme(inheriting: .tronEmerald)
+                .tronSettingsVisualTheme(inheriting: .tronPrimary)
                 .tronSettingsCaption("Choose 1–100 chats (default 10). Show more reveals another batch of this size. Applies to every project on this iPhone.")
 
-                TronSettingsGroup("Subagent Activity", accent: .tronEmerald) {
+                TronSettingsGroup("Subagent Activity", accent: .tronPrimary) {
                     TronValueRow(
                         icon: "circle.dotted",
                         title: "Show finished subagents",
                         detail: "Keep the subagent button visible after work finishes",
-                        accent: .tronEmerald
+                        accent: .tronPrimary
                     ) {
-                        TronInlineMenu(retentionLabel(settings.subagentRecentFinishedRetentionMinutes), accent: .tronEmerald) {
+                        TronInlineMenu(retentionLabel(settings.subagentRecentFinishedRetentionMinutes), accent: .tronPrimary) {
                             ForEach(Array(AppLocalBehaviorSettings.subagentRecentFinishedRetentionRange), id: \.self) { minutes in
                                 Button(retentionLabel(minutes)) {
                                     settings.subagentRecentFinishedRetentionMinutes = minutes
@@ -49,7 +49,7 @@ struct AppLocalBehaviorSettingsView: View {
                         .accessibilityValue(retentionLabel(settings.subagentRecentFinishedRetentionMinutes))
                     }
                 }
-                .tronSettingsVisualTheme(inheriting: .tronEmerald)
+                .tronSettingsVisualTheme(inheriting: .tronPrimary)
                 .tronSettingsCaption("Only active hides the button as soon as all subagents finish. This applies to every session on this iPhone. Finished subagents are always available in Manage Session’s Subagent History.")
             }
             .padding(.horizontal, 20)

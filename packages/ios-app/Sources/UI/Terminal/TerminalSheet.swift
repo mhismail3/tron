@@ -8,7 +8,7 @@ struct SessionTerminalToolbarButton: View {
     let enabled: Bool
     let identifier: String
     /// The presenting sheet's title tint.
-    var accent: SwiftUI.Color = .tronEmerald
+    var accent: SwiftUI.Color = .tronPrimary
     let action: () -> Void
 
     var body: some View {
@@ -134,7 +134,7 @@ struct TerminalSheetChrome<Content: View, MenuContent: View>: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    private var accent: SwiftUI.Color { settingsTheme?.accent ?? .tronEmerald }
+    private var accent: SwiftUI.Color { settingsTheme?.accent ?? .tronPrimary }
 
     var body: some View {
         NavigationStack {

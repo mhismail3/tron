@@ -26,7 +26,7 @@ struct TronConfirmationTextField: View {
             }
         }
         .padding(.horizontal, TronSpacing.xl)
-        .tronGlassSurface(accent: settingsTheme?.accent ?? .tronEmerald, tintOpacity: 0.08)
+        .tronGlassSurface(accent: settingsTheme?.accent ?? .tronPrimary, tintOpacity: 0.08)
         .task { focused = true }
     }
 }

@@ -118,14 +118,14 @@ struct SettingsView: View {
                         action: { showsNotifications = true }
                     )
                     SettingsChangesLink(scope: .all, onOpenSession: onImported)
-                        .tronSettingsVisualTheme(accent: .tronEmerald)
+                        .tronSettingsVisualTheme(accent: .tronPrimary)
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Global Settings") }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: dynamicTypeSize.isAccessibilitySize ? "xmark" : "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                             .accessibilityLabel("Done")
                     }
                     .accessibilityIdentifier("settings-done")
@@ -197,12 +197,12 @@ enum SettingsGroupKind {
         }
     }
 
-    var accent: Color {
+    @MainActor var accent: Color {
         switch self {
         case .agent: .tronPurple
         case .tools: .tronCyan
         case .accounts: .tronIndigo
-        case .more, .iphone: .tronEmerald
+        case .more, .iphone: .tronPrimary
         case .diagnostics: .tronSlate
         }
     }
@@ -373,8 +373,8 @@ struct SessionSettingsView: View {
                         TronSheetLoadingState(label: "Loading settings…")
                     } else {
                         if project == nil {
-                            TronSettingsGroup("Settings", accent: .tronEmerald) { links(rows, sections) }
-                                .tronSettingsVisualTheme(accent: .tronEmerald)
+                            TronSettingsGroup("Settings", accent: .tronPrimary, sectionCount: 1) { links(rows, sections) }
+                                .tronSettingsVisualTheme(accent: .tronPrimary)
                         }
                     }
                 }

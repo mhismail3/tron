@@ -236,7 +236,7 @@ struct ArchivedSessionsSectionHeader: View {
                 Spacer(minLength: SessionDashboardLayout.iconTextSpacing)
                 TronDisclosureChevron(isExpanded: isExpanded, size: SessionDashboardLayout.headerChevronSize)
             }
-            .foregroundStyle(Color.tronEmerald)
+            .foregroundStyle(Color.tronPrimary)
             .padding(.leading, SessionDashboardLayout.headerLeadingPadding)
             .padding(.trailing, SessionDashboardLayout.rowContainerHorizontalInset)
             .padding(.top, SessionDashboardLayout.headerTopPadding)
@@ -263,7 +263,7 @@ struct ArchivedSessionsSectionHeader: View {
         if isAwaitingFirstPage {
             ProgressView()
                 .controlSize(.small)
-                .tint(Color.tronEmerald)
+                .tint(Color.tronPrimary)
                 .transition(.opacity)
                 .accessibilityHidden(true)
         } else {

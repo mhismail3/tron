@@ -20,7 +20,7 @@ struct SettingsToolsEditor: View {
         _chosen = State(initialValue: selected)
     }
 
-    private var accent: Color { settingsTheme?.accent ?? .tronEmerald }
+    private var accent: Color { settingsTheme?.accent ?? .tronPrimary }
     private var groups: [AvailableToolGroup] {
         let tools = options.compactMap { option -> JSONValue? in
             guard let name = option.value.stringValue, onSave != nil || chosen.contains(name) else { return nil }

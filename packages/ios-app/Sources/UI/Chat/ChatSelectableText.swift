@@ -172,7 +172,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         view.textContainer.lineFragmentPadding = 0
         view.adjustsFontForContentSizeCategory = false
         view.dataDetectorTypes = []
-        view.linkTextAttributes = [.foregroundColor: UIColor(Color.tronEmerald)]
+        view.linkTextAttributes = [.foregroundColor: UIColor(Color.tronPrimary)]
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.setContentHuggingPriority(.defaultLow, for: .horizontal)
         view.accessibilityIdentifier = Self.accessibilityIdentifier

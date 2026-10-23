@@ -323,7 +323,7 @@ struct ChatComposerView: View {
                     size: ComposerControlMetrics.symbolSize,
                     weight: .semibold
                 ))
-                .foregroundStyle(attachmentActionsEnabled ? Color.tronEmerald : Color.tronTextMuted)
+                .foregroundStyle(attachmentActionsEnabled ? Color.tronPrimary : Color.tronTextMuted)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             ComposerAttachmentMenuButton(
@@ -347,7 +347,7 @@ struct ChatComposerView: View {
         Button(action: onCatchUp) {
             Image(systemName: "arrow.down")
                 .font(TronTypography.buttonSM)
-                .foregroundStyle(Color.tronEmerald)
+                .foregroundStyle(Color.tronPrimary)
                 .frame(width: ComposerControlMetrics.hitTarget, height: ComposerControlMetrics.hitTarget)
                 .contentShape(Circle())
         }
@@ -404,7 +404,7 @@ private struct ComposerPlaceholder: View {
         Text(line)
             .font(TronTypography.input)
             // Typed text is full emerald; the prompt reads as a dimmer hint.
-            .foregroundStyle(Color.tronEmerald.opacity(0.55))
+            .foregroundStyle(Color.tronPrimary.opacity(0.55))
             .lineLimit(1)
     }
 }

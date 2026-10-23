@@ -425,7 +425,7 @@ struct QueuedMessageRow: View {
     private var behavior: ChatPromptBehavior { ChatPromptBehavior(message.behavior) }
 
     private var accent: Color {
-        behavior == .steer ? .tronEmerald : .tronPurple
+        behavior == .steer ? .tronPrimary : .tronPurple
     }
 
     private var deliveryDetail: String {
@@ -633,5 +633,5 @@ struct QueuedMessageEditorSheet: View {
         .tronSettingsVisualTheme(accent: accent)
     }
 
-    private var accent: Color { behavior == .steer ? .tronEmerald : .tronPurple }
+    private var accent: Color { behavior == .steer ? .tronPrimary : .tronPurple }
 }

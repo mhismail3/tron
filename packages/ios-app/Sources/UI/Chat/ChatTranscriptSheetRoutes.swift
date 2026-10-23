@@ -161,7 +161,7 @@ struct ChatTranscriptSheetHost: ViewModifier {
                 resolve: resolveThinkingTrace
             )
         case .prompt(let reading):
-            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: .tronEmerald)
+            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: .tronPrimary)
         case .notificationDetail(let value):
             LiveNotificationDetailSheet(
                 eventID: value.eventID,

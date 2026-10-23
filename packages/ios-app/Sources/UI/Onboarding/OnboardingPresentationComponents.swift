@@ -91,8 +91,8 @@ struct OnboardingCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) { content }
             .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.12)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.tronEmerald.opacity(0.22), lineWidth: 1))
+            .glassEffect(.regular.tint(Color.tronPrimary.opacity(0.12)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.tronPrimary.opacity(0.22), lineWidth: 1))
     }
 }
 
@@ -100,7 +100,7 @@ struct OnboardingInfoRow: View {
     let icon, title, subtitle: String
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronEmerald).frame(width: 26, height: 26)
+            Image(systemName: icon).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronPrimary).frame(width: 26, height: 26)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextPrimary).fixedSize(horizontal: false, vertical: true)
                 Text(subtitle).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary).fixedSize(horizontal: false, vertical: true)

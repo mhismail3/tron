@@ -90,7 +90,7 @@ struct HomeSectionRowsSheet: View, Equatable {
         let visible = SessionTitleSearch.filter(rows, query: query) { $0.session.title }
         TronDashboardFilterSheet(
             title: section.title,
-            accent: .tronEmerald,
+            accent: .tronPrimary,
             detents: [.medium, .large],
             onDone: onDone
         ) {
@@ -99,14 +99,14 @@ struct HomeSectionRowsSheet: View, Equatable {
                     title: "No sessions",
                     detail: "There are no sessions in this section on the selected servers.",
                     icon: "bubble.left.and.bubble.right",
-                    accent: .tronEmerald
+                    accent: .tronPrimary
                 )
             } else if visible.isEmpty {
                 TronPlaceholderState(
                     title: "No matches",
                     detail: "No session title matches “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”.",
                     icon: "magnifyingglass",
-                    accent: .tronEmerald
+                    accent: .tronPrimary
                 )
             }
             LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
@@ -128,7 +128,7 @@ struct HomeSectionRowsSheet: View, Equatable {
                 text: $query,
                 isPresented: $showingSearch,
                 prompt: "Search titles",
-                accent: .tronEmerald,
+                accent: .tronPrimary,
                 buttonLabel: "Search \(section.title)",
                 buttonIdentifier: "home-\(section.rawValue)-sheet-search",
                 onDismiss: dismissSearch

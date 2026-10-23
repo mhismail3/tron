@@ -138,7 +138,7 @@ struct OnboardingView: View {
         .tronPresentation()
         .tronScreenBackground()
         .tronTopBlur(.sheet)
-        .tint(.tronEmerald)
+        .tint(.tronPrimary)
         .onDisappear { model.noticeCenter.retire(scope: noticeScope) }
         .tronManagedSheet(
             isPresented: $showScanner,
@@ -161,7 +161,7 @@ struct OnboardingView: View {
                         Button { showScanner = false } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .tronToolbarAction(accent: .tronEmerald)
+                                .tronToolbarAction(accent: .tronPrimary)
                         }
                         .accessibilityLabel("Done")
                     }
@@ -393,13 +393,13 @@ struct OnboardingView: View {
     private var pageDots: some View {
         HStack(spacing: 6) {
             ForEach(Step.allCases, id: \.self) { value in
-                Capsule().fill(value.rawValue <= step.rawValue ? Color.tronEmerald : Color.tronTextMuted.opacity(0.45))
+                Capsule().fill(value.rawValue <= step.rawValue ? Color.tronPrimary : Color.tronTextMuted.opacity(0.45))
                     .frame(width: value == step ? 16 : 6, height: 6)
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.14)), in: Capsule())
+        .glassEffect(.regular.tint(Color.tronPrimary.opacity(0.14)), in: Capsule())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Onboarding step \(step.rawValue + 1) of \(Step.allCases.count)")
         .accessibilityRespondsToUserInteraction(false)

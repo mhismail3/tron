@@ -57,7 +57,7 @@ struct TronSelectionRow<Choices: View>: View {
     let title: String
     var detail: String? = nil
     let value: String
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     @ViewBuilder let choices: () -> Choices
 
     var body: some View {
@@ -86,7 +86,7 @@ struct TronChoiceRow<ID: Hashable>: View {
     var detail: String? = nil
     let choices: [TronChoice<ID>]
     let selected: ID?
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     let onChoose: (ID) -> Void
 
     var body: some View {
@@ -185,7 +185,7 @@ struct TronSelectionSheetRow<Destination: View>: View {
     var detail: String? = nil
     let value: String
     var accessibilityLabel: String? = nil
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     /// A short count or state is shown whole; the row layout makes room.
     var valueFixed = false
     @ViewBuilder let destination: () -> Destination
@@ -216,14 +216,14 @@ struct TronCatalogOptionRow: View {
     let action: () -> Void
     @Environment(\.tronSettingsVisualTheme) private var theme
 
-    private var accent: Color { theme?.accent ?? (isSelected ? .tronEmerald : .tronSlate) }
+    private var accent: Color { theme?.accent ?? (isSelected ? .tronPrimary : .tronSlate) }
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Group {
                     if isSelected && isApplying {
-                        TronPulseLoadingIndicator(accent: theme?.accent ?? .tronEmerald, size: 14)
+                        TronPulseLoadingIndicator(accent: theme?.accent ?? .tronPrimary, size: 14)
                     } else {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : icon)
                             .foregroundStyle(accent)
@@ -297,7 +297,7 @@ struct TronNumberSettingRow: View {
     let title: String
     var detail: String? = nil
     @Binding var value: Int
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     var stagedText: Binding<String?>? = nil
     @Environment(\.tronSettingsInputScope) private var inputScope
     @State private var text: String?
@@ -378,7 +378,7 @@ struct TronTextSettingRow: View {
     var detail: String? = nil
     @Binding var value: String
     var keyboard: UIKeyboardType = .default
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
 
     var body: some View {
         TronSettingsRow(icon: icon, title: title, subtitle: detail, accent: accent) {

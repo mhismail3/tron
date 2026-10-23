@@ -176,9 +176,9 @@ private struct TronListLeadingView: View {
                 Text(number.formatted())
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .monospacedDigit()
-                    .foregroundStyle(Color.tronEmerald)
+                    .foregroundStyle(Color.tronPrimary)
                     .frame(width: 24, height: 24)
-                    .overlay(Circle().strokeBorder(Color.tronEmerald, lineWidth: 1.5))
+                    .overlay(Circle().strokeBorder(Color.tronPrimary, lineWidth: 1.5))
             }
         }
         .frame(width: TronListMetrics.leadingWidth)
@@ -295,7 +295,7 @@ struct TronListGroup<Row: Identifiable, RowView: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: section.tint ?? .tronEmerald, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.10,
+        .tronGlassSurface(accent: section.tint ?? .tronPrimary, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.10,
                           respectsSettingsTheme: section.tint == nil)
         .clipShape(RoundedRectangle(cornerRadius: TronListMetrics.cornerRadius, style: .continuous))
         .accessibilityElement(children: .contain)
@@ -342,7 +342,7 @@ struct TronFeedCard<Content: View>: View {
     @ViewBuilder let content: () -> Content
     var body: some View {
         content()
-            .tronScrollSurface(accent: .tronEmerald, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.07)
+            .tronScrollSurface(accent: .tronPrimary, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.07)
             .environment(\.tronSettingsVisualTheme, nil)
     }
 }
@@ -366,7 +366,7 @@ struct TronFeedStateRow: View {
         case .loading:
             TronFeedCard {
                 HStack(spacing: 10) {
-                    ProgressView().tint(.tronEmerald)
+                    ProgressView().tint(.tronPrimary)
                     Text("Loading more…").font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 52)
@@ -379,7 +379,7 @@ struct TronFeedStateRow: View {
                     Image(systemName: "exclamationmark.triangle").foregroundStyle(Color.tronAmber)
                     Text(message).font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Button(action: retry) { TronInlineActionLabel("Retry", accent: .tronEmerald) }
+                    Button(action: retry) { TronInlineActionLabel("Retry", accent: .tronPrimary) }
                         .buttonStyle(.plain).accessibilityIdentifier("feed-retry")
                 }
                 .padding(.horizontal, TronListMetrics.horizontalPadding).frame(minHeight: 52)
@@ -440,7 +440,7 @@ struct TronFeedPositionChip: View {
                         Text("of \(total.formatted())\(totalIsExact ? "" : "+")").font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
                         bar(low: low, high: high, total: total)
                     }
-                    Image(systemName: "arrow.up").font(.system(size: 11, weight: .bold)).foregroundStyle(Color.tronEmerald)
+                    Image(systemName: "arrow.up").font(.system(size: 11, weight: .bold)).foregroundStyle(Color.tronPrimary)
                 }
                 .monospacedDigit()
                 .padding(.horizontal, 13).frame(height: 30)
@@ -461,7 +461,7 @@ struct TronFeedPositionChip: View {
         let length = max(Double(high - low + 1) / Double(max(total, 1)), 0.04)
         return Capsule().fill(Color.tronTextPrimary.opacity(0.1)).frame(width: 44, height: 4)
             .overlay(alignment: .leading) {
-                Capsule().fill(Color.tronEmerald).frame(width: 44 * min(length, 1), height: 4)
+                Capsule().fill(Color.tronPrimary).frame(width: 44 * min(length, 1), height: 4)
                     .offset(x: 44 * min(start, 1 - min(length, 1)))
             }
             .accessibilityHidden(true)

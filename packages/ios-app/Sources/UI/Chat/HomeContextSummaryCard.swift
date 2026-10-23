@@ -15,7 +15,7 @@ struct HomeContextSummaryCard: View {
     }
 
     var body: some View {
-        TronGlassCard(accent: .tronEmerald) {
+        TronGlassCard(accent: .tronPrimary) {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
                 HStack(spacing: TronSpacing.md) {
                     TronStatusPill(text: HomeStatusLinePresentation.state(read.status), accent: HomeSheet.statusAccent(read.status))
@@ -28,7 +28,7 @@ struct HomeContextSummaryCard: View {
                         .accessibilityIdentifier("home-manage-workers")
                 }
                 HStack(spacing: TronSpacing.xl) {
-                    SessionContextProgressRing(fraction: percent / 100, accent: .tronEmerald, diameter: TronSpacing.xlarge)
+                    SessionContextProgressRing(fraction: percent / 100, accent: .tronPrimary, diameter: TronSpacing.xlarge)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Context used")
                         .accessibilityValue("\(Int(percent.rounded())) percent")

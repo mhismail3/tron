@@ -74,7 +74,7 @@ struct ComposerAttachmentMenuButton: UIViewRepresentable {
             destination: ChatAttachmentDestination
         ) -> UIAction {
             let image = UIImage(systemName: systemImage)?.withTintColor(
-                UIColor(Color.tronEmerald),
+                UIColor(Color.tronPrimary),
                 renderingMode: .alwaysOriginal
             )
             return UIAction(title: title, image: image) { [weak self] _ in

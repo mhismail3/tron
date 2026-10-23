@@ -44,7 +44,9 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   completion and stop on repeated cursors. Choices open picker sheets of `TronCatalogOptionRow`
   (native menus fail inside nested sheets, #877); numbers and ordered choices use the shared
   anchored slider with Gateway-served bounds; a tap anywhere outside it closes and saves it, even
-  below a short embedded section. Session and Home settings place sections in Global's group
+  below a short embedded section. Embedded renderers inherit the enclosing sheet's slider host;
+  only standalone renderers install one, so the editor uses the sheet viewport rather than its card.
+  Session and Home settings place sections in Global's group
   cards (Agent, Tools & Extensions, More), every section a drill-in row; overrides show the
   shared Overridden pill beside the row title and Revert after the value.
 - **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
@@ -56,8 +58,9 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Project, Session, Global); Home writes its saved settings, a chat its own Session scope.
   Both reuse Global's renderer and editors. Manage model cards select the three chat-model keys:
   catalog header/Switch Model, Effort and the current model-qualified Context Window. They use the
-  same writes, approvals and override/Revert path; changing the card changes no scope semantics.
-  Home Settings has one Settings container (Models: workers/delegation only, More Settings, Tools).
+  same writes, approvals and Revert path; changing the card changes no scope semantics. The model
+  header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
+  Home Settings has one untitled Settings container (Models: workers/delegation only, More Settings, Tools).
   Session Settings has one Settings container (Compaction, More Settings, Tools, Project Trust),
   no Models subsheet. Project-owned controls are read-only with a shared Project info pill;
   explicit overrides have Overridden and circular Revert. `SettingsProjectGroups` shows applied

@@ -13,12 +13,12 @@ struct ManageModelConfigurationCard: View {
     }
 
     var body: some View {
-        TronGlassCard(accent: .tronEmerald) {
+        TronGlassCard(accent: .tronPrimary) {
             SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ["session"],
                 presentation: .keys(["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]),
                 embedded: true, modelConfiguration: true)
         }
-        .tronSettingsVisualTheme(accent: .tronEmerald)
+        .tronSettingsVisualTheme(accent: .tronPrimary)
         .controlSize(.small)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(home ? "home-model-summary" : "session-model-summary")

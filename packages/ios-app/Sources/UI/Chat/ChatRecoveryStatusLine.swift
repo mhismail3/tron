@@ -50,7 +50,7 @@ struct ChatRecoveryStatusLine: View {
                 .foregroundStyle(status.tone.primaryColor)
                 Text("Retry")
                     .fontWeight(.semibold)
-                    .foregroundStyle(Color.tronEmerald)
+                    .foregroundStyle(Color.tronPrimary)
                     .fixedSize()
             }
             .font(TronTypography.bodySM)

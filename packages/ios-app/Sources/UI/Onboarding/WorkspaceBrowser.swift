@@ -14,7 +14,7 @@ struct WorkspaceBrowser: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var theme
-    private var accent: Color { theme?.accent ?? .tronEmerald }
+    private var accent: Color { theme?.accent ?? .tronPrimary }
     let shortcuts: [WorkspaceShortcut]
     let initialPath: String?
     let onSelect: (String) -> Void

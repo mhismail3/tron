@@ -20,7 +20,7 @@ struct SettingsSecretEditor: View {
                     .tronTextEntryDone()
                     .accessibilityLabel("New value")
                     .tronSettingsCaption(help)
-                TronGlassCard(accent: .tronEmerald) {
+                TronGlassCard(accent: .tronPrimary) {
                     Button { draft = ""; onChange(nil); dismiss() } label: {
                         TronSettingsRow(icon: "arrow.uturn.backward", title: "Follow the default")
                     }
@@ -165,7 +165,7 @@ struct SettingsListEditor: View {
                     TronSelectionSheetRow(icon: "plus", title: "Add model", value: "Choose") {
                         entryPicker { value in if !items.contains(where: { $0.text == value }) { items.append(Item(text: value)) } }
                     }
-                    .tronGlassSurface(accent: .tronEmerald)
+                    .tronGlassSurface(accent: .tronPrimary)
                 } else {
                     TronSettingsRow(icon: "plus", title: "Add value") {
                         TextField("Value", text: $next,
@@ -178,7 +178,7 @@ struct SettingsListEditor: View {
                         Button(action: add) { TronInlineActionLabel("Add") }
                             .buttonStyle(.plain).disabled(next.isEmpty)
                     }
-                    .tronGlassSurface(accent: .tronEmerald)
+                    .tronGlassSurface(accent: .tronPrimary)
                     .tronSettingsCaption(entry.map { "\($0.hint) For example: \($0.example)" })
                 }
             }

@@ -15,11 +15,26 @@ struct AppearanceSettingsView: View {
                     TronSegmentedControl(
                         options: AppearanceMode.allCases.map { (label: $0.label, value: $0) },
                         selection: $appearance.mode,
-                        accent: .tronEmerald,
+                        accent: .tronPrimary,
                         minimumHeight: 40
                     )
                     .frame(maxWidth: .infinity)
                     .accessibilityLabel("Color Mode")
+                }
+
+                TronSettingsGroup("Theme color", accent: .tronPrimary) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(ThemeColor.allCases.enumerated()), id: \.element.id) { index, color in
+                            if index > 0 { TronSettingsDivider(accent: .tronPrimary) }
+                            Button { appearance.themeColor = color } label: {
+                                TronSettingsRow(icon: appearance.themeColor == color ? "checkmark.circle.fill" : "circle",
+                                                title: color.label, accent: .tronPrimary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("theme-color-\(color.rawValue)")
+                            .accessibilityValue(appearance.themeColor == color ? "Selected" : "")
+                        }
+                    }
                 }
 
                 TronSettingsGroup("Text Font", accent: .tronPurple) {

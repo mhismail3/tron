@@ -58,7 +58,7 @@ struct HomeTaskSheet: View {
 
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
     /// The family accent of the Manage Home row that opened this branch (#925).
-    private var accent: Color { visualTheme?.accent ?? .tronEmerald }
+    private var accent: Color { visualTheme?.accent ?? .tronPrimary }
     private var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     var canMutate: Bool {
         guard active, !model.homeMutations.isRunning(profileID: profileID),

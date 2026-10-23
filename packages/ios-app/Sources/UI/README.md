@@ -8,7 +8,7 @@ reusable components. Its binding rules are [presentation parity](../../docs/pres
 ## Owns
 
 - `Theme/`: `TronPresentation` (app-wide boundary: managed sheets, settings rows and groups,
-  confirmations, loading, top blur, toolbar tint), `TronTheme`, `FontSettings`, `TronFontLoader`,
+  confirmations, loading, top blur, toolbar tint), `TronTheme`, `ThemeColor`, `FontSettings`, `TronFontLoader`,
   `TronSettingControls`, `TronDateControls` (`TronDateValueButton`, `TronDatePickerSheet`, shared by
   Automations and Home), `TronCardRail`, `TronDisclosure`, `TronContentFitDetent`, `TronWidthCap`,
   `TronSafariView`.
@@ -31,6 +31,11 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   [presentation parity](../../docs/presentation-parity.md) together.
 - Fonts are built from descriptors and reused, bounded, by every input that shapes them; adaptive
   palette colors parse their hex once and select by interface style only when resolved.
+- Appearance stores the app's primary identity in `AppearanceSettings.themeColor`: Emerald,
+  Deep Burgundy or Olive Gold. `Color.tronPrimary` reads that observable owner; ink, title,
+  icon, container and pill tint share the adaptive ink without recreating navigation or chats.
+  Semantic status and resource identities stay independent. `TronSettingsGroup.sectionCount`
+  suppresses the heading for a declared single-container sheet while preserving its detail.
 - `ResourceTagLabel` is the one capsule for distribution (External, Module, Local) and scope
   (User, Project) tags; Project takes precedence and the tags are mutually exclusive.
 - `InAppNoticeHost` renders the State-owned notice center in one non-key, pass-through window per

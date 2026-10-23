@@ -301,7 +301,7 @@ struct HomeProfileItemEditor: View {
     @PresentationState private var replaces = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var theme
-    private var accent: Color { theme?.accent ?? .tronEmerald }
+    private var accent: Color { theme?.accent ?? .tronPrimary }
 
     init(item: HomeProfileListDTO.Item, onSave: @escaping (HomeProfileChange, String) -> Void) {
         self.item = item
@@ -374,7 +374,7 @@ struct HomeProfileRetireEditor: View {
     @PresentationState private var reason = ""
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var theme
-    private var accent: Color { theme?.accent ?? .tronEmerald }
+    private var accent: Color { theme?.accent ?? .tronPrimary }
 
     var body: some View {
         ScrollView {

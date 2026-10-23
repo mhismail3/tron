@@ -161,7 +161,7 @@ private struct TronPresentationModifier: ViewModifier {
         content
             .font(TronTypography.body)
             .foregroundStyle(Color.tronTextPrimary)
-            .tint(Color.tronEmerald)
+            .tint(Color.tronPrimary)
     }
 }
 
@@ -217,7 +217,7 @@ private struct TronCollectionSurfaceModifier: ViewModifier {
         content
             .font(TronTypography.body)
             .foregroundStyle(Color.tronTextPrimary)
-            .tint(Color.tronEmerald)
+            .tint(Color.tronPrimary)
             .scrollContentBackground(.hidden)
             .background { TronBackdrop().ignoresSafeArea() }
     }
@@ -297,7 +297,7 @@ extension View {
 
     /// Resolves direct icon/action paint through the active settings theme while
     /// retaining the supplied historical color outside Settings.
-    func tronSettingsAccent(_ fallback: Color = .tronEmerald) -> some View {
+    func tronSettingsAccent(_ fallback: Color = .tronPrimary) -> some View {
         modifier(TronSettingsAccentModifier(fallback: fallback))
     }
 
@@ -322,7 +322,7 @@ extension View {
     /// Historical app-owned Liquid Glass surface. System toolbar controls must
     /// not use this modifier because iOS already owns their container chrome.
     func tronGlassSurface(
-        accent: Color = .tronEmerald,
+        accent: Color = .tronPrimary,
         cornerRadius: CGFloat = 12,
         tintOpacity: Double = 0.14,
         interactive: Bool = false,
@@ -338,7 +338,7 @@ extension View {
     }
 
     func tronScrollSurface(
-        accent: Color = .tronEmerald,
+        accent: Color = .tronPrimary,
         cornerRadius: CGFloat = 12,
         tintOpacity: Double = 0.10
     ) -> some View {
@@ -357,7 +357,7 @@ extension View {
         modifier(TronToolbarActionAccent(accent: accent, role: role))
     }
 
-    func tronNavigationTitle(_ title: String, accent: Color = .tronEmerald) -> some View {
+    func tronNavigationTitle(_ title: String, accent: Color = .tronPrimary) -> some View {
         navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -429,7 +429,7 @@ struct TronActionButtonStyle: ButtonStyle {
     private var accent: Color {
         if let explicitAccent { return explicitAccent }
         return switch role {
-        case .standard, .primary: settingsTheme?.accent ?? Color.tronEmerald
+        case .standard, .primary: settingsTheme?.accent ?? Color.tronPrimary
         case .destructive: Color.tronError
         }
     }
@@ -477,7 +477,7 @@ struct TronIconButtonStyle: ButtonStyle {
     let size: CGFloat
     @Environment(\.isEnabled) private var isEnabled
 
-    init(accent: Color = .tronEmerald, size: CGFloat = 44) {
+    init(accent: Color = .tronPrimary, size: CGFloat = 44) {
         self.accent = accent
         self.size = max(44, size)
     }
@@ -521,7 +521,7 @@ struct TronPrimaryActionButton: View {
     }
 
     private var accent: Color {
-        role == .destructive ? .tronError : settingsTheme?.accent ?? .tronEmerald
+        role == .destructive ? .tronError : settingsTheme?.accent ?? .tronPrimary
     }
 }
 
@@ -540,7 +540,7 @@ private struct TronFieldSurfaceModifier: ViewModifier {
             .textFieldStyle(.plain)
             .font(monospaced ? TronTypography.code(size: TronTypography.sizeBody) : TronTypography.input)
             .foregroundStyle(Color.tronTextPrimary)
-            .tint(settingsTheme?.accent ?? .tronEmerald)
+            .tint(settingsTheme?.accent ?? .tronPrimary)
             .padding(.horizontal, compact ? TronSpacing.md : TronSpacing.section)
             .padding(.vertical, dense ? TronSpacing.xs : compact ? TronSpacing.sm : TronSpacing.md)
             .frame(minHeight: dense ? 48 : 52)
@@ -570,7 +570,7 @@ private struct TronInlineFieldModifier: ViewModifier {
     }
 
     func body(content: Content) -> some View {
-        let accent = settingsTheme?.accent ?? .tronEmerald
+        let accent = settingsTheme?.accent ?? .tronPrimary
         content
             .textFieldStyle(.plain)
             .font(font)
@@ -586,7 +586,7 @@ private struct TronTextEditorSurfaceModifier: ViewModifier {
         content
             .font(monospaced ? TronTypography.codeBlock : TronTypography.body)
             .foregroundStyle(Color.tronTextPrimary)
-            .tint(settingsTheme?.accent ?? .tronEmerald)
+            .tint(settingsTheme?.accent ?? .tronPrimary)
             .scrollContentBackground(.hidden)
             .padding(TronSpacing.md)
             .background(Color.tronSurfaceElevated.opacity(0.55), in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
@@ -761,7 +761,7 @@ struct TronReadOnlyTextView: UIViewRepresentable {
         }
         let textColor = UIColor(Color.tronTextPrimary)
         if view.textColor != textColor { view.textColor = textColor }
-        let tintColor = UIColor(Color.tronEmerald)
+        let tintColor = UIColor(Color.tronPrimary)
         if view.tintColor != tintColor { view.tintColor = tintColor }
         view.readerInset = inset
         view.applyDocumentInsets()
@@ -801,7 +801,7 @@ private struct TronSaveToolbarModifier: ViewModifier {
 struct TronSearchBar: View {
     @Binding var text: String
     var prompt = "Search"
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     var focusOnAppear = false
     var onClose: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
@@ -882,7 +882,7 @@ struct TronSearchBar: View {
 struct TronSegmentedControl<Value: Hashable>: View {
     let options: [(label: String, value: Value)]
     @Binding var selection: Value
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     var foreground: Color? = nil
     var minimumHeight: CGFloat = 44
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
@@ -924,7 +924,7 @@ struct TronSegmentedControl<Value: Hashable>: View {
 
 struct TronSheetTitle: View {
     let title: String
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     var icon: String? = nil
     var truncationMode: Text.TruncationMode = .tail
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
@@ -1236,7 +1236,7 @@ struct TronConfirmationSheet: View {
                     .padding(24)
                 }
                 .tronScrollEdgeChrome()
-                .tronNavigationTitle("Confirm", accent: .tronEmerald)
+                .tronNavigationTitle("Confirm", accent: .tronPrimary)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
@@ -1255,7 +1255,7 @@ struct TronConfirmationSheet: View {
                     if actionsContent == nil && placement == .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             confirmButton
-                                .tronToolbarAction(accent: .tronEmerald, role: destructive ? .destructive : .standard)
+                                .tronToolbarAction(accent: .tronPrimary, role: destructive ? .destructive : .standard)
                                 .accessibilityIdentifier("confirmation-primary-toolbar")
                         }
                     }
@@ -1280,7 +1280,7 @@ struct TronConfirmationSheet: View {
         .disabled(!canConfirm)
     }
 
-    private var accent: Color { destructive ? .tronError : settingsTheme?.accent ?? .tronEmerald }
+    private var accent: Color { destructive ? .tronError : settingsTheme?.accent ?? .tronPrimary }
 }
 
 /// Confirmation actions inherit the app's glass buttons and preserve SwiftUI's
@@ -1364,8 +1364,8 @@ extension View {
 /// `TronSheetTitle` and `tronToolbarAction` resolve through it, so a sheet's
 /// icons cannot drift from its title.
 enum TronSheetTint {
-    static func resolve(_ accent: Color?, theme: TronSettingsVisualTheme?) -> Color {
-        theme?.accent ?? accent ?? .tronEmerald
+    @MainActor static func resolve(_ accent: Color?, theme: TronSettingsVisualTheme?) -> Color {
+        theme?.accent ?? accent ?? .tronPrimary
     }
 }
 
@@ -1488,7 +1488,7 @@ struct TronGlassCard<Content: View>: View {
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(
-        accent: Color = .tronEmerald,
+        accent: Color = .tronPrimary,
         cornerRadius: CGFloat = 12,
         interactive: Bool = false,
         @ViewBuilder content: () -> Content
@@ -1546,6 +1546,7 @@ struct TronSettingsGroup<Content: View>: View {
     let inlineDetail: String?
     let accent: Color
     let surfaceStyle: TronSettingsGroupSurfaceStyle
+    let sectionCount: Int?
     let content: Content
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
@@ -1553,8 +1554,9 @@ struct TronSettingsGroup<Content: View>: View {
         _ title: String?,
         detail: String? = nil,
         inlineDetail: String? = nil,
-        accent: Color = .tronEmerald,
+        accent: Color = .tronPrimary,
         surfaceStyle: TronSettingsGroupSurfaceStyle = .glass,
+        sectionCount: Int? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -1562,12 +1564,13 @@ struct TronSettingsGroup<Content: View>: View {
         self.inlineDetail = inlineDetail
         self.accent = accent
         self.surfaceStyle = surfaceStyle
+        self.sectionCount = sectionCount
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
-            if title != nil || detail != nil {
+            if (sectionCount != 1 && title != nil) || detail != nil {
                 VStack(alignment: .leading, spacing: TronSpacing.xs) {
                     if let heading {
                         heading
@@ -1593,7 +1596,7 @@ struct TronSettingsGroup<Content: View>: View {
 
     /// One wrapping header, not an HStack that strands or truncates the note.
     private var heading: Text? {
-        guard let title else { return nil }
+        guard sectionCount != 1, let title else { return nil }
         let label = Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
         guard let inlineDetail else { return label }
         let note = Text(" (\(inlineDetail))").font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
@@ -1639,7 +1642,7 @@ struct TronSettingsRow<Trailing: View>: View {
         subtitleLineLimit: Int? = 2,
         subtitleIsMarkdown: Bool = false,
         titleIsIdentifier: Bool = false,
-        accent: Color = .tronEmerald,
+        accent: Color = .tronPrimary,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
@@ -1900,7 +1903,7 @@ extension TronSettingsRow where Trailing == EmptyView {
         subtitleLineLimit: Int? = 2,
         subtitleIsMarkdown: Bool = false,
         titleIsIdentifier: Bool = false,
-        accent: Color = .tronEmerald,
+        accent: Color = .tronPrimary,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
@@ -1960,7 +1963,7 @@ struct TronInfoCard: View {
 }
 
 struct TronSettingsDivider: View {
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
@@ -2015,7 +2018,7 @@ struct TronValueRow<Trailing: View>: View {
         title: String,
         detail: String? = nil,
         value: String? = nil,
-        accent: Color = .tronEmerald,
+        accent: Color = .tronPrimary,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
@@ -2068,7 +2071,7 @@ extension TronValueRow where Trailing == EmptyView {
         title: String,
         detail: String? = nil,
         value: String? = nil,
-        accent: Color = .tronEmerald
+        accent: Color = .tronPrimary
     ) {
         self.init(
             icon: icon,
@@ -2165,7 +2168,7 @@ struct TronToggleRow: View {
         icon: String,
         title: String,
         detail: String? = nil,
-        accent: Color = .tronEmerald,
+        accent: Color = .tronPrimary,
         isEnabled: Bool = true,
         isOn: Binding<Bool>
     ) {
@@ -2223,14 +2226,14 @@ struct TronInlineActionLabel: View {
     let title: String
     var icon: String?
     var isWorking = false
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     /// Optional local override for surfaces whose type scale differs from the
     /// shared compact-control default (for example, in-app notices).
     var fontSize: CGFloat?
     @Environment(\.controlSize) private var controlSize
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    init(_ title: String, icon: String? = nil, isWorking: Bool = false, fontSize: CGFloat? = nil, accent: Color = .tronEmerald, usesSemanticAccent: Bool = false) {
+    init(_ title: String, icon: String? = nil, isWorking: Bool = false, fontSize: CGFloat? = nil, accent: Color = .tronPrimary, usesSemanticAccent: Bool = false) {
         self.usesSemanticAccent = usesSemanticAccent
         self.title = title
         self.icon = icon
@@ -2418,7 +2421,7 @@ enum TronPulseLoadingIndicatorEngine {
 }
 
 struct TronPulseLoadingIndicator: View {
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     var size: CGFloat = 18
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -2536,7 +2539,7 @@ struct TronPlaceholderState: View {
 /// Partial, in-section loads use `TronLoadingState` instead.
 struct TronSheetLoadingState: View {
     let label: String
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
@@ -2619,7 +2622,7 @@ struct TronSheetLoadingHostModifier: ViewModifier {
 /// its label kept for VoiceOver so it can never wrap or crowd the row.
 struct TronLoadingState: View {
     let label: String
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {

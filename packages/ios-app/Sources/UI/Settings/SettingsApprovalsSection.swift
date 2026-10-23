@@ -3,7 +3,7 @@ import TronMobileCore
 
 extension View {
     /// Shows the scope's pending settings changes directly below this view.
-    func settingsApprovals(_ scope: SettingsApprovalScope, accent: Color = .tronEmerald) -> some View {
+    func settingsApprovals(_ scope: SettingsApprovalScope, accent: Color = .tronPrimary) -> some View {
         SettingsApprovalsSection(scope: scope, accent: accent, anchor: self)
     }
 }
