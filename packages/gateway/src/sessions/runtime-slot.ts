@@ -1700,12 +1700,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           ...(managedLoaderOptions ?? {}),
           ...profile.resources,
           extensionFactories,
-          extensionsOverride: (base) => attributeExtensions(base, this.dependencies.browserLiveViews ? {
-            views: this.dependencies.browserLiveViews,
-            sessionId: sessionManager.getSessionId(),
-            runtimeGeneration: this.runtimeGeneration,
-            observeResult: input => this.dependencies.modules.policy("toolResultProjection")?.().observeBrowserResult(input) ?? input.result,
-          } : undefined, { requireTronAskUser: true, ...(managedSubagents ? { managedSubagents } : {}) }),
+          extensionsOverride: (base) => attributeExtensions(base,
+            this.dependencies.modules.policy("toolResultProjection")?.().beginBrowserLoad(sessionManager.getSessionId(), this.runtimeGeneration),
+            { requireTronAskUser: true, ...(managedSubagents ? { managedSubagents } : {}) }),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });

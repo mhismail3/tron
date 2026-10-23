@@ -19,6 +19,8 @@ settlement](../../docs/native-tool-settlement.md).
 They close over existing display owners; native capture remains absent without live views.
 The display projection also admits canonical artifact/live-view references in one scan;
 runtime slots cache its result only for the exact current session and leaf.
+It also admits each extension load with a display-owned session/generation/token scope;
+extension attribution consumes that scope without depending on the live-view registry.
 
 **Computer descriptor.** `computer-module.ts` owns `tron-computer` metadata and
 its per-session extension. Availability remains Mac-only, sampled when the

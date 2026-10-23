@@ -14,8 +14,7 @@ import type {
 import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE, adaptMcpAuthCommandHandler } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
-import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
-import type { ToolResultProjection } from "../kernel/projection/tool-result.js";
+import type { BrowserResultObservation } from "../kernel/projection/tool-result.js";
 import { isManagedSubagentExtension, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
 
@@ -157,13 +156,7 @@ interface RegistrationAdmission {
   extension: Extension;
   requireTronAskUser: boolean;
   requireManagedSubagents: boolean;
-  browserLiveView?: {
-    views: BrowserLiveViewRegistry;
-    sessionId: string;
-    runtimeGeneration: string;
-    observeResult: ToolResultProjection["observeBrowserResult"];
-    loadToken: string;
-  };
+  browserLiveView?: BrowserResultObservation;
 }
 
 /**
@@ -340,19 +333,14 @@ function validateReservedCapabilities(base: LoadExtensionsResult, options?: { re
  * registrations performed later through the same API. The result is safe to
  * apply on every resource reload because each load result is admitted once and
  * all maps/functions are retained as public Pi objects. */
-export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?: {
-  views: BrowserLiveViewRegistry;
-  sessionId: string;
-  runtimeGeneration: string;
-  observeResult: ToolResultProjection["observeBrowserResult"];
-}, options?: { requireTronAskUser?: boolean; managedSubagents?: ManagedSubagents }): LoadExtensionsResult {
-  const loadToken = browserLiveView?.views.beginSessionLoad(browserLiveView.sessionId);
+export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?: BrowserResultObservation,
+  options?: { requireTronAskUser?: boolean; managedSubagents?: ManagedSubagents }): LoadExtensionsResult {
   options?.managedSubagents?.admit(base.extensions);
   validateReservedCapabilities(base, options);
   const admission: Omit<RegistrationAdmission, "extension"> = {
     requireTronAskUser: options?.requireTronAskUser === true,
     requireManagedSubagents: options?.managedSubagents !== undefined,
-    ...(browserLiveView && loadToken ? { browserLiveView: { ...browserLiveView, loadToken } } : {}),
+    ...(browserLiveView ? { browserLiveView } : {}),
   };
   for (const extension of base.extensions) installRegistrationAdmission(extension, admission);
   return base;

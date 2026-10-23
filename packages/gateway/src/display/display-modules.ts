@@ -18,6 +18,11 @@ export function createDisplayModule(services: () => DisplayModuleServices): Modu
       const workspace = host.contract(workspaceModule);
       const projection: ToolResultProjection = {
         display: admitToolDisplayProjection, references: displayReferences,
+        beginBrowserLoad: (sessionId, runtimeGeneration) => {
+          const views = services().liveViews;
+          return views ? { sessionId, runtimeGeneration, loadToken: views.beginSessionLoad(sessionId),
+            observeResult: input => projection.observeBrowserResult(input) } : undefined;
+        },
         observeBrowserResult: input => {
           const views = services().liveViews;
           return views ? observeTrustedAgentBrowserResult({ ...input, views }) : input.result;
