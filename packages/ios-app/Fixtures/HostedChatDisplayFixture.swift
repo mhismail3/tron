@@ -324,6 +324,7 @@ struct HostedHomeDashboardFixture: View {
             }
         }
         .preferredColorScheme(arguments.contains("-home-dark") ? .dark : .light)
+        .environment(\.accessibilityReduceMotion, arguments.contains("-usage-capture-reduced-motion"))
         .dynamicTypeSize(arguments.contains("-home-accessibility-type") ? .accessibility3 : .large)
         // Forward scene transitions as production does: background retires the
         // connection that a mounted Home sheet's identity names, and foreground reconnects.

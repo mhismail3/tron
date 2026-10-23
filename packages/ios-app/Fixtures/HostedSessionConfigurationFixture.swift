@@ -281,6 +281,9 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         case "session.context":
             result = .object(["activeTools": .array(HostedSettingsReviewSchema.tools.map(JSONValue.string))])
         case let method where HostedManageSessionReview.enabled && HostedManageSessionReview.handles(method):
+            if method == "session.workspace.inspect", ProcessInfo.processInfo.arguments.contains("-workspace-capture-delay") {
+                try await Task.sleep(for: .seconds(1))
+            }
             result = HostedManageSessionReview.response(method, params: params)
         case "session.resources":
             result = .object(["tools": .array(HostedSettingsReviewSchema.tools.map {
