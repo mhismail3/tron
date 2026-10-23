@@ -126,6 +126,8 @@ struct HostedSubagentParityFixture: View {
         let current = row(isResumed ? "resumed" : "worker", "Asynchronous worker", states[stage], settled: stage == 3)
         return [current, row("completed", "Completed worker", .completed)]
             + (isResumed ? [row("worker", "Paused execution", .paused, settled: true)] : [])
+            + (ProcessInfo.processInfo.arguments.contains("-history-long")
+                ? (1...30).map { row("earlier-\($0)", "Earlier worker \($0)", .completed) } : [])
     }
 
     private func updateHistory(stage: Int) {
