@@ -98,8 +98,13 @@ struct ConfigurationSliderPreference: PreferenceKey {
 extension View {
     /// Install outside scrolling content: both controls share one overlay and
     /// cannot relayout rows, leak outside taps, or leave a hidden second editor.
-    func tronConfigurationSliderHost(_ presentation: ConfigurationSliderPresentation) -> some View {
-        modifier(ConfigurationSliderHost(presentation: presentation))
+    @ViewBuilder
+    func tronConfigurationSliderHost(_ presentation: ConfigurationSliderPresentation,
+                                     inheriting inherited: ConfigurationSliderPresentation? = nil) -> some View {
+        // An embedded renderer must use the sheet's viewport-wide host. A second
+        // host confines its editor to the model card and duplicates preferences.
+        if inherited != nil { self }
+        else { modifier(ConfigurationSliderHost(presentation: presentation)) }
     }
 }
 

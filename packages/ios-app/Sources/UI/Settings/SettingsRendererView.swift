@@ -69,7 +69,7 @@ struct SettingsRendererView: View {
         .environment(\.tronPresentationDependencyRead, PresentationDependencyRead(
             id: .init(target: target, freshness: model.settingsFreshness),
             perform: { try? await model.refreshSettingsSnapshot(for: target) }))
-        .tronConfigurationSliderHost(sliderPresentation)
+        .tronConfigurationSliderHost(sliderPresentation, inheriting: inheritedSliderPresentation)
         .environment(\.configurationSliderSignposts, model.performanceSignposts)
         .tronConfirmation(
             "Change this setting?",

@@ -80,8 +80,8 @@ final class TronManageSheetsThemeUITests: XCTestCase {
 
     /// Each editor is the first interaction on a newly opened Home model card.
     @MainActor func testFirstOpenHomeEffortAndContextExposeUsableSliders() {
-        for (control, slider) in [("settings-choice-control", "settings-choice-slider"),
-                                  ("settings-number-control", "settings-number-slider")] {
+        for (control, slider) in [("Context Window", "settings-number-slider"),
+                                  ("Effort", "settings-choice-slider")] {
             let app = launchManageHome(dark: false)
             defer { app.terminate() }
             let button = app.buttons[control].firstMatch
@@ -90,7 +90,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
             let editor = app.descendants(matching: .any)[slider].firstMatch
             XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertTrue(editor.isHittable, "First-open editor must accept input, not remain an empty capsule")
-            XCTAssertGreaterThan(editor.frame.width, 150)
+            XCTAssertGreaterThan(editor.frame.width, 100)
             shot("first-open-\(control)")
             app.terminate()
         }

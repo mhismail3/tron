@@ -1111,9 +1111,15 @@ private actor HostedHomeShellGateway {
         let reviewKeys = HostedSettingsReviewSchema.scopeReview ? [HostedSettingsReviewSchema.key("model.queue[role=subagent]", "workers", "Subagent models",
             .array(["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"].map(JSONValue.string)), "3 models", "list",
             order: 42, essential: true, layer: "session")] : []
-        let profileKeys = reviewKeys + [modelKey, workerThinkingKey, contextWindowKey, memoryKey,
-            HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
-                order: 20, essential: true, layer: "session", options: [.object(["value": .string("high"), "label": .string("High")])]),
+        // Match the negotiated production ordered-choice contract, including alternatives.
+        var thinkingKey = HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
+            order: 20, essential: true, layer: "session", options: ["low", "medium", "high"].map {
+                .object(["value": .string($0), "label": .string($0.capitalized)])
+            }).objectValue!
+        var thinkingPresentation = thinkingKey["presentation"]!.objectValue!
+        thinkingPresentation["valueKind"] = .string("orderedChoice")
+        thinkingKey["presentation"] = .object(thinkingPresentation)
+        let profileKeys = reviewKeys + [modelKey, workerThinkingKey, contextWindowKey, memoryKey, .object(thinkingKey),
             HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "session")
         ] + homeKeys
         return .object(["keys": .array(profileKeys), "sections": .array(HostedSettingsReviewSchema.sections)])
