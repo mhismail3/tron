@@ -48,7 +48,7 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
   `unconfigured`; a login change mid-read answers `unavailable`. AuthBroker serializes
   OpenAI and Codex OAuth (both use callback port 1455).
 - **OpenAI OAuth eligibility.** One Gateway-wide `OpenAIModelEligibility` owner (Home
-  borrows it) reads the same token's `GET https://api.openai.com/v1/models` (paged, 5 s
+  borrows it through `sessionRuntimeView`, whose method overrides stay session-local) reads the same token's `GET https://api.openai.com/v1/models` (paged, 5 s
   bound, fresh 60 s) and keeps only `visibility: "list"` slugs the SDK registers, in
   account order. That list is the only authority for first-party OAuth choices; before
   a success, or after a failure without a same-token success, OAuth OpenAI offers no

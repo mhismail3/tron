@@ -20,7 +20,7 @@ import {
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
-import { borrowedOpenAIModelEligibility, OpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { OpenAIModelEligibility, sessionRuntimeView } from "../providers/openai-model-eligibility.js";
 import { applyJevModelPricing } from "../providers/jev-model-pricing.js";
 import type {
   AdministrativeDrainBlockerCategory,
@@ -4744,31 +4744,4 @@ export class RuntimeRegistry {
       return this.displayArtifacts.acquire(artifactID, sessionID, requestedRange);
     }, signal), lease => lease.release());
   }
-}
-
-/** One Home runtime's own view of the shared Gateway model runtime (#480). Session
- * code may replace a method on the runtime it is given: `SessionContextWindowPolicy`
- * replaces `getModel` to project the session's context-window budget. On this view
- * such a write stays with that one runtime, so it neither changes Gateway-wide
- * lookups nor stacks under the next replacement runtime. Every other read and
- * call reaches the shared runtime, bound to it, so provider packages registered
- * there stay visible. Property writes stay local; mutating method calls still
- * reach the shared runtime and must be invoked only by its owner. */
-function sessionRuntimeView(shared: ModelRuntime): ModelRuntime {
-  const own = new Map<PropertyKey, unknown>();
-  return new Proxy(shared, {
-    get: (target, property) => {
-      // Borrowed eligibility is a read-only lookup, never a new filter installation.
-      if (property === borrowedOpenAIModelEligibility) return openAIModelEligibility(target);
-      if (own.has(property)) return own.get(property);
-      const value: unknown = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-    set: (_target, property, value) => {
-      own.set(property, value);
-      return true;
-    },
-    defineProperty: () => false,
-    deleteProperty: () => false,
-  });
 }

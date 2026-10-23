@@ -10,7 +10,7 @@ const SUCCESS_TTL_MS = 60_000;
 const MAX_DISCOVERY_MODELS = 25_000;
 const installed = new WeakMap<ModelRuntime, OpenAIModelEligibility>();
 /** Session-local views may delegate lookup without installing filters or owning an attachment. */
-export const borrowedOpenAIModelEligibility = Symbol("borrowedOpenAIModelEligibility");
+const borrowedOpenAIModelEligibility = Symbol("borrowedOpenAIModelEligibility");
 
 type OpenAIModel = Model<Api>;
 interface DiscoveryEntry { slug: string; visibility: string; displayName?: string; }
@@ -302,6 +302,33 @@ export class OpenAIModelEligibility {
     positions.forEach((position, index) => { result[position] = ordered[index]!; });
     return result;
   }
+}
+
+/** One Home runtime's own view of the shared Gateway model runtime (#480). Session
+ * code may replace a method on the runtime it is given: `SessionContextWindowPolicy`
+ * replaces `getModel` to project the session's context-window budget. On this view
+ * such a write stays with that one runtime, so it neither changes Gateway-wide
+ * lookups nor stacks under the next replacement runtime. Every other read and
+ * call reaches the shared runtime, bound to it, so provider packages registered
+ * there stay visible. Property writes stay local; mutating method calls still
+ * reach the shared runtime and must be invoked only by its owner. */
+export function sessionRuntimeView(shared: ModelRuntime): ModelRuntime {
+  const own = new Map<PropertyKey, unknown>();
+  return new Proxy(shared, {
+    get: (target, property) => {
+      // Borrowed eligibility is a read-only lookup, never a new filter installation.
+      if (property === borrowedOpenAIModelEligibility) return openAIModelEligibility(target);
+      if (own.has(property)) return own.get(property);
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+    set: (_target, property, value) => {
+      own.set(property, value);
+      return true;
+    },
+    defineProperty: () => false,
+    deleteProperty: () => false,
+  });
 }
 
 export function openAIModelEligibility(runtime: ModelRuntime): OpenAIModelEligibility | undefined {
