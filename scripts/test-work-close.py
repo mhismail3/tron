@@ -76,7 +76,9 @@ def fixture_gh() -> None:
         number = int(args[3].rsplit("/", 1)[-1])
         labels = state.get("issue_labels", {}).get(str(number), [state.get("label", "epic")])
         response = {"number": number, "node_id": "issue" if number == 41 else f"node-{number}",
-                    "state": state["state"], "labels": [{"name": label} for label in labels]}
+                    "state": state.get("issue_states", {}).get(str(number), state["state"]),
+                    "title": state.get("issue_titles", {}).get(str(number), "Fixture issue"),
+                    "labels": [{"name": label} for label in labels]}
     elif args[:3] == ["api", "--paginate", "--slurp"]:
         if "/sub_issues" in args[3]:
             if state.get("fail_children"):
@@ -462,9 +464,9 @@ def run() -> None:
             assert state["writes"] == ["edit"]
 
             # Nesting (docs/restructure/plan.md §9.1): an epic or a task links under an epic parent.
-            def parent(name, success, child, epic):
+            def parent(name, success, child, epic, *options):
                 result = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), "issue", "parent", str(child),
-                                         "--epic", str(epic)], cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+                                         "--epic", str(epic), *options], cwd=repo, env=env, capture_output=True, text=True, timeout=30)
                 evidence.append({"case": name, "exit": result.returncode, "stdout": result.stdout, "stderr": result.stderr})
                 assert (result.returncode == 0) == success, evidence[-1]
                 return json.loads(state_path.read_text()), result.stderr
@@ -480,6 +482,36 @@ def run() -> None:
             assert "epic parent" in error and not state["writes"]
             state, error = parent("epic under itself refused", False, 50, 50)
             assert "epic parent" in error and not state["writes"]
+
+            # Only tracked module identities admit maintenance parents, not arbitrary tasks.
+            manifest = repo / "work.module.json"
+            manifest.write_text('{"layer":"L5","owns":["**"]}\n')
+            git("add", "work.module.json")
+            module = {"issue_labels": {"53": ["kind:maintenance"], "52": ["kind:bug"]},
+                      "issue_titles": {"53": "Module: repo/work"}}
+            reset(**module)
+            state, _ = parent("task linked under an open tracked maintenance module", True, 52, 53)
+            assert state["writes"] == ["sub-issue"] and state["sub_issue"]["epic"] == "node-53"
+            assert state["sub_issue"]["replace"] is False
+            reset(**module)
+            state, _ = parent("explicit module parent replacement forwarded", True, 52, 53, "--replace-parent")
+            assert state["writes"] == ["sub-issue"] and state["sub_issue"]["replace"] is True
+            reset(**module, issue_states={"53": "closed"})
+            state, _ = parent("closed maintenance module refused", False, 52, 53)
+            assert not state["writes"]
+            reset(**{**module, "issue_titles": {"53": "Module: repo/missing"}})
+            state, _ = parent("unmatched maintenance module refused", False, 52, 53)
+            assert not state["writes"]
+            reset(**{**module, "issue_labels": {"53": ["kind:bug"]}})
+            state, _ = parent("non-maintenance module refused", False, 52, 53)
+            assert not state["writes"]
+            reset(**module)
+            state, _ = parent("module under itself refused", False, 53, 53)
+            assert not state["writes"]
+            git("rm", "--cached", "work.module.json")
+            reset(**module)
+            state, _ = parent("untracked manifest cannot admit a parent", False, 52, 53)
+            assert not state["writes"]
 
             reason = root / "reopen.md"
             git("push", "origin", "--delete", "feat/41-foreign")

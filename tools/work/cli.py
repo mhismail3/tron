@@ -96,11 +96,11 @@ def main(argv: list) -> int:
     reopen_issue.add_argument("issue", type=int)
     reopen_issue.add_argument("--comment-file", required=True, type=Path,
                               help="Markdown reason for reopening (required, posted publicly); not logged")
-    parent_issue = issue_commands.add_parser("parent", help="link a task or epic under an epic")
+    parent_issue = issue_commands.add_parser("parent", help="link an issue under an epic or checked maintenance module")
     parent_issue.add_argument("issue", type=int)
     parent_issue.add_argument("--epic", required=True, type=int)
     parent_issue.add_argument("--replace-parent", action="store_true",
-                              help="move the task from its current epic to this one")
+                              help="move the issue from its current parent to this one")
     blocker_issue = issue_commands.add_parser("block", help="add a native blocked-by relationship")
     blocker_issue.add_argument("issue", type=int)
     blocker_issue.add_argument("--blocked-by", required=True, type=int)

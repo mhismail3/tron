@@ -844,7 +844,10 @@ That is enough room, so no issue per file is needed.
 
 - Phase and Area issues carry the `epic` label. The work tooling already
   excludes `epic` from claims, so only Module and Slice issues are claimable.
-  Module issues are claimed only by **scoping** workers.
+  Module issues are claimed only by **scoping** workers. `work issue parent`
+  admits an open maintenance module when its exact `Module: <module id>` title
+  matches a tracked `*.module.json` manifest; modules retain their phase/area
+  epic parents. Replacing a slice’s existing parent requires `--replace-parent`.
 - Labels: the existing `kind:` and `area:` labels, plus one new `restructure`
   label for filtering. It is added through `work bootstrap` in slice 0.2.
   No phase labels: the parent link carries the phase.

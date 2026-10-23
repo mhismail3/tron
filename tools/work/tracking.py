@@ -5,11 +5,15 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 from contextlib import nullcontext
 from datetime import date
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ownership"))
+from ownership import module_id
 
 import bootstrap
 import claim as claims
@@ -367,19 +371,31 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
     child = _issue(gh, f"{owner}/{name}", child_number)
     epic = _issue(gh, f"{owner}/{name}", epic_number)
     epic_labels = {label["name"] for label in epic.get("labels", [])}
-    # The child may itself be an epic: phase and area epics nest under a master epic.
-    if child_number == epic_number or config["dashboard"]["epicLabel"] not in epic_labels:
-        raise TrackingError("parent links require an epic parent other than the child")
+    # Match the canonical module identity, not an arbitrary maintenance issue.
+    module_parent = False
+    if "kind:maintenance" in epic_labels and epic.get("state") == "open":
+        manifests = subprocess.run(
+            ["git", "ls-files", "-z", "--", "*.module.json"],
+            cwd=repo, check=True, capture_output=True, text=True,
+        ).stdout.split("\0")
+        module_parent = epic.get("title") in {
+            f"Module: {module_id(path)}" for path in manifests if path
+        }
+    # Phase and area epics retain their links; module issues remain maintenance.
+    if child_number == epic_number or not (
+        config["dashboard"]["epicLabel"] in epic_labels or module_parent
+    ):
+        raise TrackingError("parent links require an epic parent or an open maintenance module other than the child")
     if any(node["id"] == child["node_id"] for node in _relation(gh, epic["node_id"])["subIssues"]["nodes"]):
         print(f"issue #{child_number} is already a sub-issue of #{epic_number}")
         return
     gh.graphql(
-        # GitHub allows one parent; moving a task to another epic must say so explicitly.
+        # GitHub allows one parent; replacing it must be explicit.
         "mutation($epic: ID!, $child: ID!, $replace: Boolean!) { addSubIssue(input: "
         "{issueId: $epic, subIssueId: $child, replaceParent: $replace}) { issue { id } } }",
         epic=epic["node_id"], child=child["node_id"], replace=replace_parent,
     )
-    print(f"linked issue #{child_number} under epic #{epic_number}")
+    print(f"linked issue #{child_number} under parent #{epic_number}")
 
 
 def add_blocker(gh: Gh, repo: Path, config: dict, issue_number: int, blocker_number: int) -> None:
