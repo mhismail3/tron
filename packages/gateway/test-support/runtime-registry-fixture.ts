@@ -9,7 +9,7 @@ import { TrustService } from "../src/admin/trust-service.js";
 import type { NotificationService } from "../src/notifications/notification-service.js";
 import type { SessionSummaryUpdate } from "../src/protocol/types.js";
 import type { GatewayWorkRegistry } from "../src/kernel/run/gateway-work-registry.js";
-import type { ResourceRecorder } from "../src/transport/stall-diagnostics.js";
+import type { ResourceRecorder } from "../src/util/resource-recorder.js";
 import type { SessionCatalog, SessionCatalogReconcileOutcome } from "../src/sessions/session-catalog.js";
 import type { ExtensionArtifactDiscoveryCounts } from "../src/sessions/extension-artifact-discovery.js";
 import { RuntimeRegistry, type CapacityShedRecord, type RuntimeLifecycleRecord } from "../src/sessions/runtime-registry.js";

@@ -3,6 +3,7 @@ import { freemem, totalmem } from "node:os";
 import { monitorEventLoopDelay, PerformanceObserver, performance, type EventLoopUtilization } from "node:perf_hooks";
 import { getHeapStatistics } from "node:v8";
 import { drainDurableWriteStats } from "../util/durable-json.js";
+import type { ResourceRecorder, ResourceRuntimeEntry } from "../util/resource-recorder.js";
 
 /** The `monitorEventLoopDelay` histogram; @types/node renamed its interface across majors. */
 type EventLoopDelayHistogram = ReturnType<typeof monitorEventLoopDelay>;
@@ -205,14 +206,6 @@ export const UNAUDIENCED_SNAPSHOT_WARNING = 0;
  * counted, so the record stays one readable line. */
 const MAX_RESOURCE_DETAIL = 8;
 
-/** One live runtime in the sample: its canonical transcript size is the byte
- * estimate of what it holds until runtime residency is measured directly. */
-export interface ResourceRuntimeEntry {
-  sessionId: string;
-  bytes: number;
-  subscribers: number;
-}
-
 /** One topic's traffic over the sample window. `subscribers` is the highest
  * recipient count a frame on that topic had; a topic whose recipients left is
  * still visible by its frames and bytes. */
@@ -260,29 +253,6 @@ export interface ResourceSample {
    * the bytes they would have cost: the state G-4 kept off a slow link. */
   outboundCoalescedFrames: number;
   outboundCoalescedBytes: number;
-}
-
-/**
- * What the owners of measurable work report to the sampler. Each call counts
- * one occurrence at the site that already knows it; the sampler never scans to
- * discover what happened.
- */
-export interface ResourceRecorder {
-  /** One serialized frame offered on a topic, and the recipients it had. */
-  recordTopicFrame(topic: string, bytes: number, subscribers: number): void;
-  /** One catalog walk, with the time it took, the files it read, and whether a
-   * request was waiting on it. */
-  recordCatalogWalk(durationMs: number, files: number, requestPath?: boolean): void;
-  recordOutboundBytes(bytes: number): void;
-  /** One superseded frame dropped in a connection's outbound queue, with the
-   * encoded bytes it would have sent: the state G-4 kept off a slow link. */
-  recordOutboundCoalesced(bytes: number): void;
-  /** One runtime that became live, counted where it is published: a load and an
-   * eviction inside one window are otherwise invisible to a set comparison. */
-  recordRuntimeLoaded(): void;
-  /** One published runtime that was disposed, counted at its disposal; a start
-   * that was retired before it was ever live is not an eviction. */
-  recordRuntimeEvicted(): void;
 }
 
 export interface ResourceSamplerDependencies {

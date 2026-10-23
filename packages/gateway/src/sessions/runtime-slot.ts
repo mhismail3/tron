@@ -90,7 +90,7 @@ import type {
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { stage } from "../util/request-span.js";
-import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
+import type { ResourceRecorder } from "../util/resource-recorder.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { BlobStore } from "./blob-store.js";
 import {
