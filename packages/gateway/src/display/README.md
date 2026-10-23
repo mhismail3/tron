@@ -16,7 +16,8 @@ settlement](../../docs/native-tool-settlement.md).
 ## Contract
 
 **Display descriptors.** `display-modules.ts` owns display/native-capture metadata.
-They close over existing display owners; native capture remains absent without live views.
+Composition supplies the shared artifact store and live views directly; native
+capture remains absent without live views, without a registry service getter.
 The display projection also admits canonical artifact/live-view references in one scan;
 runtime slots cache its result only for the exact current session and leaf.
 It also admits each extension load with a display-owned session/generation/token scope;
@@ -39,7 +40,8 @@ local, private, reserved, link-local or multicast address; the Gateway never fet
 them. The tool's model guidance asks for proactive, honestly labelled visuals and
 prefers `inline` for bounded images; that is guidance, not a transport default.
 
-**Artifact store.** A durable store owned by `RuntimeRegistry`, separate from the
+**Artifact store.** One durable store constructed by composition and lent to the
+registry/slots for storage coordination, separate from the
 transient `BlobStore`: random logical IDs over immutable SHA-256 objects, session
 owner links that survive restart and pass to a fork before its identity commit.
 Ownership reconciles against the complete JSONL tree (abandoned branches keep theirs);

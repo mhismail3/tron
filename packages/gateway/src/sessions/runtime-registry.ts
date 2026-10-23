@@ -62,7 +62,6 @@ import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { ProcessActivityRecency } from "../kernel/projection/process-activity-recency.js";
 import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import type { NotificationService } from "../notifications/notification-service.js";
-import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
@@ -71,7 +70,6 @@ import { scanReservedHomeSession } from "../modules/home/home-session-recovery.j
 import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
 import { syncDurably } from "../util/durable-json.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
-import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import {
   invocationProjection,
   invocationReceipts,
@@ -541,7 +539,6 @@ export class RuntimeRegistry {
   private readonly displayArtifactLane = new RequestSpanLane("registry.display-lane");
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
-  private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
   private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
@@ -690,7 +687,7 @@ export class RuntimeRegistry {
       resources?: ResourceRecorder;
       machineId?: string;
       notifications?: NotificationService;
-      browserLiveViews?: BrowserLiveViewRegistry;
+      readonly displayArtifacts: RuntimeSlotDependencies["displayArtifacts"];
       workRegistry?: GatewayWorkRegistry;
       /** A discovery pass that stopped at one of its budgets instead of the end
        * of its roots, with the counts it spent. A directory past the stop is
@@ -707,7 +704,6 @@ export class RuntimeRegistry {
   ) {
     this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
-    this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
     this.workspace = options.modules.contract(workspaceModule);
     this.exports = new BlobStore({
       maximumItemBytes: SESSION_EXPORT_MAX_ITEM_BYTES,
@@ -753,7 +749,6 @@ export class RuntimeRegistry {
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
   get moduleHost(): ModuleHost { return this.options.modules; }
   get knowledge(): KnowledgeService | undefined { return this.knowledgeService; }
-  displayModuleServices() { return { artifacts: this.displayArtifacts, liveViews: this.options.browserLiveViews }; }
   notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
   /** The generic K1/K5 operations and reads Home's owner and module are built over
    * (k0-kernel.md §5); Home's module constructs the owner. */
@@ -1052,17 +1047,17 @@ export class RuntimeRegistry {
     await Promise.all([
       this.blobs.initialize(),
       this.exports.initialize(),
-      this.displayArtifacts.initialize(),
+      this.options.displayArtifacts.initialize(),
     ]);
     await Promise.all([...this.slots.values()].map((slot) => slot.reconcileDisplayArtifactOwnership()));
   }
 
   async maintainDisplayArtifacts(): Promise<void> {
-    await this.displayArtifacts.maintain(() => this.sessionIDsForStorageMaintenance());
+    await this.options.displayArtifacts.maintain(() => this.sessionIDsForStorageMaintenance());
   }
 
   async removeDisplayArtifacts(sessionID: string): Promise<void> {
-    await this.displayArtifactLane.run(() => this.displayArtifacts.removeSession(sessionID));
+    await this.displayArtifactLane.run(() => this.options.displayArtifacts.removeSession(sessionID));
   }
 
   private async reconcileCanonicalAttention(
@@ -1252,7 +1247,7 @@ export class RuntimeRegistry {
         // Publish those owner links before committing the new session identity so
         // a successful fork can never expose a dangling artifact reference.
         for (const artifactID of slot.displayArtifactIDs()) {
-          await this.displayArtifacts.grant(artifactID, nextId, previousId);
+          await this.options.displayArtifacts.grant(artifactID, nextId, previousId);
         }
         await this.options.beforeSessionRekey?.(previousId, nextId);
         // A rebind is the only identity change the Gateway owns: a reset
@@ -1687,7 +1682,7 @@ export class RuntimeRegistry {
       trust: this.options.trust,
       blobs: this.blobs,
       exports: this.exports,
-      displayArtifacts: this.displayArtifacts,
+      displayArtifacts: this.options.displayArtifacts,
       workspace: this.workspace,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,
@@ -4648,7 +4643,7 @@ export class RuntimeRegistry {
     // also be backed by an exact reference on this session's canonical branch.
     // Do not repair owner links from an arbitrary transcript reference; fork
     // ownership is committed transactionally by the rekey path above.
-    if (!this.displayArtifacts.hasOwner(artifactID, sessionID)) return false;
+    if (!this.options.displayArtifacts.hasOwner(artifactID, sessionID)) return false;
     const slot = await this.acquire(sessionID);
     return slot.referencesDisplayArtifact(artifactID);
   }
@@ -4671,7 +4666,7 @@ export class RuntimeRegistry {
         throw new GatewayError("not_found", "Display artifact is unavailable");
       }
       signal?.throwIfAborted();
-      return this.displayArtifacts.acquire(artifactID, sessionID, requestedRange);
+      return this.options.displayArtifacts.acquire(artifactID, sessionID, requestedRange);
     }, signal), lease => lease.release());
   }
 }
