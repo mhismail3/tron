@@ -162,10 +162,12 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 
 - Manage Home/Session list sheets share `Components/TronList.swift`. Fixed sets (Profile,
   Chapters, Instructions, Resources) are a `TronListGroup`: one glass container per section, its
-  header and count above it. Feeds (Memory, Tasks, Session History, Subagent History) are a
+  header and count above it; a single-category section (a Resources kind) passes its category
+  tint for header and container instead of emerald. Feeds (Memory, Tasks, Session History, Subagent History) are a
   `TronFeed` of `TronFeedCard`s, with the next page loaded by `FeedStore` while 5 rows remain.
   Long feeds overlay a bottom-centred position chip whose 44-pt target takes every touch (tap:
-  newest); the feed ends with room to clear it.
+  newest); the feed ends with room to clear it. An empty Subagent History is a
+  `TronFeedEmptyState`: caption on top, the shared `TronPlaceholderState` centred below, no card.
   Each `TronListRow` has: a centred kind icon or ordinal, the title, one status pill top-right,
   12 pt subtext, then tags and time; a row with neither status nor time carries its tags top-right
   (below the title when both do not fit). Actions are in the detail and a matching long-press menu.

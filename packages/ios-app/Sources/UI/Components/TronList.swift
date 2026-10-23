@@ -475,7 +475,8 @@ struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
                     header()
-                    placeholder().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: TronListMetrics.feedGap) { placeholder() }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
                 // At least the visible height, so the placeholder centres in it; taller

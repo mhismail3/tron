@@ -63,7 +63,9 @@ struct HomePagedListSheet: View {
     var body: some View {
         NavigationStack {
             Group {
-                if store.hasPage {
+                if store.hasPage, isEmpty {
+                    TronFeedEmptyState(identifier: "\(identifier)-viewport") { captions } placeholder: { placeholders }
+                } else if store.hasPage {
                     if isMemory {
                         TronFeed(items: memoryRows, identifier: "\(identifier)-viewport", ordinal: { $0.line.start + $0.line.span },
                                  total: memoryPages.first?.totalMessages, tail: tail, loadMore: loadMore, retry: retry) {
@@ -126,20 +128,29 @@ struct HomePagedListSheet: View {
         }
     }
 
+    /// A settled read with no rows: the feed gives way to its centred empty state.
+    private var isEmpty: Bool {
+        store.error == nil && !store.loading && next == nil && (isMemory ? memoryRows.isEmpty : taskRows.isEmpty)
+    }
+
     @ViewBuilder private var header: some View {
         VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
             captions
-            if let status = taskStatus, !status.available || status.taskRecovery?.available != true {
-                TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery?.reason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
-            }
-            if isMemory, memoryRows.isEmpty {
-                TronPlaceholderState(title: "No memory yet", detail: "Memory appears after Home admits conversation history.", icon: "brain")
-            }
-            if !isMemory, taskRows.isEmpty, taskStatus?.admitsTaskReads != false {
-                TronPlaceholderState(title: "No tasks", detail: "Home has not recorded any tasks.", icon: "checklist")
-            }
+            placeholders
         }
         .padding(.bottom, 4)
+    }
+
+    @ViewBuilder private var placeholders: some View {
+        if let status = taskStatus, !status.available || status.taskRecovery?.available != true {
+            TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery?.reason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
+        }
+        if isMemory, memoryRows.isEmpty {
+            TronPlaceholderState(title: "No memory yet", detail: "Memory appears after Home admits conversation history.", icon: "brain")
+        }
+        if !isMemory, taskRows.isEmpty, taskStatus?.admitsTaskReads != false {
+            TronPlaceholderState(title: "No tasks", detail: "Home has not recorded any tasks.", icon: "checklist")
+        }
     }
 
     private func memoryRow(_ line: HomeMemoryViewDTO.Line) -> some View {

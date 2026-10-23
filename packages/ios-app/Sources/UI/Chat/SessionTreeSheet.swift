@@ -213,7 +213,12 @@ struct SessionTreeSheet: View {
     var body: some View {
         NavigationStack {
             Group {
-                if supported, store.hasPage {
+                if supported, store.hasPage, rows.isEmpty, store.error == nil, !store.loading,
+                   store.pages.last?.page.older == nil {
+                    TronFeedEmptyState(identifier: "session-history-viewport") { caption } placeholder: {
+                        TronPlaceholderState(title: "No history yet", detail: "Entries appear as this session runs.", icon: "clock.arrow.circlepath")
+                    }
+                } else if supported, store.hasPage {
                     TronFeed(items: rows, identifier: "session-history-viewport", ordinal: \.ordinal,
                              total: store.pages.first?.page.totalEntries, tail: tail,
                              loadMore: loadOlder, retry: retry) {
@@ -227,8 +232,6 @@ struct SessionTreeSheet: View {
                                 TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronEmerald)
                             } else if let error = store.error {
                                 TronSettingsNotice(message: error, retry: retry)
-                            } else if store.pages.first?.page.nodes.isEmpty == true {
-                                TronPlaceholderState(title: "No history yet", detail: "Entries appear as this session runs.", icon: "clock.arrow.circlepath")
                             } else {
                                 TronSheetLoadingState(label: "Loading history…", accent: .tronEmerald)
                             }

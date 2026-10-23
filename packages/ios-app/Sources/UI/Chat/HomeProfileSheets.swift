@@ -13,15 +13,8 @@ extension HomeSheet {
         let inferred = active.filter { !$0.confirmed }
         let editable = model.homeProfileEditable
         return VStack(alignment: .leading, spacing: 18) {
-            TronSettingsCaption(editable
-                ? "Learned from your messages to Home. Confirmed items are binding; inferred items are Home's default until you confirm them. Changes apply from Home's next activation."
-                : "Learned from your messages to Home. Confirmed items are binding; inferred items are Home's default until you confirm them.")
-            profileEditNotices()
-            if active.isEmpty {
-                TronPlaceholderState(title: "Nothing learned yet",
-                                     detail: "Home saves durable preferences, decisions, delegation defaults and facts you state.",
-                                     icon: "person.text.rectangle")
-            }
+            profileHeader(list)
+            if active.isEmpty { profileEmptyPlaceholder }
             if editable, inferred.count > 1 {
                 TronListGroup([HomeProfileConfirmAll(count: inferred.count)]) { row in
                     TronListButton(TronListRowContent(title: profileEdit.working ? "Confirming…" : "Confirm all inferred",
@@ -57,10 +50,35 @@ extension HomeSheet {
             if !inactive.isEmpty {
                 TronSettingsCaption("Superseded or retired items stay in Knowledge.")
             }
-            if list.unclassified > 0 {
-                TronSettingsCaption("\(list.unclassified) profile \(list.unclassified == 1 ? "note has" : "notes have") no single kind and \(list.unclassified == 1 ? "is" : "are") not applied.")
-            }
+            if list.unclassified > 0 { profileUnclassifiedCaption(list) }
         }
+    }
+
+    /// A profile with no items at all: the shared centred empty state.
+    func emptyProfile(_ list: HomeProfileListDTO) -> some View {
+        TronFeedEmptyState(identifier: "home-profile-viewport") {
+            VStack(alignment: .leading, spacing: 18) {
+                profileHeader(list)
+                if list.unclassified > 0 { profileUnclassifiedCaption(list) }
+            }
+        } placeholder: { profileEmptyPlaceholder }
+    }
+
+    @ViewBuilder private func profileHeader(_ list: HomeProfileListDTO) -> some View {
+        TronSettingsCaption(model.homeProfileEditable
+            ? "Learned from your messages to Home. Confirmed items are binding; inferred items are Home's default until you confirm them. Changes apply from Home's next activation."
+            : "Learned from your messages to Home. Confirmed items are binding; inferred items are Home's default until you confirm them.")
+        profileEditNotices()
+    }
+
+    private var profileEmptyPlaceholder: some View {
+        TronPlaceholderState(title: "Nothing learned yet",
+                             detail: "Home saves durable preferences, decisions, delegation defaults and facts you state.",
+                             icon: "person.text.rectangle")
+    }
+
+    private func profileUnclassifiedCaption(_ list: HomeProfileListDTO) -> some View {
+        TronSettingsCaption("\(list.unclassified) profile \(list.unclassified == 1 ? "note has" : "notes have") no single kind and \(list.unclassified == 1 ? "is" : "are") not applied.")
     }
 
     func profileItemDetail(_ item: HomeProfileListDTO.Item) -> some View {

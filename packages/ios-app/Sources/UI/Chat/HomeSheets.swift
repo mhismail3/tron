@@ -185,17 +185,23 @@ struct HomeSheet: View {
     }
 
     private var sheetContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                content
-                if let mutationFailure {
-                    TronPlaceholderState(title: "Home change", detail: mutationFailure, icon: "exclamationmark.triangle")
+        Group {
+            if let list = emptyProfileList {
+                emptyProfile(list)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        content
+                        if let mutationFailure {
+                            TronPlaceholderState(title: "Home change", detail: mutationFailure, icon: "exclamationmark.triangle")
+                        }
+                    }
+                    .padding(18)
                 }
+                .tronScrollEdgeChrome()
             }
-            .padding(18)
-            .environment(\.tronSettingsSecondaryTextSizeAdjustment, SessionSummaryTypography.metadataSizeAdjustment)
         }
-        .tronScrollEdgeChrome()
+        .environment(\.tronSettingsSecondaryTextSizeAdjustment, SessionSummaryTypography.metadataSizeAdjustment)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if case .manage = destination {
@@ -270,6 +276,16 @@ struct HomeSheet: View {
         case .profileItem(let item): profileItemDetail(loadedProfileItem(item))
         default:
             loadedContent
+        }
+    }
+
+    /// The current read's profile when it holds no items and no change failed.
+    private var emptyProfileList: HomeProfileListDTO? {
+        guard mutationFailure == nil else { return nil }
+        switch owner.state {
+        case .loaded(let read, .profile(let list)), .loading(let read, .some(.profile(let list))):
+            return read.identity.profileID == profileID && read.identity.surfaceToken == token && list.items.isEmpty ? list : nil
+        default: return nil
         }
     }
 
