@@ -58,6 +58,7 @@ lists in composition order, because four owners observe session removal today
 | `modelRuntimeInstalled` | sync, owner runtimes only | `openAIModelEligibility.attachRuntime` (`runtime-slot.ts:2243`), Kimi/Jev pricing (`runtime-registry.ts:1827`) | providers |
 | `modelUsed` | sync, off the critical path | `noteModelUsed` (`runtime-slot.ts:4662`) | providers |
 | `sessionRemoval` (observers) | async before delete/rekey; rejection refuses | `beforeSessionDelete/Rekey` (`runtime-registry.ts:682-683`) | automations |
+| `sessionLineage` | sync: `state(sessionId)` (sealed, materializing reserved successor, lineage id, ordinal, attempt, path), `assertWritable(sessionId)`, `publicationUncertain()` | `HomeOwner.chapterStateFor`/`isHomeChapter` reads in acquire, catalog, attention, retain, cold scan and the slot; `assertChapterWritable`; the registry's `homePublicationUncertain` gate | Home |
 | `sessionRetired` (observers) | sync, each caught | `retireSession` (`runtime-slot.ts:2775`, `:10879`), `sessionRekeyed/Closed` (`runtime-registry.ts:681`, `:684`), search invalidator (`:1449`, `:1466`, `:3853`) | display, transport, search |
 
 ### 2.2 Session profiles
@@ -247,7 +248,7 @@ lands, a slice runs the named locks and the full Gateway suite directly. Locks s
 
 Order: wiring first (E1-E3), then read-only projection (E4), the behavior core (E5),
 delegation, which depends on run ownership (E6), and the registry, which depends on all
-(E7). The rest of §5's left column follows E7 (maintainer, 2026-10-22): while `gateway/run` owns the slot
+(E7). Home leaves the registry through `sessionLineage` (§2.1; decision A, maintainer 2026-10-23): the kernel asks Home only for lineage facts, never through a HomeOwner mirror, and the registry's Home procedures (reserved-successor materialization, publication retirement, task recovery and dispatch) move to Home over K1 operations. The rest of §5's left column follows E7 (maintainer, 2026-10-22): while `gateway/run` owns the slot
 and registry, which import delegation, a delegation→run import is a hard two-way pair (#1348 layers probe). E2 before E3-E7 keeps moved files from being re-touched for imports (D1). K4 and K6 are
 file moves on disjoint files that may run beside E3-E7 (`admin-settings-change`,
 `settings-approvals`, `admin.store`, `run-prompt-stream`). Each step is several slices of one
