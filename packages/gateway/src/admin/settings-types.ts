@@ -1,6 +1,5 @@
-import { TIERS, type LayerId, type Tier } from "../kernel/settings/tool-contract.js";
+import { TIERS, splitModelRef, type LayerId, type Tier } from "../kernel/settings/tool-contract.js";
 import { GatewayError } from "../errors.js";
-import { splitModelRef } from "../providers/model-queue.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from "../util/validation.js";
 
 

@@ -5,6 +5,14 @@ export const LAYERS = ["project", "session", "global"] as const;
 export type LayerId = typeof LAYERS[number];
 export type Direction = "widen" | "narrow";
 
+export const MODEL_QUEUE_ROLES = ["worker", "subagent", "background"] as const;
+export function modelQueueKey(role: typeof MODEL_QUEUE_ROLES[number]): string { return `model.queue[role=${role}]`; }
+
+export function splitModelRef(value: string): { provider: string; id: string } | undefined {
+  const separator = value.indexOf("/");
+  return separator > 0 && separator < value.length - 1 ? { provider: value.slice(0, separator), id: value.slice(separator + 1) } : undefined;
+}
+
 /** Scope names #1634 retired, as old session entries recorded them. Session JSONL
  * is never rewritten (#1649), so session readers map them to current names;
  * the next settings write persists the current name. The startup migration of the

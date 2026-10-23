@@ -2,10 +2,9 @@ import { GatewayError } from "../errors.js";
 import { HOME_TOOL_NAMES } from "../modules/home/home-runtime-policy.js";
 import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../kernel/run/compaction-policy.js";
 import { validateMacTerminalKey } from "../security/mac-terminal.js";
-import { MODEL_QUEUE_ROLES, modelQueueKey } from "../providers/model-queue.js";
 import { boolean, integer, object, string, arrayOfStrings } from "../util/validation.js";
 import { type Control, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "./settings-types.js";
-import { type QualifierName, type Tier, type Direction } from "../kernel/settings/tool-contract.js";
+import { MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Tier, type Direction } from "../kernel/settings/tool-contract.js";
 import type { StoreLayer } from "./settings-types.js";
 
 /**

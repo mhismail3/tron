@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "../kernel/pi/ai.js";
 import { GatewayError } from "../errors.js";
+import { splitModelRef } from "../kernel/settings/tool-contract.js";
 import type { ProviderUsageOwner } from "./provider-usage.js";
 import { isVirtualModel } from "./virtual-model.js";
 import {
@@ -26,14 +27,11 @@ import {
  * catches a limit the usage read could not see.
  */
 
-export const MODEL_QUEUE_ROLES = ["worker", "subagent", "background"] as const;
 const MODEL_QUEUE_SKIP_PERCENT = 95;
 const RECORD_MS = 15 * 60_000;
 /** A projected usage skip lasts this long, so a child never acts on an old read. */
 const PROJECTED_USAGE_MS = 10 * 60_000;
 const PROJECTION_BYTES = 64 * 1024;
-
-export function modelQueueKey(role: ModelQueueRole): string { return `model.queue[role=${role}]`; }
 
 /** The children's projection, in the Gateway's own state directory. */
 export function modelQueueProjectionPath(tronHome: string): string { return join(tronHome, "gateway", "model-queue.json"); }
@@ -51,11 +49,6 @@ async function writeProjectionFile(path: string, contents: string): Promise<void
     await writeFile(temporary, contents, { mode: 0o600 });
     await rename(temporary, path);
   } finally { await rm(temporary, { force: true }); }
-}
-
-export function splitModelRef(value: string): { provider: string; id: string } | undefined {
-  const separator = value.indexOf("/");
-  return separator > 0 && separator < value.length - 1 ? { provider: value.slice(0, separator), id: value.slice(separator + 1) } : undefined;
 }
 
 export type TaskModelQueues = Readonly<Record<"worker" | "subagent", readonly string[]>>;

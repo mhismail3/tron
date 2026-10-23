@@ -98,8 +98,8 @@ import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-bound
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../modules/home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
-import { ModelQueueOwner, modelQueueKey, modelQueueProjectionPath, type ModelQueueRecord } from "../providers/model-queue.js";
-import type { ModelQueueRole } from "../providers/model-queue-extension.js";
+import { ModelQueueOwner, modelQueueProjectionPath, type ModelQueueRecord } from "../providers/model-queue.js";
+import { modelQueueKey } from "../kernel/settings/tool-contract.js";
 import { ProviderUsageOwner } from "../providers/provider-usage.js";
 import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
 import { applyHomeCacheRetention } from "../modules/home/home-request-policy.js";
@@ -2730,7 +2730,7 @@ export class RuntimeRegistry {
   /** A role's model queue, `provider/id` in order, through the one settings
    * resolver (Profile > Mac > built-in). The background queue without a value
    * of its own is the subagent queue. */
-  async modelQueueOf(role: ModelQueueRole, scope: "global" | "home" = "global"): Promise<string[]> {
+  async modelQueueOf(role: Parameters<typeof modelQueueKey>[0], scope: "global" | "home" = "global"): Promise<string[]> {
     const settings = this.settingsOwners?.model;
     if (!settings) return [];
     const keys = role === "background" ? [modelQueueKey("background"), modelQueueKey("subagent")] : [modelQueueKey(role)];

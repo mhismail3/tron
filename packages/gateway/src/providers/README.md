@@ -13,6 +13,9 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
 `recent-models.ts`, `model-release-date-catalog.ts` (+ JSON data), `virtual-model.ts`,
 `kimi-k3-policy.ts`, `jev-model-pricing.ts`, `provider-runtime.ts`.
 
+Queue roles, setting-key addresses and lexical model-reference parsing belong to
+[the settings vocabulary](../kernel/settings/README.md), not provider queue execution.
+
 ## Contract
 
 - **Pi stays canonical** for provider IDs, credentials, models and retries. The global

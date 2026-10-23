@@ -7,7 +7,8 @@ and settings change path use one contract and one persisted store format.
 
 ## Owns
 
-`tool-contract.ts`: layer/tier/qualifier vocabulary, retired scope-name mapping
+`tool-contract.ts`: layer/tier/qualifier and model-reference/queue role/key vocabulary,
+retired scope-name mapping
 shared by session readers and store migration, and tool request, resolution,
 result and worker-state interfaces. `settings-record.ts` owns append-only audit
 segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
