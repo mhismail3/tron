@@ -6,6 +6,16 @@ final class TronManageModelPreviewTests: XCTestCase {
     @MainActor func testDarkPreview() throws { try preview("dark") }
     @MainActor func testLargeTypePreview() throws { try preview("large") }
 
+    @MainActor func testHistoryLargePreview() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-manage-session-review", "-history-large",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch(); defer { app.terminate() }
+        try tap(app, "Stop session"); try reveal(app, "Session History"); try tap(app, "Session History")
+        try ready(app, "history-row-h-6732"); try tap(app, "history-row-h-6732")
+        try ready(app, "history-entry-actions"); shot("large-history-entry")
+    }
+
     @MainActor private func preview(_ mode: String) throws {
         let app = XCUIApplication()
         let appearance = mode == "dark" ? ["-home-dark", "-fixture-appearance", "dark"] : ["-fixture-appearance", "light"]
