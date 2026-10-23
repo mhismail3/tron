@@ -1,5 +1,5 @@
-import type { LayerId, SettingsTarget } from "../kernel/settings/tool-contract.js";
-import type { StoreLayer } from "../kernel/settings/settings-types.js";
+import type { LayerId, SettingsTarget } from "./tool-contract.js";
+import type { StoreLayer } from "./settings-types.js";
 
 /** Storage paths remain available to the SDK and historical undo. Grants are
  * checked independently, before values enter resolution or a new mutation. */

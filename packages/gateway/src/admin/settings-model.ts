@@ -23,7 +23,7 @@ import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, keyDefault, floorFor, floorIn
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { formatProfileValue, profileListItem, type HomeProfileAuthor, type HomeProfileItems, type HomeProfileOp, type HomeProfileSaved, type HomeProfileWrite } from "../modules/home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, maxTier, raiseTier, type FormatContext, type ModelRefValue, type SessionStore, type OptionSources, type SettingsStores, type FloorOverrides } from "../kernel/settings/settings-types.js";
-import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "./settings-registry.js";
+import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "../kernel/settings/scope-resolution.js";
 
 /** What a session target contributes: its Session scope and whether it is Home's chat. */
 export interface SessionSettingsSource {

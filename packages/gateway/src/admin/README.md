@@ -11,7 +11,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 
 | Area | Files |
 |---|---|
-| Settings declarations and binding admission | `settings-schema.ts` (`KEYS`, `RECORD_SUBJECTS`), `settings-registry.ts` (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
+| Settings declarations and binding admission | `settings-schema.ts` (`KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
 | SDK scope admission and operational model selection | `settings-sdk-manager.ts`, `settings-admission.ts` |
 | Resolution and presentation | `settings-resolver.ts`, `settings-model.ts` (`SettingsModel`), `settings-presentation.ts`, `settings-project-diagnostics.ts` |
 | Change path and policy | `settings-model.ts` (`SettingsChangePath`), `settings-risk.ts`; audit/approvals: [kernel settings](../kernel/settings/README.md) |

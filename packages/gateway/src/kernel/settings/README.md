@@ -15,6 +15,8 @@ ordered queue summaries, Pi-compatible tool-selection composition and neutral re
 (store snapshots, outside marks, floor overrides, Git state and option/format sources). `settings-record.ts` owns append-only audit
 segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
 approvals, their admission bounds, settlement, expiry and untold outcomes.
+`scope-resolution.ts` owns binding admission from declared Session/Project permissions,
+canonical targets and the public/storage scope mapping.
 `settings-migration-state.ts` owns shared-store value transformation and digest
 validation; admin owns the migration transaction, backups and publication.
 

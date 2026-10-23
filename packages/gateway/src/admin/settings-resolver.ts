@@ -2,7 +2,7 @@ import { type SettingsTarget, type Badge, type LayerValue, type ResolvedKey, typ
 import { dirname, join } from "node:path";
 import { KEYS, keyForHome, keyDefault, floorInstances, schemaKey, type Binding, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "../kernel/settings/settings-types.js";
-import { canonicalSettingsTarget, scopeAdmitted, scopeForStore } from "./settings-registry.js";
+import { canonicalSettingsTarget, scopeAdmitted, scopeForStore } from "../kernel/settings/scope-resolution.js";
 import { instanceId } from "./settings-outside.js";
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
 

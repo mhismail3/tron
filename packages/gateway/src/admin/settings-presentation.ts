@@ -3,7 +3,7 @@ import type { ResolvedKey, Resolution } from "../kernel/settings/tool-contract.j
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { formatProfileValue } from "../modules/home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type ValueType } from "../kernel/settings/settings-types.js";
-import { scopeAdmitted } from "./settings-registry.js";
+import { scopeAdmitted } from "../kernel/settings/scope-resolution.js";
 
 /**
  * What a client is shown for each resolved key and section (docs/settings-model.md
