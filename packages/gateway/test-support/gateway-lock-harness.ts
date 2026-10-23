@@ -335,7 +335,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   await server.listen();
   await automations?.initialize();
   // gateway-main recovers Home tasks once serving; until then task reads and dispatch refuse.
-  if (options.home) await registry.recoverHomeTasks();
+  if (options.home) await registry.homeOwner().recoverTasks();
   const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
 
   const exchanges: Array<{ client: string; method: string; params: unknown; response: unknown }> = [];

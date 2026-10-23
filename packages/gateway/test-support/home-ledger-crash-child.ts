@@ -10,8 +10,8 @@ const owner = new HomeOwner({
   workspace: new TronWorkspace(tronHome),
   // The crash path only seals a chapter, which never dispatches a task.
   taskSessions: {} as never,
-  // Sealing never materializes a successor runtime.
-  runtimes: {} as never,
+  // Sealing never materializes a successor runtime or watches global resources.
+  runtimes: {} as never, agentDir: "/nonexistent-agent-dir",
   // The crash path never reaches a learned-profile read, so no Knowledge owner exists.
   knowledge: () => undefined,
   sessions: {

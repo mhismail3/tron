@@ -6,6 +6,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { HomeChapterMaterializer, type HomeRuntimePort } from "./home-chapter-materialization.js";
+import { HomeGlobalResources } from "./home-global-resources.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest, type HomeTaskControlRefusalReason, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
@@ -140,6 +141,8 @@ export interface HomeMemoryPort {
 
 export interface HomeOwnerOptions {
   tronHome: string;
+  /** Pi's agent directory, whose global resources Home's chapter reloads on change. */
+  agentDir: string;
   trust: TrustService;
   sessions: HomeSessionPort;
   /** K1 runtime operations the reserved-successor procedure is built on. */
@@ -213,6 +216,8 @@ export class HomeOwner {
   private readonly tasks: HomeTaskDispatcher;
   /** Builds a reserved successor chapter's runtime (home.prompt, wake). */
   readonly materializer: HomeChapterMaterializer;
+  /** Global resource watchers for the live Home chapter. */
+  readonly resources: HomeGlobalResources;
   private readonly inbox: WakeInboxOwner;
   /** The wake owner's single-flight state: one drain at a time, with one request
    * remembered while it runs. Nothing else starts a wake. */
@@ -244,6 +249,8 @@ export class HomeOwner {
       wakeAvailable: homeId => this.wakeAvailable(homeId),
       wake: () => this.requestWake(),
     });
+    this.resources = new HomeGlobalResources({ agentDir: options.agentDir, diagnostic: record => this.options.diagnostic?.(record),
+      homeSlot: () => { try { return options.runtimes.runtimeOf(this.routeBinding().physicalSessionId); } catch { return undefined; } } });
     this.materializer = new HomeChapterMaterializer(this, options.runtimes, options.trust, options.diagnostic);
     this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox);
   }
@@ -273,7 +280,7 @@ export class HomeOwner {
     return { model: { provider: snapshot.model.provider, id: snapshot.model.id }, thinking };
   }
 
-  /** Post-listen startup only (see `RuntimeRegistry.recoverHomeTasks`). Recovery
+  /** Post-listen startup only (gateway-main, after listen). Recovery
    * has no executable session lifetime to resurrect. */
   async recoverTasks(): Promise<void> {
     const recovery = await this.tasks.recover();

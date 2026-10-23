@@ -794,7 +794,7 @@ describe("Home task cold reconciliation", () => {
     const cold = await startup;
     expect(readiness).toBe("ready");
     expect(await cold.homeOwner().status()).toMatchObject({ taskRecovery: { available: false, reason: "not-started" } });
-    await cold.recoverHomeTasks();
+    await cold.homeOwner().recoverTasks();
     expect(barrier).toHaveBeenCalled();
     expect(await cold.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
   }, 20_000);
@@ -1948,7 +1948,7 @@ describe("Home task production dispatch", () => {
     });
     try {
       await cold.initialize(); await (cold as any).sessionCatalog.whenPublished();
-      await cold.recoverHomeTasks();
+      await cold.homeOwner().recoverTasks();
       await expect(cold.acquire(run.sessionId)).rejects.toThrow(/Referenced task/);
       expect(constructions).toBe(0);
       evidence.push({ case: "cold-missing-task", constructions, refused: true });

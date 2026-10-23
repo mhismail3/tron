@@ -106,7 +106,7 @@ its workflows name); nothing extra is persisted.
 
 ## Cold reconciliation
 
-After the listener serves, `RuntimeRegistry.recoverHomeTasks` settles abandoned records one at
+After the listener serves, `HomeOwner.recoverTasks` (called by gateway-main) settles abandoned records one at
 a time without constructing workers or replaying. A live or unreadable async run →
 `unknown` (`detached-work-outlived-task`); a durable Stop intent without report →
 `interrupted`; a report counts only with one marker and one valid report after it. Until it

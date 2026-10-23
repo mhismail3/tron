@@ -12,6 +12,7 @@ import { HomeRequestPolicyError } from "./home-request-policy.js";
 import type { RequestPolicyHook } from "../kernel/host/request-policy.js";
 import type { InputAdmissionPolicy } from "../kernel/host/input-admission.js";
 import type { SessionLineagePolicy } from "../kernel/host/session-lineage.js";
+import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../kernel/host/kernel-lifecycle.js";
 import { assertChapterWritable } from "./home-chapter-state.js";
 import { homeInputAdmission } from "./home-input-admission.js";
 import { dispatchWithWorkerChoice, type HomeWorkerChoicePort } from "./home-task-worker-choice.js";
@@ -24,6 +25,8 @@ import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/se
 export interface HomeModuleServices {
   runSettled: RunSettledPolicy;
   lineage: SessionLineagePolicy;
+  lifecycle: KernelLifecycleObserver;
+  taskLedger: TaskLedgerPolicy;
   requestPolicy: RequestPolicyHook;
   inputAdmission: InputAdmissionPolicy;
   profile: HomeSessionProfileServices;
@@ -43,12 +46,23 @@ export interface HomeModuleServices {
  * operations and reads of owners installed after registry construction. */
 export function homeModuleServices(owner: HomeOwner,
   platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport; homeDiagnostic?: HomeDiagnostic; homeTaskDiagnostic?: (record: HomeTaskDiagnostic) => void; },
-  ports: Pick<HomeModuleServices, "knowledge" | "read"> & { workerChoice: HomeWorkerChoicePort; changes(): SettingsChangePath | undefined; resourcesIdle(sessionId: string): void; runtime: HomeSessionProfileServices["runtime"] },
+  ports: Pick<HomeModuleServices, "knowledge" | "read"> & { workerChoice: HomeWorkerChoicePort; changes(): SettingsChangePath | undefined; runtime: HomeSessionProfileServices["runtime"] },
 ): Omit<HomeModuleServices, "search"> {
   return {
     knowledge: ports.knowledge, read: ports.read,
     delegate: (sessionId, request, signal) => dispatchWithWorkerChoice(owner, ports.workerChoice, sessionId, request, signal),
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
+    lifecycle: {
+      // The designation is read before any runtime is built.
+      initialize: () => owner.initialize(),
+      started: () => owner.resources.start(),
+      closing: () => owner.resources.close(),
+      dispose: () => owner.dispose(),
+    },
+    taskLedger: {
+      validateMarker: (sessionId, marker) => owner.validateTaskMarker(sessionId, marker),
+      settingsTarget: (sessionId, taskId, purpose) => owner.taskSettingsTarget(sessionId, taskId, purpose),
+    },
     lineage: {
       state: sessionId => {
         const { homeId, ...state } = owner.chapterStateFor(sessionId);
@@ -72,7 +86,7 @@ export function homeModuleServices(owner: HomeOwner,
     },
     runSettled: {
       quiescent: sessionId => owner.chapterQuiescent(sessionId),
-      idle: (sessionId, by) => { owner.noteHomeIdle(sessionId, by); ports.resourcesIdle(sessionId); },
+      idle: (sessionId, by) => { owner.noteHomeIdle(sessionId, by); owner.resources.idle(sessionId); },
     },
     memory: sessionId => owner.memoryToolsFor(sessionId),
     task: (sessionId, request) => owner.taskTool(sessionId, request),
@@ -100,7 +114,7 @@ export function createHomeModule(services: () => HomeModuleServices): ModuleDesc
     tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"], commands: [],
     start: () => ({ profiles: [homeSessionProfile(() => services().profile)], hooks: {
       profileDecision: (sessionId, cwd) => { const name = services().profile.decision(sessionId, cwd); return name === "unnamed" ? "unrecorded" : name; },
-      runSettled: () => services().runSettled, sessionLineage: () => services().lineage, requestPolicy: () => services().requestPolicy,
+      runSettled: () => services().runSettled, sessionLineage: () => services().lineage, kernelLifecycle: () => services().lifecycle, taskLedger: () => services().taskLedger, requestPolicy: () => services().requestPolicy,
       inputAdmission: () => services().inputAdmission, appendGuard: homeAppendGuardHook(() => services().appendGuard) }, extension: session => {
       const owners = services();
       return createTronHomeExtension(() => owners.memory(session.sessionId()),

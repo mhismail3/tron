@@ -47,7 +47,7 @@ describe("Home durable publication reconciliation", () => {
       trust: new TrustService(join(root, "agent")),
       workspace,
       // Publication recovery never dispatches a task, so the task namespace is never read.
-      taskSessions: {} as RuntimeRegistry, runtimes: {} as never,
+      taskSessions: {} as RuntimeRegistry, runtimes: {} as never, agentDir: "/nonexistent-agent-dir",
       sessions: {
         createHomeSession: async () => "session-1",
         sessionFile: async () => join(root, "sessions", "session-1.jsonl"),
@@ -94,7 +94,7 @@ describe("Home durable publication reconciliation", () => {
       trust: new TrustService(join(root, "agent")),
       workspace,
       // Publication recovery never dispatches a task, so the task namespace is never read.
-      taskSessions: {} as RuntimeRegistry, runtimes: {} as never,
+      taskSessions: {} as RuntimeRegistry, runtimes: {} as never, agentDir: "/nonexistent-agent-dir",
       sessions: {
         createHomeSession: async () => "session-1",
         sessionFile: async () => join(root, "sessions", "session-1.jsonl"),

@@ -21,6 +21,8 @@ export interface HomeRuntimePort {
   /** One construction flight per session: a live runtime is returned as
    * `existing`; a running flight is joined; otherwise `construct` runs once. */
   materializeRuntime(sessionId: string, construct: () => Promise<RuntimeSlot>): Promise<{ slot: RuntimeSlot; existing: boolean }>;
+  /** The live runtime now, without the registry mutex. */
+  runtimeOf(sessionId: string): RuntimeSlot | undefined;
   /** The live runtime as the registry mutex orders it. */
   liveRuntime(sessionId: string): Promise<RuntimeSlot | undefined>;
   sessionDirectory(cwd: string): string;

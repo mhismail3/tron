@@ -1,6 +1,7 @@
 import { HOME_SESSION_PROFILE_NAME } from "../home/home-session-profile.js";
 import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
 import type { SessionLineagePolicy } from "../kernel/host/session-lineage.js";
+import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../kernel/host/kernel-lifecycle.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -100,7 +101,6 @@ import {
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { HomeOwner } from "../home/home-owner.js";
-import { HomeGlobalResources } from "../home/home-global-resources.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
 import type { HomeDiagnostic } from "../home/home-diagnostic.js";
@@ -617,7 +617,6 @@ export class RuntimeRegistry {
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, PendingColdLoad>();
   private reservedSlotStarts = 0;
-  private readonly homeResources: HomeGlobalResources;
   /** Heap the byte budget has charged to session starts that are not published yet, keyed by
    * the session being opened. The byte pass counts them in the projected total, so two concurrent
    * opens each see the room the other has taken; a session's own reservation is left out of its
@@ -778,10 +777,9 @@ export class RuntimeRegistry {
       projectionPath: modelQueueProjectionPath(options.tronHome),
       ...(options.modelQueueDiagnostic ? { log: options.modelQueueDiagnostic } : {}),
     }) : undefined;
-    this.homeResources = new HomeGlobalResources({ agentDir: options.agentDir, diagnostic: record => this.options.homeDiagnostic?.(record),
-      homeSlot: () => { try { return this.slots.get(this.home.routeBinding().physicalSessionId); } catch { return undefined; } } });
     this.home = new HomeOwner({
       tronHome: options.tronHome,
+      agentDir: options.agentDir,
       trust: options.trust,
       sessions: {
         createHomeSession: async (cwd) => (await this.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
@@ -843,6 +841,7 @@ export class RuntimeRegistry {
       },
       runtimes: {
         materializeRuntime: (sessionId, construct) => this.materializeRuntime(sessionId, construct),
+        runtimeOf: (sessionId) => this.slots.get(sessionId),
         liveRuntime: (sessionId) => this.mutex.run(() => this.slots.get(sessionId)),
         sessionDirectory: (cwd) => this.sessionDirectoryFor(cwd),
         canonicalEntries: (sessionId) => this.canonicalEntries(sessionId),
@@ -897,7 +896,6 @@ export class RuntimeRegistry {
         ownership: this.options.gatewayModelRuntime ? "borrowed" as const : "owned" as const,
       }),
       knowledge: this.knowledgeService, changes: () => this.settingsOwners?.changes,
-      resourcesIdle: sessionId => this.homeResources.idle(sessionId),
       workerChoice: {
         homeRuntime: async sessionId => (await this.acquire(sessionId)).snapshot(),
         settings: () => this.settingsOwners?.model,
@@ -1045,8 +1043,8 @@ export class RuntimeRegistry {
   }
 
   async initialize(onPhase?: (phase: "catalog-warming" | "attention-recovery") => void): Promise<void> {
-    // The designation is read before any runtime is built, so no session opens with a late profile.
-    await this.home.initialize();
+    // Lifecycle owners load first (Home's designation), so no session opens with a late profile.
+    for (const lifecycle of this.lifecycles()) await lifecycle.initialize();
     await this.workspace.initialize();
     // Load the durable recovery inputs before capturing catalog membership, as before this
     // optimization. The later evidence cut therefore cannot omit a marker already admitted to this pass.
@@ -1057,7 +1055,7 @@ export class RuntimeRegistry {
     // writers; the periodic pass is the backstop for any event the watcher could not see (G-9 moves
     // both into the scheduler). A reader joins that first cut rather than walking the folder itself.
     this.sessionCatalog.start();
-    this.homeResources.start();
+    for (const lifecycle of this.lifecycles()) lifecycle.started();
     const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
     // readiness on those full reads; recover them once the Gateway is serving.
@@ -1072,14 +1070,6 @@ export class RuntimeRegistry {
 
   private pendingAttentionRecovery: ReadonlyMap<string, readonly RunMarkerEvidence[]> | undefined;
   private pendingStartupPhaseObserver: ((phase: "catalog-warming" | "attention-recovery") => void) | undefined;
-
-  /** Retires abandoned Home task identities once the Gateway is serving. Until
-   * it settles, task surfaces report `not-started`, which keeps task dispatch
-   * refused and inbox delivery deferred; pending results deliver on a later
-   * activation. Canonical files only: accepted prompts are never recreated. */
-  async recoverHomeTasks(): Promise<void> {
-    await this.home.recoverTasks();
-  }
 
   async recoverCanonicalAttention(): Promise<void> {
     const markerEvidence = this.pendingAttentionRecovery;
@@ -1578,6 +1568,17 @@ export class RuntimeRegistry {
     throw new GatewayError("not_found", "Tron session was not found");
   }
 
+  /** Lifecycle observers in composition order, resolved at each phase (k0-kernel.md §2.1). */
+  private lifecycles(): KernelLifecycleObserver[] {
+    return this.options.modules.observers("kernelLifecycle").map(hook => hook());
+  }
+
+  private taskLedger(): TaskLedgerPolicy {
+    const hook = this.options.modules.policy("taskLedger");
+    if (!hook) throw new Error("No task ledger owner is composed");
+    return hook();
+  }
+
   /** The composed lineage owner (Home), resolved at each call (k0-kernel.md §2.1). */
   private lineage(): SessionLineagePolicy {
     const hook = this.options.modules.policy("sessionLineage");
@@ -1763,10 +1764,10 @@ export class RuntimeRegistry {
       settings: () => this.settingsOwners,
       lineageState: (sessionId: string) => this.lineage().state(sessionId),
       homeTaskSettings: async (sessionId: string, taskId: string, purpose: "resolve" | "change") => {
-        const target = await this.home.taskSettingsTarget(sessionId, taskId, purpose);
+        const target = await this.taskLedger().settingsTarget(sessionId, taskId, purpose);
         return { ...target, slot: await this.acquire(target.sessionId) };
       },
-      validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
+      validateTaskMarker: (sessionId: string, marker: unknown) => this.taskLedger().validateMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
       ...(this.options.runtimeDisposeTimeout ? { runtimeDisposalTimedOut: this.options.runtimeDisposeTimeout } : {}),
@@ -4654,7 +4655,7 @@ export class RuntimeRegistry {
     this.shutdownState = "shuttingDown";
     if (this.evictionTimer) clearInterval(this.evictionTimer);
     if (this.artifactDiscoveryTimer) clearInterval(this.artifactDiscoveryTimer);
-    this.homeResources.close();
+    for (const lifecycle of this.lifecycles()) lifecycle.closing();
     const operation = this.performDispose();
     this.disposalPromise = operation;
     try {
@@ -4696,10 +4697,10 @@ export class RuntimeRegistry {
   }
 
   private async disposeSharedStores(): Promise<void> {
-    // Home's memory owns capability state inside the workspace, so it is
-    // released before the workspace that owns those files (and so a later
+    // Home's memory owns capability state inside the workspace, so lifecycle
+    // owners release before the workspace that owns those files (and so a later
     // Gateway authority in this process can open the same store again).
-    await this.home.dispose().catch(() => {});
+    for (const lifecycle of this.lifecycles()) await lifecycle.dispose().catch(() => {});
     const pending: Promise<void>[] = [];
     if (!this.blobsDisposed) {
       pending.push(this.blobs.dispose().then(() => { this.blobsDisposed = true; }));

@@ -20,7 +20,7 @@ import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
  *   registry disposes every runtime and aborts that turn, as a `restartNow` or a
  *   stalled drain's shutdown does, not a crash). The task record is still
  *   non-terminal at that boundary; a new Gateway over the same Tron home settles
- *   it from its canonical file (`recoverHomeTasks`, `cold-no-report`) and the
+ *   it from its canonical file (`HomeOwner.recoverTasks`, `cold-no-report`) and the
  *   result wakes Home in the new process.
  *
  * The refused write answers `internal` with the raw file-system error, as

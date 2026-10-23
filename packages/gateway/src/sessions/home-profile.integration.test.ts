@@ -246,7 +246,7 @@ async function fixture(label: string): Promise<Fixture> {
   } as unknown as GatewayServiceDependencies);
 
   // Task recovery runs after listen, as in gateway-main; delegation is refused before it.
-  await registry.recoverHomeTasks();
+  await registry.homeOwner().recoverTasks();
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
   await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);

@@ -202,7 +202,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   const owned = { registry, root };
   fixtures.push(owned);
   await bringUpToReadiness(registry);
-  await registry.recoverHomeTasks();
+  await registry.homeOwner().recoverTasks();
   const home = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } }, () => model);
   // Readiness only: task recovery runs after listen, as in gateway-main.
   const restartToReadiness = async () => {
@@ -223,7 +223,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   return { root, registry, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, queueDiagnostics, agentDir, trust, restartToReadiness,
     restart: async () => {
       const cold = await restartToReadiness();
-      await cold.recoverHomeTasks();
+      await cold.homeOwner().recoverTasks();
       return cold;
     } };
 }

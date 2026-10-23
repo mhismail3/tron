@@ -180,7 +180,7 @@ async function fixture(label: string, options: { cacheWarming?: boolean; virtual
   f.service = opened.service;
   await f.registry.initialize();
   // Gateway startup retires abandoned task identities after its listener serves (gateway-main).
-  await f.registry.recoverHomeTasks();
+  await f.registry.homeOwner().recoverTasks();
   return f;
 }
 
@@ -205,7 +205,7 @@ async function reopen(f: Fixture): Promise<void> {
   f.registry = opened.registry;
   f.service = opened.service;
   await f.registry.initialize();
-  await f.registry.recoverHomeTasks();
+  await f.registry.homeOwner().recoverTasks();
 }
 
 interface ContextEnvelope {
