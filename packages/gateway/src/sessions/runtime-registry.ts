@@ -97,6 +97,7 @@ import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../modules/home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
 import { modelQueueKey } from "../kernel/settings/tool-contract.js";
+import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { applyHomeCacheRetention } from "../modules/home/home-request-policy.js";
 import type { HomeKernelPorts } from "../modules/home/home-module.js";
 import {
@@ -687,7 +688,7 @@ export class RuntimeRegistry {
       resources?: ResourceRecorder;
       machineId?: string;
       notifications?: NotificationService;
-      readonly displayArtifacts: RuntimeSlotDependencies["displayArtifacts"];
+      readonly displayArtifacts: DisplayArtifactStore;
       workRegistry?: GatewayWorkRegistry;
       /** A discovery pass that stopped at one of its budgets instead of the end
        * of its roots, with the counts it spent. A directory past the stop is
