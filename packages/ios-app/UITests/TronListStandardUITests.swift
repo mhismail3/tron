@@ -223,6 +223,59 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertFalse(element(app, "home-chapter-1-leading").exists, "Chapters carry no repeated icon")
     }
 
+    /// Stacked groups (#1700): every titled section of a grouped list is its own
+    /// container, apart from the next, with its header and count above it on the
+    /// container's edges, on both sheets that stack groups (Profile, Resources).
+    @MainActor func testGroupedSectionsAreSeparateContainersWithHeadersAbove() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        ring.tap()
+        let profile = element(app, "home-manage-profile")
+        XCTAssertTrue(profile.waitForExistence(timeout: 10), app.debugDescription)
+        for _ in 0..<6 where !profile.isHittable { app.swipeUp() }
+        profile.tap()
+        expandSheet(app, title: "Profile")
+        assertSeparateSections(app, list: "home-profile-items", titles: ["Preferences", "Standing decisions"],
+                               row: "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
+        app.terminate()
+
+        app.launchArguments = ["-tron-session-configuration-fixture", "-manage-session-review", "-fixture-appearance", "light"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+        app.buttons["Stop session"].tap()
+        let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
+        for _ in 0..<8 where !resources.isHittable { app.swipeUp() }
+        resources.tap()
+        XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
+        expandSheet(app, title: "Resources")
+        assertSeparateSections(app, list: "project-resource-groups", titles: ["Skills", "Subagents"], row: "project-resource-skills-0")
+    }
+
+    @MainActor private func assertSeparateSections(_ app: XCUIApplication, list: String, titles: [String], row: String) {
+        var previousBottom: CGFloat?
+        for (index, title) in titles.enumerated() {
+            let header = element(app, "\(list)-header-\(index)"), section = element(app, "\(list)-section-\(index)")
+            XCTAssertTrue(header.waitForExistence(timeout: 5) && section.exists, "\(list) section \(index) has its own header and container\n\(app.debugDescription)")
+            XCTAssertTrue(header.label.hasPrefix(title) && header.label.rangeOfCharacter(from: .decimalDigits) != nil,
+                          "The header names \(title) and its count: \(header.label)")
+            XCTAssertLessThanOrEqual(header.frame.maxY, section.frame.minY + 0.5, "\(title)'s header sits above its container")
+            XCTAssertEqual(header.frame.minX, section.frame.minX, accuracy: 1, "\(title)'s header starts on the container's leading edge")
+            XCTAssertEqual(header.frame.maxX, section.frame.maxX, accuracy: 1, "\(title)'s count ends on the container's trailing edge")
+            if let previousBottom {
+                XCTAssertGreaterThan(header.frame.minY - previousBottom, 8, "\(title) starts apart from the previous container")
+            }
+            previousBottom = section.frame.maxY
+        }
+        let first = element(app, "\(list)-section-0"), firstRow = app.buttons[row]
+        XCTAssertTrue(first.frame.contains(firstRow.frame.insetBy(dx: 1, dy: 1)), "The first row is inside the first container")
+    }
+
     /// Tasks page themselves; a refused page keeps the rows and offers Retry, and
     /// the feed ends with an explicit end row.
     @MainActor func testTaskFeedRetriesAndEnds() {
