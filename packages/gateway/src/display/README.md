@@ -91,12 +91,16 @@ Projection reads the persisted details live and after cold reload.
 
 - Viewing authority is always the exact active canonical branch; retention alone
   never authorizes a read.
+- Runtime replacement and slot disposal revoke the retiring session's views and load
+  token without revoking unrelated live sessions. The real-runtime lifecycle lock
+  checks both boundaries and rejects re-admission with the retired token.
 - Live viewing never launches, controls or closes a browser.
 
 ## Verify
 
 ```bash
-scripts/tron test gateway src/display/display.store.lock.integration.test.ts \
+scripts/tron test gateway src/display/runtime-retirement.lock.integration.test.ts \
+  src/display/display.store.lock.integration.test.ts \
   src/display/display-image-lifetime.integration.test.ts \
   src/transport/server-live-view.integration.test.ts \
   src/kernel/projection/codemode-nested-presentation.integration.test.ts
