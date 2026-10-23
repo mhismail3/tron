@@ -57,6 +57,30 @@ final class TronDiagnosticsExportUITests: XCTestCase {
     }
 
     @MainActor
+    func testDismissedLogsCannotPublishHeldExportResult() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-diagnostics-export-fixture", "-diagnostics-export-scenario", "retirement"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(observe(app, "fixture.export-connection", "selected:export-original ready:true"))
+        app.buttons["Open Logs"].tap()
+        let export = app.buttons["Export Diagnostics"]
+        XCTAssertTrue(export.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "synthetic-original-evidence")).firstMatch.waitForExistence(timeout: 15))
+        export.tap()
+        app.navigationBars.firstMatch.swipeDown()
+        XCTAssertTrue(app.buttons["Open Logs"].waitForExistence(timeout: 15))
+        XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:1 released:0"))
+        app.buttons["fixture.release-export-preparation"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-original", "exports:1 commands:1 repeats:0 originalEvidence:true"))
+        let staleNotice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Diagnostics"), object: app.staticTexts["fixture.export-notices"])
+        XCTAssertEqual(XCTWaiter.wait(for: [staleNotice], timeout: 2), .timedOut)
+        XCTAssertFalse(app.buttons["Close"].exists)
+        evidence(app, "1675-retired-export-publication")
+    }
+
+    @MainActor
     func testOriginalConnectedExportWritesOnceWithCapturedEvidence() {
         let app = launch("normal")
         defer { app.terminate() }

@@ -26,6 +26,7 @@ extension GatewayLogRecord {
 struct GatewayLogsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronPresentationStateScope) private var presentationScope
     @Environment(\.scenePhase) private var scenePhase
     #if HOSTED_TEST
     @Environment(\.hostedDiagnosticsPreparation) private var hostedDiagnosticsPreparation
@@ -156,9 +157,7 @@ struct GatewayLogsSettingsView: View {
             loadGeneration &+= 1
             loadCoordinator.cancel()
             loading = false
-            exportGeneration &+= 1
-            localCaptureGeneration &+= 1
-            localCaptureInFlight = false
+            // Cover suspends reads, not publication of a user-started capture/export.
         }
         .onDisappear {
             loadGeneration &+= 1
@@ -239,21 +238,17 @@ struct GatewayLogsSettingsView: View {
         shareIntentGeneration &+= 1
         let shareIntent = shareIntentGeneration
         let generation = localCaptureGeneration
-        let activity = presentationActivity
+        let scope = presentationScope
         localCaptureInFlight = true
         Task { @MainActor in
             defer {
                 if generation == localCaptureGeneration { localCaptureInFlight = false }
             }
             let loaded = await model.loadGatewayLogsResult(limit: 1_000, includeRemote: false)
-            guard generation == localCaptureGeneration,
-                  presentationActivity == activity,
-                  activity.allowsPresentationPublication,
+            guard scope?.isRetired != true, generation == localCaptureGeneration,
                   !Task.isCancelled else { return }
             let appRecords = await model.appLog.snapshot()
-            guard generation == localCaptureGeneration,
-                  presentationActivity == activity,
-                  activity.allowsPresentationPublication,
+            guard scope?.isRetired != true, generation == localCaptureGeneration,
                   !Task.isCancelled else { return }
             let text = GatewayLogExport.jsonLines(
                 records: loaded.records, metadata: loaded.metadata,
@@ -264,10 +259,8 @@ struct GatewayLogsSettingsView: View {
                 #if HOSTED_TEST
                 await hostedDiagnosticsCapture?(url)
                 #endif
-                guard generation == localCaptureGeneration,
+                guard scope?.isRetired != true, generation == localCaptureGeneration,
                       shareIntent == shareIntentGeneration,
-                      presentationActivity == activity,
-                      activity.allowsPresentationPublication,
                       !Task.isCancelled else {
                     await model.discardExportArtifact(url)
                     return
@@ -275,9 +268,7 @@ struct GatewayLogsSettingsView: View {
                 exportArtifactURL = url
                 shareURL = DiagnosticShareFile(url: url)
             } catch {
-                guard generation == localCaptureGeneration,
-                      presentationActivity == activity,
-                      activity.allowsPresentationPublication else { return }
+                guard scope?.isRetired != true, generation == localCaptureGeneration else { return }
                 model.postNotice("Local diagnostics could not be captured. Try again.", role: .error, lifetime: .standard, priority: .normal)
             }
         }
@@ -290,7 +281,7 @@ struct GatewayLogsSettingsView: View {
         shareIntentGeneration &+= 1
         let shareIntent = shareIntentGeneration
         let generation = exportGeneration
-        let activity = presentationActivity
+        let scope = presentationScope
         let records = recordIndex.records
         let metadata = captureMetadata
         let destination = model.knowledgeDestinationIdentity
@@ -309,17 +300,14 @@ struct GatewayLogsSettingsView: View {
                 ))
                 switch try await model.exportDiagnostics(text, destination: destination) {
                 case .saved(let path):
-                    guard model.knowledgeDestinationIdentity == destination,
-                          generation == exportGeneration, presentationActivity == activity,
-                          activity.allowsPresentationPublication else { return }
+                    guard scope?.isRetired != true, model.knowledgeDestinationIdentity == destination,
+                          generation == exportGeneration else { return }
                     UIPasteboard.general.string = path
                     model.postNotice("Diagnostics saved on Mac · path copied", role: .success, lifetime: .standard, priority: .low)
                 case .share(let url):
-                    guard model.knowledgeDestinationIdentity == destination,
+                    guard scope?.isRetired != true, model.knowledgeDestinationIdentity == destination,
                           generation == exportGeneration,
-                          shareIntent == shareIntentGeneration,
-                          presentationActivity == activity,
-                          activity.allowsPresentationPublication else {
+                          shareIntent == shareIntentGeneration else {
                         await model.discardExportArtifact(url)
                         return
                     }
@@ -327,11 +315,9 @@ struct GatewayLogsSettingsView: View {
                     shareURL = DiagnosticShareFile(url: url)
                 }
             } catch {
-                guard model.knowledgeDestinationIdentity == destination,
+                guard scope?.isRetired != true, model.knowledgeDestinationIdentity == destination,
                       generation == exportGeneration,
-                      shareIntent == shareIntentGeneration,
-                      presentationActivity == activity,
-                      activity.allowsPresentationPublication else { return }
+                      shareIntent == shareIntentGeneration else { return }
                 model.postNotice("Diagnostics could not be exported. Try again.", role: .error, lifetime: .standard, priority: .normal)
             }
         }

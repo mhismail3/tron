@@ -262,6 +262,8 @@ canonical state, is never persisted, and is not a second state authority.
   replacement data is admitted. New sources clear it; new reads and mutations still require
   current authority. Navigation resets a viewport once per new request, not again on refresh.
 - Cover never cancels Gateway intake, sequence admission, canonical reduction, accepted
-  mutations, drafts, receipts, terminal connections or notifications. On uncover each branch's
-  owner installs one current aggregate; chat rebases its viewport once against the newest
+  mutations, drafts, receipts, terminal connections or notifications. User-started diagnostics
+  capture/export also retains result publication across cover or scene inactivity; surface
+  retirement and destination authority still fence stale results, and newer share
+  intent fences share artifacts. On uncover each branch's owner installs one current aggregate; chat rebases its viewport once against the newest
   installation and suppresses accumulated entrances; the dashboard publishes one row cut.

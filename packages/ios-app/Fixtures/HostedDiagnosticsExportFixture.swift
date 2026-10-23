@@ -13,6 +13,7 @@ struct HostedDiagnosticsExportFixture: View {
     @Environment(\.scenePhase) private var phase
     @State private var model: AppModel
     @State private var ready = false
+    @State private var logsPresented = false
     @State private var originalCounts = ""
     @State private var replacementCounts = ""
     @State private var preparation = ""
@@ -31,7 +32,7 @@ struct HostedDiagnosticsExportFixture: View {
         let first = DiagnosticsExportFixtureGateway(name: "original", fails: scenario == "failure" || scenario == "held-failure", holdsLogs: scenario == "logs-held")
         let second = DiagnosticsExportFixtureGateway(name: "replacement", fails: false)
         originalGateway = first; replacementGateway = second
-        gate = DiagnosticsExportPreparationGate(held: scenario == "held" || scenario == "held-failure")
+        gate = DiagnosticsExportPreparationGate(held: scenario == "held" || scenario == "held-failure" || scenario == "retirement")
         let memory = AutomationFixtureProfileStore(); store = memory
         let profiles = GatewayProfileStore(metadata: memory, tokens: memory)
         try! profiles.save(original, token: "fixture-only-token")
@@ -51,7 +52,11 @@ struct HostedDiagnosticsExportFixture: View {
         TronPresentationSurface(id: "fixture.diagnostics-export") {
             VStack(spacing: 0) {
                 if ready {
-                    NavigationStack { GatewayLogsSettingsView() }.tronSettingsLayout()
+                    if scenario == "retirement" {
+                        Button("Open Logs") { logsPresented = true }
+                    } else {
+                        NavigationStack { GatewayLogsSettingsView() }.tronSettingsLayout()
+                    }
                 } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
                 VStack(spacing: 3) {
                     Text(originalCounts).accessibilityIdentifier("fixture.export-original")
@@ -86,6 +91,9 @@ struct HostedDiagnosticsExportFixture: View {
                     }.buttonStyle(.bordered)
                 }.font(.caption2).padding(6)
             }
+        }
+        .tronManagedSheet(isPresented: $logsPresented, identity: "fixture.diagnostics-logs") {
+            NavigationStack { GatewayLogsSettingsView() }.tronSettingsLayout()
         }
         .environment(model)
         .environment(\.hostedDiagnosticsPreparation, { await gate.prepare() })
