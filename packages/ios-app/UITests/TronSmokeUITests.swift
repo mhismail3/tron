@@ -341,15 +341,15 @@ final class TronSmokeUITests: XCTestCase {
         empty.buttons["home-pinned-row"].tap()
         openManageHome(empty)
         // Before Home's first activation, Manage Home's context card has no activation line.
-        XCTAssertTrue(empty.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5), empty.debugDescription)
+        XCTAssertTrue(empty.descendants(matching: .any)["home-context-summary"].waitForExistence(timeout: 5), empty.debugDescription)
         XCTAssertFalse(empty.descendants(matching: .any)["home-context-activation"].exists)
         keepScreenshot(named: "home-context-empty")
     }
 
-    /// Manage Home's context card explains where the next request's context goes: one
-    /// stacked bar of the window with a meaning per section, and no entry IDs or byte counts.
+    /// Home shows the request's remaining context without a session breakdown,
+    /// raw entry IDs or byte counts.
     @MainActor
-    func testHomeContextShowsBreakdownWithoutRawIdentifiers() {
+    func testHomeContextSummaryOmitsSessionBreakdownAndRawIdentifiers() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
@@ -357,15 +357,14 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.descendants(matching: .any)["context-segmented-bar"].exists)
-        for (id, label) in [("instructions", "Instructions"), ("profile", "About you"), ("memory", "Memory"),
-                            ("chapter", "This chapter"), ("results", "Task results"), ("input", "Your message")] {
-            XCTAssertTrue(app.descendants(matching: .any)["context-segment-\(id)"].label.hasPrefix(label), label)
+        XCTAssertTrue(app.descendants(matching: .any)["home-context-summary"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any)["home-context-ring"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["context-segmented-bar"].exists)
+        for id in ["instructions", "profile", "memory", "chapter", "results", "input"] {
+            XCTAssertFalse(app.descendants(matching: .any)["context-segment-\(id)"].exists, id)
         }
-        // The header says how much is left, so the legend has no Free line (#963).
-        XCTAssertFalse(app.descendants(matching: .any)["context-segment-free"].exists, "The legend has no Free line")
-        XCTAssertTrue(app.descendants(matching: .any)["context-segment-memory"].label.contains("260 summaries"))
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-workers"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-host"].exists)
         XCTAssertFalse(app.staticTexts["activation-entry"].exists, "Context must not show an entry ID")
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", " bytes")).firstMatch.exists, "Context must not show byte counts")
         keepScreenshot(named: "home-context-populated")
@@ -1254,7 +1253,7 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
         XCTAssertEqual(state.label, "Ready")
-        XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists, "The stats card comes from the Home chat's session")
+        XCTAssertTrue(app.descendants(matching: .any)["home-context-summary"].exists, "The compact summary reads the Home chat's real usage")
         XCTAssertFalse(app.buttons["Background models"].firstMatch.exists, "Model controls belong only to Home Settings")
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
@@ -1429,7 +1428,7 @@ final class TronSmokeUITests: XCTestCase {
             openManageHome(app)
             if state == "browser-unsupported" {
                 XCTAssertFalse(app.descendants(matching: .any)["home-manage-memory-browser"].exists)
-                XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists)
+                XCTAssertTrue(app.descendants(matching: .any)["home-context-summary"].exists)
             }
             if state == "empty-models" {
                 revealHomeSetting(app, "Background models")
