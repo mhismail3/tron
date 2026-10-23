@@ -18,6 +18,37 @@ struct HostedSessionRowClockFixture: View {
     @State private var probeWidth: CGFloat = 0
 
     var body: some View {
+        if ProcessInfo.processInfo.arguments.contains("-dashboard-row-typography") {
+            typographyRows
+        } else {
+            clockRows
+        }
+    }
+
+    /// Real shared rows beside independently styled reference text. XCUI measures
+    /// the painted text frames, not a diagnostic claiming which font was chosen.
+    private var typographyRows: some View {
+        VStack(spacing: 20) {
+            ForEach(["iiiiiiii", "WWWWWWWW"], id: \.self) { sample in
+                DashboardListRow(title: "Session", subtitle: sample, accent: .tronEmerald) {
+                    Image(systemName: "circle")
+                } trailing: {
+                    SessionRowRelativeTime(text: sample == "iiiiiiii" ? "now" : "20m ago", isWaiting: false)
+                        .accessibilityIdentifier("timestamp-\(sample)")
+                }
+                Text(sample)
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .accessibilityIdentifier("subtitle-reference-\(sample)")
+                Text(sample == "iiiiiiii" ? "now" : "20m ago")
+                    .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .medium).monospacedDigit())
+                    .accessibilityIdentifier("timestamp-reference-\(sample)")
+            }
+        }
+        .padding()
+        .background(Color.tronBackground)
+    }
+
+    private var clockRows: some View {
         List {
             Section {
                 ForEach(Self.rowOffsets, id: \.self) { offset in

@@ -136,6 +136,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   native anchor.
 - Disposable state (opening, imports, entrance ledger, floating displays) lives in
   `ChatSessionPresentation`; nothing here is persisted except drafts via State.
+- Dashboard row context and relative timestamps use the shared code caption typography,
+  independent of the reading family, including View All. `TronSessionRowClockUITests` checks
+  their rendered glyph advances and caption metrics against shared code text references.
 - Reduce Motion removes spatial motion and never hides authoritative text.
 - Disable Home's icon, title and subtitle use `tronError`; Pause memory keeps standard styling.
 
