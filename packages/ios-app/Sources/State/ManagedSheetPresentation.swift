@@ -176,7 +176,10 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         var environment = nativeEnvironment
         environment.scenePhase = nativeScenePhase
         environment.tronPresentationDependencyRead = nativeDependencyRead
-        let source: NativeSheetSource? = isPresented || nativeHost.isInstalled ? NativeSheetSource(
+        // Install the native node while idle: the first request must change
+        // an existing sheet binding, not insert an already-presenting graph
+        // into a surface whose own presentation may still be settling.
+        let source = NativeSheetSource(
             owner: nativeHost,
             content: AnyView(Color.clear.accessibilityHidden(true).sheet(isPresented: $isPresented, onDismiss: didDismiss) {
                 let token = lease.contentToken(identity: identity)
@@ -188,10 +191,10 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
             }),
             environment: environment,
             onRemoval: sourceDidDisappear
-        ) : nil
+        )
         return content
             .transformPreference(NativeSheetSources.self) { sources in
-                if let source { sources.append(source) }
+                sources.append(source)
             }
             // Only a live false → true request plays, once its content appears: a
             // sheet already presented when its presenter mounts (launch, reconnect,
@@ -313,7 +316,8 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         var environment = nativeEnvironment
         environment.scenePhase = nativeScenePhase
         environment.tronPresentationDependencyRead = nativeDependencyRead
-        let source: NativeSheetSource? = item != nil || nativeHost.isInstalled ? NativeSheetSource(
+        // Keep the native item node installed before its first request too.
+        let source = NativeSheetSource(
             owner: nativeHost,
             content: AnyView(Color.clear.accessibilityHidden(true).sheet(item: $item, onDismiss: didDismiss) { value in
                 let token = lease.contentToken(identity: identity(value))
@@ -325,10 +329,10 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
             }),
             environment: environment,
             onRemoval: sourceDidDisappear
-        ) : nil
+        )
         return content
             .transformPreference(NativeSheetSources.self) { sources in
-                if let source { sources.append(source) }
+                sources.append(source)
             }
             // Only a live nil → item request plays, once its content appears; replacing
             // a presented item is not a new presentation.

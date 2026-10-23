@@ -209,7 +209,9 @@ separate:
   `HOSTED_TEST`.
 - Managed sources publish render-input preferences without adding a background view or AX node
   to a control. `TronNativeSheetCanvas`, mounted at each scene/surface root, contains scope-owned
-  `RetainedNativeSheetHost` nodes in one retained SwiftUI hosting controller per surface. Keeping
+  `RetainedNativeSheetHost` nodes in one retained SwiftUI hosting controller per surface. Native
+  sheet nodes mount while their presenters are idle, before the first binding request; the first
+  tap changes an existing node rather than installing an already-presenting graph. Keeping
   child controllers under a disposable container does not retain their presentations. Hosts forward
   inherited environment and transactions; explicit scene-phase and dependency-read observation keep
   activation/freshness live. Invisible mounting stays outside control labels. Native chrome, detents,

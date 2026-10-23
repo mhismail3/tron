@@ -158,6 +158,8 @@ struct HomeSheet: View {
     /// This sheet's family accent: the row that opened it, else Home's own green.
     var accent: Color { visualTheme?.accent ?? .tronPrimary }
     private var isEvidence: Bool { if case .evidence = destination { true } else { false } }
+    /// One medium-first policy for every Home destination, including document chrome.
+    private var detents: Set<PresentationDetent> { [.medium, .large] }
     var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     var body: some View {
         Group {
@@ -168,7 +170,7 @@ struct HomeSheet: View {
             } else if destination.isTaskSurface {
                 HomeTaskSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
             } else if isEvidence {
-                TronDocumentSheet(title: destination.title) { sheetContent }
+                TronDocumentSheet(title: destination.title, detents: detents) { sheetContent }
             } else {
                 NavigationStack { sheetContent }
             }
@@ -176,7 +178,7 @@ struct HomeSheet: View {
         .tronTopBlur(.sheet)
         // Every Manage Home sheet opens at medium and drags to large, as Manage
         // Session's sub-sheets do (#799, #811).
-        .presentationDetents(isEvidence ? [.large] : [.medium, .large])
+        .presentationDetents(detents)
         .presentationDragIndicator(.hidden)
         .tint(accent)
         .onPresentationRetire { owner.retire() }
