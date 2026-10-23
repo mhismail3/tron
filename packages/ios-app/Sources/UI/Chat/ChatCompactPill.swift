@@ -21,9 +21,9 @@ extension ChatNotificationTone {
 
     var secondaryColor: Color {
         switch self {
-        case .accent: ChatCompactPillPalette.accentSecondary
+        case .accent: .tronPrimary
         case .command: ChatCompactPillPalette.commandSecondary
-        case .tool: ChatCompactPillPalette.accentSecondary
+        case .tool: .tronPrimary
         case .information: ChatCompactPillPalette.informationSecondary
         case .purple: ChatCompactPillPalette.purpleSecondary
         case .subagent: ChatCompactPillPalette.subagentSecondary
@@ -58,7 +58,6 @@ private enum ChatCompactPillPalette {
     static let warningPrimary = Color(lightHex: "#92400E", darkHex: "#FBBF24")
     static let neutralPrimary = Color(lightHex: "#475569", darkHex: "#CBD5E1")
 
-    static let accentSecondary = Color(lightHex: "#047857", darkHex: "#A7F3D0")
     static let commandSecondary = Color(lightHex: "#3730A3", darkHex: "#E0E7FF")
     static let informationSecondary = Color(lightHex: "#075985", darkHex: "#7DD3FC")
     static let purpleSecondary = Color(lightHex: "#5B21B6", darkHex: "#DDD6FE")

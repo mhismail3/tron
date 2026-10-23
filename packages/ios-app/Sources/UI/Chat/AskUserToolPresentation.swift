@@ -296,7 +296,7 @@ struct AskUserCompletedFormView: View {
                     HStack(spacing: 5) {
                         ForEach(presentation.form.questions.indices, id: \.self) { page in
                             Circle()
-                                .fill(page == currentQuestionIndex ? Color.tronEmerald : Color.tronTextMuted.opacity(0.35))
+                                .fill(page == currentQuestionIndex ? Color.tronPrimary : Color.tronTextMuted.opacity(0.35))
                                 .frame(width: 7, height: 7)
                         }
                     }
@@ -304,7 +304,7 @@ struct AskUserCompletedFormView: View {
                 }
                 Text("\(currentQuestionIndex + 1)/\(presentation.form.questions.count)")
                     .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(Color.tronEmerald)
+                    .foregroundStyle(Color.tronPrimary)
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
@@ -362,7 +362,7 @@ struct AskUserCompletedFormView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: selectionIcon(selected: selected, multiSelect: question.multiSelect))
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(selected ? Color.tronEmerald : Color.tronTextMuted)
+                .foregroundStyle(selected ? Color.tronPrimary : Color.tronTextMuted)
             VStack(alignment: .leading, spacing: 3) {
                 Text(option.label)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
@@ -377,7 +377,7 @@ struct AskUserCompletedFormView: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .tronGlassSurface(accent: selected ? .tronEmerald : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
+        .tronGlassSurface(accent: selected ? .tronPrimary : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
         .accessibilityElement(children: .combine)
         .accessibilityValue(selected ? "Selected" : "Not selected")
     }
@@ -388,7 +388,7 @@ struct AskUserCompletedFormView: View {
             HStack(spacing: 12) {
                 Image(systemName: selectionIcon(selected: selected, multiSelect: question.multiSelect))
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(selected ? Color.tronEmerald : Color.tronTextMuted)
+                    .foregroundStyle(selected ? Color.tronPrimary : Color.tronTextMuted)
                 Text("Other")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
@@ -406,7 +406,7 @@ struct AskUserCompletedFormView: View {
                     .padding(.bottom, 14)
             }
         }
-        .tronGlassSurface(accent: selected ? .tronEmerald : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
+        .tronGlassSurface(accent: selected ? .tronPrimary : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
         .accessibilityValue(selected ? "Selected" : "Not selected")
     }
 

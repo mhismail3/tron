@@ -708,7 +708,7 @@ struct ComposerResourceDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
                     summary
                     contentSection
                 }
@@ -860,7 +860,7 @@ struct ComposerResourceDetailSheet: View {
     @ViewBuilder
     private var contentSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TronTechnicalSectionLabel("Content")
+            TronTechnicalSectionLabel("Content").containerValue(\.tronSettingsSection, false)
             Group {
                 if let content = displayedContent, !content.text.isEmpty {
                     ComposerResourceContentBody(preview: content, source: entry.source)

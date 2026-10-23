@@ -104,7 +104,7 @@ struct MacReplacementSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18) {
                     if let operation = status?.operation {
                         summaryGroup(operation)
                         stepsGroup(operation)
@@ -114,7 +114,7 @@ struct MacReplacementSheet: View {
                         }
                         terminalGroup(operation)
                     } else if connected {
-                        TronSheetLoadingState(label: "Loading replacement…", accent: .tronEmerald)
+                        TronSheetLoadingState(label: "Loading replacement…", accent: .tronPrimary)
                     } else {
                         offlineRow(operation: nil)
                     }
@@ -123,13 +123,13 @@ struct MacReplacementSheet: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .tronScrollEdgeChrome()
-            .tronNavigationTitle("Replace Mac App", accent: .tronEmerald)
+            .tronNavigationTitle("Replace Mac App", accent: .tronPrimary)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -170,7 +170,7 @@ struct MacReplacementSheet: View {
                     icon: operation.path == "quick" ? "hammer" : "shippingbox",
                     title: MacReplacementPresentation.pathTitle(operation.path),
                     detail: MacReplacementPresentation.reasonDetail(operation.reason),
-                    accent: .tronEmerald
+                    accent: .tronPrimary
                 )
                 TronSettingsDivider(accent: accent)
                 TronValueRow(
@@ -201,10 +201,10 @@ struct MacReplacementSheet: View {
     }
 
     private func stepsGroup(_ operation: MacReplacementOperation) -> some View {
-        TronSettingsGroup("Steps", accent: .tronEmerald) {
+        TronSettingsGroup("Steps", accent: .tronPrimary) {
             VStack(spacing: 0) {
                 ForEach(Array(operation.steps.enumerated()), id: \.element.id) { index, step in
-                    if index > 0 { TronSettingsDivider(accent: .tronEmerald) }
+                    if index > 0 { TronSettingsDivider(accent: .tronPrimary) }
                     TronValueRow(
                         icon: MacReplacementPresentation.stepIcon(step),
                         title: step.title,

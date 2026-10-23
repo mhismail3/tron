@@ -10,13 +10,13 @@ struct VisibleServersSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 TronDashboardFilterOption(title: "All servers", detail: "Show sessions from every paired server.",
-                    selected: settings.dashboardFilter.isAllSelected, accent: .tronEmerald, inactiveAccent: .tronCyan) {
+                    selected: settings.dashboardFilter.isAllSelected, accent: .tronPrimary, inactiveAccent: .tronCyan) {
                     settings.dashboardFilter.selectAll()
                 }
                 ForEach(model.dashboardServerSources) { source in
                     TronDashboardFilterOption(title: source.label,
                         detail: "\(source.sessionCount) session\(source.sessionCount == 1 ? "" : "s") · \(source.state.label)",
-                        selected: settings.dashboardFilter.isSelected(source.profileID), accent: .tronEmerald, inactiveAccent: .tronCyan) {
+                        selected: settings.dashboardFilter.isSelected(source.profileID), accent: .tronPrimary, inactiveAccent: .tronCyan) {
                         settings.dashboardFilter.toggle(source.profileID)
                     }
                 }

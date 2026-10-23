@@ -137,13 +137,13 @@ struct ProviderConfigurationSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: provider.displayName, accent: .tronEmerald)
+                    TronSheetTitle(title: provider.displayName, accent: .tronPrimary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { close() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .disabled(beginningMethod != nil || clearing)
                     .accessibilityLabel("Done")
@@ -216,7 +216,7 @@ struct ProviderConfigurationSheet: View {
 
     private var configurationContent: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+            TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
                 TronGlassCard(accent: provider.configured ? .tronEmerald : .tronSlate) {
                     TronSettingsRow(
                         icon: provider.configured ? "checkmark.seal.fill" : "key",
@@ -239,7 +239,7 @@ struct ProviderConfigurationSheet: View {
     }
 
     @ViewBuilder private var usageSection: some View {
-        TronSettingsGroup("Account Usage", accent: .tronEmerald) {
+        TronSettingsGroup("Account Usage", accent: .tronPrimary) {
             if provider.isLocalOnly {
                 // Local models have no account, so this status is authoritative
                 // without a Gateway usage capability or a provider.usage read.
@@ -251,7 +251,7 @@ struct ProviderConfigurationSheet: View {
                 )
                 .accessibilityLabel("Unlimited. Local models run on this Mac with no account usage limits.")
             } else if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
-                TronSettingsCaption("Account usage is unavailable on this Gateway. Connection details remain available.")
+                TronSettingsCaption("Account usage is unavailable on this Gateway. Connection details remain available.").containerValue(\.tronSettingsSection, false)
             } else if let usage = usageController.snapshots[provider.id] {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .center, spacing: 8) {
@@ -260,10 +260,10 @@ struct ProviderConfigurationSheet: View {
                         Button { usageController.begin() } label: {
                             Image(systemName: usageController.isLoading ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
                                 .font(.system(size: ProviderUsageRefreshPresentation.iconPointSize, weight: .semibold))
-                                .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
+                                .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronPrimary)
                                 .frame(width: ProviderUsageRefreshPresentation.visibleDiameter, height: ProviderUsageRefreshPresentation.visibleDiameter)
                                 .tronGlassSurface(
-                                    accent: settingsTheme?.accent ?? .tronEmerald,
+                                    accent: settingsTheme?.accent ?? .tronPrimary,
                                     cornerRadius: ProviderUsageRefreshPresentation.visibleDiameter / 2,
                                     tintOpacity: 0.12,
                                     interactive: true
@@ -293,10 +293,10 @@ struct ProviderConfigurationSheet: View {
                 .padding(.horizontal, 14)
                 .padding(.bottom, ProviderUsagePresentation.hasDetailContent(usage) || usageController.didFail ? 14 : 8)
             } else if usageController.isLoading {
-                TronLoadingState(label: "Loading account usage…", accent: .tronEmerald)
+                TronLoadingState(label: "Loading account usage…", accent: .tronPrimary)
                     .padding(.top, 8)
             } else if usageController.didFail {
-                TronSettingsCaption("Account usage is currently unavailable. Connection details remain available.")
+                TronSettingsCaption("Account usage is currently unavailable. Connection details remain available.").containerValue(\.tronSettingsSection, false)
             }
         }
     }
@@ -338,7 +338,7 @@ struct ProviderConfigurationSheet: View {
 
     @ViewBuilder private var connectionControls: some View {
         if provider.authMethods.isEmpty {
-            TronSettingsCaption("This provider does not advertise a supported connection method.")
+            TronSettingsCaption("This provider does not advertise a supported connection method.").containerValue(\.tronSettingsSection, false)
         } else {
             ProviderChoiceGroup(
                 title: "Connection Method",
@@ -766,7 +766,7 @@ struct ModelPicker: View {
                     Button { beginSearch() } label: {
                         Image(systemName: "magnifyingglass")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Search models")
                     #if HOSTED_TEST
@@ -826,7 +826,7 @@ struct ModelPicker: View {
         )
     }
 
-    private var accent: Color { settingsTheme?.accent ?? .tronEmerald }
+    private var accent: Color { settingsTheme?.accent ?? .tronPrimary }
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
@@ -947,7 +947,7 @@ struct ModelPicker: View {
     }
 
     private func rowAccent(isSelected: Bool) -> Color {
-        settingsTheme?.accent ?? (isSelected ? .tronEmerald : .tronSlate)
+        settingsTheme?.accent ?? (isSelected ? .tronPrimary : .tronSlate)
     }
 
     private func closeSearch() {

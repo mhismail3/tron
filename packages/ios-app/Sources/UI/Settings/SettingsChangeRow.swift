@@ -137,7 +137,7 @@ struct SettingsChangeRowView: View, Equatable {
             }
             if isNew {
                 Text("NEW").font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
-                    .foregroundStyle(Color.tronEmerald).accessibilityLabel("Since you last looked")
+                    .foregroundStyle(Color.tronPrimary).accessibilityLabel("Since you last looked")
             }
         }
         .lineLimit(1)

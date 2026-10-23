@@ -27,7 +27,7 @@ struct BuiltinExtensionsSettingsSection: View {
     private var scopeName: String { projectCWD == nil ? "all sessions" : "this project" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18) {
             TronSettingsGroup("Built-in Extensions", detail: "Turn a built-in off for \(scopeName).", accent: .tronCyan) {
                 if loading {
                     TronLoadingState(label: "Loading extension settings…", accent: .tronCyan)

@@ -403,8 +403,8 @@ struct SettingsProjectInfo: View {
     let source: SettingsProjectSource
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                TronSettingsCaption("This is set by the current project's settings. Ask an agent to update them in the repo.")
+            TronSettingsSections(alignment: .leading, spacing: 18) {
+                TronSettingsCaption("This is set by the current project's settings. Ask an agent to update them in the repo.").containerValue(\.tronSettingsSection, false)
                 TronSettingsGroup(nil) {
                     TronSettingsRow(icon: "doc.text", title: "File") {
                         Text(source.file).font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
@@ -616,7 +616,7 @@ private struct SettingsCatalogPicker: View {
                         .accessibilityIdentifier("settings-option-\(option.label)")
                     }
                     if options.isEmpty {
-                        TronSettingsCaption("No available options")
+                        TronSettingsCaption("No available options").containerValue(\.tronSettingsSection, false)
                     }
                     if let nextCursor {
                         Button { pageCursor = nextCursor } label: {
@@ -628,7 +628,7 @@ private struct SettingsCatalogPicker: View {
                     }
                 }
                 if let loadError {
-                    TronSettingsCaption(loadError)
+                    TronSettingsCaption(loadError).containerValue(\.tronSettingsSection, false)
                     Button("Try again") { reloadTick &+= 1 }
                         .buttonStyle(.plain)
                 } else if options == nil || displayedSource != source {

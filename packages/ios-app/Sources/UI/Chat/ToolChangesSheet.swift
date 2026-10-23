@@ -114,10 +114,10 @@ struct ToolDiffView: View {
         switch surfaceStyle {
         case .glass:
             diffScroll
-                .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+                .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.07)
         case .scrollOptimized:
             diffScroll
-                .tronScrollSurface(accent: .tronEmerald, tintOpacity: 0.07)
+                .tronScrollSurface(accent: .tronPrimary, tintOpacity: 0.07)
         }
     }
 

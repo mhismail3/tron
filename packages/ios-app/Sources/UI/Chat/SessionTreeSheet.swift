@@ -229,11 +229,11 @@ struct SessionTreeSheet: View {
                         VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
                             caption
                             if !supported {
-                                TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronEmerald)
+                                TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronPrimary)
                             } else if let error = store.error {
                                 TronSettingsNotice(message: error, retry: retry)
                             } else {
-                                TronSheetLoadingState(label: "Loading history…", accent: .tronEmerald)
+                                TronSheetLoadingState(label: "Loading history…", accent: .tronPrimary)
                             }
                         }
                         .padding(.horizontal, 16).padding(.top, 4)
@@ -260,15 +260,15 @@ struct SessionTreeSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: reload) {
                         TronToolbarTextLabel("Reload", systemImage: "arrow.clockwise", isWorking: store.loading)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .disabled(store.loading || !supported || identity == nil)
                 }
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: Self.title, accent: .tronEmerald) }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: Self.title, accent: .tronPrimary) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }.accessibilityLabel("Done")
                 }
             }
@@ -296,19 +296,19 @@ struct SessionTreeSheet: View {
             }
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronEmerald).tint(.tronEmerald)
+        .tronSettingsVisualTheme(accent: .tronPrimary).tint(.tronPrimary)
     }
 
     private var leafID: String? { model.sessionHistoryPresentation(for: sessionID)?.leafEntryId }
 
     private var caption: some View {
         VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
-            TronSettingsCaption("All branches, newest first. Tap an entry for details; long-press for quick actions.")
+            TronSettingsCaption("All branches, newest first. Tap an entry for details; long-press for quick actions.").containerValue(\.tronSettingsSection, false)
             if let page = store.pages.first?.page, let initialEntryID, !initialEntryResolved,
                !page.nodes.contains(where: { $0.id == initialEntryID }) {
                 if initialEntryStore.error != nil {
                     TronSettingsNotice(message: "The cited history entry is unavailable; no evidence was substituted.", accent: .tronAmber)
-                } else { TronLoadingState(label: "Opening cited entry…", accent: .tronEmerald) }
+                } else { TronLoadingState(label: "Opening cited entry…", accent: .tronPrimary) }
             }
         }
         .padding(.bottom, 4)
@@ -475,9 +475,9 @@ struct HistoryEntryDetailsSheet: View {
             .padding(.horizontal, 16).padding(.top, 8)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "History Entry", accent: .tronEmerald) }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: "History Entry", accent: .tronPrimary) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronEmerald) }.accessibilityLabel("Done")
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronPrimary) }.accessibilityLabel("Done")
                 }
             }
             .task(id: "\(active):\(readable):\(offset):\(revision)") {
@@ -501,7 +501,7 @@ struct HistoryEntryDetailsSheet: View {
                 if node.label != nil { Button("Remove", role: .destructive) { onSaveLabel(nil) } }
             }
         }
-        .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden).tint(.tronEmerald)
+        .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden).tint(.tronPrimary)
         .accessibilityIdentifier("history-entry-detail")
     }
 
@@ -520,7 +520,7 @@ struct HistoryEntryDetailsSheet: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: .tronEmerald, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.10)
+        .tronGlassSurface(accent: .tronPrimary, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.10)
         .accessibilityElement(children: .combine)
     }
 
@@ -542,7 +542,7 @@ struct HistoryEntryDetailsSheet: View {
         let actions = actions
         var rows: [ActionRow] = []
         if let title = actions.navigationTitle {
-            rows.append(ActionRow(id: "navigate", icon: "arrow.turn.down.right", tone: .tronEmerald, title: title,
+            rows.append(ActionRow(id: "navigate", icon: "arrow.turn.down.right", tone: .tronPrimary, title: title,
                                   detail: SessionHistoryPolicy.navigationDetail(for: node), run: actions.navigate))
         }
         rows.append(ActionRow(id: "fork", icon: "arrow.triangle.branch", tone: .tronPurple, title: "Fork New Session",
@@ -553,20 +553,20 @@ struct HistoryEntryDetailsSheet: View {
         }
         rows.append(ActionRow(id: "copy", icon: "doc.on.doc", tone: .tronSlate, title: "Copy Text", detail: "The entry's full text", run: actions.copy))
         return VStack(alignment: .leading, spacing: 7) {
-            Text("Actions").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary).padding(.horizontal, 4)
+            Text("Actions").tronSectionHeading().foregroundStyle(Color.tronTextPrimary).padding(.horizontal, 4)
             TronListGroup(rows, hasLeading: true, identifier: "history-entry-actions") { action in
                 TronListButton(TronListRowContent(leading: .icon(action.icon, action.tone), title: action.title, subtext: action.detail),
                                identifier: "history-entry-action-\(action.id)", action: action.run)
                     .disabled(!readable)
             }
-            TronSettingsCaption("Long-press the entry in Session History for the same actions.")
+            TronSettingsCaption("Long-press the entry in Session History for the same actions.").containerValue(\.tronSettingsSection, false)
         }
     }
 
     @ViewBuilder private var content: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text("Content").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
+                Text("Content").tronSectionHeading().foregroundStyle(Color.tronTextPrimary)
                 Spacer()
                 if let page = store.page { Text("\(page.totalCharacters.formatted()) characters").font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted) }
             }
@@ -575,7 +575,7 @@ struct HistoryEntryDetailsSheet: View {
                 TronReadOnlyTextView(text: page.text, style: node.role == .user || node.role == .assistant ? .body : .code)
                     .id(page.offset)
                     .frame(maxHeight: .infinity)
-                    .tronGlassSurface(accent: .tronEmerald, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.06)
+                    .tronGlassSurface(accent: .tronPrimary, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.06)
                 // Paging remains available only for bounded multipart entries.
                 if page.previousOffset != nil || page.nextOffset != nil {
                     HStack {
@@ -587,7 +587,7 @@ struct HistoryEntryDetailsSheet: View {
                     .disabled(store.loading)
                     .padding(.horizontal, 4)
                 }
-            } else if readable, store.error == nil { TronSheetLoadingState(label: "Loading entry…", accent: .tronEmerald) }
+            } else if readable, store.error == nil { TronSheetLoadingState(label: "Loading entry…", accent: .tronPrimary) }
             if readable, let error = store.error { TronSettingsNotice(message: error, retry: { revision &+= 1 }) }
         }
     }
@@ -640,8 +640,8 @@ struct HistoryNavigationSheet: View {
                         .buttonStyle(TronActionButtonStyle(role: .primary))
                         .disabled(working || !current || !SessionHistoryPolicy.canNavigate(node: node, leafID: leafID))
                 }.padding(18)
-            }.tronScrollEdgeChrome().tronNavigationTitle(SessionHistoryPolicy.navigationTitle(for: node), accent: .tronEmerald)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark").tronToolbarAction(accent: .tronEmerald) }.accessibilityLabel("Done") } }
+            }.tronScrollEdgeChrome().tronNavigationTitle(SessionHistoryPolicy.navigationTitle(for: node), accent: .tronPrimary)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark").tronToolbarAction(accent: .tronPrimary) }.accessibilityLabel("Done") } }
         }.tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
     }
     private func navigate() {
@@ -684,8 +684,8 @@ struct HistoryForkSheet: View {
                     }
                     Button(working ? "Creating…" : "Create Fork") { fork() }.buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || !current)
                 }.padding(18)
-            }.tronScrollEdgeChrome().tronNavigationTitle("Fork Session", accent: .tronEmerald)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark").tronToolbarAction(accent: .tronEmerald) }.disabled(working).accessibilityLabel("Done") } }
+            }.tronScrollEdgeChrome().tronNavigationTitle("Fork Session", accent: .tronPrimary)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark").tronToolbarAction(accent: .tronPrimary) }.disabled(working).accessibilityLabel("Done") } }
         }.tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden).interactiveDismissDisabled(working)
     }
     private func choice(_ title: String, detail: String, value: SessionForkPosition) -> some View {

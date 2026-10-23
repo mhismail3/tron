@@ -409,10 +409,10 @@ struct KnowledgeSheet: View {
         } else {
             // The catalogue header opens a new section, so it keeps the section
             // rhythm while the rows themselves pack tighter.
-            Text(filterSummary).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+            Text(filterSummary).tronSectionHeading().foregroundStyle(Color.tronKnowledge)
                 .padding(.top, TronSpacing.md)
             if section == .history {
-                TronSettingsCaption(Self.legacyHistoryDetail)
+                TronSettingsCaption(Self.legacyHistoryDetail).containerValue(\.tronSettingsSection, false)
             }
             if let error {
                 TronSettingsNotice(message: "Refresh unavailable: \(error)", accent: .tronAmber)
@@ -1208,7 +1208,7 @@ struct KnowledgeEntryLoadView: View {
 
     @ViewBuilder private var loadingBody: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: TronSpacing.section) {
+            TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
                 KnowledgeEntryHeader(
                     title: row.title,
                     linkLabel: KnowledgeSourceRowPresentationPolicy.domain(row),
@@ -1424,7 +1424,7 @@ struct KnowledgeDetailView: View {
 
     private var detailContent: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: TronSpacing.section) {
+            TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
                 if let observation = observationPresentation {
                     KnowledgeObservationStatement(presentation: observation)
                         .textSelection(.enabled)
@@ -1623,7 +1623,7 @@ struct KnowledgeDetailView: View {
                 }
                 if case .note(let note) = currentRecord.content, let fields = note.fields {
                     Text("Structured qualifications")
-                        .font(TronTypography.sheetSectionHeader)
+                        .tronSectionHeading()
                         .foregroundStyle(Color.tronKnowledge)
                     ForEach(Array(fields.enumerated()), id: \.offset) { _, field in
                         VStack(alignment: .leading, spacing: TronSpacing.xs) {
@@ -1894,7 +1894,7 @@ struct KnowledgeDetailView: View {
                     .padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
             }
         }
-        if let evidenceMessage { TronSettingsCaption(evidenceMessage) }
+        if let evidenceMessage { TronSettingsCaption(evidenceMessage).containerValue(\.tronSettingsSection, false) }
         if linkedReader.loading { TronLoadingState(label: "Opening related entry…", accent: .tronKnowledge) }
         if let linkedRecordError = linkedReader.error { Text(linkedRecordError).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronAmber) }
     }
@@ -1991,7 +1991,7 @@ struct KnowledgeDetailView: View {
                 .buttonStyle(.plain)
             }
             if let evidenceMessage {
-                TronSettingsCaption(evidenceMessage).padding(14)
+                TronSettingsCaption(evidenceMessage).containerValue(\.tronSettingsSection, false).padding(14)
             }
         }
     }

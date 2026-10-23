@@ -1546,7 +1546,7 @@ struct TronSettingsGroup<Content: View>: View {
     let inlineDetail: String?
     let accent: Color
     let surfaceStyle: TronSettingsGroupSurfaceStyle
-    let sectionCount: Int?
+    @Environment(\.tronSettingsSectionCount) private var sectionCount
     let content: Content
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
@@ -1556,7 +1556,6 @@ struct TronSettingsGroup<Content: View>: View {
         inlineDetail: String? = nil,
         accent: Color = .tronPrimary,
         surfaceStyle: TronSettingsGroupSurfaceStyle = .glass,
-        sectionCount: Int? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -1564,13 +1563,12 @@ struct TronSettingsGroup<Content: View>: View {
         self.inlineDetail = inlineDetail
         self.accent = accent
         self.surfaceStyle = surfaceStyle
-        self.sectionCount = sectionCount
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
-            if (sectionCount != 1 && title != nil) || detail != nil {
+            if (sectionCount > 1 && title != nil) || detail != nil {
                 VStack(alignment: .leading, spacing: TronSpacing.xs) {
                     if let heading {
                         heading
@@ -1596,7 +1594,7 @@ struct TronSettingsGroup<Content: View>: View {
 
     /// One wrapping header, not an HStack that strands or truncates the note.
     private var heading: Text? {
-        guard sectionCount != 1, let title else { return nil }
+        guard sectionCount > 1, let title else { return nil }
         let label = Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
         guard let inlineDetail else { return label }
         let note = Text(" (\(inlineDetail))").font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)

@@ -217,7 +217,7 @@ struct SessionContextSheet: View {
             ScrollView(.vertical, showsIndicators: true) {
                 // Bounded cards own nested sheets. Keep their presenters mounted
                 // while a child covers this scrolled, medium-detent surface.
-                VStack(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18) {
                     if let snapshot = displayedPresentation {
                         if model.connectionState == .connected,
                            let target = model.presentationTarget(for: sessionID),

@@ -23,7 +23,7 @@ struct ProvidersSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(spacing: 6) {
+            TronSettingsSections(alignment: .center, spacing: 6, lazy: true) {
                 TronGlassCard(accent: .tronPrimary) {
                     VStack(spacing: 0) {
                         modelCatalogRow
@@ -46,7 +46,7 @@ struct ProvidersSettingsView: View {
                     if loadFailed {
                         TronSettingsNotice(message: "Providers could not be loaded. Check the Gateway connection.", retry: reload)
                     } else {
-                        TronSettingsCaption("No providers are available from this Gateway.")
+                        TronSettingsCaption("No providers are available from this Gateway.").containerValue(\.tronSettingsSection, false)
                     }
                 } else {
                     let visibleProviders = ProviderUsageOrdering.visible(
@@ -61,15 +61,15 @@ struct ProvidersSettingsView: View {
                         providerSection("Available", providers: available)
                     }
                     if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
-                        TronSettingsCaption("Account usage is unavailable on this Gateway.")
+                        TronSettingsCaption("Account usage is unavailable on this Gateway.").containerValue(\.tronSettingsSection, false)
                     } else if usageController.isLoading {
-                        TronSettingsCaption("Refreshing account usage…")
+                        TronSettingsCaption("Refreshing account usage…").containerValue(\.tronSettingsSection, false)
                     } else if usageController.didFail {
-                        TronSettingsCaption("Account usage is currently unavailable. Connection details remain available.")
+                        TronSettingsCaption("Account usage is currently unavailable. Connection details remain available.").containerValue(\.tronSettingsSection, false)
                     }
                 }
                 if let profile = model.profiles.selected {
-                    TronSettingsCaption("Provider credentials are stored on \(profile.label) (\(profile.host)).")
+                    TronSettingsCaption("Provider credentials are stored on \(profile.label) (\(profile.host)).").containerValue(\.tronSettingsSection, false)
                         .padding(.top, 2)
                 }
             }

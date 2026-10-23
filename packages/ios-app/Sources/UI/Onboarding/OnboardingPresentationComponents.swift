@@ -9,15 +9,14 @@ struct OnboardingNavigationTitle: UIViewRepresentable {
         label.font = UIFontMetrics(forTextStyle: .headline).scaledFont(for: base)
         label.adjustsFontForContentSizeCategory = true
         label.textAlignment = .center
-        label.textColor = UIColor { traits in
-            UIColor(hex: traits.userInterfaceStyle == .dark ? "#34D399" : "#047857")
-        }
+        label.textColor = UIColor(Color.tronPrimary)
         label.accessibilityTraits.insert(.header)
         return label
     }
 
     func updateUIView(_ label: UILabel, context: Context) {
         label.text = text
+        label.textColor = UIColor(Color.tronPrimary)
         label.accessibilityLabel = text
     }
 
@@ -70,7 +69,7 @@ struct OnboardingPage<Content: View>: View {
     init(subtitle: String, @ViewBuilder content: () -> Content) { self.subtitle = subtitle; self.content = content() }
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: TronSpacing.section) {
+            TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
                 Text(subtitle)
                     .font(TronTypography.body)
                     .foregroundStyle(Color.tronTextSecondary)

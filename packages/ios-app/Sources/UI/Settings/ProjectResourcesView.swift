@@ -349,7 +349,7 @@ struct ProjectResourcesView: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                     if model.resources?.objectValue != nil {
                         resourceGroup
                         .tronSettingsCaption("These are resolved resources actually available to this session, tagged by where they come from. Open a row to inspect its source, path, capabilities, or schema.")
@@ -516,7 +516,7 @@ struct ProjectResourceDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
                     if !resolvedPurpose.isEmpty {
                         Text(resolvedPurpose)
                             .font(TronTypography.body)
@@ -591,7 +591,7 @@ struct ProjectResourceDetailSheet: View {
     /// Tools have no body; what the model must supply is their useful detail.
     private var inputsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TronTechnicalSectionLabel("Inputs")
+            TronTechnicalSectionLabel("Inputs").containerValue(\.tronSettingsSection, false)
             VStack(alignment: .leading, spacing: 12) {
                 if presentation.inputs.isEmpty {
                     Text("This tool takes no inputs.")

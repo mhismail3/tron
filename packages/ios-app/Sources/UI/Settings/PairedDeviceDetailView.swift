@@ -67,7 +67,7 @@ struct PairedDeviceDetailView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                 deviceGroup
                 if usesServer {
                     installationGroup
@@ -181,12 +181,12 @@ struct PairedDeviceDetailView: View {
                 icon: "iphone.and.arrow.forward",
                 onConfirm: { Task { await requestInstall() } },
                 additionalContent: AnyView(
-                    TronSettingsGroup("Build", detail: "Fast debug uses incremental, unoptimized compilation for UI iteration.", accent: .tronEmerald) {
+                    TronSettingsGroup("Build", detail: "Fast debug uses incremental, unoptimized compilation for UI iteration.", accent: .tronPrimary) {
                         TronToggleRow(
                             icon: "hare",
                             title: "Fast debug rebuild",
                             detail: "Use optimized compilation when off",
-                            accent: .tronEmerald,
+                            accent: .tronPrimary,
                             isOn: $fastDebugRebuild
                         )
                     }
@@ -234,14 +234,14 @@ struct PairedDeviceDetailView: View {
         TronSettingsGroup(
             "Device Installation",
             detail: "Administrative changes require this paired server to be the active connection.",
-            accent: .tronEmerald
+            accent: .tronPrimary
         ) {
             Button { Task { await useServer() } } label: {
                 TronValueRow(
                     icon: "arrow.right.circle",
                     title: "Use This Server",
                     detail: "Connect before choosing the source repository",
-                    accent: .tronEmerald
+                    accent: .tronPrimary
                 )
                 .contentShape(Rectangle())
             }
@@ -255,7 +255,7 @@ struct PairedDeviceDetailView: View {
         TronSettingsGroup(
             "Source Build and Install",
             detail: "A supervised Mac performs a development-signed LocalDevice overwrite install for this authorized device.",
-            accent: .tronEmerald
+            accent: .tronPrimary
         ) {
             VStack(spacing: 0) {
                 if loading {
@@ -263,7 +263,7 @@ struct PairedDeviceDetailView: View {
                         icon: "arrow.clockwise",
                         title: "Loading installation settings…",
                         detail: nil,
-                        accent: .tronEmerald
+                        accent: .tronPrimary
                     ) {
                         TronPulseLoadingIndicator(size: 18)
                     }
@@ -298,7 +298,7 @@ struct PairedDeviceDetailView: View {
             } label: {
                 HStack(spacing: 8) {
                     if installActive {
-                        TronPulseLoadingIndicator(accent: .tronEmerald, size: 18)
+                        TronPulseLoadingIndicator(accent: .tronPrimary, size: 18)
                     } else {
                         Image(systemName: "iphone.and.arrow.forward")
                     }
@@ -321,11 +321,11 @@ struct PairedDeviceDetailView: View {
             TronValueRow(
                 icon: "folder.badge.gearshape",
                 title: "Source Repository",
-                accent: .tronEmerald
+                accent: .tronPrimary
             ) {
                 TronInlineActionLabel(
                     config?.sourceRoot.map(GatewayConnectionDetailPresentation.redactedMacPath) ?? "Not configured",
-                    accent: .tronEmerald
+                    accent: .tronPrimary
                 )
             }
             .contentShape(Rectangle())

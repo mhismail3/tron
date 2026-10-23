@@ -51,7 +51,7 @@ extension HomeSheet {
 
     /// One summary line: its text whole, then the two lines under it.
     private func memorySummary(_ line: HomeMemoryViewDTO.Line, halves: [HomeMemoryViewDTO.Line]) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18) {
             TronGlassCard(accent: accent) {
                 VStack(alignment: .leading, spacing: 0) {
                     TronSettingsRow(icon: HomeMemoryPresentation.icon(line), title: HomeMemoryPresentation.title(line),
@@ -74,7 +74,7 @@ extension HomeSheet {
         let message = item.projection.text
         let remembered = item.summary.map { HomeMemoryPresentation.strip($0.text) }
             .flatMap { HomeMemoryPresentation.differs($0, from: message) ? $0 : nil }
-        return VStack(alignment: .leading, spacing: 18) {
+        return TronSettingsSections(alignment: .leading, spacing: 18) {
             if let remembered {
                 TronSettingsGroup("Summary", accent: accent) { markdownText(remembered) }
                     .accessibilityElement(children: .contain)
@@ -113,7 +113,7 @@ extension HomeSheet {
 
     /// The canonical history of one memory entry, paged in bounded characters.
     func evidenceSheet(_ page: HomeMemoryEvidencePageDTO) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18) {
             Text(page.text)
                 .font(TronFont.mono())
                 .foregroundStyle(Color.tronTextPrimary)

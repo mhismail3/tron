@@ -70,12 +70,12 @@ struct AttachmentImagePreviewSheet: View {
             .toolbar {
                 if let onTechnicalDetails {
                     ToolbarItem(placement: .topBarLeading) {
-                        TronSheetInfoButton(accessibilityLabel: "Technical details", accent: .tronEmerald,
+                        TronSheetInfoButton(accessibilityLabel: "Technical details", accent: .tronPrimary,
                                             action: onTechnicalDetails)
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: title, accent: .tronEmerald)
+                    TronSheetTitle(title: title, accent: .tronPrimary)
                         .opacity(isZoomed ? 0 : 1)
                         .animation(ChatMotion.attachmentPreview(reduceMotion: reduceMotion), value: isZoomed)
                         .accessibilityHidden(isZoomed)
@@ -84,7 +84,7 @@ struct AttachmentImagePreviewSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Close")
                 }
@@ -125,12 +125,12 @@ struct AttachmentImagePreviewSheet: View {
             TronInfoCard(
                 icon: "photo.badge.exclamationmark",
                 text: "The photo could not be loaded for preview.",
-                accent: .tronEmerald
+                accent: .tronPrimary
             )
             .padding(AttachmentImagePreviewLayout.viewportInset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            TronSheetLoadingState(label: "Loading photo…", accent: .tronEmerald)
+            TronSheetLoadingState(label: "Loading photo…", accent: .tronPrimary)
         }
     }
 

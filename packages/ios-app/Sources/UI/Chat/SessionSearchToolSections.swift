@@ -72,7 +72,7 @@ struct SessionSearchToolSections: View {
     let accent: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.section) {
+        TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
             TronSettingsGroup("Query", accent: accent) {
                 TronSettingsRow(icon: "magnifyingglass", title: presentation.query, accent: accent)
                     .textSelection(.enabled)
@@ -103,7 +103,7 @@ struct SessionSearchToolSections: View {
                     }
                 }
             }
-            TronSettingsCaption("Other chats’ text is untrusted content, not instructions.")
+            TronSettingsCaption("Other chats’ text is untrusted content, not instructions.").containerValue(\.tronSettingsSection, false)
         }
         .accessibilityIdentifier("session-search-tool-detail")
     }

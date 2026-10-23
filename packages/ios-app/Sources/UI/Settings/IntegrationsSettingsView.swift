@@ -92,7 +92,7 @@ struct IntegrationsSettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18) {
                 if let snapshot {
                     let definitions = snapshot.definitions
                     let configured = snapshot.instances.filter { instance in definitions.contains { $0.id == instance.definitionId } }
@@ -498,11 +498,11 @@ private struct IntegrationSetupView: View {
                 }
                 policySection
             } else {
-                TronSettingsCaption("Completing setup on the selected Mac. Credentials remain in its secure store.")
+                TronSettingsCaption("Completing setup on the selected Mac. Credentials remain in its secure store.").containerValue(\.tronSettingsSection, false)
                 TronLoadingState(label: "Completing setup…", accent: .tronCyan)
             }
             if model.connectionState != .connected {
-                TronSettingsCaption("Reconnecting to this Mac. Your setup inputs and accepted operation are kept.")
+                TronSettingsCaption("Reconnecting to this Mac. Your setup inputs and accepted operation are kept.").containerValue(\.tronSettingsSection, false)
             }
             if let error = draft.error { TronSettingsNotice(message: error, accent: .tronError) }
         }

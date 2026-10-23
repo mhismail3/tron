@@ -23,7 +23,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 
 ## Contract
 
-- **Layout.** The gear opens one sheet: This iPhone (emerald: Appearance, App Customizations),
+- **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, App Customizations),
   Accounts (indigo: Connections, Model Providers, Connected Services), Agent (purple: Models,
   Compaction, Trusted Projects, More Settings), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
   System (slate: Mac Terminal, Push Notifications, Setup, Logs). The
@@ -36,6 +36,11 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
   chosen folder as Not trusted through `settings.change`, a folder inside a listed project too
   (the nearest saved decision governs).
+- **Appearance.** Theme selection writes iPhone-local UserDefaults immediately and reloads in
+  a fresh process. Emerald, Deep Burgundy and Olive Gold share adaptive primary roles;
+  semantic statuses and resource identities do not change with the theme. Section layouts use
+  `TronSettingsSections`, including renderer-driven and conditional groups: one container has
+  no heading, multiple containers retain their headings, and explanatory detail remains.
 - **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `number`, `text`,
   `secret`, `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
   order. An unimplemented control renders its `display` read-only; an

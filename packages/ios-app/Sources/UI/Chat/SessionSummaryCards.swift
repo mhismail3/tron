@@ -178,7 +178,7 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
         }
         .foregroundStyle(Color.tronTextPrimary)
         .padding(14)
-        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.14)
+        .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.14)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(usage.accessibilityLabel)
         .accessibilityIdentifier("session-usage-summary")

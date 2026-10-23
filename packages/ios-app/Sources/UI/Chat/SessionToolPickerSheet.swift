@@ -130,7 +130,7 @@ struct AvailableToolsList: View {
     let onSelect: (AvailableToolRow) -> Void
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
             ForEach(groups) { group in
                 let enabled = group.tools.filter { active.contains($0.name) }.count
                 TronSettingsGroup(group.title, detail: "\(enabled) of \(group.tools.count) on", accent: accent,
@@ -188,14 +188,14 @@ struct SessionToolPickerSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    TronSettingsCaption("Turn tools on or off for this chat only. Defaults for new chats are in Settings → Tools. Changes apply while the agent is idle.")
+                TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+                    TronSettingsCaption("Turn tools on or off for this chat only. Defaults for new chats are in Settings → Tools. Changes apply while the agent is idle.").containerValue(\.tronSettingsSection, false)
                     if model.settingsSnapshot(for: SettingsTarget.sessionGatewayTarget(sessionID)) != nil {
-                        TronGlassCard(accent: .tronEmerald) {
+                        TronGlassCard(accent: .tronPrimary) {
                             SettingsRendererView(target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "session",
                                 presentation: .keys(["tools.active"]), liveControl: { setting in
                                     AnyView(TronSettingsRow(icon: "checklist", title: setting.presentation?.label ?? "Tools",
-                                        subtitle: setting.presentation?.help, accent: .tronEmerald) {
+                                        subtitle: setting.presentation?.help, accent: .tronPrimary) {
                                         TronDynamicValue(text: setting.display)
                                     })
                                 }, resetDisabled: saving != nil)
@@ -205,16 +205,16 @@ struct SessionToolPickerSheet: View {
                         TronSettingsNotice(message: errorMessage, accent: .tronError)
                     }
                     if loading && groups.isEmpty {
-                        TronLoadingState(label: "Loading tools…", accent: .tronEmerald)
+                        TronLoadingState(label: "Loading tools…", accent: .tronPrimary)
                     } else if groups.isEmpty {
                         TronPlaceholderState(
                             title: "Tools Unavailable",
                             detail: "Reopen this chat and try again.",
                             icon: "wrench.and.screwdriver",
-                            accent: .tronEmerald
+                            accent: .tronPrimary
                         )
                     } else {
-                        AvailableToolsList(groups: groups, active: active, accent: .tronEmerald, isSaving: saving != nil,
+                        AvailableToolsList(groups: groups, active: active, accent: .tronPrimary, isSaving: saving != nil,
                                           onToggle: { tool, enabled in set(tool, enabled: enabled) },
                                           onSelect: { tool in
                             selected = ProjectResourceSelection(kind: .tools, title: tool.title, value: tool.value)
@@ -228,26 +228,26 @@ struct SessionToolPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Available Tools", accent: .tronEmerald)
+                    TronSheetTitle(title: "Available Tools", accent: .tronPrimary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Done")
                 }
             }
         }
         .tronManagedSheet(item: $selected, identity: { _ in "chat.available-tool-detail" }) { selection in
-            ProjectResourceDetailSheet(sessionID: sessionID, selection: selection, accentOverride: .tronEmerald) { selected = nil }
+            ProjectResourceDetailSheet(sessionID: sessionID, selection: selection, accentOverride: .tronPrimary) { selected = nil }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronEmerald)
-        .tint(Color.tronEmerald)
+        .tronSettingsVisualTheme(accent: .tronPrimary)
+        .tint(Color.tronPrimary)
         .task(id: PresentationActivityTaskID(
             source: "\(model.sessionContextRevision(for: sessionID))/\(model.sessionResourceRevision(for: sessionID))",
             presentationActive: presentationActivity.allowsPresentationPublication

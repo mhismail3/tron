@@ -288,7 +288,7 @@ struct SettingsSectionLinks: View {
             if index > 0 { TronSettingsDivider() }
             TronProgressiveSheetLink(accessibilityLabel: title(id), identity: "settings.section.\(id)") {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    TronSettingsSections(alignment: .leading, spacing: 18) {
                         ForEach(members(id)) { section in
                             if section.id == "workers", let homeProfileID,
                                let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter({ $0.group == "workers" }) {
@@ -360,12 +360,12 @@ struct SessionSettingsView: View {
             model.selectedGatewayProfileID().map { (cwd: cwd, profileID: $0) }
         }.flatMap { $0.cwd.isEmpty ? nil : $0 } : nil
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18) {
                 // Global Settings' layout: titled group cards of drill-in rows (#1651).
-                VStack(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18) {
                     TronSettingsCaption(homeProfileID == nil
                         ? "Choices for this session. Revert an override to use Global settings."
-                        : "Home's overrides of Global settings. Worker launch choices apply to new workers.")
+                        : "Home's overrides of Global settings. Worker launch choices apply to new workers.").containerValue(\.tronSettingsSection, false)
                     if project == nil, let notice = model.settingsSnapshot(for: target)?.resolution.projectNotice {
                         SettingsProjectNoticeGroup(notice: notice)
                     }
@@ -373,7 +373,7 @@ struct SessionSettingsView: View {
                         TronSheetLoadingState(label: "Loading settings…")
                     } else {
                         if project == nil {
-                            TronSettingsGroup("Settings", accent: .tronPrimary, sectionCount: 1) { links(rows, sections) }
+                            TronSettingsGroup("Settings", accent: .tronPrimary) { links(rows, sections) }
                                 .tronSettingsVisualTheme(accent: .tronPrimary)
                         }
                     }
@@ -465,7 +465,7 @@ struct SetupSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 20) {
+            TronSettingsSections(alignment: .leading, spacing: 20) {
                 TronSettingsGroup("Import", detail: "Open a Tron session export in a new session.") {
                     ImportSessionRow(onImported: onImported)
                 }

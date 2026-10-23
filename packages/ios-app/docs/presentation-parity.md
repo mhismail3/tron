@@ -122,6 +122,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Reuse.** Settings, Manage and Project changes reuse `TronSettingsGroup`, `TronSettingsRow`,
   `TronSelectionRow`, `TronGlassCard`, the shared typography/colors and the managed or progressive
   sheet owner; no local rounded-card backgrounds or duplicated navigation/Done chrome.
+  `TronSettingsSections` derives the section count structurally before lazy layout. Groups and
+  custom section labels omit a lone heading by default, retaining explanatory detail; standalone
+  captions do not count as sections. Presentation surfaces reset this scope for child sheets.
   `TronValueRow`, `TronNumberSettingRow` and `TronTextSettingRow` delegate geometry to
   `TronSettingsRow`. Sub-destinations disclose as progressively stacked sheets, not pushes.
 - **Geometry.** `tronSettingsLayout`: 14-point leading inset, 22-point centered icon column,
@@ -162,8 +165,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 
 - Manage Home/Session list sheets share `Components/TronList.swift`. Fixed sets (Profile,
   Chapters, Instructions, Resources) are a `TronListGroup`: one glass container per section, its
-  header and count above it; a single-category section (a Resources kind) passes its category
-  tint for header and container instead of emerald. Feeds (Memory, Tasks, Session History, Subagent History) are a
+  header and count above it only when multiple nonempty sections remain; a single-category
+  section (a Resources kind) keeps its category tint instead of the primary identity. Feeds (Memory, Tasks, Session History, Subagent History) are a
   `TronFeed` of `TronFeedCard`s, with the next page loaded by `FeedStore` while 5 rows remain.
   Long feeds overlay a bottom-centred position chip whose 44-pt target takes every touch (tap:
   newest); the feed ends with room to clear it. An empty feed (and an empty

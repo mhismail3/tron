@@ -79,7 +79,7 @@ struct AutomationDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                     if isLoading { TronSheetLoadingState(label: "Loading Automation…", accent: .tronAutomation) }
                     else if let errorMessage { errorState(errorMessage) }
                     else if let record { detail(record) }
@@ -172,7 +172,7 @@ struct AutomationDetailView: View {
         }
         actions(record)
         VStack(alignment: .leading, spacing: TronSpacing.sm) {
-            TronTechnicalSectionLabel("Recent Runs")
+            TronTechnicalSectionLabel("Recent Runs").containerValue(\.tronSettingsSection, false)
             VStack(spacing: 0) {
                 if runs.isEmpty {
                     TronSettingsRow(
@@ -194,7 +194,7 @@ struct AutomationDetailView: View {
     }
     private func actions(_ record: GatewayAutomationRecord) -> some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
-            TronTechnicalSectionLabel("Controls")
+            TronTechnicalSectionLabel("Controls").containerValue(\.tronSettingsSection, false)
             if let run = record.currentRun {
                 Button("Cancel run") { confirmation = .cancel(record, run) }
                     .buttonStyle(TronActionButtonStyle(role: .standard))

@@ -107,7 +107,7 @@ struct PackageDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
                     header
                     // The diagnostic explains missing kinds before the reader
                     // infers that the package contributes none of them.

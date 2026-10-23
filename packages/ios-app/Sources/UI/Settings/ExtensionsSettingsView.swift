@@ -68,7 +68,7 @@ struct ExtensionsSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                 resolutionSection
                 BuiltinExtensionsSettingsSection(projectCWD: projectCWD)
 
@@ -101,7 +101,7 @@ struct ExtensionsSettingsView: View {
                         TronSettingsRow(
                             icon: "arrow.down.circle.fill",
                             title: "Install Package",
-                            accent: .tronEmerald
+                            accent: .tronPrimary
                         )
                     }
                     .buttonStyle(.plain)
@@ -109,7 +109,7 @@ struct ExtensionsSettingsView: View {
                     SettingsRendererView(target: settingsTarget, writeLayer: settingsWriteLayer, projectCWD: projectCWD,
                                          presentation: .keys([Self.npmCommandKey]), detailedKeys: true)
                 }
-                .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.06)
+                .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.06)
                 .tronSettingsCaption("Agent packages and extensions run with your Mac user authority. Review their source before installing.")
 
                 if supportsModules {
@@ -378,7 +378,7 @@ struct ExtensionsSettingsView: View {
 
     private var packageInstallSheet: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                 VStack(alignment: .leading, spacing: 8) {
                     sheetSectionHeader(
                         "Source",
@@ -397,10 +397,10 @@ struct ExtensionsSettingsView: View {
                     TronToggleRow(
                         icon: "folder.badge.gearshape",
                         title: "Current project only",
-                        accent: .tronEmerald,
+                        accent: .tronPrimary,
                         isOn: $local
                     )
-                    .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+                    .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.07)
                     .disabled(projectCWD == nil)
                 }
 
@@ -428,7 +428,7 @@ struct ExtensionsSettingsView: View {
     private func sheetSectionHeader(_ title: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: TronSpacing.xs) {
             Text(title)
-                .font(TronTypography.sheetSectionHeader)
+                .tronSectionHeading()
                 .foregroundStyle(Color.tronTextPrimary)
                 .accessibilityAddTraits(.isHeader)
             Text(detail)

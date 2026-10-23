@@ -8,7 +8,7 @@ extension HomeSheet {
     func chapters(_ list: HomeChapterListDTO) -> some View {
         // The sheet's title already names the list: one intro line, then the rows.
         VStack(alignment: .leading, spacing: 10) {
-            TronSettingsCaption("Newest first. Sealed chapters stay readable and refuse changes.")
+            TronSettingsCaption("Newest first. Sealed chapters stay readable and refuse changes.").containerValue(\.tronSettingsSection, false)
             TronListGroup(Array(list.chapters.reversed()), identifier: "home-chapter-list") { chapter in
                 TronListButton(HomeChapterPresentation.rowContent(chapter, accent: Self.chapterAccent(chapter.state)),
                                identifier: "home-chapter-\(chapter.ordinal)") {
@@ -19,7 +19,7 @@ extension HomeSheet {
     }
 
     func chapterDetail(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18) {
             chapterHeader(chapter, limits: limits)
             if let contents = chapter.contents {
                 if let topics = contents.topics, !topics.isEmpty {

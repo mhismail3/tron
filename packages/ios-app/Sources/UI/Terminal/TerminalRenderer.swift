@@ -391,7 +391,7 @@ struct TerminalControlBar: View {
                 .frame(minWidth: 30, minHeight: 36)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(selected ? Color.tronEmerald : Color.tronTextPrimary)
+        .foregroundStyle(selected ? Color.tronPrimary : Color.tronTextPrimary)
         .contentShape(Rectangle())
         .accessibilityLabel(label)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -409,7 +409,7 @@ struct TerminalControlBar: View {
                 .frame(minWidth: 30, minHeight: 36)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(selected ? Color.tronEmerald : Color.tronTextPrimary)
+        .foregroundStyle(selected ? Color.tronPrimary : Color.tronTextPrimary)
         .contentShape(Rectangle())
         .accessibilityLabel(label)
         .accessibilityAddTraits(selected ? .isSelected : [])

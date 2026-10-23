@@ -6,8 +6,8 @@ struct ExperimentalSettingsContent: View {
     @PresentationState private var swiftApps = SwiftAppExperiment.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-                TronSettingsGroup("Swift Files", accent: .tronEmerald) {
+        TronSettingsSections(alignment: .leading, spacing: 18) {
+                TronSettingsGroup("Swift Files", accent: .tronPrimary) {
                     TronToggleRow(
                         icon: "play.rectangle",
                         title: "Run Swift files",
@@ -16,7 +16,7 @@ struct ExperimentalSettingsContent: View {
                     )
                     .accessibilityIdentifier("settings-experimental-swift-apps")
                 }
-                .tronSettingsVisualTheme(inheriting: .tronEmerald)
+                .tronSettingsVisualTheme(inheriting: .tronPrimary)
                 .tronSettingsCaption("Run opens a single-file SwiftUI app shown in chat as a native app, with no file, network or system access. Applies only to this iPhone.")
         }
     }

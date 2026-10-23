@@ -87,7 +87,7 @@ struct WorkspaceBrowser: View {
 
     private var browser: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+            TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
                 if let errorMessage, !isTransientConnectionError(errorMessage) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .font(TronTypography.bodySM)
@@ -199,7 +199,7 @@ struct WorkspaceBrowser: View {
     private func browserGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
             Text(title.uppercased())
-                .font(TronTypography.sheetSectionHeader)
+                .tronSectionHeading()
                 .foregroundStyle(Color.tronTextMuted)
             content()
         }

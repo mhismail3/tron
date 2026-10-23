@@ -37,7 +37,7 @@ struct ProjectResourceContentSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TronTechnicalSectionLabel("Content")
+            TronTechnicalSectionLabel("Content").containerValue(\.tronSettingsSection, false)
             if readsInReader, let content = loadedContent {
                 TronGlassCard(accent: accent) {
                     ComposerResourceContentBody(preview: .init(text: Self.excerpt(content.text), isTruncated: false),

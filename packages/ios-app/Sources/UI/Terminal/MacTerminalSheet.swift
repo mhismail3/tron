@@ -20,7 +20,7 @@ struct MacTerminalSettingsRow: View {
         .accessibilityIdentifier("settings-link-Mac Terminal")
         .tronManagedSheet(isPresented: $isPresented, identity: "settings.Mac Terminal") {
             MacTerminalSheet()
-                .tronSettingsVisualTheme(accent: theme?.accent ?? .tronEmerald)
+                .tronSettingsVisualTheme(accent: theme?.accent ?? .tronPrimary)
                 .tronPresentation()
         }
     }

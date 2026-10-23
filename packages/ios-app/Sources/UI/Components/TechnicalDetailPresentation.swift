@@ -52,7 +52,7 @@ struct TronMetadataTable: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.sm) {
-            if let title { TronTechnicalSectionLabel(title) }
+            if let title { TronTechnicalSectionLabel(title).containerValue(\.tronSettingsSection, false) }
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     if index > 0 { Divider().overlay(accent.opacity(0.18)) }
@@ -160,7 +160,7 @@ struct TronTechnicalSectionLabel: View {
 
     var body: some View {
         Text(title.uppercased())
-            .font(TronTypography.sheetSectionHeader)
+            .tronSectionHeading()
             .foregroundStyle(Color.tronTextMuted)
             .accessibilityAddTraits(.isHeader)
     }

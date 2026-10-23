@@ -86,7 +86,7 @@ struct TrustSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            TronSettingsSections(alignment: .leading, spacing: 16, lazy: true) {
                 if allowsGlobalDefault {
                     SettingsAutosaveNotice(key: .settings(.global, sessionID: nil))
                     globalDefaultSection
@@ -115,7 +115,7 @@ struct TrustSettingsView: View {
                     )
                 }
 
-                TronSettingsCaption("Trust gates project-local settings, extensions, skills, prompts, packages, and system prompt files. It is not a sandbox.")
+                TronSettingsCaption("Trust gates project-local settings, extensions, skills, prompts, packages, and system prompt files. It is not a sandbox.").containerValue(\.tronSettingsSection, false)
             }
             .padding(20)
         }
@@ -271,7 +271,7 @@ struct TrustSettingsView: View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
             VStack(alignment: .leading, spacing: TronSpacing.xs) {
                 Text("Decision")
-                    .font(TronTypography.sheetSectionHeader)
+                    .tronSectionHeading()
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
                 Text("Controls whether project-local resources may load.")

@@ -112,7 +112,7 @@ struct QuickRebuildGroup: View {
     private var isRunning: Bool { gatewayState == .running || deviceState == .running || replacementRunning }
 
     var body: some View {
-        TronSettingsGroup("Quick Rebuild", detail: "Rebuild from source on \(profile.label).", accent: .tronEmerald) {
+        TronSettingsGroup("Quick Rebuild", detail: "Rebuild from source on \(profile.label).", accent: .tronPrimary) {
             VStack(spacing: 0) {
                 row(
                     icon: "desktopcomputer",
@@ -121,7 +121,7 @@ struct QuickRebuildGroup: View {
                     state: gatewayState,
                     accessibilityName: "Gateway"
                 ) { await rebuildGateway() }
-                TronSettingsDivider(accent: .tronEmerald)
+                TronSettingsDivider(accent: .tronPrimary)
                 row(
                     icon: "iphone",
                     title: "Rebuild iPhone App",
@@ -130,7 +130,7 @@ struct QuickRebuildGroup: View {
                     accessibilityName: "iPhone app"
                 ) { await rebuildDevice() }
                 if AppModel.supportsMacReplacement(capabilities: capabilities) {
-                    TronSettingsDivider(accent: .tronEmerald)
+                    TronSettingsDivider(accent: .tronPrimary)
                     replacementRow
                 }
             }
@@ -166,14 +166,14 @@ struct QuickRebuildGroup: View {
         case .running: detail = "Rebuild in progress"
         case .unavailable(let reason): detail = reason
         }
-        return TronValueRow(icon: icon, title: title, detail: detail, accent: .tronEmerald) {
+        return TronValueRow(icon: icon, title: title, detail: detail, accent: .tronPrimary) {
             // One tap opens the menu, a second confirms; Cancel or tapping
             // outside dismisses without a command.
             Menu {
                 Button("Confirm") { Task { await confirm() } }
                 Button("Cancel", role: .cancel) {}
             } label: {
-                TronInlineActionLabel("Restart", isWorking: state == .running, accent: .tronEmerald)
+                TronInlineActionLabel("Restart", isWorking: state == .running, accent: .tronPrimary)
                     .fixedSize(horizontal: true, vertical: false)
             }
             .disabled(state != .ready || requesting)
@@ -186,10 +186,10 @@ struct QuickRebuildGroup: View {
         switch replacementState {
         case .ready(let reason), .running(let reason), .unavailable(let reason): detail = reason
         }
-        return TronValueRow(icon: "macwindow", title: "Replace Mac App", detail: detail, accent: .tronEmerald) {
+        return TronValueRow(icon: "macwindow", title: "Replace Mac App", detail: detail, accent: .tronPrimary) {
             if replacementRunning {
                 Button(action: showReplacement) {
-                    TronInlineActionLabel("Progress", isWorking: true, accent: .tronEmerald)
+                    TronInlineActionLabel("Progress", isWorking: true, accent: .tronPrimary)
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 .buttonStyle(.plain)
@@ -206,7 +206,7 @@ struct QuickRebuildGroup: View {
                     }
                     Button("Cancel", role: .cancel) {}
                 } label: {
-                    TronInlineActionLabel("Replace", accent: .tronEmerald)
+                    TronInlineActionLabel("Replace", accent: .tronPrimary)
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 .disabled(requesting || (replacement == nil && { if case .ready = replacementState { return false }; return true }()))

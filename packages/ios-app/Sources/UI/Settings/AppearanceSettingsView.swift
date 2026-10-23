@@ -6,10 +6,10 @@ struct AppearanceSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 20) {
+            TronSettingsSections(alignment: .leading, spacing: 20, lazy: true) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Color Mode")
-                        .font(TronTypography.sheetSectionHeader)
+                        .tronSectionHeading()
                         .foregroundStyle(Color.tronTextPrimary)
                         .accessibilityAddTraits(.isHeader)
                     TronSegmentedControl(

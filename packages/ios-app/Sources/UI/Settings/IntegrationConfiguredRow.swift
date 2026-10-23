@@ -54,7 +54,7 @@ struct IntegrationConfiguredRow: View {
             }
             Spacer(minLength: TronSpacing.md)
             Button(action: action) {
-                TronInlineActionLabel(actionTitle, accent: configured ? .tronEmerald : accent)
+                TronInlineActionLabel(actionTitle, accent: configured ? .tronPrimary : accent)
                     .fixedSize(horizontal: true, vertical: false)
             }
             .buttonStyle(.plain)

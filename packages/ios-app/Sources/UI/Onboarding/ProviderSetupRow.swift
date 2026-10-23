@@ -53,7 +53,7 @@ struct ProviderSetupRow: View {
         if surfaceStyle == .standalone {
             row
                 .tronScrollSurface(
-                    accent: .tronEmerald,
+                    accent: .tronPrimary,
                     cornerRadius: 12,
                     tintOpacity: provider.configured ? 0.14 : 0.08
                 )
@@ -76,7 +76,7 @@ struct ProviderSetupRow: View {
             } else {
                 rowContents {
                     Button { showsConfiguration = true } label: {
-                        TronInlineActionLabel("Connect", accent: settingsTheme?.accent ?? .tronEmerald)
+                        TronInlineActionLabel("Connect", accent: settingsTheme?.accent ?? .tronPrimary)
                             .fixedSize(horizontal: true, vertical: false)
                     }
                     .buttonStyle(.plain)
@@ -90,7 +90,7 @@ struct ProviderSetupRow: View {
     }
 
     private var detailsPill: some View {
-        TronInlineActionLabel("Details", accent: settingsTheme?.accent ?? .tronEmerald)
+        TronInlineActionLabel("Details", accent: settingsTheme?.accent ?? .tronPrimary)
             .fixedSize(horizontal: true, vertical: false)
     }
 

@@ -86,16 +86,16 @@ struct ProviderChoiceGroup: View {
     let onSelect: (String) -> Void
 
     var body: some View {
-        TronSettingsGroup(title, accent: .tronEmerald) {
+        TronSettingsGroup(title, accent: .tronPrimary) {
             VStack(spacing: 0) {
                 ForEach(Array(choices.enumerated()), id: \.element.id) { index, choice in
-                    if index > 0 { TronSettingsDivider(accent: .tronEmerald) }
+                    if index > 0 { TronSettingsDivider(accent: .tronPrimary) }
                     Button { if choice.id != selectedID { onSelect(choice.id) } } label: {
                         TronSettingsRow(
                             icon: choice.icon ?? (selectedID == choice.id ? "checkmark.circle.fill" : "circle"),
                             title: choice.title,
                             subtitle: choice.subtitle,
-                            accent: .tronEmerald
+                            accent: .tronPrimary
                         ) {
                             if busyID == choice.id {
                                 TronPulseLoadingIndicator(size: 18)
@@ -130,7 +130,7 @@ struct ProviderAuthFlowContent: View {
     let onChangeStep: (Int, String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.section) {
+        TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
             if let recovered = model.recoveredAuthOperationID,
                model.authEvent?.operationId == recovered || model.authPrompt?.operationId == recovered {
                 RecoveredAuthControls(operationID: recovered)
@@ -191,7 +191,7 @@ private struct RecoveredAuthControls: View {
         OnboardingCard {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
                 Text("Login already in progress")
-                    .font(TronTypography.sheetSectionHeader)
+                    .tronSectionHeading()
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
                 TronCaption("Continue below, or restart to get a new login link. Restarting makes the previous authorization link invalid.")
@@ -242,9 +242,9 @@ private struct AuthPromptContent: View {
     @State private var submitting = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.section) {
+        TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
             Text(prompt.message)
-                .font(TronTypography.sheetSectionHeader)
+                .tronSectionHeading()
                 .foregroundStyle(Color.tronTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
@@ -295,10 +295,10 @@ private struct AuthEventContent: View {
     @State private var browserError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.section) {
+        TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
             switch event.kind {
             case .progress:
-                TronSheetLoadingState(label: event.message ?? "Waiting for the provider…", accent: .tronEmerald)
+                TronSheetLoadingState(label: event.message ?? "Waiting for the provider…", accent: .tronPrimary)
             case .authURL:
                 authURLContent
             case .deviceCode:

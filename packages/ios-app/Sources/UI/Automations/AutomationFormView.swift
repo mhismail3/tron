@@ -237,7 +237,7 @@ struct AutomationFormView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                     basicsSection
                     actionSection
                     targetSection
@@ -496,7 +496,7 @@ struct AutomationFormView: View {
                 }
             }
             if targetMode == .workspace && actionKind == .sessionPrompt {
-                TronSettingsCaption("Every occurrence creates and retains a new ordinary session in the selected workspace.")
+                TronSettingsCaption("Every occurrence creates and retains a new ordinary session in the selected workspace.").containerValue(\.tronSettingsSection, false)
             }
         }
     }

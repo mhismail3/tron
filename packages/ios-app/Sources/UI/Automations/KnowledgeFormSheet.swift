@@ -15,7 +15,7 @@ struct KnowledgeFormSheet<Content: View>: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) { content() }
+                TronSettingsSections(alignment: .leading, spacing: 18) { content() }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 18)
                     .padding(.bottom, 32)

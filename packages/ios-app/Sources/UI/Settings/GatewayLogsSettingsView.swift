@@ -75,13 +75,13 @@ struct GatewayLogsSettingsView: View {
                 if !hasLoaded && recordIndex.isEmpty {
                     TronLoadingState(
                         label: model.diagnosticsAreReady ? "Loading logs…" : "Loading local diagnostics…",
-                        accent: .tronEmerald
+                        accent: .tronPrimary
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 24)
                 } else if rows.isEmpty {
-                    TronSettingsCaption(emptyStateMessage)
+                    TronSettingsCaption(emptyStateMessage).containerValue(\.tronSettingsSection, false)
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                 } else {
@@ -110,13 +110,13 @@ struct GatewayLogsSettingsView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             levelFilterBar
         }
-        .tronNavigationTitle("Logs", accent: .tronEmerald)
+        .tronNavigationTitle("Logs", accent: .tronPrimary)
         .toolbar {
             ToolbarItemGroup(placement: .topBarLeading) {
                 Button { copyVisibleLogs() } label: {
                     Image(systemName: copySucceeded ? "checkmark" : "doc.on.doc")
                         .font(TronTypography.buttonSM)
-                        .tronToolbarAction(accent: .tronEmerald)
+                        .tronToolbarAction(accent: .tronPrimary)
                         .contentTransition(.symbolEffect(.replace.downUp))
                 }
                 .disabled(visibleItems.isEmpty)
@@ -124,22 +124,22 @@ struct GatewayLogsSettingsView: View {
 
                 Button { captureOnIPhone() } label: {
                     Group {
-                        if localCaptureInFlight { TronPulseLoadingIndicator(accent: .tronEmerald, size: 18) }
+                        if localCaptureInFlight { TronPulseLoadingIndicator(accent: .tronPrimary, size: 18) }
                         else { Image(systemName: "iphone.and.arrow.forward") }
                     }
                     .font(TronTypography.buttonSM)
-                    .tronToolbarAction(accent: .tronEmerald)
+                    .tronToolbarAction(accent: .tronPrimary)
                 }
                 .disabled(localCaptureInFlight || shareURL != nil)
                 .accessibilityLabel("Capture on iPhone")
 
                 Button { exportDiagnostics() } label: {
                     Group {
-                        if exportInFlight { TronPulseLoadingIndicator(accent: .tronEmerald, size: 18) }
+                        if exportInFlight { TronPulseLoadingIndicator(accent: .tronPrimary, size: 18) }
                         else { Image(systemName: "square.and.arrow.up") }
                     }
                     .font(TronTypography.buttonSM)
-                    .tronToolbarAction(accent: .tronEmerald)
+                    .tronToolbarAction(accent: .tronPrimary)
                 }
                 .disabled(visibleItems.isEmpty || exportInFlight)
                 .accessibilityLabel("Export Diagnostics")

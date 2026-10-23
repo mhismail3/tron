@@ -12,7 +12,7 @@ struct HomeToolDetailSections: View {
     let open: (HomeTextReading) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18) {
             header
             ForEach(Array(presentation.sections.enumerated()), id: \.offset) { _, section in
                 sectionView(section)
@@ -60,7 +60,7 @@ struct HomeToolDetailSections: View {
                     if rows.isEmpty { TronSettingsRow(icon: "checklist", title: "No tasks", accent: accent) }
                 }
             }
-            if let footer { TronSettingsCaption(footer, inset: 0) }
+            if let footer { TronSettingsCaption(footer, inset: 0).containerValue(\.tronSettingsSection, false) }
         case .failure(let title, let message, let issues):
             TronSettingsGroup(title, accent: .tronError) {
                 VStack(spacing: 0) {
@@ -108,7 +108,7 @@ struct HomeToolDetailSections: View {
         } else if !rows.isEmpty || detail != nil {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
                 if !rows.isEmpty { TronGlassCard(accent: accent) { rowList(rows) } }
-                if let detail { TronSettingsCaption(detail, inset: 0) }
+                if let detail { TronSettingsCaption(detail, inset: 0).containerValue(\.tronSettingsSection, false) }
             }
         }
     }

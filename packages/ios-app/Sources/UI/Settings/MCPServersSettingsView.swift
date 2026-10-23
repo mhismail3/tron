@@ -106,7 +106,7 @@ struct MCPServersSettingsView: View {
     var body: some View {
         let destination = model.knowledgeDestinationIdentity
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                 if let error { TronSettingsNotice(message: error, accent: .tronError, retry: reload) }
                 if serverErrorCount > 0 {
                     TronSettingsNotice(message: "\(serverErrorCount) entr\(serverErrorCount == 1 ? "y" : "ies") in mcp.json could not be read", accent: .tronError)
@@ -374,7 +374,7 @@ struct MCPAddServerForm: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                TronSettingsSections(alignment: .leading, spacing: 16) {
                     TronSettingsGroup("Server name", accent: accent) {
                         TextField("For example, calendar", text: $serverName).textInputAutocapitalization(.never).autocorrectionDisabled().tronTextEntryDone().padding(12)
                     }

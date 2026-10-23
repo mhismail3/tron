@@ -28,7 +28,7 @@ extension HomeTaskSheet.PendingRevocation.Target {
 
 extension HomeTaskSheet {
     func permissionList(_ permissions: HomeTaskPermissionsDTO) -> some View {
-        VStack(alignment: .leading, spacing: TronSpacing.section) {
+        TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
             TronSettingsGroup(permissionTitle) {
                 VStack(spacing: 0) {
                     if let permissionSettings {
@@ -164,7 +164,7 @@ private struct HomeGrantRequestRow: View {
         .contextMenu { Text(request.request.intentDigest) }
         .tronManagedSheet(item: $editingExpiryComponent, instance: request.id, identity: { "home.grant.\(request.id).expiry.\($0.id)" }) { component in
             TronDatePickerSheet(title: component == .date ? "Expiry date" : "Expiry time", component: component,
-                                date: $expiry, earliestDate: .now, accent: visualTheme?.accent ?? .tronEmerald)
+                                date: $expiry, earliestDate: .now, accent: visualTheme?.accent ?? .tronPrimary)
         }
     }
 

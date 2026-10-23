@@ -109,8 +109,8 @@ struct MultilineComposerTextView: UIViewRepresentable {
             coordinator?.textViewDidLayout(view)
         }
         view.backgroundColor = .clear
-        view.textColor = UIColor(Color.tronEmerald)
-        view.tintColor = UIColor(Color.tronEmerald)
+        view.textColor = UIColor(Color.inputText)
+        view.tintColor = UIColor(Color.tronPrimary)
         view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0
         view.contentInset = .zero
@@ -129,6 +129,8 @@ struct MultilineComposerTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: LayoutAwareTextView, context: Context) {
+        view.textColor = UIColor(Color.inputText)
+        view.tintColor = UIColor(Color.tronPrimary)
         view.scrollsToTop = !context.environment.chatOwnsStatusBar
         context.coordinator.parent.responder?.detach(view)
         context.coordinator.parent = self
@@ -648,11 +650,11 @@ struct ComposerTrailingButton: View {
                                 size: ComposerControlMetrics.symbolSize,
                                 weight: .semibold
                             ))
-                            .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+                            .foregroundStyle(isDisabled ? Color.tronPrimary.opacity(0.3) : Color.tronPrimary)
                             .opacity(isSending ? 0 : 1)
                             .scaleEffect(isSending && !reduceMotion ? 0.72 : 1)
                         if isSending {
-                            TronPulseLoadingIndicator(accent: .tronEmerald, size: 18)
+                            TronPulseLoadingIndicator(accent: .tronPrimary, size: 18)
                                 .transition(
                                     reduceMotion
                                         ? .opacity

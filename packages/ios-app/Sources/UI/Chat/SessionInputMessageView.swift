@@ -410,7 +410,7 @@ struct InboundContextDetailsSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
                     if !technical {
                         if let report {
                             ToolStaticChip(icon: "doc.text", text: report.outcome, accent: accent)
@@ -501,7 +501,7 @@ struct InboundContextDetailsSheet: View {
 
     private var messageSection: some View {
         VStack(alignment: .leading, spacing: TronSpacing.sm) {
-            TronTechnicalSectionLabel("Message")
+            TronTechnicalSectionLabel("Message").containerValue(\.tronSettingsSection, false)
             TronMarkdownView(text: messageText, streaming: false)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(TronSpacing.lg)
@@ -515,7 +515,7 @@ struct InboundContextDetailsSheet: View {
         sheetTitle: String
     ) -> some View {
         VStack(alignment: .leading, spacing: TronSpacing.sm) {
-            TronTechnicalSectionLabel(title)
+            TronTechnicalSectionLabel(title).containerValue(\.tronSettingsSection, false)
             TronTechnicalJSONRow(
                 value: value,
                 title: "Inspect \(title.lowercased())",

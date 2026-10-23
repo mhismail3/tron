@@ -7,7 +7,7 @@ struct SettingsChangesLink: View {
     let scope: SettingsChangesScope
     /// The row's subtitle; without one the link is a toolbar icon.
     var subtitle: String?
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
     var onOpenSession: ((AppModel.SessionNavigationRoute) -> Void)?
     @State private var presented = false
 
@@ -96,10 +96,10 @@ struct SettingsChangesView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    TronSettingsCaption("One audit history · \(activeScope.title). Includes your changes, agent requests, and observed external edits. History never supplies configuration values.")
+                    TronSettingsCaption("One audit history · \(activeScope.title). Includes your changes, agent requests, and observed external edits. History never supplies configuration values.").containerValue(\.tronSettingsSection, false)
                     if scope != .all {
                         TronSegmentedControl(options: [(label: scope.title, value: "context"), (label: "All scopes", value: "all")],
-                                             selection: $contextFilter, accent: .tronEmerald, minimumHeight: 40)
+                                             selection: $contextFilter, accent: .tronPrimary, minimumHeight: 40)
                     }
                     if loading && rows.isEmpty {
                         TronLoadingState(label: "Loading changes…")
@@ -132,7 +132,7 @@ struct SettingsChangesView: View {
                             if loading { TronLoadingState(label: "Loading changes…") }
                             else { Text("Load more") }
                         }
-                        .buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald))
+                        .buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronPrimary))
                         .disabled(loading)
                         .frame(maxWidth: .infinity)
                         .accessibilityIdentifier("settings-changes-load-more")
@@ -147,7 +147,7 @@ struct SettingsChangesView: View {
                     Button { showsFilters = true } label: {
                         Image(systemName: filtersActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Filters")
                     .accessibilityIdentifier("settings-changes-filters")
@@ -157,7 +157,7 @@ struct SettingsChangesView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                             .accessibilityLabel("Done")
                     }
                 }
@@ -172,7 +172,7 @@ struct SettingsChangesView: View {
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button { showsFilters = false } label: {
-                                Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronEmerald)
+                                Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronPrimary)
                             }
                             .accessibilityLabel("Done")
                         }
@@ -432,7 +432,7 @@ private struct SettingsChangeDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18) {
                     TronGlassCard(accent: statusAccent) {
                         VStack(spacing: 0) {
                             TronSettingsRow(icon: "circle.dashed", title: "Before",
@@ -503,7 +503,7 @@ private struct SettingsChangeDetailView: View {
                         }
                     }
                     if cursor != nil {
-                        Button("Load key history") { Task { await loadHistory() } }.buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald)).disabled(loading)
+                        Button("Load key history") { Task { await loadHistory() } }.buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronPrimary)).disabled(loading)
                     }
                     if let errorMessage { TronSettingsNotice(message: errorMessage, title: "History unavailable") }
                     if loading && history.isEmpty { TronLoadingState(label: "Loading history…") }
@@ -515,7 +515,7 @@ private struct SettingsChangeDetailView: View {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: entry.title) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronEmerald)
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronPrimary)
                     }.accessibilityLabel("Done")
                 }
             }
@@ -575,7 +575,7 @@ private struct SettingsChangeDetailView: View {
 
     /// The requesting chat, the owning task and Undo (or Apply again), as rows.
     @ViewBuilder private var actions: some View {
-        TronGlassCard(accent: .tronEmerald) {
+        TronGlassCard(accent: .tronPrimary) {
             VStack(spacing: 0) {
                 if let sessionID = entry.actor.sessionId, onOpenSession != nil {
                     Button { Task { await openSession(sessionID) } } label: {

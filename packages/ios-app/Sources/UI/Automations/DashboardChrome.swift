@@ -88,12 +88,12 @@ struct DashboardChrome<Content: View>: View {
             // above a UIKit view takes its touches.
             .background {
                 DashboardIndicatorSwap(state: home?.state ?? .resting) { state in
-                    HomeButtonIndicator(state: state, accent: .tronEmerald)
+                    HomeButtonIndicator(state: state, accent: .tronPrimary)
                 }
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
-            .tronDashboardFloatingCircle(accent: .tronEmerald)
+            .tronDashboardFloatingCircle(accent: .tronPrimary)
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
         }
@@ -118,7 +118,7 @@ struct DashboardTitle: View {
     var body: some View {
         Text("Tron")
             .font(TronTypography.sans(size: DashboardHeaderState.titleSize, weight: .bold))
-            .foregroundStyle(Color.tronEmerald)
+            .foregroundStyle(Color.tronPrimary)
             .lineLimit(1)
             .minimumScaleFactor(0.5)
             // Fit long names before applying the small visual transform;

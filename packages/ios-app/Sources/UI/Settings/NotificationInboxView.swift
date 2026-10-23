@@ -9,7 +9,7 @@ struct NotificationInboxToolbarButton: View {
         Button(action: action) {
             Image(systemName: unreadCount > 0 ? "bell.badge.fill" : "bell")
                 .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                .tronToolbarAction(accent: .tronEmerald)
+                .tronToolbarAction(accent: .tronPrimary)
                 .symbolRenderingMode(.hierarchical)
         }
         .accessibilityLabel(unreadCount > 0
@@ -121,7 +121,7 @@ struct NotificationInboxView: View {
                     isWorking: model.notificationInbox.isMarkingAllRead
                 )
             }
-            .tronToolbarAction(accent: .tronEmerald)
+            .tronToolbarAction(accent: .tronPrimary)
             .disabled(model.notificationInbox.unreadCount == 0 || model.notificationInbox.isMarkingAllRead)
             .accessibilityLabel("Mark all notifications read")
         }
@@ -130,7 +130,7 @@ struct NotificationInboxView: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .tronToolbarAction(accent: .tronEmerald)
+                    .tronToolbarAction(accent: .tronPrimary)
             }
             .accessibilityLabel("Done")
         }
@@ -203,7 +203,7 @@ struct NotificationInboxRowList: View {
 
     var body: some View {
         if model.notificationInbox.isLoadingFirstWindows && notifications.isEmpty {
-            TronSheetLoadingState(label: "Loading notifications from paired Gateways…", accent: .tronEmerald)
+            TronSheetLoadingState(label: "Loading notifications from paired Gateways…", accent: .tronPrimary)
         } else if notifications.isEmpty {
             NotificationInboxEmptyState(filter: filter)
         } else if PresentationClockPolicy.runs(
@@ -267,7 +267,7 @@ struct NotificationInboxEmptyState: View {
                 ? "New agent alerts will appear here until you mark them read."
                 : "Agent alerts from paired Gateways will appear here.",
             icon: filter == .unread ? "bell.slash" : "bell",
-            accent: .tronEmerald
+            accent: .tronPrimary
         )
         .frame(minHeight: 280)
     }
@@ -326,7 +326,7 @@ private struct NotificationInboxHistoryView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -411,7 +411,7 @@ private struct NotificationInboxRow: View {
                 title: title,
                 subtitle: item.notification.message,
                 subtitleLineLimit: 1,
-                accent: isUnread ? .tronEmerald : .tronTextMuted,
+                accent: isUnread ? .tronPrimary : .tronTextMuted,
                 titleFont: TronTypography.sans(size: TronTypography.sizeBodyLG, weight: isUnread ? .semibold : .medium),
                 titleColor: isUnread ? .tronTextPrimary : .tronTextSecondary,
                 subtitleColor: isUnread ? .tronTextSecondary : .tronTextMuted,
@@ -419,7 +419,7 @@ private struct NotificationInboxRow: View {
             )
         }
         .buttonStyle(.plain)
-        .tronGlassSurface(accent: .tronEmerald, tintOpacity: isUnread ? 0.14 : 0, interactive: true)
+        .tronGlassSurface(accent: .tronPrimary, tintOpacity: isUnread ? 0.14 : 0, interactive: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([
             title,
@@ -450,8 +450,8 @@ private struct NotificationInboxDetailView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: TronSpacing.xl) {
                     VStack(alignment: .leading, spacing: TronSpacing.sm) {
-                        TronTechnicalSectionLabel("Notification")
-                        TronGlassCard(accent: item.notification.isUnread ? .tronEmerald : .tronTextMuted) {
+                        TronTechnicalSectionLabel("Notification").containerValue(\.tronSettingsSection, false)
+                        TronGlassCard(accent: item.notification.isUnread ? .tronPrimary : .tronTextMuted) {
                             VStack(alignment: .leading, spacing: TronSpacing.md) {
                                 Label(item.notification.title, systemImage: item.notification.kind.icon)
                                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
@@ -473,7 +473,7 @@ private struct NotificationInboxDetailView: View {
                             .init(title: "Status", value: item.notification.outcome.label, icon: "paperplane"),
                             .init(title: "Received", value: formattedDate, icon: "clock"),
                         ],
-                        accent: .tronEmerald
+                        accent: .tronPrimary
                     )
                 }
                 .padding(.horizontal, 20)
@@ -492,7 +492,7 @@ private struct NotificationInboxDetailView: View {
                             isWorking: isOpening
                         )
                     }
-                    .tronToolbarAction(accent: .tronEmerald)
+                    .tronToolbarAction(accent: .tronPrimary)
                     .disabled(isOpening)
                     .accessibilityLabel(isOpening ? "Opening chat" : "Open chat")
                 }
@@ -501,7 +501,7 @@ private struct NotificationInboxDetailView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Done")
                 }

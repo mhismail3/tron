@@ -11,7 +11,7 @@ struct ToolTechnicalDetailsSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
                     protocolMetadata
                     payload("Request", value: tool.request ?? .null)
                     payload("Result", value: ToolTechnicalResultResolver.resolve(tool))
@@ -110,7 +110,7 @@ struct ToolTechnicalDetailsSheet: View {
     }
 
     private func sectionLabel(_ title: String) -> some View {
-        TronTechnicalSectionLabel(title)
+        TronTechnicalSectionLabel(title).containerValue(\.tronSettingsSection, false)
     }
 }
 

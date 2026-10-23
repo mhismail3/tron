@@ -32,7 +32,7 @@ extension View {
                 .tint(Color.tronError)
                 .accessibilityIdentifier("session-delete-action-\(session.dashboardID)")
             Button("Rename", systemImage: "pencil") { onRename() }
-                .tint(Color.tronEmerald)
+                .tint(Color.tronPrimary)
         }
     }
 

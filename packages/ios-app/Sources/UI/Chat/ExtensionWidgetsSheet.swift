@@ -55,7 +55,7 @@ struct SessionActivitySheet: View {
                                     title: "No activity",
                                     detail: "Running subagents and retained extension content appear here.",
                                     icon: "square.on.square.dashed",
-                                    accent: .tronEmerald
+                                    accent: .tronPrimary
                                 )
                             }
                         }
@@ -64,7 +64,7 @@ struct SessionActivitySheet: View {
                 }
                 .tronScrollEdgeChrome()
             }
-            .tronNavigationTitle("Activity", accent: .tronEmerald)
+            .tronNavigationTitle("Activity", accent: .tronPrimary)
             .toolbar { doneToolbar }
         }
         .tronManagedSheet(item: $selectedProcess, identity: { "activity-process.\($0.id)" }) { process in
@@ -73,7 +73,7 @@ struct SessionActivitySheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronEmerald)
+        .tronSettingsVisualTheme(accent: .tronPrimary)
         .tronPresentation()
         .accessibilityIdentifier("session-activity-sheet")
     }
@@ -131,7 +131,7 @@ struct SessionActivitySheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .tronToolbarAction(accent: .tronEmerald)
+                    .tronToolbarAction(accent: .tronPrimary)
             }
             .accessibilityLabel("Done")
         }
@@ -144,7 +144,7 @@ private struct ActivitySectionHeader: View {
 
     var body: some View {
         Text(title)
-            .font(TronTypography.sheetSectionHeader)
+            .tronSectionHeading()
             .foregroundStyle(Color.tronTextPrimary)
             .padding(.top, 4)
             .accessibilityAddTraits(.isHeader)
@@ -157,7 +157,7 @@ private struct ExtensionContentEntryCard: View {
     let entry: ExtensionRetainedContent.Entry
 
     var body: some View {
-        TronGlassCard(accent: .tronEmerald, cornerRadius: 14) {
+        TronGlassCard(accent: .tronPrimary, cornerRadius: 14) {
             entryContent
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)

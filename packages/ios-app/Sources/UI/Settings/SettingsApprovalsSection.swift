@@ -40,7 +40,7 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18) {
             anchor
             if !requests.isEmpty {
                 Text("Waiting for you")

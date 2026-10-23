@@ -111,7 +111,7 @@ struct HomeTaskSheet: View {
     }
 
     private var contents: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18) {
             content
             if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
                 TronPlaceholderState(title: "Home change unresolved", detail: "Check completion; do not repeat the change.", icon: "clock")
@@ -187,7 +187,7 @@ struct HomeTaskSheet: View {
 
     private func taskDetail(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
         let title = HomeTaskPresentation.title(title: task.title, briefText: task.intent.text, project: task.project)
-        return VStack(alignment: .leading, spacing: 18) {
+        return TronSettingsSections(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(title)

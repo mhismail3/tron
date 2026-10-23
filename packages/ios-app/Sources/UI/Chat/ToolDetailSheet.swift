@@ -428,7 +428,7 @@ struct ToolDetailSheet: View {
 
     private func sectionLabel(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(TronTypography.sheetSectionHeader)
+            .tronSectionHeading()
             .foregroundStyle(Color.tronTextMuted)
     }
 
@@ -458,7 +458,7 @@ private struct ToolDetailSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title.uppercased())
-                .font(TronTypography.sheetSectionHeader)
+                .tronSectionHeading()
                 .foregroundStyle(Color.tronTextMuted)
             content
         }

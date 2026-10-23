@@ -184,9 +184,9 @@ struct AgentInstructionsSheet: View {
             if let projection = AgentInstructionsProjection(context: model.context) {
                 AgentInstructionsOverview(projection: projection)
             } else if loading {
-                TronSheetLoadingState(label: "Loading instructions…", accent: .tronEmerald)
+                TronSheetLoadingState(label: "Loading instructions…", accent: .tronPrimary)
             } else {
-                TronInfoCard(icon: "doc.text", text: "Instructions are unavailable for this session.", accent: .tronEmerald)
+                TronInfoCard(icon: "doc.text", text: "Instructions are unavailable for this session.", accent: .tronPrimary)
                     .padding(18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
@@ -213,7 +213,7 @@ struct AgentInstructionsSheet: View {
 /// sheet theme; the source is named by its tag, not by a color.
 private struct AgentInstructionsListSheet<Content: View>: View {
     let title: String
-    private var accent: Color { .tronEmerald }
+    private var accent: Color { .tronPrimary }
     @ViewBuilder let content: () -> Content
     @Environment(\.dismiss) private var dismiss
 
@@ -260,7 +260,7 @@ private struct AgentInstructionsReader: View {
             PreparedAgentInstructions(instructions: reading.text)
                 .tronScrollEdgeChrome()
         }
-        .tronSettingsVisualTheme(accent: .tronEmerald)
+        .tronSettingsVisualTheme(accent: .tronPrimary)
     }
 }
 
@@ -275,8 +275,8 @@ struct AgentInstructionsOverview: View {
         ScrollView {
             // A dozen rows at most; eager layout keeps every row addressable
             // while the sheet rests at its medium detent.
-            VStack(alignment: .leading, spacing: 18) {
-                TronSettingsCaption("The model reads these sections in this order for every turn. Open one to see where it comes from.")
+            TronSettingsSections(alignment: .leading, spacing: 18) {
+                TronSettingsCaption("The model reads these sections in this order for every turn. Open one to see where it comes from.").containerValue(\.tronSettingsSection, false)
                     .padding(.bottom, -8)
                 TronListGroup(Array(projection.sections.enumerated()).map(NumberedSection.init), hasLeading: true,
                               identifier: "agent-instructions-sections") { numbered in
@@ -291,7 +291,7 @@ struct AgentInstructionsOverview: View {
                         reading = AgentInstructionsReading(id: "full", title: "Full Prompt", text: projection.text)
                     }
                 }
-                TronSettingsCaption("Some model providers add their own text to each request. That text is not part of these instructions.")
+                TronSettingsCaption("Some model providers add their own text to each request. That text is not part of these instructions.").containerValue(\.tronSettingsSection, false)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -344,12 +344,12 @@ private struct AgentInstructionsSectionSheet: View {
     private static let inlineLimit = 2_400
 
     private var copy: AgentInstructionsPresentation.SectionCopy { AgentInstructionsPresentation.copy(for: section) }
-    private var accent: Color { .tronEmerald }
+    private var accent: Color { .tronPrimary }
 
     var body: some View {
         AgentInstructionsListSheet(title: copy.title) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
                     Text(copy.purpose)
                         .font(TronTypography.body)
                         .foregroundStyle(Color.tronTextPrimary)
@@ -528,7 +528,7 @@ struct PreparedAgentInstructions: View {
                         }
                 }
             } else {
-                TronSheetLoadingState(label: "Preparing instructions…", accent: .tronEmerald)
+                TronSheetLoadingState(label: "Preparing instructions…", accent: .tronPrimary)
             }
         }
         .task(id: PresentationActivityTaskID(

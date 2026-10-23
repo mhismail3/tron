@@ -894,7 +894,7 @@ struct SessionShellView: View {
                 .accessibilityIdentifier(viewAll.identifier)
             }
         }
-        .font(TronTypography.sheetSectionHeader)
+        .tronSectionHeading()
         .foregroundStyle(Color.tronPrimary)
         .textCase(nil)
         // Symmetric insets: View All lines up with the rows' trailing timestamps.

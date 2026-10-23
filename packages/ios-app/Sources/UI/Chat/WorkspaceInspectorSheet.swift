@@ -497,7 +497,7 @@ struct WorkspaceInspectorSheet: View {
                     ForEach(owner.changeGroups) { group in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(group.title.uppercased())
-                                .font(TronTypography.sheetSectionHeader)
+                                .tronSectionHeading()
                                 .foregroundStyle(Color.tronTextMuted)
                             ForEach(group.rows) { change in changeRow(change) }
                         }
@@ -847,7 +847,7 @@ private struct WorkspaceCommitDetailSheet: View {
 
                     if !detail.changes.isEmpty {
                         Text("CHANGED FILES")
-                            .font(TronTypography.sheetSectionHeader)
+                            .tronSectionHeading()
                             .foregroundStyle(Color.tronTextMuted)
                         ForEach(detail.changes) { change in
                             Button { openDiff(change) } label: {

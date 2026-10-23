@@ -547,7 +547,7 @@ struct QueuedMessageEditorSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18) {
                     TronGlassCard(accent: accent) {
                         TronSelectionRow(
                             icon: "arrow.turn.up.right",
@@ -568,7 +568,7 @@ struct QueuedMessageEditorSheet: View {
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Message")
-                            .font(TronTypography.sheetSectionHeader)
+                            .tronSectionHeading()
                             .foregroundStyle(Color.tronTextPrimary)
                             .accessibilityAddTraits(.isHeader)
                         TextEditor(text: $text)

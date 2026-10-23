@@ -15,7 +15,7 @@ struct CustomModelIDsEditor: View {
                 .textFieldStyle(.plain)
                 .font(TronTypography.code(size: TronTypography.sizeBody))
                 .foregroundStyle(Color.tronTextPrimary)
-                .tint(theme?.accent ?? .tronEmerald)
+                .tint(theme?.accent ?? .tronPrimary)
                 .padding(.horizontal, TronSpacing.section)
                 .padding(.vertical, TronSpacing.md)
                 .frame(minHeight: 52)
@@ -43,7 +43,7 @@ struct CustomModelsSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                 SettingsAutosaveNotice(key: .customModels(target))
                 providersSection
                     .disabled(advancedDocumentEdited)
@@ -131,14 +131,14 @@ struct CustomModelsSettingsView: View {
         LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
             VStack(alignment: .leading, spacing: TronSpacing.xs) {
                 Text("Providers")
-                    .font(TronTypography.sheetSectionHeader)
+                    .tronSectionHeading()
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
-                TronSettingsCaption("Choose a provider to edit its endpoint, format, and model IDs.")
+                TronSettingsCaption("Choose a provider to edit its endpoint, format, and model IDs.").containerValue(\.tronSettingsSection, false)
             }
 
             if providers.isEmpty {
-                TronSettingsCaption("No custom providers. Built-in providers are unchanged.")
+                TronSettingsCaption("No custom providers. Built-in providers are unchanged.").containerValue(\.tronSettingsSection, false)
             } else {
                 ForEach(providers) { provider in
                     providerRow(provider)
@@ -153,10 +153,10 @@ struct CustomModelsSettingsView: View {
                 TronSettingsRow(
                     icon: "plus",
                     title: "Add Provider",
-                    accent: .tronEmerald,
+                    accent: .tronPrimary,
                     titleColor: TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme)
                         ? .white
-                        : settingsTheme?.accent ?? .tronEmerald
+                        : settingsTheme?.accent ?? .tronPrimary
                 )
             }
             .buttonStyle(.plain)
@@ -198,7 +198,7 @@ struct CustomModelsSettingsView: View {
         let providerID = provider.wrappedValue.id
         let api = editedProviderBinding(provider.api, providerID: providerID)
         return ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                 SettingsAutosaveNotice(key: .customModels(target))
                 TronSettingsGroup("Connection") {
                     VStack(spacing: 0) {

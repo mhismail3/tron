@@ -345,7 +345,7 @@ struct CameraCaptureSheet: View {
     }
 
     private var centerCameraButtonTint: Color {
-        if showingPreview { return Color.tronEmerald.opacity(0.44) }
+        if showingPreview { return Color.tronPrimary.opacity(0.44) }
         return .white.opacity(cameraModel.controlsLookEnabled ? 0.44 : 0.14)
     }
 
@@ -361,12 +361,12 @@ struct CameraCaptureSheet: View {
             ZStack {
                 cameraGlassSurface(
                     size: CameraControlMetrics.iconButtonSize,
-                    tint: (isActive ? Color.tronEmerald : Color.white).opacity(isActive ? 0.22 : 0.12),
+                    tint: (isActive ? Color.tronPrimary : Color.white).opacity(isActive ? 0.22 : 0.12),
                     isEnabled: isEnabled
                 )
                 Image(systemName: systemImage)
                     .font(TronTypography.sans(size: CameraControlMetrics.iconFontSize, weight: .semibold))
-                    .foregroundStyle(isActive ? Color.tronEmerald : .white)
+                    .foregroundStyle(isActive ? Color.tronPrimary : .white)
                     .contentTransition(.symbolEffect(.replace.downUp))
             }
             .frame(width: CameraControlMetrics.iconHitTargetSize, height: CameraControlMetrics.iconHitTargetSize)

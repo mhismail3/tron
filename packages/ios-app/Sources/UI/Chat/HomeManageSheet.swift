@@ -17,7 +17,7 @@ extension HomeSheet {
     func manageSheet(_ read: HomeManageDTO) -> some View {
         let unresolved = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
         let mutating = model.homeMutations.isRunning(profileID: profileID)
-        return VStack(alignment: .leading, spacing: 18) {
+        return TronSettingsSections(alignment: .leading, spacing: 18) {
             usageHeader(read)
             if let sessionID { ManageModelConfigurationCard(sessionID: sessionID, home: true) }
             manageRows(read, unresolved: unresolved)

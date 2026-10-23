@@ -18,11 +18,11 @@ struct ProcessHistorySheet: View {
         NavigationStack {
             Group {
                 if let store { history(store) }
-                else { TronSheetLoadingState(label: "Preparing subagent history…", accent: .tronEmerald) }
+                else { TronSheetLoadingState(label: "Preparing subagent history…", accent: .tronPrimary) }
             }
-            .tronNavigationTitle(Self.title, accent: .tronEmerald)
+            .tronNavigationTitle(Self.title, accent: .tronPrimary)
             .toolbar { doneToolbar }
-            .tint(Color.tronEmerald)
+            .tint(Color.tronPrimary)
         }
         .tronManagedSheet(
             item: $selectedProcess,
@@ -47,7 +47,7 @@ struct ProcessHistorySheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronEmerald)
+        .tronSettingsVisualTheme(accent: .tronPrimary)
         .tronPresentation()
         .accessibilityIdentifier("process-history-sheet")
     }
@@ -58,7 +58,7 @@ struct ProcessHistorySheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .tronToolbarAction(accent: .tronEmerald)
+                    .tronToolbarAction(accent: .tronPrimary)
             }
             .accessibilityLabel("Done")
         }
@@ -97,7 +97,7 @@ struct ProcessHistorySheet: View {
     @ViewBuilder
     private func history(_ store: SessionProcessHistoryStore) -> some View {
         let rows = rows(store)
-        let caption = TronSettingsCaption("Newest first. Open a run to read its transcript.")
+        let caption = TronSettingsCaption("Newest first. Open a run to read its transcript.").containerValue(\.tronSettingsSection, false)
             .padding(.top, 8)
         if rows.isEmpty, hasPlaceholder(store, empty: true) {
             TronFeedEmptyState(identifier: "process-history-feed") { caption } placeholder: {
@@ -114,7 +114,7 @@ struct ProcessHistorySheet: View {
                 VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
                     caption
                     if rows.isEmpty, store.status == .idle {
-                        TronSheetLoadingState(label: "Loading subagent history…", accent: .tronEmerald)
+                        TronSheetLoadingState(label: "Loading subagent history…", accent: .tronPrimary)
                     } else if hasPlaceholder(store, empty: rows.isEmpty) {
                         placeholder(store, hasMounted: !mountedProcesses.isEmpty)
                     }
@@ -147,7 +147,7 @@ struct ProcessHistorySheet: View {
                 title: "History changed",
                 detail: "Reload to continue from the latest canonical page.",
                 icon: "arrow.triangle.2.circlepath",
-                accent: .tronEmerald,
+                accent: .tronPrimary,
                 actionTitle: "Reload History"
             ) {
                 store.retryReload(sessionID: sessionID, presentationGeneration: generation)
@@ -159,14 +159,14 @@ struct ProcessHistorySheet: View {
                     ? "Current and recent subagent activity remains available below."
                     : "Update Tron on your Mac to load canonical subagent history.",
                 icon: "externaldrive.badge.questionmark",
-                accent: .tronEmerald
+                accent: .tronPrimary
             )
         case .disconnected:
             TronPlaceholderState(title: "Gateway disconnected", detail: "Reconnect to load canonical subagent history.",
-                                 icon: "wifi.slash", accent: .tronEmerald)
+                                 icon: "wifi.slash", accent: .tronPrimary)
         case .loaded:
             TronPlaceholderState(title: "No recorded subagents", detail: "Completed subagent sessions will appear here.",
-                                 icon: "clock.arrow.circlepath", accent: .tronEmerald)
+                                 icon: "clock.arrow.circlepath", accent: .tronPrimary)
         default:
             EmptyView()
         }
@@ -181,7 +181,7 @@ private struct SessionProcessPlaceholder: View {
 
     var body: some View {
         TronGlassCard(accent: .tronSlate) {
-            TronPlaceholderState(title: title, detail: detail, icon: icon, accent: .tronEmerald)
+            TronPlaceholderState(title: title, detail: detail, icon: icon, accent: .tronPrimary)
         }
     }
 }
@@ -197,7 +197,7 @@ enum SessionProcessRowStyle {
         case .pausedSettled: .tronTextMuted
         case .inProgress: .tronAmber
         // Subagent History settles into Manage Session's emerald theme.
-        case .succeeded: self == .history ? .tronEmerald : .tronSuccess
+        case .succeeded: self == .history ? .tronPrimary : .tronSuccess
         case .unsuccessful: .tronError
         }
     }
@@ -264,7 +264,7 @@ struct SessionProcessRow: View {
             if let metadata {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("DETAILS")
-                        .font(TronTypography.sheetSectionHeader)
+                        .tronSectionHeading()
                         .foregroundStyle(Color.tronTextMuted)
                     Text(metadata)
                         .font(TronTypography.secondaryDescription)
@@ -276,7 +276,7 @@ struct SessionProcessRow: View {
             if currentAction != nil || outputPreview != nil {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(outputLabel)
-                        .font(TronTypography.sheetSectionHeader)
+                        .tronSectionHeading()
                         .foregroundStyle(process.lifecycle.state == .running ? cardAccent : Color.tronTextMuted)
                     if let currentAction { activityLabel(currentAction) }
                     if let outputPreview {
@@ -636,7 +636,7 @@ struct ReadOnlySubagentSessionSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronEmerald)
+                            .tronToolbarAction(accent: .tronPrimary)
                     }
                     .accessibilityLabel("Done")
                 }

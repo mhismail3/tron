@@ -111,9 +111,9 @@ private struct CommandLifecycleDetailsSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true) {
                     VStack(alignment: .leading, spacing: TronSpacing.sm) {
-                        TronTechnicalSectionLabel("Arguments")
+                        TronTechnicalSectionLabel("Arguments").containerValue(\.tronSettingsSection, false)
                         TronMarkdownView(text: arguments, streaming: false)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(TronSpacing.lg)

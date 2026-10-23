@@ -268,7 +268,7 @@ struct TronListGroup<Row: Identifiable, RowView: View>: View {
         VStack(alignment: .leading, spacing: TronListMetrics.sectionGap) {
             ForEach(Array(sections.enumerated()), id: \.offset) { index, section in
                 VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
-                    if let title = section.title {
+                    if sections.count > 1, let title = section.title {
                         HStack(alignment: .firstTextBaseline) {
                             Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(section.tint ?? .tronAccentText)
                             Spacer(minLength: 8)

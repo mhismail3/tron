@@ -110,7 +110,7 @@ struct ProjectSettingsSections: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18) {
             if model.selectedGatewayProfileID() != profileID {
                 TronPlaceholderState(title: "Project on another Mac",
                     detail: "Use this project's server before inspecting its repository overrides.",
@@ -164,7 +164,7 @@ struct ProjectSettingsSections: View {
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("project-settings-no-overrides")
                     }
-                    TronSettingsCaption("Read-only Project settings. Only allowed repository values are listed. Ask an agent to update them in the repo.")
+                    TronSettingsCaption("Read-only Project settings. Only allowed repository values are listed. Ask an agent to update them in the repo.").containerValue(\.tronSettingsSection, false)
                 } else if let settingsError {
                     TronPlaceholderState(title: "Repository overrides unavailable", detail: settingsError,
                                          icon: "folder.badge.gearshape", actionTitle: "Retry") { reload &+= 1 }

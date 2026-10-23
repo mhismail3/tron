@@ -188,7 +188,7 @@ struct HomeSheet: View {
                 emptyProfile(list)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    TronSettingsSections(alignment: .leading, spacing: 18) {
                         content
                         if let mutationFailure {
                             TronPlaceholderState(title: "Home change", detail: mutationFailure, icon: "exclamationmark.triangle")

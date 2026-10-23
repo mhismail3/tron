@@ -12,7 +12,7 @@ extension HomeSheet {
         let inactive = list.items.filter { $0.status != .active }
         let inferred = active.filter { !$0.confirmed }
         let editable = model.homeProfileEditable
-        return VStack(alignment: .leading, spacing: 18) {
+        return TronSettingsSections(alignment: .leading, spacing: 18) {
             profileHeader(list)
             if active.isEmpty { profileEmptyPlaceholder }
             if editable, inferred.count > 1 {
@@ -56,7 +56,7 @@ extension HomeSheet {
                 }
             }
             if !inactive.isEmpty {
-                TronSettingsCaption("Superseded or retired items stay in Knowledge.")
+                TronSettingsCaption("Superseded or retired items stay in Knowledge.").containerValue(\.tronSettingsSection, false)
             }
             if list.unclassified > 0 { profileUnclassifiedCaption(list) }
         }
@@ -65,7 +65,7 @@ extension HomeSheet {
     /// A profile with no items at all: the shared centred empty state.
     func emptyProfile(_ list: HomeProfileListDTO) -> some View {
         TronFeedEmptyState(identifier: "home-profile-viewport") {
-            VStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18) {
                 profileHeader(list)
                 if list.unclassified > 0 { profileUnclassifiedCaption(list) }
             }
@@ -75,7 +75,7 @@ extension HomeSheet {
     @ViewBuilder private func profileHeader(_ list: HomeProfileListDTO) -> some View {
         TronSettingsCaption(model.homeProfileEditable
             ? "Learned from your messages to Home. Confirmed items are binding; inferred items are Home's default until you confirm them. Changes apply from Home's next activation."
-            : "Learned from your messages to Home. Confirmed items are binding; inferred items are Home's default until you confirm them.")
+            : "Learned from your messages to Home. Confirmed items are binding; inferred items are Home's default until you confirm them.").containerValue(\.tronSettingsSection, false)
         profileEditNotices()
     }
 
@@ -86,11 +86,11 @@ extension HomeSheet {
     }
 
     private func profileUnclassifiedCaption(_ list: HomeProfileListDTO) -> some View {
-        TronSettingsCaption("\(list.unclassified) profile \(list.unclassified == 1 ? "note has" : "notes have") no single kind and \(list.unclassified == 1 ? "is" : "are") not applied.")
+        TronSettingsCaption("\(list.unclassified) profile \(list.unclassified == 1 ? "note has" : "notes have") no single kind and \(list.unclassified == 1 ? "is" : "are") not applied.").containerValue(\.tronSettingsSection, false)
     }
 
     func profileItemDetail(_ item: HomeProfileListDTO.Item) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        TronSettingsSections(alignment: .leading, spacing: 18) {
             profileEditNotices()
             TronGlassCard(accent: accent) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -319,7 +319,7 @@ struct HomeProfileItemEditor: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18) {
                 TronSettingsGroup("Text", detail: "One line, as Home applies it.", accent: accent) {
                     TextField("Item text", text: $text, axis: .vertical)
                         .lineLimit(2...8)
@@ -344,7 +344,7 @@ struct HomeProfileItemEditor: View {
                                   accent: accent, isOn: $replaces)
                         .accessibilityIdentifier("home-profile-editor-replace")
                 }
-                TronSettingsCaption("Your edit is confirmed and applies from Home's next activation. You can undo it.")
+                TronSettingsCaption("Your edit is confirmed and applies from Home's next activation. You can undo it.").containerValue(\.tronSettingsSection, false)
             }
             .padding(18)
         }
@@ -378,7 +378,7 @@ struct HomeProfileRetireEditor: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18) {
                 TronSettingsGroup("Item", accent: accent) {
                     TronSettingsRow(icon: HomeProfilePresentation.kindIcon(item.kind), title: HomeProfilePresentation.kindTitle(item.kind),
                                     subtitle: item.text, subtitleLineLimit: 4, accent: accent)
@@ -396,7 +396,7 @@ struct HomeProfileRetireEditor: View {
                         .frame(minHeight: 52)
                         .accessibilityIdentifier("home-profile-retire-reason")
                 }
-                TronSettingsCaption("Home stops applying it from its next activation. It stays in Knowledge, and you can undo this.")
+                TronSettingsCaption("Home stops applying it from its next activation. It stays in Knowledge, and you can undo this.").containerValue(\.tronSettingsSection, false)
             }
             .padding(18)
         }

@@ -403,8 +403,8 @@ private struct ComposerPlaceholder: View {
     var body: some View {
         Text(line)
             .font(TronTypography.input)
-            // Typed text is full emerald; the prompt reads as a dimmer hint.
-            .foregroundStyle(Color.tronPrimary.opacity(0.55))
+            // The shared hint role stays quieter without losing AA text contrast.
+            .foregroundStyle(Color.inputPlaceholder)
             .lineLimit(1)
     }
 }

@@ -255,7 +255,7 @@ struct KnowledgeCoverageDetailSheet: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: TronSpacing.section) {
+            TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
                 TronSettingsGroup(
                     "Cuts needing attention",
                     detail: KnowledgeCoveragePresentationPolicy.attentionDetail(coverage),
@@ -283,7 +283,7 @@ struct KnowledgeCoverageDetailSheet: View {
                 if let errorText { TronSettingsNotice(message: "Coverage unavailable: \(errorText)", accent: .tronAmber) }
                 if let mutationErrorText { TronSettingsNotice(message: mutationErrorText, accent: .tronAmber) }
                 if let progress = KnowledgeCoveragePresentationPolicy.listProgress(coverage, loaded: cuts.count) {
-                    TronSettingsCaption(progress)
+                    TronSettingsCaption(progress).containerValue(\.tronSettingsSection, false)
                 }
                 if canLoadMore {
                     TronPaginationButton(label: "Load more cuts needing attention", loadingLabel: "Loading…", icon: "arrow.down", isLoading: loadingMore, isEnabled: allowsActions, accent: .tronKnowledge, action: onLoadMore)
@@ -363,7 +363,7 @@ struct KnowledgeObservationTechnicalDetailsSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsSections(alignment: .leading, spacing: TronSpacing.section) {
                     TronTechnicalMetadataSection(title: "Record", items: presentation.recordMetadata, accent: .tronKnowledge)
                     TronTechnicalMetadataSection(title: "Source", items: presentation.sourceMetadata, accent: .tronKnowledge)
                     if !presentation.observerMetadata.isEmpty {

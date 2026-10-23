@@ -12,7 +12,7 @@ struct SettingsSecretEditor: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            TronSettingsSections(alignment: .leading, spacing: 16) {
                 SecureField("New value", text: $draft)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -73,7 +73,7 @@ struct SettingsNumberMapEditor: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            TronSettingsSections(alignment: .leading, spacing: 16) {
                 TronSettingsGroup(title) {
                     ForEach(Array(fields.enumerated()), id: \.offset) { index, field in
                         if index > 0 { TronSettingsDivider() }
@@ -142,7 +142,7 @@ struct SettingsListEditor: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            TronSettingsSections(alignment: .leading, spacing: 16) {
                 TronSettingsGroup(title) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         if index > 0 { TronSettingsDivider() }

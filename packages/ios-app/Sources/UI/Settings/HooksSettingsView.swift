@@ -139,7 +139,7 @@ struct HooksSettingsView: View {
     @Environment(AppModel.self) private var model
     /// The opening group's accent (Tools, or the Project card's); teal only when opened alone (#939).
     @Environment(\.tronSettingsVisualTheme) private var theme
-    private var accent: Color { theme?.accent ?? .tronEmerald }
+    private var accent: Color { theme?.accent ?? .tronPrimary }
     @Environment(\.tronPresentationActivity) private var presentationActivity
     private var scope: SettingsScope { projectCWD == nil ? .global : .project }
     @PresentationState private var mode: HookViewMode = .byEvent
@@ -190,8 +190,8 @@ struct HooksSettingsView: View {
             showsUnregisteredEvents: showUnregisteredEvents
         )
         return ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                TronSettingsCaption(scopeExplanation)
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
+                TronSettingsCaption(scopeExplanation).containerValue(\.tronSettingsSection, false)
                 if HooksProjectTrustNote.isRequired(projectCWD: projectCWD, trust: trust) {
                     untrustedProjectRow
                 }
@@ -338,7 +338,7 @@ struct HooksSettingsView: View {
             case .loadIssues:
                 loadIssueList(content)
             case .caption:
-                TronSettingsCaption("Registered means the selected runtime exposed handlers now. It does not report recent execution, health, enabled state, or last-run information.")
+                TronSettingsCaption("Registered means the selected runtime exposed handlers now. It does not report recent execution, health, enabled state, or last-run information.").containerValue(\.tronSettingsSection, false)
             }
         }
     }

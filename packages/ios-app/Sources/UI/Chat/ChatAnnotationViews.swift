@@ -152,7 +152,7 @@ struct ChatAnnotationSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         sectionHeader("Quote")
                         ChatQuoteBlock(rule: accent) {
@@ -227,7 +227,7 @@ struct ChatAnnotationSheet: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(TronTypography.sheetSectionHeader)
+            .tronSectionHeading()
             .foregroundStyle(Color.tronTextPrimary)
             .accessibilityAddTraits(.isHeader)
     }

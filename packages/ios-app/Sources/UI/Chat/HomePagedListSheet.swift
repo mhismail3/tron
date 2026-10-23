@@ -122,9 +122,9 @@ struct HomePagedListSheet: View {
     @ViewBuilder private var captions: some View {
         TronSettingsCaption(isMemory
             ? "Newest first. Open a message for full content, or a summary to see what it covers."
-            : "Newest first. Open a task to see its brief, worker and check-ins.")
+            : "Newest first. Open a task to see its brief, worker and check-ins.").containerValue(\.tronSettingsSection, false)
         if case .memory(.some, let ordinal) = destination {
-            TronSettingsCaption(ordinal.map { "Chapter \($0) only" } ?? "This chapter only")
+            TronSettingsCaption(ordinal.map { "Chapter \($0) only" } ?? "This chapter only").containerValue(\.tronSettingsSection, false)
         }
     }
 

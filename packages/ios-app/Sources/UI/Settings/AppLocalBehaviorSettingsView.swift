@@ -10,7 +10,7 @@ struct AppLocalBehaviorSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18) {
                 TronSettingsGroup("Dashboard", accent: .tronPrimary) {
                     TronChoiceRow(icon: "rectangle.3.group", title: "Dashboard View",
                                   choices: DashboardSessionSortMode.allCases.map { TronChoice(id: $0, label: $0.rawValue, detail: $0.detail) },

@@ -171,7 +171,7 @@ struct NewSessionSheet: View {
             .tronManagedSheet(isPresented: $showServers, identity: "new-session.servers") {
                 NavigationStack {
                     ScrollView(.vertical, showsIndicators: true) {
-                        VStack(alignment: .leading, spacing: 16) {
+                        TronSettingsSections(alignment: .leading, spacing: 16) {
                             TronSettingsGroup("Paired Servers", detail: "New sessions will be created on the selected server.", accent: .tronPrimary) {
                                 VStack(spacing: 0) {
                                     ForEach(Array(pairedServers.enumerated()), id: \.element.id) { index, profile in

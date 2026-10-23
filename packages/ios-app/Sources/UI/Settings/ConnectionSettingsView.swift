@@ -93,7 +93,7 @@ struct ConnectionsSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                 TronSettingsGroup("Paired Macs") {
                     VStack(spacing: 0) {
                         ForEach(Array(pairedProfiles.enumerated()), id: \.element.id) { index, profile in
@@ -108,7 +108,7 @@ struct ConnectionsSettingsView: View {
                                     detail: profile.isEnabled
                                         ? "\(profile.host):\(profile.port)"
                                         : "Disabled · \(profile.host):\(profile.port)",
-                                    accent: .tronEmerald
+                                    accent: .tronPrimary
                                 ) {
                                     GatewayConnectionStatusBadge(state: model.dashboardServerState(for: profile.id))
                                 }
@@ -517,7 +517,7 @@ struct GatewayConnectionDetailView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
                 TronSettingsGroup("Status", accent: statusColor) {
                     VStack(spacing: 0) {
                         TronValueRow(
@@ -817,7 +817,7 @@ struct GatewayConnectionDetailView: View {
                 // The standard trailing settings pill; the confirmation sheet
                 // carries the destructive semantics of skipping the drain.
                 Button { confirmingRestartNow = true } label: {
-                    TronInlineActionLabel("Restart Now", accent: .tronEmerald)
+                    TronInlineActionLabel("Restart Now", accent: .tronPrimary)
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 .buttonStyle(.plain)
@@ -827,10 +827,10 @@ struct GatewayConnectionDetailView: View {
     }
 
     private func gatewayUpdateGroup(config: GatewayUpdateConfig?) -> some View {
-        TronSettingsGroup("Gateway Maintenance", accent: .tronEmerald) {
-            TronSettingsRow(icon: "folder", title: "Source repository", accent: .tronEmerald) {
+        TronSettingsGroup("Gateway Maintenance", accent: .tronPrimary) {
+            TronSettingsRow(icon: "folder", title: "Source repository", accent: .tronPrimary) {
                 Button { configuringSourceRepository = true } label: {
-                    TronInlineActionLabel(GatewayConnectionDetailPresentation.sourceRepositoryDetail(config), accent: .tronEmerald)
+                    TronInlineActionLabel(GatewayConnectionDetailPresentation.sourceRepositoryDetail(config), accent: .tronPrimary)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Configure source repository")
@@ -1045,7 +1045,7 @@ struct GatewayMaintenanceActions: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: 12) {
                     ForEach(row) { action in
-                        button(action, accent: theme?.accent ?? .tronEmerald)
+                        button(action, accent: theme?.accent ?? .tronPrimary)
                     }
                 }
             }
@@ -1089,7 +1089,7 @@ struct GatewayServerInfoSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 18) {
+                TronSettingsSections(alignment: .leading, spacing: 18) {
                     if metadata.isEmpty && loading {
                         TronSheetLoadingState(label: "Loading server info…", accent: .tronCyan)
                     } else if metadata.isEmpty {
