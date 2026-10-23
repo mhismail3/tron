@@ -1,10 +1,10 @@
 import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
-import { createModelQueueExtension, type ModelQueueSource } from "../providers/model-queue-extension.js";
+import { createModelQueueExtension, type ModelQueueSource } from "./model-queue-extension.js";
 
 /** The child half, as its own module: every managed subagent child loads it. */
-const MODEL_QUEUE_CHILD_EXTENSION = fileURLToPath(new URL(`../providers/model-queue-extension${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
+const MODEL_QUEUE_CHILD_EXTENSION = fileURLToPath(new URL(`./model-queue-extension${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
 
 /**
  * A Gateway session's part of the model queues (settings-model.md 6.3):

@@ -1,7 +1,7 @@
 import * as activityProjection from "../kernel/projection/activity.js";
 import * as sessionPages from "../kernel/projection/session-pages.js";
 import { SnapshotProjection } from "../kernel/projection/snapshot.js";
-import { modelQueueSessionExtension } from "./model-queue-session.js";
+import { modelQueueSessionExtension } from "../providers/model-queue-session.js";
 import { createSettingsManager } from "../admin/settings-sdk-manager.js";
 import { applyModelAdmission, compactionAdmission } from "../admin/settings-admission.js";
 import { readWorkerQueueSelection } from "../providers/model-queue-extension.js";

@@ -27,7 +27,6 @@
     "kernel/run/invocation-receipts.ts",
     "sessions/locks/run-*.golden.json",
     "kernel/run/locks/store-run-markers.golden.json",
-    "sessions/model-queue-session.ts",
     "sessions/multi-resource-message.e2e.test.ts",
     "sessions/native-tool-settlement.integration.test.ts",
     "sessions/openai-model-eligibility.integration.test.ts",
