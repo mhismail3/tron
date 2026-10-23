@@ -98,9 +98,8 @@ import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-bound
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../modules/home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
-import { ModelQueueOwner, modelQueueProjectionPath, type ModelQueueRecord } from "../providers/model-queue.js";
+import type { ModelQueueOwner } from "../providers/model-queue.js";
 import { modelQueueKey } from "../kernel/settings/tool-contract.js";
-import { ProviderUsageOwner } from "../providers/provider-usage.js";
 import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
 import { applyHomeCacheRetention } from "../modules/home/home-request-policy.js";
 import type { HomeKernelPorts } from "../modules/home/home-module.js";
@@ -702,10 +701,8 @@ export class RuntimeRegistry {
        * examined by a later pass; the report keeps the stop visible. */
       artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
       extensionArtifactWarning?: (warning: { reason: import("../kernel/projection/extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
-      /** Provider usage for the queues' 95% skip; the transport shares this owner. */
-      providerUsage?: Pick<ProviderUsageOwner, "read">;
-      /** Where the queue owner logs each skipped model. */
-      modelQueueDiagnostic?: (record: ModelQueueRecord) => void;
+      /** The composition's provider queue owner, shared with background callers. */
+      modelQueue?: ModelQueueOwner;
       /** The Gateway-wide user-scope runtime, where user provider packages (for
        * example CortexKit's `anthropic` override) are registered. Home's chat runs
        * on it (#480). Only a registry without a Gateway, as in tests, omits it;
@@ -738,13 +735,7 @@ export class RuntimeRegistry {
       ...(options.catalogChanged ? { onChanged: options.catalogChanged } : {}),
       ...(options.catalogWatcherReset ? { onWatcherReset: options.catalogWatcherReset } : {}),
     });
-    this.modelQueue = options.gatewayModelRuntime ? new ModelQueueOwner({
-      runtime: options.gatewayModelRuntime,
-      usage: options.providerUsage ?? new ProviderUsageOwner(),
-      queue: role => this.modelQueueOf(role),
-      projectionPath: modelQueueProjectionPath(options.tronHome),
-      ...(options.modelQueueDiagnostic ? { log: options.modelQueueDiagnostic } : {}),
-    }) : undefined;
+    this.modelQueue = options.modelQueue;
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.readHeapSample = options.heapSample ?? (() => ({
       usedBytes: process.memoryUsage().heapUsed,

@@ -15,6 +15,8 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
 
 Queue roles, setting-key addresses and lexical model-reference parsing belong to
 [the settings vocabulary](../kernel/settings/README.md), not provider queue execution.
+Gateway composition constructs the provider queue with the shared usage/runtime,
+projection path and lazy settings reader; the registry borrows that exact owner.
 
 ## Contract
 

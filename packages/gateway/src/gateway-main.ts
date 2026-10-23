@@ -68,7 +68,7 @@ import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, QueueKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "./providers/model-queue-extension.js";
-import { modelQueueProjectionPath } from "./providers/model-queue.js";
+import { ModelQueueOwner, modelQueueProjectionPath } from "./providers/model-queue.js";
 import { ProviderUsageOwner } from "./providers/provider-usage.js";
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
 import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
@@ -309,7 +309,7 @@ let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | 
 const persistenceDiagnostic = (sessionId: string, code: string) => logger.log("warning", "Session persistence diagnostic", {
   event: code, source: "session", sessionId,
 });
-const sessions = new RuntimeRegistry({
+const sessions: RuntimeRegistry = new RuntimeRegistry({
   modules, agentDir: config.agentDir,
   createModelRuntime: () => createProviderModelRuntime(config.agentDir),
   gatewayModelRuntime: modelRuntime,
@@ -342,15 +342,20 @@ const sessions = new RuntimeRegistry({
     }),
   // Home's memory compactor and Knowledge's calls run on the background model
   // queue, on the Gateway's own ModelRuntime (providers/model-queue.ts).
-  providerUsage,
-  modelQueueDiagnostic: (record) => {
-    if (record.event === "model-queue.skip") logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
-      event: record.event, source: "models", code: record.role,
-    });
-    else logger.log(record.status === "failed" ? "warning" : "info",
-      `Child model queue from ${record.scope}: ${record.status === "published" ? record.models.join(", ") || "empty" : `publication failed (${record.reason})`}`,
-      { event: record.event, source: "models", code: record.role, ...(record.sessionId ? { sessionId: record.sessionId } : {}) });
-  },
+  modelQueue: new ModelQueueOwner({
+    runtime: modelRuntime,
+    usage: providerUsage,
+    queue: role => sessions.modelQueueOf(role),
+    projectionPath: modelQueueProjectionPath(config.tronHome),
+    log: (record) => {
+      if (record.event === "model-queue.skip") logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
+        event: record.event, source: "models", code: record.role,
+      });
+      else logger.log(record.status === "failed" ? "warning" : "info",
+        `Child model queue from ${record.scope}: ${record.status === "published" ? record.models.join(", ") || "empty" : `publication failed (${record.reason})`}`,
+        { event: record.event, source: "models", code: record.role, ...(record.sessionId ? { sessionId: record.sessionId } : {}) });
+    },
+  }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
   // Load and eviction are transitions at info: the byte budget's decisions have
   // to be attributable to one session from the log alone, and the reason has to

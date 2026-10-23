@@ -1,3 +1,5 @@
+import { ModelQueueOwner, modelQueueProjectionPath, type ModelQueueOptions } from "../src/providers/model-queue.js";
+import { ProviderUsageOwner } from "../src/providers/provider-usage.js";
 import type { RecentModelStore } from "../src/providers/recent-models.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import type { ModelRuntime } from "../src/kernel/pi/coding-agent.js";
@@ -8,7 +10,7 @@ import type { SessionSearchService } from "../src/sessions/session-search-servic
 import type { HomeComposition } from "../src/modules/home/home-module.js";
 import type { HomeOwner } from "../src/modules/home/home-owner.js";
 
-type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime">;
+type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "modelQueue">;
 /** Home's composition inputs a test may supply; the rest are the registry's own. */
 type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "notifications" | "machineId" | "homeTaskDiagnostic">;
 
@@ -30,15 +32,23 @@ export function homeOwnerOf(registry: RuntimeRegistry): HomeOwner {
 
 /** One real registry fixture: the production composition, then the real registry.
  * Options remain the boundary's own inputs; no production overrides or test hooks. */
-export async function createTestRegistry(options: RegistryOptions & HomeTestOptions & Omit<ModuleOwners, "registry" | "sessionSearch" | "home" | "openAIModelEligibility"> & { modelRuntimeFactory?: () => Promise<ModelRuntime>; openAIModelEligibility?: OpenAIModelEligibility; sessionSearch?: () => SessionSearchService | undefined }): Promise<RuntimeRegistry> {
-  const { connections, scheduleToolOperations, sessionSearch, recentModelsChanged, modelRuntimeFactory, openAIModelEligibility = new OpenAIModelEligibility(), homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport, ...registryOptions } = options;
+export async function createTestRegistry(options: RegistryOptions & HomeTestOptions & Omit<ModuleOwners, "registry" | "sessionSearch" | "home" | "openAIModelEligibility"> & { providerUsage?: ModelQueueOptions["usage"]; modelQueueDiagnostic?: ModelQueueOptions["log"]; modelRuntimeFactory?: () => Promise<ModelRuntime>; openAIModelEligibility?: OpenAIModelEligibility; sessionSearch?: () => SessionSearchService | undefined }): Promise<RuntimeRegistry> {
+  const { providerUsage, modelQueueDiagnostic, connections, scheduleToolOperations, sessionSearch, recentModelsChanged, modelRuntimeFactory, openAIModelEligibility = new OpenAIModelEligibility(), homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport, ...registryOptions } = options;
   const home: HomeComposition = {
     tronHome: options.tronHome, agentDir: options.agentDir, trust: options.trust, notifications: options.notifications, machineId: options.machineId,
     homeTaskDiagnostic: options.homeTaskDiagnostic, homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport,
   };
   const { modules, home: owner, recentModels } = await startGatewayModules({ tronHome: options.tronHome, log: { log: () => {} } },
     () => ({ registry, home, openAIModelEligibility, connections, scheduleToolOperations, recentModelsChanged, persistenceDiagnostic: options.persistenceDiagnostic, sessionSearch: sessionSearch?.() }));
-  const registry = new RuntimeRegistry({ ...registryOptions, modules, createModelRuntime: () => createProviderModelRuntime(options.agentDir, modelRuntimeFactory) });
+  const registry: RuntimeRegistry = new RuntimeRegistry({ ...registryOptions, modules,
+    modelQueue: options.gatewayModelRuntime ? new ModelQueueOwner({
+      runtime: options.gatewayModelRuntime,
+      usage: providerUsage ?? new ProviderUsageOwner(),
+      queue: role => registry.modelQueueOf(role),
+      projectionPath: modelQueueProjectionPath(options.tronHome),
+      ...(modelQueueDiagnostic ? { log: modelQueueDiagnostic } : {}),
+    }) : undefined,
+    createModelRuntime: () => createProviderModelRuntime(options.agentDir, modelRuntimeFactory) });
   homes.set(registry, owner);
   recents.set(registry, recentModels);
   return registry;
