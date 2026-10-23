@@ -256,9 +256,13 @@ struct SettingsSectionLinks: View {
     @Environment(AppModel.self) private var model
 
     // Presentation grouping only: schema keys, layers and mutation owners stay unchanged.
-    private func root(_ id: String) -> String { id == "workers" ? "model" : ["approvals", "run"].contains(id) ? "advanced" : id }
+    private var chatScope: Bool { target.objectValue?["kind"]?.stringValue == "session" }
+    private func root(_ id: String) -> String {
+        if chatScope && ["model", "workers"].contains(id) { return "advanced" }
+        return id == "workers" ? "model" : ["approvals", "run"].contains(id) ? "advanced" : id
+    }
     private func members(_ id: String) -> [SettingsRendererSection] {
-        let ids = id == "model" ? ["model", "workers"] : id == "advanced" ? ["approvals", "run"] : [id]
+        let ids = id == "model" ? ["model", "workers"] : id == "advanced" ? (chatScope ? ["model", "workers", "approvals", "run"] : ["approvals", "run"]) : [id]
         return ids.compactMap { id in sections.first { $0.id == id } }.filter { section in
             model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
         }
@@ -271,7 +275,7 @@ struct SettingsSectionLinks: View {
     /// line; joining each section's served description would wrap.
     private func sectionDescription(_ id: String) -> String? {
         let members = members(id)
-        if id == "advanced" { return "Connection, retries, and approvals" }
+        if id == "advanced" { return chatScope ? "Workers, connection, retries, and approvals" : "Connection, retries, and approvals" }
         if id == "model", homeProfileID != nil { return "Workers and delegation" }
         if members.count > 1, id == "model" { return "Models, thinking, and workers" }
         let text = members.compactMap(\.description).joined(separator: " · ")
@@ -348,7 +352,7 @@ struct SessionSettingsView: View {
         let shown = Set(sections.filter { section in
             model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
         }.map(\.id))
-        let rows = (homeProfileID == nil ? ["context", "approvals", "run", "tools"] : ["workers", "approvals", "run", "tools"])
+        let rows = (homeProfileID == nil ? ["context", "model", "workers", "approvals", "run", "tools"] : ["workers", "approvals", "run", "tools"])
             .filter(shown.contains)
         // The chat's project, read-only, below its own choices; Manage Session's
         // Workspace row already names the branch. Its notices are listed there once.
