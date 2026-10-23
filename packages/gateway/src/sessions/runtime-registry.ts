@@ -75,7 +75,6 @@ import { syncDurably } from "../util/durable-json.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
-import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";
 import {
   invocationProjection,
   invocationReceipts,
@@ -2798,10 +2797,6 @@ export class RuntimeRegistry {
     operationId: string,
     automationId: string,
   ): Promise<{ slot: RuntimeSlot; release: () => void }> {
-    if (!isAutomationId(sessionId) || !isAutomationId(automationId)
-      || runIdFromAutomationOperationId(operationId) === undefined) {
-      throw new GatewayError("invalid_request", "Automation execution identity is invalid");
-    }
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;

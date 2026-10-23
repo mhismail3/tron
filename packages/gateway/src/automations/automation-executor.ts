@@ -13,6 +13,7 @@ import {
   type AutomationRecoveryResult,
 } from "./automation-scheduler.js";
 import type { AutomationRecord, AutomationRun } from "./types.js";
+import { isAutomationId, runIdFromAutomationOperationId } from "./automation-contract.js";
 
 function terminalResult(terminal: OwnedOperationTerminal): AutomationExecutionResult {
   if (terminal.lifecycle === "completed") {
@@ -69,6 +70,10 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     try {
       let slot;
       if (target.kind === "workspace") {
+        if (!isAutomationId(sessionId) || !isAutomationId(record.id)
+          || runIdFromAutomationOperationId(operationId) === undefined) {
+          throw new GatewayError("invalid_request", "Automation execution identity is invalid");
+        }
         const leased = await this.sessions.createAutomationSession(
           target.cwd,
           sessionId,
