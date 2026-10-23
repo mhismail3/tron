@@ -16,6 +16,7 @@ import { createHomeModule, createHomeResearchModule } from "../home/home-module.
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
+import type { SessionSearchService } from "../sessions/session-search-service.js";
 
 /** The owners modules read per runtime: the registry's own services and the
  * composition's, which never pass through the registry. */
@@ -23,12 +24,17 @@ export interface ModuleOwners {
   registry: Pick<RuntimeRegistry, "knowledge" | "displayModuleServices" | "notifyModuleServices" | "homeModuleServices">;
   connections?: ConnectionOwner | undefined;
   scheduleToolOperations?: ScheduleToolOperations | undefined;
+  sessionSearch?: SessionSearchService | undefined;
 }
 
 /** One production composition. Callbacks may close over the not-yet-constructed
  * registry: start only captures them; extension assembly resolves the live owner. */
 export function gatewayModules(owners: () => ModuleOwners): readonly ModuleDescriptor<unknown>[] {
   const registry = () => owners().registry;
+  const home = () => ({ ...registry().homeModuleServices(), search: () => {
+    const owner = owners().sessionSearch;
+    return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
+  } });
   return [
     workspaceModule,
     settlementModule,
@@ -43,8 +49,8 @@ export function gatewayModules(owners: () => ModuleOwners): readonly ModuleDescr
     computerModule,
     createScheduleModule(() => owners().scheduleToolOperations),
     createNotifyModule(() => registry().notifyModuleServices()),
-    createHomeModule(() => registry().homeModuleServices()),
-    createHomeResearchModule(() => registry().homeModuleServices()),
+    createHomeModule(home),
+    createHomeResearchModule(home),
   ];
 }
 

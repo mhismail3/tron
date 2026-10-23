@@ -162,7 +162,8 @@ async function fixture(
   await trust.set(project, true);
   const requestRecords: HomeRequestRecord[] = [];
   const web = webTransport();
-  const registry = await createTestRegistry({ agentDir,
+  let search: SessionSearchService | undefined;
+  const registry = await createTestRegistry({ agentDir, sessionSearch: () => search,
     tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime,
@@ -188,8 +189,7 @@ async function fixture(
   await seedIndex?.(registry, indexPath);
   const index = await SessionSearchIndex.open(indexPath);
   indexes.push(index);
-  const search = new SessionSearchService(registry, index);
-  registry.setSessionSearchService(search);
+  search = new SessionSearchService(registry, index);
 
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
   await setHomeMemoryModels(registry, [MEMORY_MODEL]);

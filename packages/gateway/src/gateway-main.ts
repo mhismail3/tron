@@ -230,7 +230,7 @@ const auth = new AuthBroker(
   },
 );
 const modules = await startGatewayModules({ tronHome: config.tronHome, log: logger },
-  () => ({ registry: sessions, connections, scheduleToolOperations }));
+  () => ({ registry: sessions, connections, scheduleToolOperations, sessionSearch }));
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),
   agentDir: config.agentDir,
@@ -453,9 +453,8 @@ let sessionSearch: SessionSearchService | undefined;
 let sessionSearchIndex: SessionSearchIndex | undefined;
 try {
   sessionSearchIndex = await SessionSearchIndex.open(join(config.tronHome, "gateway", "session-search.sqlite"));
+  // Home's session_search research tool is this owner's only reader, through the composition.
   sessionSearch = new SessionSearchService(sessions, sessionSearchIndex);
-  // Home's session_search research tool is this owner's only reader, late-bound.
-  sessions.setSessionSearchService(sessionSearch);
 } catch (error) {
   sessionSearchIndex?.close();
   logger.log("warning", "Optional session search index is unavailable; chat remains available", { event: "session-search.index-unavailable", source: "search", error });

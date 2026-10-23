@@ -559,7 +559,6 @@ export class RuntimeRegistry {
   private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
-  private sessionSearchService: import("./session-search-service.js").SessionSearchService | undefined;
   private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
@@ -897,7 +896,6 @@ export class RuntimeRegistry {
       knowledge: this.knowledgeService, changes: () => this.settingsOwners?.changes,
       resourcesIdle: sessionId => this.homeResources.idle(sessionId),
       delegate: (sessionId, request, signal) => this.dispatchHomeTask(sessionId, request, signal),
-      search: () => { const owner = this.sessionSearchService; return owner ? (request, signal) => owner.search(request, signal) : undefined; },
       read: (request, signal) => readHomeSessionEntry(this, request, signal),
     });
   }
@@ -908,14 +906,6 @@ export class RuntimeRegistry {
   setKnowledgeService(service: KnowledgeService): void {
     if (this.knowledgeService && this.knowledgeService !== service) throw new Error("Knowledge service is already installed");
     this.knowledgeService = service;
-  }
-
-  /** Installs the optional session-search owner for Home's research tools. The
-   * service is constructed over this registry after it exists, so slots read it
-   * late-bound. */
-  setSessionSearchService(service: import("./session-search-service.js").SessionSearchService): void {
-    if (this.sessionSearchService && this.sessionSearchService !== service) throw new Error("Session search service is already installed");
-    this.sessionSearchService = service;
   }
 
   /** Installs the settings model and its change path for the `settings` tool.

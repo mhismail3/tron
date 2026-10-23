@@ -39,10 +39,10 @@ export interface HomeModuleServices {
  * operations and reads of owners installed after registry construction. */
 export function homeModuleServices(owner: HomeOwner,
   platform: { trust: TrustService; homeWebTransport?: HomeResearchTransport; homeDiagnostic?: HomeDiagnostic; homeTaskDiagnostic?: (record: HomeTaskDiagnostic) => void; },
-  ports: Pick<HomeModuleServices, "knowledge" | "search" | "read" | "delegate"> & { changes(): SettingsChangePath | undefined; resourcesIdle(sessionId: string): void; runtime: HomeSessionProfileServices["runtime"] },
-): HomeModuleServices {
+  ports: Pick<HomeModuleServices, "knowledge" | "read" | "delegate"> & { changes(): SettingsChangePath | undefined; resourcesIdle(sessionId: string): void; runtime: HomeSessionProfileServices["runtime"] },
+): Omit<HomeModuleServices, "search"> {
   return {
-    knowledge: ports.knowledge, search: ports.search, read: ports.read, delegate: ports.delegate,
+    knowledge: ports.knowledge, read: ports.read, delegate: ports.delegate,
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
     profile: {
       decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), runtime: ports.runtime,
