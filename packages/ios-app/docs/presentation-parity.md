@@ -250,7 +250,9 @@ canonical state, is never persisted, and is not a second state authority.
   down its lineage, queued editing requires the exact session/message, and catalog demand belongs
   only to a surface consuming the roster. Independent Home/global settings and immutable details
   do not restore a covered chat. On reveal, opening readiness checks live subscription authority,
-  not just a retained local ready frame. The dashboard resumes a stale catalog on reveal.
+  not just a retained local ready frame; while a reconnect is still reconciling, the model owns
+  that restoration, so a foreground never re-covers a retained transcript with its opening
+  surface. The dashboard resumes a stale catalog on reveal.
 - A schema editor consumes its shared target snapshot through `PresentationDependencyRead`;
   the foremost surface admits the refresh and the settings owner deduplicates it. Providers and
   authorized devices refresh through their visible owners, not an unconditional reconnect pair.
