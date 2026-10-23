@@ -154,7 +154,7 @@ import { resourceDistribution } from "./resource-distribution.js";
 import { skillTitle } from "./skill-title.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, subagentDetail, type SubagentCatalog, type SubagentDetail } from "../kernel/delegation/subagent-catalog.js";
-import type { SessionStore } from "../admin/settings-resolver.js";
+import type { SessionStore } from "../kernel/settings/settings-types.js";
 import { KEYS, hasCompactionApplier, schemaKey } from "../admin/settings-schema.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-

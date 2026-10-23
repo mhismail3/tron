@@ -11,7 +11,8 @@ and settings change path use one contract and one persisted store format.
 retired scope-name mapping
 shared by session readers and store migration, and tool request, resolution,
 result and worker-state interfaces. `settings-types.ts` owns value validation, formatting,
-ordered queue summaries and Pi-compatible tool-selection composition. `settings-record.ts` owns append-only audit
+ordered queue summaries, Pi-compatible tool-selection composition and neutral resolver inputs
+(store snapshots, outside marks, floor overrides, Git state and option/format sources). `settings-record.ts` owns append-only audit
 segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
 approvals, their admission bounds, settlement, expiry and untold outcomes.
 `settings-migration-state.ts` owns shared-store value transformation and digest

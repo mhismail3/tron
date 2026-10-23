@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import type { ProjectGitState } from "../kernel/settings/settings-types.js";
 import type { GitResult } from "../kernel/settings/tool-contract.js";
 
 /**
@@ -129,10 +130,6 @@ export async function stagedBlob(root: string, spec: string): Promise<string | u
   const blob = await git(root, ["rev-parse", "--verify", "-q", spec]);
   return blob.ok ? blob.stdout.trim() : undefined;
 }
-
-export type ProjectGitState =
-  | { kind: "local"; reason: "not in a git repository" | ".pi is ignored by git" }
-  | { kind: "repo"; head?: Record<string, unknown>; index?: Record<string, unknown> };
 
 /** The Project store's git state, from which the resolver badges each value
  * Project, Staged, Uncommitted or Local only (doc 5.7). A side that is absent or

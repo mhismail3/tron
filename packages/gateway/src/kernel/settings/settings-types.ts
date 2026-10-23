@@ -1,4 +1,4 @@
-import { TIERS, splitModelRef, type LayerId, type Tier } from "./tool-contract.js";
+import { TIERS, splitModelRef, type LayerId, type Tier, type FixedSetting } from "./tool-contract.js";
 import { GatewayError } from "../../errors.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from "../../util/validation.js";
 
@@ -6,6 +6,72 @@ import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from ".
 
 /** Private persistence metadata, never an outward settings scope or grant. */
 export type StoreLayer = "session" | "home" | "project" | "global" | "default";
+
+export type FloorOverrides = Record<string, { widen?: Tier; narrow?: Tier }>;
+
+export type ProjectGitState =
+  | { kind: "local"; reason: "not in a git repository" | ".pi is ignored by git" }
+  | { kind: "repo"; head?: Record<string, unknown>; index?: Record<string, unknown> };
+
+/** The Session scope as the session record holds it (doc 3.2). */
+export interface SessionStore {
+  model?: { provider: string; id: string };
+  thinking?: string;
+  /** `tron.context-window.v1`: the chat's explicit window for its model. */
+  contextWindow?: { model: string; value: number };
+  tools?: string[];
+  /** `tron.settings.v1`: explicit Session-scope values for the other keys. */
+  settings: Record<string, unknown>;
+  /** Effective directional request values retained at this branch's boundary. */
+  requestPins?: Record<string, FixedSetting>;
+  fixed?: Record<string, FixedSetting>;
+}
+
+export interface ProjectStore {
+  root: string;
+  document: Record<string, unknown>;
+  /** The file exists but cannot be parsed; its values are unknown. */
+  unreadable?: true;
+  applied: boolean;
+  reason?: "untrusted";
+  /** The store's git state, which badges each Project value (doc 5.7). */
+  git?: ProjectGitState;
+}
+
+/** The latest outside change of a key instance since Tron last wrote it (doc 5.6). */
+export interface OutsideMark { changeId: string; applyAgain: boolean; before: string; after: string }
+
+/** Every store the target's layers read, loaded by their owners (doc 3.2). */
+export interface SettingsStores {
+  /** The layers this target has (doc 3.3). Built-in is always last. */
+  layers: readonly StoreLayer[];
+  session?: SessionStore;
+  home?: Record<string, unknown>;
+  project?: ProjectStore;
+  global: Record<string, unknown>;
+  /** Saved trust decisions by canonical project path. */
+  trust: Record<string, boolean>;
+  /** Mac Terminal keys in ~/.ssh/authorized_keys, by paired device id. */
+  macTerminal: Record<string, string>;
+  /** The maintainer's floor overrides (Global policy, doc 5.4). */
+  floors: FloorOverrides;
+  /** The Gateway-owned settings document (`gateway/settings/gateway.json`). */
+  gateway: Record<string, unknown>;
+  /** Outside-change marks by layer and key instance (doc 5.6). */
+  outside?: Partial<Record<"global" | "project", Record<string, OutsideMark>>>;
+}
+
+/** Capability-constrained option sources (doc 3.6, 7.5). */
+export interface OptionSources {
+  /** The closest supported value, or the value itself when supported. */
+  clamp(source: string, dependency: unknown, value: unknown): unknown;
+}
+
+export interface ResolveOptions {
+  format: FormatContext;
+  options: OptionSources;
+  keys?: readonly string[];
+}
 
 export const LAYER_LABELS: Record<LayerId, string> = {
   project: "Project", session: "Session", global: "Global",

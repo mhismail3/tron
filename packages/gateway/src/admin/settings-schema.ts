@@ -3,7 +3,7 @@ import { HOME_TOOL_NAMES } from "../modules/home/home-runtime-policy.js";
 import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../kernel/run/compaction-policy.js";
 import { validateMacTerminalKey } from "../security/mac-terminal.js";
 import { boolean, integer, object, string, arrayOfStrings } from "../util/validation.js";
-import { type Control, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "../kernel/settings/settings-types.js";
+import { type FloorOverrides, type Control, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "../kernel/settings/settings-types.js";
 import { MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Tier, type Direction } from "../kernel/settings/tool-contract.js";
 import type { StoreLayer } from "../kernel/settings/settings-types.js";
 
@@ -601,8 +601,6 @@ export function schemaKey(id: string): KeyDeclaration {
 }
 
 /** The maintainer's floor overrides as `floors.json` holds them. */
-export type FloorOverrides = Record<string, { widen?: Tier; narrow?: Tier }>;
-
 /** A key's floor for a direction: the maintainer's override, else the code floor (doc 5.4). */
 export function floorFor(key: KeyDeclaration, direction: Direction, overrides?: FloorOverrides): { floor: Tier; source: "code" | "override" } {
   const override = overrides?.[key.id]?.[direction];

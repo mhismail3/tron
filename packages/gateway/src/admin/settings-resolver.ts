@@ -1,69 +1,14 @@
-import { type SettingsTarget, type FixedSetting, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "../kernel/settings/tool-contract.js";
+import { type SettingsTarget, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import { dirname, join } from "node:path";
-import { KEYS, keyForHome, keyDefault, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
-import { LAYER_LABELS, type FormatContext, type StoreLayer } from "../kernel/settings/settings-types.js";
+import { KEYS, keyForHome, keyDefault, floorInstances, schemaKey, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "../kernel/settings/settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, scopeForStore } from "./settings-registry.js";
-import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
 
 
 
 
-
-/** The Session scope as the session record holds it (doc 3.2). */
-export interface SessionStore {
-  model?: { provider: string; id: string };
-  thinking?: string;
-  /** `tron.context-window.v1`: the chat's explicit window for its model. */
-  contextWindow?: { model: string; value: number };
-  tools?: string[];
-  /** `tron.settings.v1`: explicit Session-scope values for the other keys. */
-  settings: Record<string, unknown>;
-  /** Effective directional request values retained at this branch's boundary. */
-  requestPins?: Record<string, FixedSetting>;
-  fixed?: Record<string, FixedSetting>;
-}
-
-export interface ProjectStore {
-  root: string;
-  document: Record<string, unknown>;
-  /** The file exists but cannot be parsed; its values are unknown. */
-  unreadable?: true;
-  applied: boolean;
-  reason?: "untrusted";
-  /** The store's git state, which badges each Project value (doc 5.7). */
-  git?: ProjectGitState;
-}
-
-/** The latest outside change of a key instance since Tron last wrote it (doc 5.6). */
-export interface OutsideMark { changeId: string; applyAgain: boolean; before: string; after: string }
-
-/** Every store the target's layers read, loaded by their owners (doc 3.2). */
-export interface SettingsStores {
-  /** The layers this target has (doc 3.3). Built-in is always last. */
-  layers: readonly StoreLayer[];
-  session?: SessionStore;
-  home?: Record<string, unknown>;
-  project?: ProjectStore;
-  global: Record<string, unknown>;
-  /** Saved trust decisions by canonical project path. */
-  trust: Record<string, boolean>;
-  /** Mac Terminal keys in ~/.ssh/authorized_keys, by paired device id. */
-  macTerminal: Record<string, string>;
-  /** The maintainer's floor overrides (Global policy, doc 5.4). */
-  floors: FloorOverrides;
-  /** The Gateway-owned settings document (`gateway/settings/gateway.json`). */
-  gateway: Record<string, unknown>;
-  /** Outside-change marks by layer and key instance (doc 5.6). */
-  outside?: Partial<Record<"global" | "project", Record<string, OutsideMark>>>;
-}
-
-/** Capability-constrained option sources (doc 3.6, 7.5). */
-export interface OptionSources {
-  /** The closest supported value, or the value itself when supported. */
-  clamp(source: string, dependency: unknown, value: unknown): unknown;
-}
 
 
 
@@ -165,12 +110,6 @@ export function composedBelow(stores: SettingsStores, key: KeyDeclaration, quali
 function layerApplied(stores: SettingsStores, layer: StoreLayer): { applied: boolean; reason?: "untrusted" } {
   if (layer === "project" && stores.project && !stores.project.applied) return { applied: false, reason: "untrusted" };
   return { applied: true };
-}
-
-export interface ResolveOptions {
-  format: FormatContext;
-  options: OptionSources;
-  keys?: readonly string[];
 }
 
 /** Resolve every key (or the requested ones) for a target. */

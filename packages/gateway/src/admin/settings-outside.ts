@@ -9,8 +9,8 @@ import { readJsonDocument } from "../util/json.js";
 import { gitHeadState, projectSettingsPath, stagedBlob, type GitHeadState } from "./project-settings-writer.js";
 import type { ChangeEntry, SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { type GitResult, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
-import type { OutsideMark } from "./settings-resolver.js";
-import { KEYS, keyDefault, floorFor, recordSubject, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import type { OutsideMark, FloorOverrides } from "../kernel/settings/settings-types.js";
+import { KEYS, keyDefault, floorFor, recordSubject, schemaKey, type Binding, type KeyDeclaration } from "./settings-schema.js";
 import { formatStoredSetting } from "../kernel/settings/settings-types.js";
 /**
  * Outside changes (docs/settings-model.md 5.6, foundation F2).
