@@ -290,11 +290,12 @@ final class NotificationInboxCoordinator {
         min(NotificationInboxAdmissionPolicy.maximumRetainedCount, buckets.values.reduce(0) { $0 + $1.unreadCount })
     }
 
-    /// Whether a profile with no installed windows is loading them. A refresh
-    /// of windows already shown (an empty Unread window after Mark Read, a
-    /// change event) is not a load: the sheet keeps its settled rows or empty
-    /// state instead of hiding its content under the loading pulse.
-    var isLoadingFirstWindows: Bool { loadingProfileIDs.contains { buckets[$0] == nil } }
+    /// Whether the inbox is loading with no window installed for any profile.
+    /// A refresh once any window is shown (an empty Unread window after Mark
+    /// Read, a change event, another Mac still connecting) is not a load: the
+    /// sheet keeps its settled rows or empty state instead of hiding its
+    /// content under the loading pulse.
+    var isLoadingFirstWindows: Bool { !loadingProfileIDs.isEmpty && buckets.isEmpty }
 
     /// Whether this filter's window still has older server pages to fetch.
     func hasOlderPages(filter: NotificationInboxFilter) -> Bool {
