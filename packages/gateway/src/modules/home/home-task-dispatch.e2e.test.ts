@@ -16,6 +16,7 @@ import { HomeMemoryRefusal } from "./home-request-policy.js";
 import { UploadStore } from "../../machine/upload-store.js";
 import { EpisodicMemoryError } from "../../episodic/episodic-contract.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { RunMarkerStore } from "../../kernel/run/run-markers.js";
 import { SessionCatalog } from "../../sessions/session-catalog.js";
 import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch, type OwnedSessionDispatchOver } from "../../kernel/delegation/owned-session-dispatch.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
@@ -745,6 +746,41 @@ describe("Home task cold reconciliation", () => {
     expect(await owner.taskResult(run.taskId)).toMatchObject({ wake: { state: "outcome-unknown" } });
     evidence.push({ case: "unreadable-inbox-proof", wake: "outcome-unknown", laterPrompt: true });
   }, 60_000);
+
+  it.each(["active", "terminal"] as const)("acknowledges only the recovered task root marker after the %s crash cut", async cut => {
+    const f = await fixture();
+    const store = (homeOwnerOf(f.registry) as unknown as { tasks: { store: HomeTaskStore } }).tasks.store;
+    if (cut === "active") vi.spyOn(store, "update").mockRejectedValue(new Error("frozen terminal owner"));
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f);
+    if (cut === "active") await expect(run.completion).rejects.toThrow(/frozen/);
+    else await run.completion;
+    vi.restoreAllMocks();
+    const sessionPath = (await f.registry.acquire(run.sessionId)).sessionFile!;
+    await f.registry.dispose();
+    await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    // The durable crash image: task evidence/ledger at the named cut, with its
+    // still-owned, unstamped root marker. No prior runtime remains executable.
+    const markers = new RunMarkerStore(f.tronHome);
+    await markers.mark(run.sessionId, run.operationId);
+    if (cut === "terminal") await markers.mark(run.sessionId, "unrelated-operation");
+    const taskPath = await taskFile(f, run.taskId);
+    const taskBefore = await readFile(taskPath, "utf8");
+    const canonicalBefore = await readFile(sessionPath, "utf8");
+    const callsBefore = f.faux.state.callCount;
+    const cold = await f.restartToReadiness();
+    await cold.recoverCanonicalAttention();
+    await homeOwnerOf(cold).recoverTasks();
+    const result = await homeOwnerOf(cold).taskResult(run.taskId);
+    expect(result).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final", reason: cut === "active" ? "cold-explicit-report" : "explicit-report" } });
+    expect(await markers.evidenceFor(run.sessionId)).toEqual(cut === "terminal" ? [expect.objectContaining({ operationId: "unrelated-operation" })] : []);
+    const summary = (await cold.list("all")).find(row => row.id === run.sessionId);
+    expect(summary?.phase).toBe(cut === "terminal" ? "interrupted" : "idle");
+    expect(f.faux.state.callCount).toBe(callsBefore);
+    if (cut === "terminal") expect(await readFile(taskPath, "utf8")).toBe(taskBefore);
+    expect(await readFile(sessionPath, "utf8")).toBe(canonicalBefore);
+    evidence.push({ case: `cold-task-root-marker-${cut}`, result: result.terminalEvidence, retainedMarkers: await markers.evidenceFor(run.sessionId), replayed: false });
+  });
 
   it("joins the fresh catalog cut before irreversibly qualifying a cold report", async () => {
     const f = await fixture();

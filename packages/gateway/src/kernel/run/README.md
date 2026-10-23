@@ -76,11 +76,13 @@ Ownership is declared by [`gateway/run`](../../run.module.json).
 Abort signals and grace periods, tool text, output and environment filtering remain
 identical to Pi-backed Gateway execution. Cleanup targets only the owned process tree.
 Oversized-request classification retains non-overflow provider errors unchanged.
-A delegated task's root run marker belongs to task settlement, not to any one
-successful reply. Attention still commits each reply, but never stamps that root
-marker with a reply completion: notices and report reminders can continue the
-same invocation. The dispatcher acknowledges the root marker after the immutable
-result; independently owned wake turns retain ordinary completion stamping.
+A delegated task's root run marker belongs to operation settlement, not to any
+one successful reply. Attention still commits each reply, but never stamps that
+root marker with a reply completion: notices and report reminders can continue
+the same invocation. Terminal invocation cleanup or the task's final acknowledgement
+retires the root marker. Cold task recovery acknowledges any remaining root marker
+after the task result is durable, preserving other operations in that session.
+Independently owned wake turns retain ordinary completion stamping.
 
 ## Entry points
 

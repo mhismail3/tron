@@ -72,10 +72,10 @@ dispatcher records pending intent, authorizes the snapshot, creates the worker t
 - A worker has project tools plus `report` and a canonical `tron-home-task` marker checked
   before cold construction. A sealed report ends the task at that turn boundary; Stop is
   terminal (`task-stopped-before-delivery` receipts for unconsumed steers);
-  `OwnedSessionDispatch` has a 24-hour ceiling. Its root run marker stays owned by
-  the task until settlement acknowledges it; individual reply completions update
-  attention without stamping that marker. A notice or report reminder can continue
-  the same invocation without conflicting with an earlier reply's completion.
+  `OwnedSessionDispatch` has a 24-hour ceiling. Individual reply completions update
+  attention without stamping the task's root run marker. A notice or report reminder
+  can continue the same invocation without conflicting with an earlier reply's
+  completion. Terminal invocation cleanup or final task acknowledgement retires it.
 - Workers (not Home) load the managed subagent provider; the task extension admits launches,
   reads, run controls and supervisor `reply` only for runs the task owns (by `id`/`runId`,
   never `dir`) and refuses missions, scheduling and non-blocking `bg_wait`, also in nested
@@ -115,7 +115,11 @@ a time without constructing workers or replaying. A live or unreadable async run
 `interrupted`; a report counts only with one marker and one valid report after it. Until it
 settles, `home.status.taskRecovery` refuses task work (dispatch, tools, steer, Stop,
 reconfirmation, redelivery) while ordinary chats continue. Results co-commit their wake
-(`cold-explicit-report`, `cold-no-report`, `cold-evidence-unavailable`).
+(`cold-explicit-report`, `cold-no-report`, `cold-evidence-unavailable`). After the result
+is durable, recovery acknowledges its exact root run marker, including already-terminal
+records; it never clears another operation's marker in the same session. An
+acknowledgement failure keeps recovery unavailable and the marker intact for the
+next startup; it is not treated as a successful cleanup.
 
 ## Control and spend status
 

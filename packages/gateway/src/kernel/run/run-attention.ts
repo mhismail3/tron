@@ -63,7 +63,7 @@ export class RunAttentionOwner {
     if (!completion.operationId) return Promise.resolve();
     // A task's root marker belongs to the whole delegated operation, not one
     // reply: notices/reminders can produce several completions before report.
-    // The dispatcher retains and acknowledges that marker at task settlement.
+    // Terminal invocation cleanup/task acknowledgement retire the root marker.
     if (completion.operationId === this.operations.taskWorker?.identity.operationId) return Promise.resolve();
     const stamp = this.operations.runPersistence.trackOwnershipWrite(() => this.operations.runPersistence.retryDurableWrite(
       `marker:completion:${completion.operationId}:${completion.id}`,

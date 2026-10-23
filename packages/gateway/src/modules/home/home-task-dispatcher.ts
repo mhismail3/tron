@@ -260,11 +260,15 @@ export class HomeTaskDispatcher {
   }
 
   private async recoverTask(task: HomeTaskRecord): Promise<void> {
-    if (task.lifecycle === "terminal" && task.wake?.push !== "pending") return;
-    if (task.lifecycle !== "terminal") return void await this.reconcile(task, "cold");
-    // Includes a crash after terminal/outbox co-commit but before advisory
-    // publication. The inbox's durable decision makes repeats harmless.
-    await this.inbox.publish(task.taskId);
+    if (task.lifecycle !== "terminal") await this.reconcile(task, "cold");
+    else if (task.wake?.push === "pending") {
+      // Includes a crash after terminal/outbox co-commit but before advisory
+      // publication. The inbox's durable decision makes repeats harmless.
+      await this.inbox.publish(task.taskId);
+    }
+    // No root invocation survives startup. Its task result is now durable, so
+    // acknowledge only that operation, including a crash after the terminal write.
+    if (task.sessionId && task.operationId) await this.sessions.clearOwnedOperationMarker(task.sessionId, task.operationId);
   }
 
   /** Settles a non-terminal task from its canonical file alone, with no runtime to stop or
