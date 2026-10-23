@@ -437,12 +437,13 @@ struct ProjectResourcesView: View {
         .tint(Color.tronEmerald)
     }
 
-    /// One container per kind; a kind with nothing loaded says so.
+    /// One container per kind, in the kind's own tint; a kind with nothing loaded says so.
     private var resourceGroup: some View {
         TronListGroup(sections: content.sections.map { section in
             TronListSection(title: section.kind.rawValue, rows: section.rows.isEmpty
                 ? [ProjectResourceListRow(kind: section.kind, index: -1, row: nil)]
-                : section.rows.enumerated().map { ProjectResourceListRow(kind: section.kind, index: $0.offset, row: $0.element) })
+                : section.rows.enumerated().map { ProjectResourceListRow(kind: section.kind, index: $0.offset, row: $0.element) },
+                tint: section.kind.accent)
         }, identifier: "project-resource-groups") { item in
             if let row = item.row {
                 TronListButton(ProjectResourceOverviewPresentation.rowContent(row), identifier: "project-resource-\(item.kind.key)-\(item.index)") {

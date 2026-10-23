@@ -93,7 +93,8 @@ struct HostedSubagentParityFixture: View {
             snapshot.processActivities = []
         }
         if arguments.contains("-history-grouping") {
-            snapshot.processActivities = Self.historyProcesses(sequence: 1,
+            // A session that never ran a subagent: no mounted runs and an empty canonical page.
+            snapshot.processActivities = arguments.contains("-history-empty") ? [] : Self.historyProcesses(sequence: 1,
                 stage: arguments.contains("-history-lifecycle") ? 0 : 1)
         }
         self.snapshot = snapshot

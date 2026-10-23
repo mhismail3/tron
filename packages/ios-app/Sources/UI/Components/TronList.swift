@@ -231,9 +231,12 @@ struct TronListTagPill: View {
 // MARK: - Grouped lists
 
 /// One section of a grouped list: rows plus an optional header above its container.
+/// A section whose rows are one category (a Resources kind) carries that category's
+/// tint on its header and container instead of the sheet's emerald.
 struct TronListSection<Row: Identifiable> {
     let title: String?
     let rows: [Row]
+    var tint: Color?
     var id: String { title ?? "rows" }
 }
 
@@ -262,7 +265,7 @@ struct TronListGroup<Row: Identifiable, RowView: View>: View {
                 VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
                     if let title = section.title {
                         HStack(alignment: .firstTextBaseline) {
-                            Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronAccentText)
+                            Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(section.tint ?? .tronAccentText)
                             Spacer(minLength: 8)
                             Text(section.rows.count.formatted()).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
                         }
@@ -287,7 +290,8 @@ struct TronListGroup<Row: Identifiable, RowView: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: .tronEmerald, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.10)
+        .tronGlassSurface(accent: section.tint ?? .tronEmerald, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.10,
+                          respectsSettingsTheme: section.tint == nil)
         .clipShape(RoundedRectangle(cornerRadius: TronListMetrics.cornerRadius, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier.map { "\($0)-section-\(index)" } ?? "")
@@ -456,6 +460,31 @@ struct TronFeedPositionChip: View {
                     .offset(x: 44 * min(start, 1 - min(length, 1)))
             }
             .accessibilityHidden(true)
+    }
+}
+
+/// A feed with nothing to list: its header stays at the top and the shared
+/// placeholder is centred in the rest of the visible sheet, never inside a card.
+struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
+    let identifier: String
+    @ViewBuilder let header: () -> Header
+    @ViewBuilder let placeholder: () -> Placeholder
+
+    var body: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+                    header()
+                    placeholder().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
+                // At least the visible height, so the placeholder centres in it; taller
+                // text still scrolls.
+                .frame(minHeight: proxy.size.height)
+            }
+            .tronScrollEdgeChrome()
+            .accessibilityIdentifier(identifier)
+        }
     }
 }
 

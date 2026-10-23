@@ -29,6 +29,38 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
+    /// Resources' per-kind section tints and an empty Subagent History (#1704), light and dark.
+    @MainActor func testCaptureResourcesAndEmptySubagentHistory() {
+        for mode in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-manage-session-review", "-fixture-appearance", mode]
+            app.launch()
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+            app.buttons["Stop session"].tap()
+            let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
+            for _ in 0..<8 where !resources.isHittable { app.swipeUp() }
+            resources.tap()
+            XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
+            expandSheet(app, title: "Resources")
+            Thread.sleep(forTimeInterval: 1)
+            shot("resources-\(mode)")
+            app.terminate()
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-history-grouping", "-history-empty", "-\(mode)"]
+            app.launch()
+            let open = app.buttons["Subagent History"]
+            XCTAssertTrue(open.waitForExistence(timeout: 10), app.debugDescription)
+            open.tap()
+            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'No recorded subagents'")).firstMatch
+                .waitForExistence(timeout: 8), app.debugDescription)
+            Thread.sleep(forTimeInterval: 1)
+            shot("subagent-history-empty-medium-\(mode)")
+            expandSheet(app, title: "Subagent History")
+            Thread.sleep(forTimeInterval: 1)
+            shot("subagent-history-empty-\(mode)")
+            app.terminate()
+        }
+    }
+
     /// The Instructions overview and its Tools, Rules and Skills subsheets, light and
     /// dark at standard text and at XXXL.
     @MainActor func testCaptureInstructionRows() {

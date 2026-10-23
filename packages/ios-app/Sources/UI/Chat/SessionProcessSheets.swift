@@ -97,78 +97,90 @@ struct ProcessHistorySheet: View {
     @ViewBuilder
     private func history(_ store: SessionProcessHistoryStore) -> some View {
         let rows = rows(store)
-        TronFeed(items: rows, identifier: "process-history-feed", ordinal: \.position, total: rows.count,
-                 totalIsExact: store.nextCursor == nil, tail: tail(store, empty: rows.isEmpty),
-                 loadMore: {
-                     guard store.nextCursor != nil, store.status != .loading, store.status != .conflict else { return }
-                     store.loadNext(sessionID: sessionID, presentationGeneration: generation)
-                 },
-                 retry: { store.loadNext(sessionID: sessionID, presentationGeneration: generation) }) {
-            VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
-                TronSettingsCaption("Newest first. Open a run to read its transcript.")
-                placeholder(store, empty: rows.isEmpty, hasMounted: !mountedProcesses.isEmpty)
+        let caption = TronSettingsCaption("Newest first. Open a run to read its transcript.")
+        if rows.isEmpty, hasPlaceholder(store, empty: true) {
+            TronFeedEmptyState(identifier: "process-history-feed") { caption } placeholder: {
+                placeholder(store, hasMounted: false)
             }
-            .padding(.bottom, 4)
-        } row: { row in
-            TronFeedCard {
-                TronListButton(SessionProcessRowPresentation.listContent(row.process), identifier: "subagent-row-\(row.process.id)") {
-                    selectedProcess = row.process
+        } else {
+            TronFeed(items: rows, identifier: "process-history-feed", ordinal: \.position, total: rows.count,
+                     totalIsExact: store.nextCursor == nil, tail: tail(store, empty: rows.isEmpty),
+                     loadMore: {
+                         guard store.nextCursor != nil, store.status != .loading, store.status != .conflict else { return }
+                         store.loadNext(sessionID: sessionID, presentationGeneration: generation)
+                     },
+                     retry: { store.loadNext(sessionID: sessionID, presentationGeneration: generation) }) {
+                VStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+                    caption
+                    if rows.isEmpty, store.status == .idle {
+                        TronSheetLoadingState(label: "Loading subagent history…", accent: .tronEmerald)
+                    } else if hasPlaceholder(store, empty: rows.isEmpty) {
+                        placeholder(store, hasMounted: !mountedProcesses.isEmpty)
+                    }
+                }
+                .padding(.bottom, 4)
+            } row: { row in
+                TronFeedCard {
+                    TronListButton(SessionProcessRowPresentation.listContent(row.process), identifier: "subagent-row-\(row.process.id)") {
+                        selectedProcess = row.process
+                    }
                 }
             }
         }
     }
 
+    /// A state that heads the feed, or replaces an empty one centred in the sheet.
+    private func hasPlaceholder(_ store: SessionProcessHistoryStore, empty: Bool) -> Bool {
+        switch store.status {
+        case .conflict, .unavailable, .disconnected: true
+        case .loaded: empty && store.nextCursor == nil
+        default: false
+        }
+    }
+
     @ViewBuilder
-    private func placeholder(_ store: SessionProcessHistoryStore, empty: Bool, hasMounted: Bool) -> some View {
+    private func placeholder(_ store: SessionProcessHistoryStore, hasMounted: Bool) -> some View {
         switch store.status {
         case .conflict:
-            SessionProcessPlaceholder(
+            TronPlaceholderState(
                 title: "History changed",
                 detail: "Reload to continue from the latest canonical page.",
                 icon: "arrow.triangle.2.circlepath",
+                accent: .tronEmerald,
                 actionTitle: "Reload History"
             ) {
                 store.retryReload(sessionID: sessionID, presentationGeneration: generation)
             }
         case .unavailable:
-            unavailable(
-                "History unavailable",
+            TronPlaceholderState(
+                title: "History unavailable",
                 detail: hasMounted
                     ? "Current and recent subagent activity remains available below."
                     : "Update Tron on your Mac to load canonical subagent history.",
-                icon: "externaldrive.badge.questionmark"
+                icon: "externaldrive.badge.questionmark",
+                accent: .tronEmerald
             )
         case .disconnected:
-            unavailable("Gateway disconnected", detail: "Reconnect to load canonical subagent history.", icon: "wifi.slash")
-        case .idle where empty:
-            TronSheetLoadingState(label: "Loading subagent history…", accent: .tronEmerald)
-        case .loaded where empty:
-            SessionProcessPlaceholder(
-                title: "No recorded subagents",
-                detail: "Completed subagent sessions will appear here.",
-                icon: "clock.arrow.circlepath"
-            )
+            TronPlaceholderState(title: "Gateway disconnected", detail: "Reconnect to load canonical subagent history.",
+                                 icon: "wifi.slash", accent: .tronEmerald)
+        case .loaded:
+            TronPlaceholderState(title: "No recorded subagents", detail: "Completed subagent sessions will appear here.",
+                                 icon: "clock.arrow.circlepath", accent: .tronEmerald)
         default:
             EmptyView()
         }
     }
-
-    private func unavailable(_ title: String, detail: String, icon: String) -> some View {
-        SessionProcessPlaceholder(title: title, detail: detail, icon: icon)
-    }
 }
 
+/// A read-only subagent session's in-card state.
 private struct SessionProcessPlaceholder: View {
     let title: String
     let detail: String
     let icon: String
-    var actionTitle: String?
-    var action: (() -> Void)?
 
     var body: some View {
         TronGlassCard(accent: .tronSlate) {
-            TronPlaceholderState(title: title, detail: detail, icon: icon, accent: .tronEmerald,
-                                 actionTitle: actionTitle, action: action)
+            TronPlaceholderState(title: title, detail: detail, icon: icon, accent: .tronEmerald)
         }
     }
 }
