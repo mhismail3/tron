@@ -165,8 +165,6 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   header and count above it; a single-category section (a Resources kind) passes its category
   tint for header and container instead of emerald. Feeds (Memory, Tasks, Session History, Subagent History) are a
   `TronFeed` of `TronFeedCard`s, with the next page loaded by `FeedStore` while 5 rows remain.
-  The feed owns a top default scroll anchor, including initial and loading-to-page layout;
-  a transcript’s bottom anchor must not become a sheet feed’s initial position.
   Long feeds overlay a bottom-centred position chip whose 44-pt target takes every touch (tap:
   newest); the feed ends with room to clear it. An empty feed (and an empty
   Profile) is a `TronFeedEmptyState`: caption on top, the shared `TronPlaceholderState` centred
