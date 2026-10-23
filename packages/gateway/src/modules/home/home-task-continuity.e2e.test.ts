@@ -98,6 +98,64 @@ const reAsk = (seen: string[]) => (context: Context) => {
 };
 
 describe("resuming a stopped Home worker in place", () => {
+  it("resumes a reported worker after a report-only reminder without a stranded running phase", async () => {
+    const f = await fixture();
+    const { port } = await listen(f);
+    const app = await maintainerClient(f, port);
+    // Delay only the real completion stamp, never its result. This puts the
+    // later reply's marker collision after agent_settled, as on the live worker.
+    const markers = (f.registry as unknown as { markers: import("../../kernel/run/run-markers.js").RunMarkerStore }).markers;
+    const stamp = markers.reassertAssistantCompletion.bind(markers);
+    let releaseStamp!: () => void;
+    const stampGate = new Promise<void>(resolve => { releaseStamp = resolve; });
+    cleanups.push(async () => releaseStamp());
+    const completions = new Set<string>();
+    markers.reassertAssistantCompletion = async (...args) => {
+      completions.add(args[2]);
+      if (completions.size > 1) await stampGate;
+      return stamp(...args);
+    };
+    const extensionDir = join(f.cwd, ".pi", "extensions");
+    await mkdir(extensionDir, { recursive: true });
+    await writeFile(join(extensionDir, "late-notice.ts"), `export default function(pi) {
+      let notified = false;
+      pi.on("turn_end", event => {
+        if (!notified && event.message.stopReason === "stop") {
+          notified = true;
+          pi.sendMessage({ customType: "late-child-notice", content: "The background review has completed.", display: false }, { triggerTurn: true });
+        }
+      });
+    }`);
+    f.faux.setResponses([
+      fauxAssistantMessage("Partial work is ready."),
+      async () => {
+        const worker = await f.registry.acquire(run.sessionId);
+        await (worker as unknown as { runAttention: { attentionBarrier?: Promise<void> } }).runAttention.attentionBarrier;
+        return fauxAssistantMessage("The review is ready too.");
+      },
+      fauxAssistantMessage([fauxToolCall("report", { resultId: "partial-result", outcome: "progress", text: "Partial work and review recorded", evidence: ["Review completed"] })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall("continued-result")], { stopReason: "toolUse" }),
+    ]);
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "reported-worker", intent: "Finite work", target: f.cwd });
+    const slot = await f.registry.acquire(run.sessionId);
+    try {
+      await waitFor(() => slot.canonicalSessionEntries().some(entry => entry.type === "custom" && entry.customType === "tron.chat-invocation.v1"
+        && (entry.data as { receiptKind?: string }).receiptKind === "terminal"), "worker invocation terminal before delayed completion stamp");
+    } finally { releaseStamp(); }
+    const result = await run.completion;
+    const stop = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "stop", taskId: run.taskId })
+      .then(() => "accepted", (error: Error) => error.message);
+    const diagnostics = f.events.filter(event => event.topic === "session.diagnostic");
+    evidence.push({ case: "reported-worker-resume", result: result.terminalEvidence, stop,
+      snapshot: { phase: slot.snapshot().phase, operation: slot.snapshot().operation }, diagnostics });
+    expect(result.terminalEvidence).toMatchObject({ outcome: "progress", reason: "explicit-report" });
+    await app.open(run.sessionId);
+    const resumed = await app.send(run.sessionId, "Continue the same worker");
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("reported-worker.resume-1")).lifecycle === "terminal", "reported worker continuation settles");
+    expect(await homeOwnerOf(f.registry).taskStatus("reported-worker.resume-1")).toMatchObject({ sessionId: run.sessionId, operationId: resumed.operationId,
+      terminalEvidence: { outcome: "final", reason: "explicit-report" } });
+    expect(diagnostics).toEqual([]);
+  }, 60_000);
   it("keeps bounded worker check-ins through stop, cold reads and resume with exact operation attribution", async () => {
     const f = await fixture();
     const { port } = await listen(f);

@@ -72,7 +72,10 @@ dispatcher records pending intent, authorizes the snapshot, creates the worker t
 - A worker has project tools plus `report` and a canonical `tron-home-task` marker checked
   before cold construction. A sealed report ends the task at that turn boundary; Stop is
   terminal (`task-stopped-before-delivery` receipts for unconsumed steers);
-  `OwnedSessionDispatch` has a 24-hour ceiling.
+  `OwnedSessionDispatch` has a 24-hour ceiling. Its root run marker stays owned by
+  the task until settlement acknowledges it; individual reply completions update
+  attention without stamping that marker. A notice or report reminder can continue
+  the same invocation without conflicting with an earlier reply's completion.
 - Workers (not Home) load the managed subagent provider; the task extension admits launches,
   reads, run controls and supervisor `reply` only for runs the task owns (by `id`/`runId`,
   never `dir`) and refuses missions, scheduling and non-blocking `bg_wait`, also in nested

@@ -76,6 +76,11 @@ Ownership is declared by [`gateway/run`](../../run.module.json).
 Abort signals and grace periods, tool text, output and environment filtering remain
 identical to Pi-backed Gateway execution. Cleanup targets only the owned process tree.
 Oversized-request classification retains non-overflow provider errors unchanged.
+A delegated task's root run marker belongs to task settlement, not to any one
+successful reply. Attention still commits each reply, but never stamps that root
+marker with a reply completion: notices and report reminders can continue the
+same invocation. The dispatcher acknowledges the root marker after the immutable
+result; independently owned wake turns retain ordinary completion stamping.
 
 ## Entry points
 
@@ -88,6 +93,10 @@ detached descendants, timeout, Stop and environment boundaries.
 Existing aborted/timed-out command errors and bounded-tool cancellation results;
 no additional logging or persisted state. Compaction diagnostics remain with the
 [session run owner](../../sessions/README.md#signals).
+
+| Signal | Meaning / diagnosis |
+|---|---|
+| `terminal-receipt-persistence-failed` | A completion ownership write failed. For a terminal Home task whose socket snapshot still says `running` without an operation, compare its canonical replies and task marker: a root task marker must not own an individual reply completion. `home-task-continuity.e2e.test.ts` reproduces the conflicting-stamp ordering and proves same-session resume. |
 
 ## Verify
 
