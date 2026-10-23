@@ -22,6 +22,25 @@ final class TronHomeSheetsUITests: XCTestCase {
         return app
     }
 
+    // Temporary native visual-review journeys; no behavioral regression assertion before approval.
+    @MainActor func testRingAlignmentReviewLight() { captureRingAlignment("light", arguments: []) }
+    @MainActor func testRingAlignmentReviewDark() { captureRingAlignment("dark", arguments: ["-home-dark"]) }
+    @MainActor func testRingAlignmentReviewXXXL() {
+        captureRingAlignment("xxxl", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"])
+    }
+
+    @MainActor private func captureRingAlignment(_ name: String, arguments: [String]) {
+        let app = launchPolishManage(arguments); defer { app.terminate() }
+        let ring = element(app, "home-context-ring").frame
+        let title = app.staticTexts["969K tokens left"].frame
+        let detail = element(app, "home-context-detail").frame
+        let measurement = XCTAttachment(string: "ring=\(ring), title=\(title), detail=\(detail), combinedMidY=\(title.union(detail).midY), delta=\(ring.midY - title.union(detail).midY)")
+        measurement.name = "1752-\(name)-observed-geometry"
+        measurement.lifetime = .keepAlways
+        add(measurement)
+        shot("1752-\(name)-summary")
+    }
+
     @MainActor private func openPolishProfileItem(_ app: XCUIApplication) {
         open(app, element(app, "home-manage-profile"), ready: "home-profile-items", name: "profile-polish")
         expand(app, done: "home-sheet-done-profile")
