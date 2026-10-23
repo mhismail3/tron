@@ -600,7 +600,6 @@ export function schemaKey(id: string): KeyDeclaration {
   return key;
 }
 
-/** The maintainer's floor overrides as `floors.json` holds them. */
 /** A key's floor for a direction: the maintainer's override, else the code floor (doc 5.4). */
 export function floorFor(key: KeyDeclaration, direction: Direction, overrides?: FloorOverrides): { floor: Tier; source: "code" | "override" } {
   const override = overrides?.[key.id]?.[direction];

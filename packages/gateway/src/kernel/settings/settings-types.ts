@@ -7,6 +7,7 @@ import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from ".
 /** Private persistence metadata, never an outward settings scope or grant. */
 export type StoreLayer = "session" | "home" | "project" | "global" | "default";
 
+/** The maintainer's floor overrides as `floors.json` holds them. */
 export type FloorOverrides = Record<string, { widen?: Tier; narrow?: Tier }>;
 
 export type ProjectGitState =
