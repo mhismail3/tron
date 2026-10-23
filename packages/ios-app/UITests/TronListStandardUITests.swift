@@ -315,6 +315,110 @@ final class TronListStandardUITests: XCTestCase {
         assertSeparateSections(app, list: "project-resource-groups", titles: ["Skills", "Subagents"], row: "project-resource-skills-0")
     }
 
+    /// Each Resources kind keeps its own tint on its section (#1704): no two section
+    /// headers are inked alike, so a sheet theme flattening them all to one accent fails.
+    @MainActor func testResourceSectionsKeepDistinctKindTints() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-manage-session-review", "-fixture-appearance", "light"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+        app.buttons["Stop session"].tap()
+        let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
+        for _ in 0..<8 where !resources.isHittable { app.swipeUp() }
+        resources.tap()
+        XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
+        expandSheet(app, title: "Resources")
+        Thread.sleep(forTimeInterval: 0.6)
+        let headers = (0..<4).map { element(app, "project-resource-groups-header-\($0)") }
+        XCTAssertTrue(headers.allSatisfy { $0.exists && $0.isHittable }, "All four kind headers are on screen\n\(app.debugDescription)")
+        let screenshot = XCUIScreen.main.screenshot().image, window = app.windows.firstMatch.frame.width
+        let inks = headers.map { sheetInk(screenshot, $0.frame, window: window) }
+        for (index, ink) in inks.enumerated() { XCTAssertNotNil(ink, "\(headers[index].label) has an inked title") }
+        for i in inks.indices { for j in inks.indices where j > i {
+            guard let a = inks[i], let b = inks[j] else { continue }
+            let distance = zip(a, b).map { abs($0 - $1) }.max() ?? 0
+            XCTAssertGreaterThan(distance, 0.08, "\(headers[i].label) and \(headers[j].label) share one tint: \(a) vs \(b)")
+        } }
+    }
+
+    /// An empty Subagent History centres the shared placeholder in the sheet below its
+    /// caption, at the medium and large detents (#1704), rather than heading the feed.
+    @MainActor func testEmptySubagentHistoryCentresItsPlaceholder() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-subagent-parity-fixture", "-history-grouping", "-history-empty", "-light"]
+        app.launch(); defer { app.terminate() }
+        let open = app.buttons["Subagent History"]
+        XCTAssertTrue(open.waitForExistence(timeout: 10), app.debugDescription)
+        open.tap()
+        assertCentredEmptyState(app, title: "Subagent History", placeholder: "No recorded subagents",
+                                viewport: "process-history-feed", caption: "Newest first")
+    }
+
+    /// Every empty feed sheet uses the same centred empty state (#1704): Session
+    /// History, and Manage Home's Profile, Memory and Tasks.
+    @MainActor func testEmptyFeedSheetsCentreTheirPlaceholders() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-history-empty", "-fixture-appearance", "light"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+        app.buttons["Stop session"].tap()
+        let history = app.buttons["Session History"]
+        for _ in 0..<12 where !history.isHittable { app.swipeUp() }
+        history.tap()
+        assertCentredEmptyState(app, title: "Session History", placeholder: "No history yet",
+                                viewport: "session-history-viewport", caption: "All branches")
+        app.terminate()
+
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-profile-empty",
+                               "-home-browser-empty", "-home-sheet-tasks-empty"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        ring.tap()
+        XCTAssertTrue(element(app, "home-manage-state").waitForExistence(timeout: 10), app.debugDescription)
+        expandSheet(app, title: "Manage Home")
+        for (row, title, placeholder, viewport, caption, done) in [
+            ("home-manage-profile", "Profile", "Nothing learned yet", "home-profile-viewport", "Learned from", "home-sheet-done-profile"),
+            ("home-manage-memory-browser", "Memory", "No memory yet", "home-memory-viewport", "Newest first", "home-sheet-done-memory"),
+            ("home-manage-tasks", "Tasks", "No tasks", "home-tasks-viewport", "Newest first", "home-sheet-done-tasks"),
+        ] {
+            let open = element(app, row)
+            for _ in 0..<6 where !open.isHittable { app.swipeUp() }
+            open.tap()
+            assertCentredEmptyState(app, title: title, placeholder: placeholder, viewport: viewport, caption: caption)
+            app.buttons[done].tap()
+            Thread.sleep(forTimeInterval: 0.8)
+        }
+    }
+
+    /// The placeholder sits centred between the caption and the bottom of the visible
+    /// sheet, at medium and then large.
+    @MainActor private func assertCentredEmptyState(_ app: XCUIApplication, title: String, placeholder text: String,
+                                                    viewport: String, caption captionText: String) {
+        let placeholder = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", text)).firstMatch
+        XCTAssertTrue(placeholder.waitForExistence(timeout: 8), app.debugDescription)
+        let feed = element(app, viewport)
+        let caption = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", captionText)).firstMatch
+        for detent in ["medium", "large"] {
+            if detent == "large" { expandSheet(app, title: title) }
+            Thread.sleep(forTimeInterval: 0.8)
+            XCTAssertTrue(feed.exists && caption.exists, "\(title) shows its viewport and caption\n\(app.debugDescription)")
+            let visibleBottom = min(feed.frame.maxY, app.windows.firstMatch.frame.maxY)
+            let centre = (caption.frame.maxY + visibleBottom) / 2
+            XCTAssertEqual(placeholder.frame.midY, centre, accuracy: 24,
+                           "\(title) at \(detent): the placeholder centres between the caption (\(caption.frame.maxY)) and the sheet bottom (\(visibleBottom))")
+            XCTAssertEqual(placeholder.frame.midX, app.windows.firstMatch.frame.midX, accuracy: 4,
+                           "\(title) at \(detent): the placeholder centres horizontally")
+            shot("empty-\(title.lowercased().replacingOccurrences(of: " ", with: "-"))-\(detent)")
+        }
+    }
+
     @MainActor private func assertSeparateSections(_ app: XCUIApplication, list: String, titles: [String], row: String) {
         var previousBottom: CGFloat?
         for (index, title) in titles.enumerated() {

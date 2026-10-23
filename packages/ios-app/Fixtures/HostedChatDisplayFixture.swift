@@ -820,6 +820,8 @@ private actor HostedHomeShellGateway {
             let result: JSONValue = .object(["decision": decision, "grant": approved ? .object(grant) : .null])
             taskDecisions[id] = result; controlCount += 1
             return (result, nil)
+        case "home.profileList" where ProcessInfo.processInfo.arguments.contains("-home-profile-empty"):
+            return (.object(["items": .array([]), "unclassified": .number(0)]), nil)
         case "home.profileList":
             seedHomeProfileEntry()
             return (.object(["items": try JSONValue.encode(profileItems), "unclassified": .number(0)]), nil)

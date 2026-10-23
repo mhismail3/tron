@@ -379,6 +379,10 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             result = try HostedLargeHistory.page(params, runtime: snapshot.runtimeGeneration)
         case "session.history.entry" where HostedLargeHistory.enabled:
             result = try HostedLargeHistory.entry(params, runtime: snapshot.runtimeGeneration)
+        case "session.history.list" where ProcessInfo.processInfo.arguments.contains("-history-empty"):
+            // A session with no canonical entries yet.
+            result = try JSONValue.encode(SessionHistoryPage(runtimeGeneration: snapshot.runtimeGeneration,
+                nodes: [], older: nil, newer: nil, totalEntries: 0))
         case "session.history.list":
             result = try JSONValue.encode(SessionHistoryPage(runtimeGeneration: snapshot.runtimeGeneration,
                 nodes: [SessionTreeNode(id: "fixture-prompt", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
