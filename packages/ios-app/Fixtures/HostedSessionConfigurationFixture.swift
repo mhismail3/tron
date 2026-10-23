@@ -264,8 +264,9 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                     "order": .number(10), "importance": .string("essential"), "control": .string("toggle"),
                     "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true)]),
             ]), HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model",
-                .object(["provider": .string("fixture"), "id": .string("model")]), "Fixture Model", "catalog", order: 5, essential: true, layer: "session"),
-                HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true),
+                try JSONValue.encode(snapshot.model), snapshot.model?.id == "alternative" ? "Alternative Model" : "Fixture Model", "catalog", order: 5, essential: true, layer: "session"),
+                HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true,
+                    qualifiers: ["model": "\(snapshot.model?.provider ?? "fixture")/\(snapshot.model?.id ?? "model")"]),
                 HostedSettingsReviewSchema.key("model.queue[role=background]", "workers", "Background models",
                     .array([.string("fixture/memory-a"), .string("fixture/memory-b")]), "2 models", "list", order: 44, essential: true)
             ] + HostedSettingsReviewSchema.additionalKeys.filter {
@@ -293,6 +294,10 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 .object(["name": .string($0), "description": .string("Session tool details for \($0)."),
                          "parameters": .object(["type": .string("object"), "properties": .object([:])])])
             })])
+        case "settings.options" where params["key"]?.stringValue == "model.ref[role=chat]":
+            result = .object(["key": .string("model.ref[role=chat]"), "source": .string("catalog.models"), "dependsOn": .array([]),
+                "options": .array(["model", "alternative"].map { .object(["value": .object(["provider": .string("fixture"), "id": .string($0)]),
+                    "label": .string($0 == "model" ? "Fixture Model" : "Alternative Model")]) })])
         case "settings.options":
             result = .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
                 "dependsOn": .array([]), "options": .array(HostedSettingsReviewSchema.tools.map {
@@ -301,6 +306,10 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         case "settings.change":
             let params = frame.objectValue?["params"]?.objectValue ?? [:]
             let change = params["changes"]?.arrayValue?.first?.objectValue
+            if params["dryRun"]?.boolValue == true {
+                result = .object(["tier": .string("quiet"), "changes": .array([])])
+                break
+            }
             if change?["key"]?.stringValue == "model.ref[role=chat]" {
                 modelRequests += 1
                 modelRequestContinuation.yield(modelRequests)

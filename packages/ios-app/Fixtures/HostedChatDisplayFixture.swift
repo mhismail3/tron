@@ -918,7 +918,8 @@ private actor HostedHomeShellGateway {
             controlCount += 1
             let memoryChange = params["changes"]?.arrayValue?.first?.objectValue
             if method == "settings.change", memoryChange?["key"]?.stringValue == "model.ref[role=chat]" {
-                guard memoryChange?["layer"]?.stringValue == "session" else { return taskRefusal() }
+                guard memoryChange?["layer"]?.stringValue == "session",
+                      params["target"]?.objectValue?["kind"]?.stringValue == "home" else { return taskRefusal() }
                 settingsModelOverridden = memoryChange?["op"]?.stringValue != "unset"
                 return (fixtureSettingsChangeResult(key: "model.ref[role=chat]"), nil)
             }
@@ -1074,7 +1075,7 @@ private actor HostedHomeShellGateway {
                 "options": .array(choices)]),
         ])
         let contextWindowKey: JSONValue = .object([
-            "key": .string("model.contextWindow"), "qualifiers": .object(["model": .string("anthropic/claude-opus-5-5")]),
+            "key": .string("model.contextWindow"), "qualifiers": .object(["model": .string("anthropic/\(settingsModelOverridden ? "claude-opus-5-5" : "claude-haiku-5-5")")]),
             "group": .string("model"), "value": .number(200_000), "display": .string("200,000 tokens"),
             "layer": .string("global"), "applied": .bool(true), "badges": .array([]),
             "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")]), .object(["layer": .string("global")])]),

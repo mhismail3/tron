@@ -22,7 +22,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         return app
     }
 
-    // Temporary native visual-review journeys; no behavioral regression assertion before approval.
+    // Approved geometry: the ring tracks the combined title/subtext at every reviewed size.
     @MainActor func testRingAlignmentReviewLight() { captureRingAlignment("light", arguments: []) }
     @MainActor func testRingAlignmentReviewDark() { captureRingAlignment("dark", arguments: ["-home-dark"]) }
     @MainActor func testRingAlignmentReviewXXXL() {
@@ -34,6 +34,8 @@ final class TronHomeSheetsUITests: XCTestCase {
         let ring = element(app, "home-context-ring").frame
         let title = app.staticTexts["969K tokens left"].frame
         let detail = element(app, "home-context-detail").frame
+        XCTAssertEqual(ring.midY, title.union(detail).midY, accuracy: 1.5,
+                       "The ring centers on title and subtext together, not only the title")
         let measurement = XCTAttachment(string: "ring=\(ring), title=\(title), detail=\(detail), combinedMidY=\(title.union(detail).midY), delta=\(ring.midY - title.union(detail).midY)")
         measurement.name = "1752-\(name)-observed-geometry"
         measurement.lifetime = .keepAlways

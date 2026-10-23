@@ -20,7 +20,7 @@ enum HostedSettingsReviewSchema {
     static func key(_ id: String, _ group: String, _ label: String, _ value: JSONValue,
                     _ display: String, _ control: String = "number", order: Double = 10,
                     help: String = "", subgroup: String? = nil, essential: Bool = false,
-                    layer: String = "global", options: [JSONValue] = []) -> JSONValue {
+                    layer: String = "global", options: [JSONValue] = [], qualifiers: [String: String]? = nil) -> JSONValue {
         let layers = id.hasPrefix("model.queue") || id == "permissions.budget.task" ? ["session", "global"]
             : ["model.ref[role=chat]", "model.thinking[role=chat]", "tools.active"].contains(id) ? ["session", "project", "global"]
             : id.hasPrefix("tools.codemode") || id.hasPrefix("tools.shell") || id == "model.offered" || id == "model.thinkingBudgets" ? ["project", "global"]
@@ -45,6 +45,11 @@ enum HostedSettingsReviewSchema {
             presentation["optionsSource"] = .object(["name": .string("catalog.tools"), "dependsOn": .array([])])
             row["presentation"] = .object(presentation)
         }
+        if id == "model.ref[role=chat]", var presentation = row["presentation"]?.objectValue {
+            presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
+            row["presentation"] = .object(presentation)
+        }
+        if let qualifiers { row["qualifiers"] = .object(qualifiers.mapValues(JSONValue.string)) }
         if let subgroup { row["subgroup"] = .string(subgroup) }
         return .object(row)
     }

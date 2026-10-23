@@ -1458,6 +1458,34 @@ describe("Tron Home activations end to end", () => {
       await f.service.invoke(client, "home.memory.view", params) as unknown as HomeMemoryView;
     const memoryItems = (view: HomeMemoryView) => view.lines.flatMap(line => line.item ? [line.item] : []);
 
+    it("serves safe canonical tool display without relabelling edited plain replies", async () => {
+      const { f, current, entryId } = await browserFixture("tool-display");
+      const plainId = current.sessionManager.appendMessage(fauxAssistantMessage("Ordinary reply, not a tool call"));
+      const callId = current.sessionManager.appendMessage({ ...fauxAssistantMessage(""), content: [
+        { type: "toolCall", id: "display-read", name: "read", arguments: { path: "/workspace/private/one.ts" } },
+        { type: "toolCall", id: "display-second", name: "bash", arguments: { command: "arbitrary command text must not be a label" } },
+      ] });
+      const items = memoryItems(await page(f, { limit: 50 }));
+      expect(items.find(item => item.evidence.entryId === callId)?.display).toEqual({
+        kind: "tool-call", toolName: "read", target: "one.ts", toolCount: 2,
+      });
+      expect(items.find(item => item.evidence.entryId === entryId)?.display).toEqual({ kind: "tool-result", toolName: "read", status: "ok" });
+      expect(items.find(item => item.evidence.entryId === plainId)?.display).toBeUndefined();
+      current.sessionManager.appendContextEdit(plainId, { content: [{ type: "text", text: "Edited plain reply" }] });
+      current.sessionManager.appendContextEdit(callId, { content: [{ type: "text", text: "Edited tool-call projection" }] });
+      current.sessionManager.appendContextEdit(entryId, { content: [{ type: "text", text: "Edited result" }] });
+      const beforeRead = await readFile(current.sessionFile!, "utf8");
+      const edited = memoryItems(await page(f, { limit: 50 }));
+      expect(edited.find(item => item.evidence.entryId === plainId)?.display).toBeUndefined();
+      expect(edited.find(item => item.evidence.entryId === callId)?.display).toEqual({ kind: "tool-call" });
+      expect(edited.find(item => item.evidence.entryId === entryId)?.display).toEqual({ kind: "tool-result" });
+      expect(await readFile(current.sessionFile!, "utf8")).toBe(beforeRead);
+      current.sessionManager.appendContextEdit(callId, null);
+      const omitted = memoryItems(await page(f, { limit: 50 })).find(item => item.evidence.entryId === callId)!;
+      expect(omitted.projection.omitted).toBe(true); expect(omitted.display).toBeUndefined();
+      report.cases.push({ case: "memory-browser-tool-display", canonicalRoleClassification: true, editedFactsSuppressed: true });
+    });
+
     it("bounds and replays pages across chapters, separating projection from exact canonical evidence", async () => {
       const { f, old, current, canonical, entryId } = await browserFixture("pages");
       const before = [await readFile(old.sessionFile!, "utf8"), await readFile(current.sessionFile!, "utf8")];
@@ -1480,6 +1508,7 @@ describe("Tron Home activations end to end", () => {
       expect(new Set(items.map(item => item.evidence.sessionId))).toEqual(new Set([old.id, current.id]));
       const projected = items.find(item => item.evidence.entryId === entryId)!;
       expect(projected).toMatchObject({ kind: "echo", attribution: "tool", projection: { format: "memory-projection" } });
+      expect(projected.display).toEqual({ kind: "tool-result", toolName: "read", status: "ok" });
       expect(projected.timestamp).toEqual(expect.any(String));
       expect(projected.projection.omissions).toEqual(expect.arrayContaining(["credentials", "capped", "browser-cap"]));
       expect(projected.projection.text).not.toContain("fixture-token");
