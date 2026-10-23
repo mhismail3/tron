@@ -5,7 +5,7 @@ import { visitCanonicalSessionEntries } from "../../episodic/episodic-source.js"
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../../sessions/runtime-registry.js";
-import { HomeChapterMaterializer, type HomeRuntimePort } from "./home-chapter-materialization.js";
+import { HomeChapterMaterializer } from "./home-chapter-materialization.js";
 import { HomeGlobalResources } from "./home-global-resources.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
@@ -146,7 +146,7 @@ export interface HomeOwnerOptions {
   trust: TrustService;
   sessions: HomeSessionPort;
   /** K1 runtime operations the reserved-successor procedure is built on. */
-  runtimes: HomeRuntimePort;
+  runtimes: ConstructorParameters<typeof HomeChapterMaterializer>[1];
   diagnostic?: HomeDiagnostic;
   /** The Tron internal workspace whose capability state holds Home's memory. */
   workspace: TronWorkspace;

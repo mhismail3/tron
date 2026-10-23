@@ -55,7 +55,6 @@ import { CompactionOperationPolicy } from "../kernel/run/compaction-policy.js";
 import type { RequestPolicy } from "../kernel/host/request-policy.js";
 import { HomeChapterIdentityReplacementError } from "../modules/home/home-chapter-state.js";
 import type { SessionLineageState } from "../kernel/host/session-lineage.js";
-import type { HomeMaterializationAuthority } from "../modules/home/home-append-guard.js";
 import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js";
 import { createHomeTaskWorkerExtension } from "../kernel/delegation/task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../kernel/delegation/task-subagents.js";
@@ -628,7 +627,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     public readonly hooks: RuntimeSlotHooks,
     interrupted: boolean,
     creationProfile: SessionProfile = ORDINARY_SESSION_PROFILE,
-    homeMaterializationAuthority?: HomeMaterializationAuthority,
+    homeMaterializationAuthority?: object,
     // Rebound only by `bindTaskWorker` when a settled task resumes in place (#929).
     public taskWorker?: HomeTaskReportOwner,
   ) {
@@ -829,7 +828,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     hooks: RuntimeSlotHooks,
     interrupted: boolean,
     creationProfile: SessionProfile = ORDINARY_SESSION_PROFILE,
-    homeMaterializationAuthority?: HomeMaterializationAuthority,
+    homeMaterializationAuthority?: object,
     taskWorker?: HomeTaskReportOwner,
   ): Promise<RuntimeSlot> {
     const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile, homeMaterializationAuthority, taskWorker);

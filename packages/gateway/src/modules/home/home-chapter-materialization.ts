@@ -1,51 +1,25 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { GatewayError } from "../../errors.js";
-import type { FileEntry, SessionEntry } from "../../kernel/pi/coding-agent.js";
+import type { SessionEntry } from "../../kernel/pi/coding-agent.js";
 import { SessionManager } from "../../kernel/pi/coding-agent.js";
 import type { TrustService } from "../../admin/trust-service.js";
 import type { RuntimeSlot } from "../../sessions/runtime-slot.js";
 import { branchFromSessionEntries } from "../../sessions/session-branch.js";
 import { appendChatSettingsSnapshot } from "../../sessions/session-settings.js";
 import { appendContextWindowSnapshot } from "../../providers/context-window-policy.js";
-import type { HomeMaterializationAuthority } from "./home-append-guard.js";
+import type { LineageRuntimePort } from "../../kernel/host/session-lineage.js";
 import type { HomeDiagnostic } from "./home-diagnostic.js";
 import type { HomeOwner } from "./home-owner.js";
 import { scanReservedHomeSession } from "./home-session-recovery.js";
 import { HOME_SESSION_PROFILE_NAME } from "./home-session-profile.js";
-
-/** The K1 runtime operations a reserved successor is built on. The registry
- * owns the slots map, its mutex, admission and publication; Home owns only the
- * chapter procedure around them. */
-export interface HomeRuntimePort {
-  /** One construction flight per session: a live runtime is returned as
-   * `existing`; a running flight is joined; otherwise `construct` runs once. */
-  materializeRuntime(sessionId: string, construct: () => Promise<RuntimeSlot>): Promise<{ slot: RuntimeSlot; existing: boolean }>;
-  /** The live runtime now, without the registry mutex. */
-  runtimeOf(sessionId: string): RuntimeSlot | undefined;
-  /** The live runtime as the registry mutex orders it. */
-  liveRuntime(sessionId: string): Promise<RuntimeSlot | undefined>;
-  sessionDirectory(cwd: string): string;
-  /** A session's canonical entries: from its live runtime, else the durable file. */
-  canonicalEntries(sessionId: string): Promise<{ entries: readonly FileEntry[] | null; live: boolean }>;
-  /** Builds and publishes a runtime over a caller-prepared manager inside one
-   * slot admission. `failed` runs first when anything inside it throws. */
-  createRuntimeOver(sessionId: string, build: {
-    profile: string;
-    prepare(): Promise<SessionManager>;
-    authority(): HomeMaterializationAuthority;
-    admitted(slot: RuntimeSlot): void;
-    published(slot: RuntimeSlot): Promise<void>;
-    failed(): void;
-  }): Promise<RuntimeSlot>;
-}
 
 /** Home's reserved-successor procedure: claim, recover or create the chapter's
  * session, then publish the observed materialization (k0-kernel.md §5). */
 export class HomeChapterMaterializer {
   constructor(
     private readonly owner: HomeOwner,
-    private readonly runtimes: HomeRuntimePort,
+    private readonly runtimes: LineageRuntimePort<RuntimeSlot>,
     private readonly trust: TrustService,
     private readonly diagnostic: HomeDiagnostic | undefined,
   ) {}

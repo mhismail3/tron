@@ -1,6 +1,6 @@
 import { HOME_SESSION_PROFILE_NAME } from "../modules/home/home-session-profile.js";
 import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
-import type { SessionLineagePolicy } from "../kernel/host/session-lineage.js";
+import type { LineageRuntimePort, SessionLineagePolicy } from "../kernel/host/session-lineage.js";
 import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../kernel/host/kernel-lifecycle.js";
 import { HOME_TOOL_NAMES } from "../modules/home/home-runtime-policy.js";
 import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
@@ -68,7 +68,6 @@ import { workspaceModule } from "../workspace/workspace-module.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
 import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { scanReservedHomeSession } from "../modules/home/home-session-recovery.js";
-import type { HomeRuntimePort } from "../modules/home/home-chapter-materialization.js";
 import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
 import { syncDurably } from "../util/durable-json.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
@@ -921,7 +920,7 @@ export class RuntimeRegistry {
   }
 
   /** Builds and publishes a runtime over a caller-prepared manager inside one slot admission (K1). */
-  private async createRuntimeOver(sessionId: string, build: Parameters<HomeRuntimePort["createRuntimeOver"]>[1]): Promise<RuntimeSlot> {
+  private async createRuntimeOver(sessionId: string, build: Parameters<LineageRuntimePort<RuntimeSlot>["createRuntimeOver"]>[1]): Promise<RuntimeSlot> {
     return this.startRuntime<RuntimeSlot>({
       reason: "create", failed: build.failed, manager: build.prepare, admitted: build.admitted, published: build.published,
       create: manager => {

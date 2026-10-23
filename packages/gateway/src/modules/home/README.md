@@ -45,6 +45,8 @@ unaffected by every rule here.
 - **Materialization** claims one attempt per reserved chapter, strictly scans candidate JSONL
   and records the exact SDK path first; bad evidence blocks without touching bytes. A ledger
   publication error fences all Home admissions until reload and slot retirement finish.
+  The neutral kernel lineage port owns runtime construction/publication; Home alone
+  interprets the write-authority fields. Slots retain a frozen defensive copy.
 - **Logical route.** `home.open` creates no runtime. `home.prompt` persists its receipt
   (identity, binding revision, chapter) before materialization and replays completed ones.
 

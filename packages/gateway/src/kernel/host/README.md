@@ -19,6 +19,8 @@ chapter state or a second Stop fence. `input-admission.ts` carries delivery iden
 bounds, the canonical context-delivery receipt type and live envelope readers;
 delivery state and budgeting remain module-owned.
 `session-profile.ts` owns the neutral immutable runtime recipe and ordinary defaults.
+`session-lineage.ts` also owns `LineageRuntimePort<Runtime>`: single-flight runtime
+construction/publication with an opaque issuer-interpreted authority object.
 
 ## Contract
 
