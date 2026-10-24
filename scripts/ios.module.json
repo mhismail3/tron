@@ -15,6 +15,7 @@
     "ios.module.json",
     "patch-ios-gateway-e2e-xctestrun.py",
     "test-ios-artifact-validator.sh",
+    "test-ios-process-evidence.py",
     "test-ios-share-browser.js",
     "test-ios-test-infrastructure.py",
     "test-tron-ios-device-share.py",

@@ -16,6 +16,7 @@ from typing import NoReturn
 
 TIMEOUT_EXIT = 124
 INTERRUPTED_EXIT = 130
+PROCESS_TREE_MAX_BYTES = 64 * 1024
 
 
 def atomic_json(path: Path, value: dict[str, object]) -> None:
@@ -67,21 +68,27 @@ def capture_evidence(evidence_dir: Path, process: subprocess.Popen[bytes], reaso
             text=True,
             timeout=5,
         ).stdout
-        (evidence_dir / "process-tree.txt").write_text(snapshot_text)
     except (OSError, subprocess.SubprocessError) as error:
         (evidence_dir / "process-tree.txt").write_text(f"ps capture failed: {error}\n")
+        return
+
+    owned_lines: list[str] = []
+    candidates: list[tuple[int, str]] = []
+    for line in snapshot_text.splitlines():
+        fields = line.strip().split(None, 5)
+        if len(fields) != 6 or not fields[0].isdigit() or fields[2] != str(process.pid):
+            continue
+        # Names are labels, never ownership: other worktrees use the same tools.
+        owned_lines.append(line)
+        pid, command = int(fields[0]), fields[5]
+        label = "xcodebuild" if "xcodebuild" in command else "testmanagerd" if "testmanagerd" in command else "test-host"
+        candidates.append((pid, label))
+    (evidence_dir / "process-tree.txt").write_bytes(
+        ("\n".join(owned_lines) + "\n").encode()[:PROCESS_TREE_MAX_BYTES]
+    )
 
     sample = Path("/usr/bin/sample")
     if sample.exists():
-        candidates: list[tuple[int, str]] = []
-        for line in snapshot_text.splitlines():
-            fields = line.strip().split(None, 5)
-            if len(fields) != 6 or not fields[0].isdigit():
-                continue
-            pid, pgid, command = int(fields[0]), fields[2], fields[5]
-            if pgid == str(process.pid) or any(name in command for name in ("testmanagerd", "TronMobile", "xcodebuild")):
-                label = "xcodebuild" if "xcodebuild" in command else "testmanagerd" if "testmanagerd" in command else "test-host"
-                candidates.append((pid, label))
         for index, (pid, label) in enumerate(candidates[:4]):
             try:
                 sampled = subprocess.run(

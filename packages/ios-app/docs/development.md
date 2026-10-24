@@ -100,6 +100,7 @@ scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
 scripts/tron-ios-test run          # the smoke set (SMOKE_ONLY_TESTING in scripts/tron-ios-test)
 scripts/tron-ios-test checkpoint   # build, then the smoke set
 python3 scripts/test-ios-test-infrastructure.py
+python3 scripts/test-ios-process-evidence.py  # owned-group timeout diagnostics; no Xcode
 ```
 
 Repeat `--only-testing` for adjacent journeys; a class selector runs the class. Count the methods
@@ -122,6 +123,8 @@ PPID 1 nor high CPU proves abandonment: diagnose with `scripts/tron-ios-test sta
 - Only the exact owned simulator UDID reaches Xcode; only marked simulators are ever deleted.
 - `build` stamps `build-identity.json`; `run` refuses products from another worktree or source
   state (exit 74). `scripts/ios-test-process.py` owns each Xcode process group and its deadlines.
+  Timeout process listings and samples include only that group; the saved process listing is
+  capped at 64 KiB, with up to four samples capped at 256,000 bytes each.
 - A pass needs one executed, passing test and writes `coverage.json`; partial evidence is kept.
 - A hosted launch without a fixture argument renders the production `ProductionSceneRoot`.
 
