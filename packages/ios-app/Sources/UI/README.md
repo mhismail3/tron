@@ -38,6 +38,9 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   on update, not only creation. Composer placeholders use the shared muted text role, not
   saturated primary ink. Normal usage labels, context-ring arcs and Changes states use primary;
   warning and failure colors remain semantic. Memory kind icons use smaller primary symbols.
+  `ProcessActivityOrb` defaults to primary ink for both solving dots and thinking strands;
+  dashboard activity and the composer's active/recent activity and extension-content glyph
+  share that identity. Their geometry, motion and neutral glass surfaces stay unchanged.
 - Section headings are visible by default, including dashboard and top-level Settings groups.
   Settings drill-in pages opt in with `TronSettingsSections(hidesLoneHeading: true)`;
   only a structurally lone section loses its heading, never its explanatory detail.

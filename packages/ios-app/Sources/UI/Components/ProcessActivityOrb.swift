@@ -349,7 +349,7 @@ struct ProcessActivityOrb: View {
     var size: CGFloat = 20
     var isVisible = true
     var animationSpeedScale = 1.0
-    var accent: Color = .tronEmerald
+    var accent: Color = .tronPrimary
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase

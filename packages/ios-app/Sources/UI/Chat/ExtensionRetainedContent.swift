@@ -187,13 +187,11 @@ struct UnifiedActivityButton: View {
                             size: ComposerControlMetrics.symbolSize,
                             weight: .semibold
                         ))
-                        .foregroundStyle(Color.tronEmerald)
+                        .foregroundStyle(Color.tronPrimary)
                         .transition(.opacity)
                 } else {
                     ProcessActivityOrb(
-                        mode: kind == .activeSubagents ? .solving : .thinking,
-                        isVisible: true,
-                        accent: .tronSubagent
+                        mode: kind == .activeSubagents ? .solving : .thinking
                     )
                     .transition(.opacity)
                 }
