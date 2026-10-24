@@ -127,7 +127,9 @@ The calling agent assesses cited sources itself.
 
 Runtime oracles: the shared-web cases in
 `../sessions/home-research-tools.integration.test.ts`,
-`web-research-child.integration.test.ts` (pinned roles/real Pi children), and
+`web-research-child.integration.test.ts` (pinned roles/real Pi children),
+`web-research-resume.integration.test.ts` (live-child reload refusal, idle parent
+reload and actual retained-role resume with scoped content and a fresh read), and
 `web-research.integration.test.ts` (real sockets, dispatch/body/redirect/TTL).
 
 ## Invariants

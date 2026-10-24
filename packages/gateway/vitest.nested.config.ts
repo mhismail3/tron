@@ -16,6 +16,7 @@ export const nestedTestFiles = [
   "src/machine/terminal-idle.e2e.test.ts",
   "src/kernel/delegation/home-managed-provider.integration.test.ts",
   "src/knowledge/web-research-child.integration.test.ts",
+  "src/knowledge/web-research-resume.integration.test.ts",
   "src/kernel/delegation/managed-attribution.integration.test.ts",
   "src/kernel/delegation/managed-subagents.integration.test.ts",
   "src/kernel/delegation/managed-subagents.invalid-entry.integration.test.ts",

@@ -88,14 +88,6 @@ function recordCase(name: string, data: Record<string, unknown>): void {
 
 // ---- the injected web transport -------------------------------------------------
 
-/** DuckDuckGo-shaped results markup, the structural parts the parser reads. */
-const SEARCH_HTML = `<html><body>
-<div class="result"><h2><a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Falpha&amp;rut=abc">Alpha &amp; result</a></h2>
-<a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Falpha">First <b>snippet</b> text</a></div>
-<div class="result"><h2><a rel="nofollow" class="result__a" href="https://example.org/beta">Beta result</a></h2>
-<a class="result__snippet" href="https://example.org/beta">Second snippet</a></div>
-</body></html>`;
-
 const ARTICLE_BODY = "This is the research article body, written as a real paragraph with enough substance that readable-text extraction keeps it whole. ".repeat(4);
 const PAGE_HTML = `<html><head><title>Research Fixture Page</title></head><body><article><h1>Research Fixture Page</h1><p>${ARTICLE_BODY}</p></article></body></html>`;
 const HUGE_HTML = `<html><head><title>Huge</title></head><body><article><p>${"huge page text that keeps repeating so the result must be capped. ".repeat(3_000)}</p></article></body></html>`;
@@ -114,10 +106,18 @@ function webTransport() {
       fetcher: async (input: string | URL): Promise<Response> => {
         const url = new URL(String(input));
         fetchedUrls.push(url.href);
-        if (url.hostname === "html.duckduckgo.com") return htmlResponse(SEARCH_HTML);
         if (url.pathname === "/huge") return htmlResponse(HUGE_HTML);
         if (url.pathname === "/redirect-private") return new Response(null, { status: 302, headers: { location: "http://127.0.0.1/secret" } });
         return htmlResponse(PAGE_HTML);
+      },
+      providerFetcher: async (input: string | URL, init?: RequestInit): Promise<Response> => {
+        const body = JSON.parse(String(init?.body));
+        const data = new URL(String(input)).pathname.endsWith("/search") ? { web: [
+          { url: "https://example.org/alpha", title: "Alpha & result", description: "First snippet text" },
+          { url: "https://example.org/beta", title: "Beta result", description: "Second snippet" },
+        ] } : { markdown: String(body.url).endsWith("/huge") ? "huge page text that keeps repeating so the result must be capped. ".repeat(3_000) : ARTICLE_BODY,
+          metadata: { sourceURL: body.url, title: String(body.url).endsWith("/huge") ? "Huge" : "Research Fixture Page", statusCode: 200 } };
+        return Response.json({ success: true, data });
       },
       resolveHost: async (hostname: string): Promise<string[]> =>
         hostname === "private.internal" ? ["10.0.0.5"] : [PUBLIC_ADDRESS],
@@ -448,17 +448,17 @@ describe("Tron Home research tools", () => {
     await writeFile(filePath, Array.from({ length: 12 }, (_, i) => `line ${i + 1} of the trusted file`).join("\n"));
 
     // F1: every tool, one activation each; the seam must never refuse.
-    const [search] = await toolAnswers(f, "search the web", [{ name: "web_search", args: { query: "alpha beta", maxResults: 2 } }]);
+    const [search] = await toolAnswers(f, "search the web", [{ name: "web_search", args: { op: "search", query: "alpha beta" } }]);
     expect(search!.isError).toBe(false);
-    expect(search!.details).toEqual({ status: "ok" });
+    expect(search!.details).toMatchObject({ status: "ok", requestId: expect.any(String) });
     expect(search!.text).toContain("Untrusted web content");
     expect(search!.text).toContain("Alpha & result");
     expect(search!.text).toContain("https://example.org/alpha");
     expect(search!.text).toContain("Second snippet");
 
-    const [fetch] = await toolAnswers(f, "fetch the page", [{ name: "web_fetch", args: { url: "https://example.org/page" } }]);
-    expect(fetch!.details).toEqual({ status: "ok" });
-    expect(fetch!.text).toContain("Title: Research Fixture Page");
+    const [fetch] = await toolAnswers(f, "fetch the page", [{ name: "web_search", args: { op: "read", url: "https://example.org/page" } }]);
+    expect(fetch!.details).toMatchObject({ status: "ok", requestId: expect.any(String) });
+    expect(JSON.parse(fetch!.text).sources[0].title).toBe("Research Fixture Page");
     expect(fetch!.text).toContain("the research article body");
 
     const [sessions] = await toolAnswers(f, "find that chat", [{ name: "session_search", args: { query: "RESEARCH-NEEDLE-ALPHA" } }]);
@@ -510,23 +510,23 @@ describe("Tron Home research tools", () => {
   it("keeps every result under the projection cap, refuses SSRF and trust escapes, and cannot reach Knowledge writes", async () => {
     const f = await fixture("bounds");
 
-    // F2: a huge page is capped at the tool, inside the 30,000-character
-    // projection bound (plus the truncation marker).
-    const [huge] = await toolAnswers(f, "fetch the huge page", [{ name: "web_fetch", args: { url: "https://example.org/huge" } }]);
-    expect(huge!.details).toEqual({ status: "ok" });
-    expect(huge!.text.length).toBeLessThanOrEqual(31_000);
-    expect(huge!.text).toContain("[truncated");
+    // F2: the complete shared-tool JSON, including citations and diagnostics,
+    // stays inside the stronger UTF-8 byte cap and declares incomplete content.
+    const [huge] = await toolAnswers(f, "fetch the huge page", [{ name: "web_search", args: { op: "read", url: "https://example.org/huge" } }]);
+    expect(huge!.details).toMatchObject({ status: "partial" });
+    expect(Buffer.byteLength(huge!.text, "utf8")).toBeLessThanOrEqual(8192);
+    expect(JSON.parse(huge!.text).sources[0].truncated).toBe(true);
 
     // F5: private destinations are refused before any transport use.
     const fetchedBefore = f.fetchedUrls.length;
     const [local, privateHost, redirected] = await toolAnswers(f, "try unsafe fetches", [
-      { name: "web_fetch", args: { url: "http://127.0.0.1/secret" } },
-      { name: "web_fetch", args: { url: "https://private.internal/data" } },
-      { name: "web_fetch", args: { url: "https://example.org/redirect-private" } },
+      { name: "web_search", args: { op: "read", url: "http://127.0.0.1/secret" } },
+      { name: "web_search", args: { op: "read", url: "https://private.internal/data" } },
+      { name: "web_search", args: { op: "read", url: "https://example.org/redirect-private" } },
     ]);
-    expect(local!.details).toMatchObject({ status: "refused" });
-    expect(privateHost!.details).toMatchObject({ status: "refused" });
-    expect(redirected!.details).toMatchObject({ status: "refused" });
+    expect(local!.details).toMatchObject({ status: "error", reason: "blocked" });
+    expect(privateHost!.details).toMatchObject({ status: "error", reason: "blocked" });
+    expect(redirected!.details).toMatchObject({ status: "error", reason: "blocked" });
     // Only the redirecting hop itself was fetched; neither private target was.
     expect(f.fetchedUrls.slice(fetchedBefore)).toEqual(["https://example.org/redirect-private"]);
 
@@ -963,7 +963,7 @@ describe("Tron Home research tools", () => {
     recordCase("delegated-admission", { parentStatus: parent!.details?.status, childStatus: child!.details?.status, malformedStatus: malformed!.details?.status });
   }, 60_000);
 
-  it("leaves ordinary sessions without research tools or the Home-only modules", async () => {
+  it("gives ordinary sessions shared web without Home-only research tools or modules", async () => {
     const f = await fixture("ordinary");
     const ordinary = await f.registry.create(f.project);
     await ordinary.setModel(PROVIDER, MODEL_ID);
@@ -972,9 +972,10 @@ describe("Tron Home research tools", () => {
       extensions: Array<{ name: string }>;
     };
     const tools = context.availableTools.map((tool) => tool.name);
-    // F6: the Tron-owned research registrations exist only in Home. (`knowledge`
-    // stays: ordinary sessions get tron-core's full Knowledge tool.)
-    for (const name of ["web_search", "web_fetch", "session_search", "session_read", "read_file"]) {
+    // F6: web is shared, while Home-only research registrations stay in Home.
+    // Ordinary sessions retain tron-core's full Knowledge tool.
+    expect(tools).toContain("web_search");
+    for (const name of ["web_fetch", "session_search", "session_read", "read_file"]) {
       expect(tools, `ordinary sessions must not register ${name}`).not.toContain(name);
     }
     expect(tools).toContain("knowledge");
