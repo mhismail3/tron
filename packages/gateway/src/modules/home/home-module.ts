@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { lstat, stat } from "node:fs/promises";
+import { readCanonicalSession } from "../../episodic/episodic-source.js";
 import { GatewayError } from "../../errors.js";
 import { createQueueSummarizer } from "../../episodic/episodic-compactor.js";
 import type { ModelQueueOwner } from "../../providers/model-queue.js";
@@ -19,7 +21,7 @@ import type { InputAdmissionPolicy } from "../../kernel/host/input-admission.js"
 import type { SessionLineagePolicy } from "../../kernel/host/session-lineage.js";
 import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../../kernel/host/kernel-lifecycle.js";
 import { assertChapterWritable } from "./home-chapter-state.js";
-import { homeOpenRefusal } from "./home-session-recovery.js";
+import { coldHomeChapterMetrics, homeOpenRefusal } from "./home-session-recovery.js";
 import { homeInputAdmission } from "./home-input-admission.js";
 import { dispatchWithWorkerChoice, type HomeWorkerChoicePort } from "./home-task-worker-choice.js";
 import type { TrustService } from "../../admin/trust-service.js";
@@ -28,7 +30,7 @@ import { readHomeSessionEntry, type HomeSessionReader } from "./home-session-rea
 import type { HomeMemoryDiagnostic } from "./home-memory.js";
 import type { HomeRequestRecord } from "./home-request-policy.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
-import type { EpisodicSummarizer } from "../../episodic/episodic-contract.js";
+import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import type { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
@@ -76,7 +78,7 @@ export interface HomeComposition {
 
 /** The registry's generic operations and reads Home is built over (k0-kernel.md §5). */
 export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "runtimes" | "taskSessions" | "memoryModels" | "knowledge"> {
-  sessions: Omit<HomeOwnerOptions["sessions"], "homeModel" | "chooseHomeModel">;
+  sessions: Omit<HomeOwnerOptions["sessions"], "homeModel" | "chooseHomeModel" | "chapterMetrics" | "hasConversation">;
   readSearchCut: Pick<RuntimeRegistry, "readSearchCut">["readSearchCut"];
   settings(): SettingsModel | undefined;
   changes(): SettingsChangePath | undefined;
@@ -94,6 +96,36 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
       tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
       sessions: {
         ...ports.sessions,
+        chapterMetrics: async (sessionId) => {
+          const slot = ports.runtimes.runtimeOf(sessionId);
+          if (!slot) return coldHomeChapterMetrics(ports.sessions.sessionFile(sessionId));
+          const path = slot.sessionFile;
+          const bytes = path ? await stat(path).then(info => info.size).catch(error => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+            throw error;
+          }) : 0;
+          return { bytes, entries: slot.canonicalEntryCount, quiescent: !slot.isBusy };
+        },
+        hasConversation: async (sessionId, expectedPath) => {
+          const slot = ports.runtimes.runtimeOf(sessionId);
+          if (!slot || slot.sessionFile !== expectedPath || slot.isDisposed) return false;
+          let fileInfo;
+          try { fileInfo = await lstat(expectedPath); }
+          catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+            throw error;
+          }
+          if (!fileInfo.isFile() || fileInfo.isSymbolicLink()) return false;
+          const cut = await readCanonicalSession({
+            path: expectedPath, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+          });
+          const hasConversation = cut.branch.some(entry => {
+            if (entry.type !== "message") return false;
+            const message = entry.raw.message as { role?: unknown } | undefined;
+            return message?.role === "user" || message?.role === "assistant";
+          });
+          return cut.tornBytes === 0 && hasConversation;
+        },
         homeModel: async () => (await ports.settings()?.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"], { storeState: false }))
           ?.keys[0]?.value as { provider: string; id: string } | undefined,
         chooseHomeModel: async (sessionId, model) => {

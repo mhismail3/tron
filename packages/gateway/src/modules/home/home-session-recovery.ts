@@ -123,6 +123,35 @@ export async function homeOpenRefusal(sessionId: string, path: string, chapter: 
   }
 }
 
+/** Cold admission measures the finite canonical file cut, not a zero-valued
+ * live projection. Streaming newline counts retain no transcript bodies; SDK
+ * construction separately validates the canonical graph before opening it.
+ * The native path read is already started so this keeps its original await cut. */
+export async function coldHomeChapterMetrics(pathRead: Promise<string | undefined>): Promise<{ bytes: number; entries: number; quiescent: boolean }> {
+  const path = await pathRead;
+  if (!path) throw new GatewayError("conflict", "Home chapter metrics are unavailable", true);
+  const handle = await open(path, "r");
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.size === 0) throw new GatewayError("conflict", "Home chapter metrics are unavailable", true);
+    let lines = 0;
+    let lastByte: number | undefined;
+    const stream = handle.createReadStream({ autoClose: false, end: before.size - 1, highWaterMark: 64 * 1_024 });
+    for await (const chunk of stream) {
+      const bytes = chunk as Buffer;
+      for (let index = bytes.indexOf(0x0a); index !== -1; index = bytes.indexOf(0x0a, index + 1)) lines += 1;
+      lastByte = bytes.at(-1);
+    }
+    const after = await handle.stat();
+    const current = await lstat(path);
+    if (lastByte !== 0x0a || lines < 1 || before.size !== after.size || before.mtimeMs !== after.mtimeMs
+      || current.isSymbolicLink() || current.dev !== before.dev || current.ino !== before.ino || current.size !== before.size) {
+      throw new GatewayError("conflict", "Home chapter changed while measuring admission", true);
+    }
+    return { bytes: before.size, entries: lines - 1, quiescent: true };
+  } finally { await handle.close(); }
+}
+
 export type ReservedHomeSessionScan =
   | { action: "absent" }
   | { action: "adopt"; path: string }

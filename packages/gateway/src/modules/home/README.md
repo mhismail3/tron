@@ -35,6 +35,10 @@ unaffected by every rule here.
   explicit chapter choices, including their K6 scope, actor and chapter fence.
   Native ports supply the late settings owners and current runtime; a host with
   no settings owner retains its existing SDK-only choice behavior.
+- **Chapter evidence.** Home owns live/cold size and entry measurements and
+  durable-conversation checks. Native ports provide only current runtime and
+  canonical path reads; cold measurement fences the finite file cut by size,
+  time and identity, and publication requires an untorn conversation branch.
 - **Workspace.** `<tronHome>/gateway/home/workspace` (`0700`, empty) is recorded **untrusted**.
   Global skills and prompt templates feed the composer only (the model sees one when inserted);
   `home-global-resources.ts` reloads them live as their agent-directory inputs change.

@@ -65,7 +65,7 @@ import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
 import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
+import { readCanonicalSessionFile } from "../episodic/episodic-source.js";
 import { syncDurably } from "../util/durable-json.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import {
@@ -737,36 +737,6 @@ export class RuntimeRegistry {
         sessionFile: (sessionId) => this.homeSessionFile(sessionId),
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
         waitingForUser: (sessionId) => this.slots.get(sessionId)?.catalogWaitingForUser ?? false,
-        chapterMetrics: async (sessionId) => {
-          const slot = this.slots.get(sessionId);
-          if (!slot) return this.coldHomeChapterMetrics(sessionId);
-          const path = slot.sessionFile;
-          const bytes = path ? await stat(path).then(info => info.size).catch(error => {
-            if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
-            throw error;
-          }) : 0;
-          return { bytes, entries: slot.canonicalEntryCount, quiescent: !slot.isBusy };
-        },
-        hasConversation: async (sessionId, expectedPath) => {
-          const slot = this.slots.get(sessionId);
-          if (!slot || slot.sessionFile !== expectedPath || slot.isDisposed) return false;
-          let fileInfo;
-          try { fileInfo = await lstat(expectedPath); }
-          catch (error) {
-            if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-            throw error;
-          }
-          if (!fileInfo.isFile() || fileInfo.isSymbolicLink()) return false;
-          const cut = await readCanonicalSession({
-            path: expectedPath, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
-          });
-          const hasConversation = cut.branch.some(entry => {
-            if (entry.type !== "message") return false;
-            const message = entry.raw.message as { role?: unknown } | undefined;
-            return message?.role === "user" || message?.role === "assistant";
-          });
-          return cut.tornBytes === 0 && hasConversation;
-        },
 
         replaceRuntimeForProfile: (sessionId, commit) => this.replaceHomeRuntimeForProfile(sessionId, commit),
         serializeSessionMutation: (sessionId, commit) => this.serializeSessionMutation(sessionId, commit),
@@ -4016,34 +3986,6 @@ export class RuntimeRegistry {
         throw new GatewayError("conflict", "A stale Home runtime could not be retired after ledger publication uncertainty", true);
       }
     }
-  }
-
-  /** Cold admission measures the finite canonical file cut, not a zero-valued
-   * live projection. Streaming newline counts retain no transcript bodies; SDK
-   * construction separately validates the canonical graph before opening it. */
-  private async coldHomeChapterMetrics(sessionId: string): Promise<{ bytes: number; entries: number; quiescent: boolean }> {
-    const path = await this.homeSessionFile(sessionId);
-    if (!path) throw new GatewayError("conflict", "Home chapter metrics are unavailable", true);
-    const handle = await open(path, "r");
-    try {
-      const before = await handle.stat();
-      if (!before.isFile() || before.size === 0) throw new GatewayError("conflict", "Home chapter metrics are unavailable", true);
-      let lines = 0;
-      let lastByte: number | undefined;
-      const stream = handle.createReadStream({ autoClose: false, end: before.size - 1, highWaterMark: 64 * 1_024 });
-      for await (const chunk of stream) {
-        const bytes = chunk as Buffer;
-        for (let index = bytes.indexOf(0x0a); index !== -1; index = bytes.indexOf(0x0a, index + 1)) lines += 1;
-        lastByte = bytes.at(-1);
-      }
-      const after = await handle.stat();
-      const current = await lstat(path);
-      if (lastByte !== 0x0a || lines < 1 || before.size !== after.size || before.mtimeMs !== after.mtimeMs
-        || current.isSymbolicLink() || current.dev !== before.dev || current.ino !== before.ino || current.size !== before.size) {
-        throw new GatewayError("conflict", "Home chapter changed while measuring admission", true);
-      }
-      return { bytes: before.size, entries: lines - 1, quiescent: true };
-    } finally { await handle.close(); }
   }
 
   /** The canonical file behind one session id: the live runtime's when it has
