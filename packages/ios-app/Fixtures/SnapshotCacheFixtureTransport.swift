@@ -86,6 +86,9 @@ actor SnapshotCacheFixtureSocket: GatewaySocketConnection {
     func receive() async throws -> Data {
         if !hello {
             hello = true
+            // The factory is synchronous. Bind before exposing hello instead
+            // of spawning an unowned initialization task that can race events.
+            await gateway.attach(self)
             return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"cache-fixture-machine","machineName":"Cache fixture","gatewayChannel":"stable","capabilities":["sessions.v1","session-archive.v1"]}"#.utf8)
         }
         if !frames.isEmpty { return frames.removeFirst() }
