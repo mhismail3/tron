@@ -119,7 +119,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   [Home contract](../../../../gateway/docs/home.md). Task Stop and Steer live in the worker's chat
   (#911). `HomeContextSummaryCard` shows a native used-fraction ring, state and pressure-colored
   worker pills, cumulative Total tokens (`input + output + cacheRead + cacheWrite`) and the latest
-  cache-hit percentage, with the ring centered against title and subtext together. Both Manage
+  cache-hit percentage, with the ring centered against title and subtext together. Its stats line
+  uses `SessionSummaryTypography.usageValue` (the shared Dynamic Type code family at the settings
+  subtext size), independent of the selected reading family. Both Manage
   surfaces place their model card immediately below the summary. Normal sessions retain their own summary. Profile's Confirm pill alone
   opens bulk confirmation; Retire uses destructive styling throughout. Chapter summaries keep
   their message/reply/task counts in wrapping shared tags. Individual task Result and Worker
