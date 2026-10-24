@@ -687,7 +687,7 @@ describe("Home task cold reconciliation", () => {
     homeOwnerOf(f.registry).publicationUncertain = true;
     const live = () => (f.registry as any).slots.has(f.home.sessionId) as boolean;
     let retired = false;
-    const retirement = (f.registry as any).retireUncertainHomeRuntimes().then(() => { retired = true; });
+    const retirement = (homeOwnerOf(f.registry) as any).options.sessions.retireHomeRuntimes().then(() => { retired = true; });
     try {
       await new Promise(resolve => setTimeout(resolve, 50));
       expect(retired).toBe(false);
