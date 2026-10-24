@@ -84,7 +84,7 @@ active-process state and joined abort operation; it does not own prompt admissio
 `compactionPolicyModule` retains its registration position. Its live SessionContext
 compaction port checks Stop before capture and publishes synchronously; policy restore
 runs at session start. Settings resolution is injected from the admin settings
-owner; compaction keeps operation capture, validation failures and budget
+I/O owner through K6 admission; compaction keeps operation capture, validation failures and budget
 application, not an independent layer resolver. Pi remains canonical for files
 and compaction execution.
 Ownership is declared by [`gateway/run`](../../run.module.json).

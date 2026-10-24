@@ -34,6 +34,8 @@ approvals, their admission bounds, settlement, expiry and untold outcomes.
 `scope-resolution.ts` owns binding admission from declared Session/Project permissions,
 canonical targets, the public/storage scope mapping and the canonical sorted-qualifier
 instance identity used by resolution badges and outside-change observation.
+`settings-admission.ts` owns operational model/thinking selection and synchronous
+compaction resolution/validation; provider eligibility remains supplied I/O.
 `settings-sdk-manager.ts` owns SDK storage admission: declared Project projection,
 validation and locked raw-document merging through the public Pi storage seam.
 It never creates a second settings store; ignored repository fields remain owned
