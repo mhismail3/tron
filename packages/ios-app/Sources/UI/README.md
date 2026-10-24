@@ -34,6 +34,8 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
 - Appearance stores the app's primary identity in `AppearanceSettings.themeColor`: Emerald,
   Deep Burgundy or Olive Gold. `Color.tronPrimary` reads that observable owner; ink, title,
   icon, container and pill tint share the adaptive ink without recreating navigation or chats.
+  Dark Burgundy uses lifted wine-colored ink; primary-tinted glass derives from that same
+  palette rather than a separate pink surface color. Light Burgundy stays independent.
   Semantic status and resource identities stay independent. UIKit inputs refresh primary ink
   on update, not only creation. Composer placeholders use the shared muted text role, not
   saturated primary ink. Normal usage labels, context-ring arcs and Changes states use primary;

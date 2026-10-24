@@ -13,7 +13,7 @@ enum ThemeColor: String, CaseIterable, Identifiable, Sendable {
         switch self { case .emerald: "#065F46"; case .burgundy: "#57152F"; case .oliveGold: "#514B10" }
     }
     var darkHex: String {
-        switch self { case .emerald: "#6EE7B7"; case .burgundy: "#EA7882"; case .oliveGold: "#D9CB75" }
+        switch self { case .emerald: "#6EE7B7"; case .burgundy: "#D96A94"; case .oliveGold: "#D9CB75" }
     }
     var ink: Color { Color(lightHex: lightHex, darkHex: darkHex) }
 }
