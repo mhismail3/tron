@@ -87,7 +87,7 @@ actor SnapshotCacheFixtureSocket: GatewaySocketConnection {
     func receive() async throws -> Data {
         if !hello {
             hello = true
-            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"cache-fixture-machine","machineName":"Cache fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"cache-fixture-machine","machineName":"Cache fixture","gatewayChannel":"stable","capabilities":["sessions.v1","session-archive.v1"]}"#.utf8)
         }
         if !frames.isEmpty { return frames.removeFirst() }
         if closed || Task.isCancelled { throw CancellationError() }

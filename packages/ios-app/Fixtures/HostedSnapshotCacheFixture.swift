@@ -185,10 +185,10 @@ private final class SnapshotCacheFixtureDriver {
         lifecycleJob = Task { @MainActor [self] in
             do {
                 try model.profiles.save(second, token: "fixture-only-token", selecting: false)
-                // Only the selected fake socket is in play; do not start a
-                // secondary dashboard URLSession client for the retired input.
-                try model.profiles.setEnabled(false, for: first)
+                // The profile store correctly refuses disabling the selected
+                // profile; switch through the lifecycle owner before disabling it.
                 await model.switchGateway(second)
+                model.setGatewayEnabled(false, profile: first)
                 completion = "done"
                 inspectFiles()
             } catch { phase = "error: \(error)" }
