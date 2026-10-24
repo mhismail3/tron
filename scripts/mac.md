@@ -33,6 +33,8 @@ confirmation; Finder replacement and launch remain operator actions.
 children over private fixture files and OS locks. Its platform boundary substitutes
 identity documents for signed apps and a held OS lock for a host writer. It proves
 backup/refusal/resume/evidence behavior, not signing, service detection or launch.
+Production `main()` admission/error mapping and recovery-archive commands are outside
+this lock; the fixture enters the parser and workflow, not the live-host entry point.
 Results, including failures, go to `test-results/mac-reinstall/report.json`.
 
 `python3 scripts/test-tron-mac-replace.py --checkout-only` exercises real Git/LFS
@@ -53,4 +55,4 @@ Replacement step journals retain exact failures and rollback state.
 ## Not here
 
 Mac UI, launcher/payload packaging, native helper implementations, Gateway lifecycle
-and releases remain with their package owners. No maintenance test touches Stable.
+and releases remain with their package owners. No maintenance test touches real Stable.

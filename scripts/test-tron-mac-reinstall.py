@@ -144,6 +144,12 @@ class ReinstallWindow(unittest.TestCase):
         self.cli('--verify', error='wrong-installed-app')
         # Only fixture identity data changes; no app is installed or launched.
         (self.installed / 'identity.json').write_bytes((self.candidate / 'identity.json').read_bytes())
+        backup = operation / 'backups/agent/session.jsonl'
+        original = backup.read_bytes()
+        backup.write_bytes(b'corruption after fixture identity changed')
+        self.cli('--confirm-offline', error='backup-mismatch')
+        self.assertEqual(self.receipt()['phase'], 'awaiting-replacement')
+        backup.write_bytes(original)
         self.cli('--confirm-offline')
         self.assertEqual(self.receipt()['phase'], 'awaiting-resume')
         self.cli('--verify', error='fixture-not-resumed')
@@ -184,6 +190,14 @@ class ReinstallWindow(unittest.TestCase):
         self.cli('--confirm-offline', error='selection-backup-changed')
         self.assertEqual(self.operation(), successor)
         self.assertFalse(channel.exists())
+        (retired / 'pending.json').write_bytes(b'{"version":"fixture-pending"}')
+        (self.installed / 'identity.json').write_bytes((self.candidate / 'identity.json').read_bytes())
+        (self.root / 'resumed').touch()
+        self.cli('--confirm-offline')
+        self.cli('--verify')
+        self.assertEqual(self.receipt()['phase'], 'verified')
+        self.assertEqual(self.receipt()['bundledSelection']['operationId'], predecessor.name)
+        self.assertTrue((retired / 'current.json').is_file())
 
 
 if __name__ == '__main__':
