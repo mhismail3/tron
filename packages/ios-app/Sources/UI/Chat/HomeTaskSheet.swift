@@ -214,6 +214,7 @@ struct HomeTaskSheet: View {
                     TronSettingsRow(icon: Self.taskIcon(task.lifecycle, outcome: terminal.outcome),
                                     title: terminal.outcome.rawValue.capitalized, subtitle: terminal.reason,
                                     subtitleLineLimit: nil, accent: accent)
+                        .tronListMarkers("home-task-result")
                 }
             }
             workerCard(task)

@@ -311,6 +311,7 @@ struct SettingsSectionLinks: View {
                                 subtitleColor: .tronTextSecondary)
             }
             .accessibilityIdentifier("settings-section-\(id)-open")
+            .tronListMarkers("settings-section-\(id)-open")
         }
     }
 

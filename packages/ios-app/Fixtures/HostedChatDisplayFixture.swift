@@ -188,6 +188,7 @@ extension EnvironmentValues {
 
 @MainActor
 struct HostedHomeDashboardFixture: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var model: AppModel
     @State private var ready = false
     @State private var error: String?
@@ -274,6 +275,8 @@ struct HostedHomeDashboardFixture: View {
                             Text("prompt-route:\(promptRoute)").accessibilityIdentifier("fixture.home-prompt-route")
                             Text("opened-session:\(openedSession)").accessibilityIdentifier("fixture.home-opened-session")
                             Text(configuredModel).accessibilityIdentifier("fixture.home-configured-model")
+                            Text("family=\(FontSettings.shared.selectedFamily.rawValue); dynamicType=\(dynamicTypeSize)")
+                                .accessibilityIdentifier("fixture.home-typography")
                             Text("abort-count:\(abortCount)").accessibilityIdentifier("fixture.home-abort-count")
                             Text("home-status-count:\(homeStatusCount)")
                                 .accessibilityIdentifier("fixture.home-status-count")

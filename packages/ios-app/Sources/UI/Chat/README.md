@@ -114,9 +114,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   cache-hit percentage, with the ring centered against title and subtext together. Both Manage
   surfaces place their model card immediately below the summary. Normal sessions retain their own summary. Profile's Confirm pill alone
   opens bulk confirmation; Retire uses destructive styling throughout. Chapter summaries keep
-  their message/reply/task counts in wrapping shared tags. Individual task details use shared
-  settings-row subtext for Result and Worker values, including multiline check-ins and live-run
-  times; task titles keep their existing typography.
+  their message/reply/task counts in wrapping shared tags. Individual task details use the same
+  `TronSettingsRow` subtitle typography as Home Settings drill-in rows for Result and Worker
+  values, including multiline check-ins and live-run times; task titles keep their existing typography.
   Memory summary counts live in their shared tag (“Summary of N messages”, singular for one),
   not a duplicate subtext line; message attribution tags are unchanged. History Entry metadata
   labels share the title’s leading edge past its icon; values stay trailing-aligned.

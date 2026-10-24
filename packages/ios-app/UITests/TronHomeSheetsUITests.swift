@@ -140,6 +140,45 @@ final class TronHomeSheetsUITests: XCTestCase {
         measurement.name = "1771-\(name)-subtext-geometry"; measurement.lifetime = .keepAlways; add(measurement)
     }
 
+    @MainActor func testCurrentSettingsTaskSubtextLight() { captureCurrentSettingsTaskSubtext("light", arguments: []) }
+    @MainActor func testCurrentSettingsTaskSubtextDark() { captureCurrentSettingsTaskSubtext("dark", arguments: ["-home-dark"]) }
+    @MainActor func testCurrentSettingsTaskSubtextAccessibility() {
+        captureCurrentSettingsTaskSubtext("ax-large", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
+    }
+
+    @MainActor private func captureCurrentSettingsTaskSubtext(_ name: String, arguments: [String]) {
+        let app = launchPolishManage(arguments + ["-home-task-padding-review"])
+        defer { app.terminate() }
+        let settings = element(app, "home-manage-settings")
+        for _ in 0..<8 where !settings.isHittable { app.swipeUp() }
+        open(app, settings, ready: "home-settings-content", name: "current-settings-reference")
+        expandSheet(app, title: "Home Settings")
+        shot("1771-current-settings-\(name)")
+        let reference = element(app, "settings-section-model-open-subtext")
+        let referenceFrame = reference.frame
+        let reading = app.staticTexts["fixture.home-typography"].label
+        closeTop(app)
+        let tasks = element(app, "home-manage-tasks")
+        for _ in 0..<8 where !tasks.isHittable { app.swipeDown() }
+        open(app, tasks, ready: "home-task-terminal", name: "current-settings-tasks")
+        expand(app, done: "home-sheet-done-tasks")
+        let terminal = element(app, "home-task-terminal")
+        for _ in 0..<8 where !terminal.isHittable { app.swipeUp() }
+        open(app, terminal, ready: "home-task-detail", name: "current-settings-task")
+        expand(app, done: "home-sheet-done-task")
+        shot("1771-current-task-header-\(name)")
+        app.swipeUp()
+        shot("1771-current-task-\(name)")
+        let geometry = ["home-task-result-subtext", "home-task-model-subtext", "home-task-subagents-subtext",
+                        "home-task-spend-subtext", "home-task-checkin-subtext"].map {
+            "\($0): \(element(app, $0).frame)"
+        }.joined(separator: "\n")
+        let measurement = XCTAttachment(string: "\(reading)\ncurrentSettingsSubtitle: \(referenceFrame)\n\(geometry)")
+        measurement.name = "1771-current-settings-task-geometry-\(name)"
+        measurement.lifetime = .keepAlways
+        add(measurement)
+    }
+
     @MainActor func testWorkerRowsUseStandardSubtext() {
         let app = launchPolishManage(); defer { app.terminate() }
         openPolishProfileItem(app)
