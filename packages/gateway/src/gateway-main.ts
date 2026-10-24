@@ -13,7 +13,7 @@ import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
 import { macTerminalHostCommand } from "./machine/mac-terminal-host.js";
-import { terminalIdleLimitMs } from "./admin/settings-schema.js";
+import { terminalIdleLimitMs } from "./kernel/settings/settings-schema.js";
 import { createGatewaySettingsSchema } from "./main/settings-schema.js";
 import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
 import { SettingsRiskEvaluator } from "./admin/settings-risk.js";

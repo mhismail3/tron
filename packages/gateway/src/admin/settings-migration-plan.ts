@@ -4,7 +4,7 @@ import { StringDecoder } from "node:string_decoder";
 import { lstat, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { type SettingsSchema } from "./settings-schema.js";
+import { type SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { migrateApprovals, migrateAuditEntry, migrateObserved, migrationObject,
   migrationRefusal, migrationSetPath, parseMigrationObject } from "../kernel/settings/settings-migration-state.js";
 

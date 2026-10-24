@@ -2,8 +2,8 @@
 
 ## Purpose
 
-The Gateway's administration owners: the settings model (one declared key per
-setting, resolved over layers and changed through one audited, tiered path) and
+The Gateway's administration owners: settings store/options adapters and the
+one audited, tiered change path over the kernel's declared schema/resolver, and
 the Mac-side admin services: trust, provider auth, packages and resources, MCP,
 custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 
@@ -11,9 +11,9 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 
 | Area | Files |
 |---|---|
-| Settings declarations and binding admission | `settings-schema.ts` (`createSettingsSchema`, `KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
+| Settings declarations and binding admission | [kernel schema](../kernel/settings/settings-schema.ts) (`createSettingsSchema`, `KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
 | SDK scope admission and operational model selection | `settings-sdk-manager.ts`, `settings-admission.ts` |
-| Resolution and presentation | `settings-resolver.ts`, `settings-model.ts` (`SettingsModel`), `settings-presentation.ts`, `settings-project-diagnostics.ts` |
+| Store/options adapter and presentation | `settings-model.ts` (`SettingsModel`), `settings-presentation.ts`; [kernel resolver and diagnostics](../kernel/settings/README.md) |
 | Change path and policy | `settings-model.ts` (`SettingsChangePath`), `settings-risk.ts`; audit/approvals: [kernel settings](../kernel/settings/README.md) |
 | Migration transaction, backups and publication | `settings-migration.ts`, `settings-migration-plan.ts`; shared-store value transforms: [kernel settings](../kernel/settings/README.md) |
 | Appliers and outside writers | `project-settings-writer.ts`, `trust-service.ts`, `settings-outside.ts` (`OutsideChanges`) |
@@ -100,7 +100,7 @@ are installed; schema access never evaluates their late-bound service getter.
 
 ## Entry points
 
-- Add or change a key: `settings-schema.ts` `KEYS`, then
+- Add or change a key: [kernel schema](../kernel/settings/settings-schema.ts) `KEYS`, then
   `scripts/tron docs update` refreshes the key table in the contract doc.
 - Resolve a target: `SettingsModel.resolve` / `options`.
 - Change or decide: `SettingsChangePath.change`, `undo`, `applyAgain`, `decide`,

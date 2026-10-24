@@ -13,7 +13,7 @@ import { createSettingsManager } from "./settings-sdk-manager.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
-import { terminalIdleLimitMs } from "./settings-schema.js";
+import { terminalIdleLimitMs } from "../kernel/settings/settings-schema.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { Resolution, ResolvedKey, SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";

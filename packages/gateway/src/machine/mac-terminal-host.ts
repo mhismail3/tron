@@ -6,7 +6,7 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TERMINAL_IDLE_DEFAULT_MINUTES, TERMINAL_IDLE_KEY } from "../admin/settings-schema.js";
+import { TERMINAL_IDLE_DEFAULT_MINUTES, TERMINAL_IDLE_KEY } from "../kernel/settings/settings-schema.js";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import { TerminalService } from "./terminal-service.js";

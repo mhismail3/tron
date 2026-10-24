@@ -1,8 +1,8 @@
-import { type SettingsTarget, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "../kernel/settings/tool-contract.js";
+import { type SettingsTarget, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "./tool-contract.js";
 import { dirname, join } from "node:path";
 import { keyForHome, keyDefault, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
-import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "../kernel/settings/settings-types.js";
-import { canonicalSettingsTarget, scopeAdmitted, scopeForStore, instanceId } from "../kernel/settings/scope-resolution.js";
+import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "./settings-types.js";
+import { canonicalSettingsTarget, scopeAdmitted, scopeForStore, instanceId } from "./scope-resolution.js";
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
 
 

@@ -10,8 +10,8 @@ import { gitHeadState, projectSettingsPath, stagedBlob, type GitHeadState } from
 import type { ChangeEntry, SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { type GitResult, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
 import type { OutsideMark, FloorOverrides } from "../kernel/settings/settings-types.js";
-import { keyDefault, floorFor, recordSubject, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
-import { readPath } from "./settings-resolver.js";
+import { keyDefault, floorFor, recordSubject, type SettingsSchema, type Binding, type KeyDeclaration } from "../kernel/settings/settings-schema.js";
+import { readPath } from "../kernel/settings/settings-resolver.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
 import { formatStoredSetting } from "../kernel/settings/settings-types.js";
 /**

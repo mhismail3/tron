@@ -1,4 +1,4 @@
-import type { SettingsSchema } from "../admin/settings-schema.js";
+import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { HOME_SESSION_PROFILE_NAME } from "../modules/home/home-session-profile.js";
 import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
 import type { LineageRuntimePort, SessionLineagePolicy } from "../kernel/host/session-lineage.js";

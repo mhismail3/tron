@@ -17,7 +17,7 @@ import type { ChangeContext, SessionAppliers, SessionSettingsSource, SettingsCha
 import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { ApprovalRequest } from "../kernel/settings/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
-import { SECTIONS, recordSubject, type SettingsSchema } from "../admin/settings-schema.js";
+import { SECTIONS, recordSubject, type SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, type HomeProfileOp } from "../modules/home/home-profile.js";
 import type { ObservedStore } from "../admin/settings-outside.js";
 import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";

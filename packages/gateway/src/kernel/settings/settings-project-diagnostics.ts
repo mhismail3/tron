@@ -1,4 +1,4 @@
-import type { Diagnostic } from "../kernel/settings/tool-contract.js";
+import type { Diagnostic } from "./tool-contract.js";
 import type { SettingsSchema } from "./settings-schema.js";
 
 /** An exact JSON path for applied values; diagnostics bound untrusted key names. */
