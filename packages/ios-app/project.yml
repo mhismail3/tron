@@ -327,11 +327,16 @@ targets:
           - "**/README.md"
     dependencies:
       - target: TronMobile
+      # Kernel contracts execute in the separate UI-test runner process, not
+      # the app process; that runner needs its own real Core framework image.
+      - target: TronMobileCore
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.uitests
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: TronMobile
+        SWIFT_PACKAGE_NAME: TronIOSApp
 
   # Displayed Swift app journeys (#889), independently runnable as their own bundle.
   TronSwiftAppUITests:
