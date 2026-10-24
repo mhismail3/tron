@@ -282,6 +282,7 @@ struct HomeTaskSheet: View {
                                             subtitleLineLimit: nil, accent: accent, subtitleFont: TronTypography.subheadline) {
                                 TronStatusPill(text: run.state.capitalized, accent: accent)
                             }
+                            .tronListMarkers("home-task-run-\(run.id)")
                         }
                         if runs.total > runs.runs.count {
                             TronSettingsDivider(accent: accent)

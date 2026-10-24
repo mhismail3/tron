@@ -119,110 +119,96 @@ final class TronHomeSheetsUITests: XCTestCase {
         shot("1723-retire-destructive")
     }
 
-    /// Native task-detail visual review, using the same long check-in in both themes.
-    @MainActor func testTaskDetailSubtextReviewLight() { captureTaskDetailSubtext("light", arguments: []) }
-    @MainActor func testTaskDetailSubtextReviewDark() { captureTaskDetailSubtext("dark", arguments: ["-home-dark"]) }
-
-    @MainActor private func captureTaskDetailSubtext(_ name: String, arguments: [String]) {
-        let app = launchPolishManage(arguments + ["-home-task-padding-review"])
-        defer { app.terminate() }
-        open(app, element(app, "home-manage-tasks"), ready: "home-task-terminal", name: "task-subtext-list")
-        expand(app, done: "home-sheet-done-tasks")
-        open(app, element(app, "home-task-terminal"), ready: "home-task-detail", name: "task-subtext-detail")
-        expand(app, done: "home-sheet-done-task")
-        shot("1771-\(name)-task-header")
-        app.swipeUp()
-        shot("1771-\(name)-task-result-worker")
-        let geometry = ["home-task-result-subtext", "home-task-model-subtext", "home-task-subagents-subtext", "home-task-spend-subtext", "home-task-checkin-subtext"].map {
-            "\($0): \(element(app, $0).frame)"
-        }.joined(separator: "\n")
-        let measurement = XCTAttachment(string: geometry)
-        measurement.name = "1771-\(name)-subtext-geometry"; measurement.lifetime = .keepAlways; add(measurement)
+    /// Native UI contracts: approved task reading size, full check-in wrapping,
+    /// and unchanged default metadata rows. Survives the one-off review captures.
+    @MainActor func testTaskReadingSubtextLight() { exerciseTaskReadingSubtext("light", arguments: []) }
+    @MainActor func testTaskReadingSubtextDark() { exerciseTaskReadingSubtext("dark", arguments: ["-home-dark"]) }
+    @MainActor func testTaskReadingSubtextAccessibility() {
+        exerciseTaskReadingSubtext("ax-large", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
     }
 
-    @MainActor func testDelegateSubtextReferenceLight() { captureDelegateSubtextReference("light") }
-    @MainActor func testDelegateSubtextReferenceDark() { captureDelegateSubtextReference("dark") }
-
-    @MainActor private func captureDelegateSubtextReference(_ theme: String) {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", "delegate", "-polish-\(theme)"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 15))
-        shot("1771-delegate-\(theme)-task-worker")
-        let geometry = ["Project", "Worker session", "Operation", "Model", "Thinking", "Reason"].map {
-            "\($0): \(element(app, "home-tool-row-\($0)-subtext").frame)"
-        }.joined(separator: "\n")
-        let measurement = XCTAttachment(string: geometry)
-        measurement.name = "1771-delegate-\(theme)-geometry"; measurement.lifetime = .keepAlways; add(measurement)
-        app.swipeUp()
-        shot("1771-delegate-\(theme)-subagents")
-    }
-
-    @MainActor func testCurrentSettingsTaskSubtextLight() { captureCurrentSettingsTaskSubtext("light", arguments: []) }
-    @MainActor func testCurrentSettingsTaskSubtextDark() { captureCurrentSettingsTaskSubtext("dark", arguments: ["-home-dark"]) }
-    @MainActor func testCurrentSettingsTaskSubtextAccessibility() {
-        captureCurrentSettingsTaskSubtext("ax-large", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
-    }
-
-    @MainActor private func captureCurrentSettingsTaskSubtext(_ name: String, arguments: [String]) {
+    @MainActor private func exerciseTaskReadingSubtext(_ name: String, arguments: [String]) {
         let app = launchPolishManage(arguments + ["-home-task-padding-review"])
         defer { app.terminate() }
         let settings = element(app, "home-manage-settings")
         for _ in 0..<8 where !settings.isHittable { app.swipeUp() }
-        open(app, settings, ready: "home-settings-content", name: "current-settings-reference")
+        open(app, settings, ready: "home-settings-content", name: "default-metadata-settings")
         expandSheet(app, title: "Home Settings")
-        shot("1771-current-settings-\(name)")
-        let reference = element(app, "settings-section-model-open-subtext")
-        let referenceFrame = reference.frame
-        let reading = app.staticTexts["fixture.home-typography"].label
+        let metadata = element(app, "settings-section-model-open-subtext")
+        let settingsTitle = element(app, "settings-section-model-open-title")
+        XCTAssertTrue(metadata.exists && settingsTitle.exists)
+        let metadataHeight = metadata.frame.height
+        XCTAssertGreaterThan(metadataHeight, 0)
+        XCTAssertLessThan(metadataHeight, settingsTitle.frame.height,
+                          "Default shared-row callers keep their smaller metadata style")
+        shot("1771-default-metadata-\(name)")
         closeTop(app)
         let tasks = element(app, "home-manage-tasks")
         for _ in 0..<8 where !tasks.isHittable { app.swipeDown() }
-        open(app, tasks, ready: "home-task-terminal", name: "current-settings-tasks")
+        open(app, tasks, ready: "home-task-terminal", name: "reading-subtext-tasks")
         expand(app, done: "home-sheet-done-tasks")
         let terminal = element(app, "home-task-terminal")
         for _ in 0..<8 where !terminal.isHittable { app.swipeUp() }
-        open(app, terminal, ready: "home-task-detail", name: "current-settings-task")
+        open(app, terminal, ready: "home-task-detail", name: "reading-subtext-task")
         expand(app, done: "home-sheet-done-task")
-        shot("1771-current-task-header-\(name)")
+        shot("1771-reading-header-\(name)")
         app.swipeUp()
-        shot("1771-current-task-\(name)")
-        let geometry = ["home-task-result-subtext", "home-task-model-subtext", "home-task-subagents-subtext",
-                        "home-task-spend-subtext", "home-task-checkin-subtext"].map {
-            "\($0): \(element(app, $0).frame)"
-        }.joined(separator: "\n")
-        let measurement = XCTAttachment(string: "\(reading)\ncurrentSettingsSubtitle: \(referenceFrame)\n\(geometry)")
-        measurement.name = "1771-current-settings-task-geometry-\(name)"
+        // The unchanged row title and approved subheadline share sizeBody (14pt),
+        // reading family and Dynamic Type curve, but keep their different weights.
+        // Compare inside this sheet so presentation transforms cannot skew parity.
+        let title = element(app, "home-task-model-title")
+        XCTAssertTrue(title.exists)
+        let lineHeight = title.frame.height
+        XCTAssertGreaterThan(lineHeight, 0)
+        var geometry = ["metadataLine=\(metadataHeight)", "readingLine=\(lineHeight)",
+                        app.staticTexts["fixture.home-typography"].label]
+        for id in ["home-task-result", "home-task-model", "home-task-subagents", "home-task-spend"] {
+            let value = element(app, "\(id)-subtext")
+            XCTAssertTrue(value.exists)
+            // This fixture's Subagents value wraps onto two lines at accessibility text.
+            let lines = name == "ax-large" && id == "home-task-subagents" ? 2.0 : 1.0
+            XCTAssertEqual(value.frame.height / lines, lineHeight, accuracy: 0.25,
+                           "\(id) uses the approved reading size, not metadata")
+            geometry.append("\(id): \(value.frame)")
+        }
+        let checkin = element(app, "home-task-checkin-subtext")
+        XCTAssertTrue(checkin.exists)
+        XCTAssertGreaterThan(checkin.frame.height / lineHeight, 6.5,
+                             "The long check-in wraps to at least seven lines without the default two-line cap")
+        XCTAssertTrue(element(app, "home-task-checkin").label.contains("report the remaining scope"),
+                      "The complete check-in, including its final Next instruction, remains available")
+        geometry.append("checkin: \(checkin.frame)")
+        let measurement = XCTAttachment(string: geometry.joined(separator: "\n"))
+        measurement.name = "1771-reading-geometry-\(name)"
         measurement.lifetime = .keepAlways
         add(measurement)
+        shot("1771-reading-worker-\(name)")
     }
 
     @MainActor func testWorkerRowsUseStandardSubtext() {
         let app = launchPolishManage(); defer { app.terminate() }
-        openPolishProfileItem(app)
-        let reference = element(app, "home-profile-item-retire-subtext")
-        XCTAssertTrue(reference.exists)
-        let lineHeight = reference.frame.height
-        XCTAssertGreaterThan(lineHeight, 0)
-        app.buttons["home-sheet-done-profile-item"].tap()
-        app.buttons["home-sheet-done-profile"].tap()
         open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks-polish")
         expand(app, done: "home-sheet-done-tasks")
         open(app, element(app, "home-task-active"), ready: "home-task-detail", name: "worker-polish")
         expand(app, done: "home-sheet-done-task")
         app.swipeUp()
-        for id in ["home-task-model", "home-task-subagents", "home-task-spend"] {
+        // The approved regular subheadline shares the unchanged row title's
+        // sizeBody and Dynamic Type curve; weight stays regular, not semibold.
+        let reference = element(app, "home-task-model-title")
+        XCTAssertTrue(reference.exists)
+        let lineHeight = reference.frame.height
+        XCTAssertGreaterThan(lineHeight, 0)
+        for id in ["home-task-model", "home-task-subagents", "home-task-spend", "home-task-run-run-live"] {
             let value = element(app, "\(id)-subtext")
             XCTAssertTrue(value.exists)
-            XCTAssertEqual(value.frame.height, lineHeight, accuracy: 0.25, "\(id) matches a standard row's rendered subtext")
+            XCTAssertEqual(value.frame.height, lineHeight, accuracy: 0.25, "\(id) matches the approved subheadline reading size")
         }
         let checkin = element(app, "home-task-checkin-subtext")
         XCTAssertTrue(checkin.exists)
         // The fixture's time, step, Done and Next each fit on one line here.
-        // Compare rendered line height to a real standard row, not a font constant.
+        // Compare native reading-size geometry, not a new point-size constant.
         XCTAssertEqual(checkin.frame.height / 4, lineHeight, accuracy: 0.25,
-                       "Latest check-in uses the same standard subtext as the single-line Worker values")
+                       "Latest check-in uses the approved subheadline size of the single-line Worker values")
         let measurement = XCTAttachment(string: "standardLine=\(lineHeight), latestCheckin=\(checkin.frame.height)")
         measurement.name = "1723-worker-font-geometry"; measurement.lifetime = .keepAlways; add(measurement)
         shot("1723-worker-standard-subtext")

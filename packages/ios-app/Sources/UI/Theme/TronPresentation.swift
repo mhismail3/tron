@@ -1751,6 +1751,7 @@ struct TronSettingsRow<Trailing: View>: View {
                 } else {
                     Text(title).font(titleFont).foregroundStyle(titleColor)
                         .fixedSize(horizontal: false, vertical: true)
+                        .tronListMarker(.title)
                 }
                 if let subtitle {
                     Text(subtitleIsMarkdown
