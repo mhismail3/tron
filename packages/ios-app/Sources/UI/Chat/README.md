@@ -67,7 +67,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 - **Composer.** Drafting works during opening and active turns; only submission waits. Send
   replaces Stop when a draft exists; `acceptsQueuedPrompts` alone allows steering (the send
   menu picks steer or follow-up). Stop is preemptive and fenced by the operation ID. Queue cards
-  (≤ 364 points) open an editor; long-press reorders or clears. `/` completes commands and
+  (≤ 364 points) open an editor; long-press reorders or clears. Steer cards and their editor
+  share primary ink and `tronPrimarySurface` glass with Manage Home/Session; follow-up stays purple. `/` completes commands and
   prompts, `@` skills only (`skill-prompt.v1`). Picker secondary copy uses
   `TronTypography.settingsRowSubtext`, matching Manage Home rows; quote annotations (#899) compose `<annotation>`
   blocks into the sent text; Save hands the keyboard straight to the composer input (#1597). Camera, photo and file attachments stage locally (10 items, 25 MiB);
@@ -179,6 +180,11 @@ review views and both workspace layout candidates (capture only, not acceptance)
 `TronHomeSummaryTypographyUITests` renders the production Home summary beside an independent
 `SessionSummaryTypography.usageValue` reference, comparing glyph/line metrics and Dynamic Type growth
 with distinct reading/code families through `HostedHomeSummaryTypographyFixture`.
+
+`TronQueuedSteerThemeUITests/testQueuedCardAndEditorFollowPrimaryTheme` samples native queued-card
+fill/arrow and editor glass across all primary themes in light/dark, comparing dark Burgundy's
+surface with Manage Home rather than its lifted ink. It also opens/saves the real queued editor.
+`TronThemeColorPreviewUITests/testQueuedSteerThemes` is navigation-only visual review, not regression proof.
 
 Classes under `TronMobileUITests/`: `TronHomeControlsUITests`, `TronHomeDashboardUITests`, `TronHomeSheetsUITests`,
 `TronConsolidatedUIRegressionTests` (Memory/canonical navigation, metadata, usage loading,

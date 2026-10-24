@@ -36,10 +36,14 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
 
     private var accent: Color {
         switch behavior {
-        case .steer: return .tronEmerald
+        case .steer: return .tronPrimary
         case .followUp: return .tronPurple
         case .ordinary, .unknown: return .tronTextSecondary
         }
+    }
+
+    private var surfaceAccent: Color {
+        behavior == .steer ? .tronPrimarySurface : accent
     }
 
     var body: some View {
@@ -59,11 +63,12 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
             // The whole prompt surface is the editor affordance, not only its
             // title/text. Attachment controls still retain their own actions.
             .modifier(ChatPromptActivationModifier(action: onActivate))
-            .glassEffect(
-                isInteractive
-                    ? .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)).interactive()
-                    : .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)),
-                in: shape
+            .tronGlassSurface(
+                accent: surfaceAccent,
+                cornerRadius: ChatPromptContainerStyle.cornerRadius,
+                tintOpacity: ChatPromptContainerStyle.tintOpacity,
+                interactive: isInteractive,
+                respectsSettingsTheme: false
             )
         }
     }
@@ -95,7 +100,7 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
                         width: QueuedMessageCardLayout.arrowContainerSize,
                         height: QueuedMessageCardLayout.arrowContainerSize
                     )
-                    .background(accent.opacity(0.13), in: Circle())
+                    .background(surfaceAccent.opacity(0.13), in: Circle())
                 statusContent
             }
 

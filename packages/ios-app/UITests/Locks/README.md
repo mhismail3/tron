@@ -1,4 +1,31 @@
-# iOS UI locks
+# iOS locks
+
+## Gateway event delivery kernel
+
+`GatewayEventDeliveryContractTests` crosses `GatewaySocketConnection` with real
+serialized hello/event/response envelopes, the production GatewayClient decoder
+and receive loop, admission, epoch retirement and AsyncSequence. Only the named
+byte peer is synthetic: these are real Core kernel contracts, not isolated Hub
+tests or real-network/TLS coverage. They observe delivered frames, connection
+outcomes and bounded transport diagnostics, never private Hub state.
+
+The ordinary `TronMobileUITests` runner embeds its own Core framework image,
+separate from the app process's image. A peer response after events fences
+receive-loop progress; peer-close gates expose overlapping retirement. The
+existing run-local `HOSTED_TEST` admission gate delays already-decoded predecessor
+work across successor admission; it is only a barrier, not an admission oracle.
+Cancellation and lifetime completion must settle consumers without orphan waiters.
+No Gateway process, new target, alternate runner or goldens are needed.
+
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileUITests/GatewayEventDeliveryContractTests
+```
+
+The existing `Locks/*Tests.swift` convention selects these contracts for module
+baselines through the manifest's consumer graph. They do not record anything.
+
+## Visual locks
 
 UI locks pin what the user sees in hosted-fixture screen states, so a
 restructure slice can prove it changed nothing visible
