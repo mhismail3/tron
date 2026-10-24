@@ -36,6 +36,21 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
         return await read.value
     }
 
+    private func expectNoDelivery(_ stream: GatewayEventStream) async {
+        let unexpected = expectation(description: "no queued predecessor after completed admission")
+        unexpected.isInverted = true
+        let tail = Task {
+            var iterator = stream.makeAsyncIterator()
+            let delivery = await iterator.next()
+            if delivery != nil { unexpected.fulfill() }
+            return delivery
+        }
+        await fulfillment(of: [unexpected], timeout: 1)
+        tail.cancel()
+        let extra = await tail.value
+        XCTAssertNil(extra)
+    }
+
     private func fence(_ client: GatewayClient, peer: EventLockPeer, frames: [Data]) async throws {
         await peer.enqueue(frames)
         // This response follows the frames on the same receive port. Its
@@ -152,20 +167,31 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             request.url?.port == 9846 ? successor : predecessor
         }, eventBufferPolicy: .init(maximumEvents: 2, maximumBytes: 4096))
         var retirement: Task<Void, Never>?
+        let entered = expectation(description: "second predecessor frame reaches actor hop")
+        let admitted = expectation(description: "predecessor admission after successor completes")
+        let gate = EventLockGate(skipping: 1) { entered.fulfill() }
         do {
-            let oldID = try await connect(client)
+            let oldID = try await GatewayClient.$hostedEventAdmissionGate.withValue({
+                let paused = await gate.wait()
+                return { _ in if paused { admitted.fulfill() } }
+            }) { try await self.connect(client) }
             try await fence(client, peer: predecessor, frames: [try frame("lock.predecessor")])
+            await predecessor.enqueue([try frame("lock.delayed-predecessor")])
+            await fulfillment(of: [entered], timeout: 3)
             let closing = expectation(description: "old socket close is suspended")
             await predecessor.observeClose { closing.fulfill() }
             retirement = Task { await client.closeIfCurrent(connectionID: oldID) }
             await fulfillment(of: [closing], timeout: 3)
             let newID = try await connect(client, port: 9846)
             try await fence(client, peer: successor, frames: [try frame("lock.successor")])
+            await gate.release()
+            await fulfillment(of: [admitted], timeout: 3)
             // Observe before releasing close: admission, not old reset, must
             // already have removed the predecessor's queued delivery.
             let delivery = await next(client.events)
             XCTAssertEqual(delivery?.connectionID, newID)
             XCTAssertEqual(delivery?.event.topic, "lock.successor")
+            await expectNoDelivery(client.events)
             await predecessor.enqueue([try frame("lock.late-predecessor")])
             try await fence(client, peer: successor, frames: [try frame("lock.after-retirement")])
             await predecessor.releaseClose()
@@ -175,6 +201,7 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             XCTAssertEqual(after?.event.topic, "lock.after-retirement")
             await client.close()
         } catch {
+            await gate.release()
             await predecessor.releaseClose()
             await retirement?.value
             await client.close()
@@ -182,7 +209,7 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
         }
     }
 
-    func testDelayedPredecessorAdmissionCannotEnterSuccessorStream() async throws {
+    func testDelayedPredecessorAdmissionCannotReopenRetiredStream() async throws {
         let predecessor = EventLockPeer()
         let successor = EventLockPeer()
         let client = GatewayClient(socketFactory: GatewaySocketFactory { request in
@@ -193,35 +220,23 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
         let gate = EventLockGate { entered.fulfill() }
         do {
             let oldID = try await GatewayClient.$hostedEventAdmissionGate.withValue({
-                await gate.wait()
+                _ = await gate.wait()
                 return { _ in admitted.fulfill() }
             }) { try await self.connect(client) }
             await predecessor.enqueue([try frame("lock.delayed-old")])
             await fulfillment(of: [entered], timeout: 3)
             await client.closeIfCurrent(connectionID: oldID)
-            let newID = try await connect(client, port: 9846)
-            try await fence(client, peer: successor, frames: [try frame("lock.new-first"), try frame("lock.new-second")])
             await gate.release()
             await fulfillment(of: [admitted], timeout: 3)
+            // No successor evidence exists yet: the retirement high-water mark
+            // alone must fence already-decoded predecessor work.
+            await expectNoDelivery(client.events)
+            let newID = try await connect(client, port: 9846)
+            try await fence(client, peer: successor, frames: [try frame("lock.new-first"), try frame("lock.new-second")])
             let first = await next(client.events)
             let second = await next(client.events)
             XCTAssertEqual(first?.connectionID, newID)
             XCTAssertEqual(second?.connectionID, newID)
-            let unexpected = expectation(description: "no queued predecessor after completed admission")
-            unexpected.isInverted = true
-            let stream = client.events
-            let tail = Task {
-                var iterator = stream.makeAsyncIterator()
-                let delivery = await iterator.next()
-                if delivery != nil { unexpected.fulfill() }
-                return delivery
-            }
-            // The admission acknowledgement above fixes the producer boundary;
-            // this bounded absence check does not infer producer completion.
-            await fulfillment(of: [unexpected], timeout: 1)
-            tail.cancel()
-            let extra = await tail.value
-            XCTAssertNil(extra)
             await client.close()
         } catch {
             await gate.release()
@@ -390,10 +405,16 @@ private actor EventLockGate {
     private let onWait: @Sendable () -> Void
     private var released = false
     private var continuation: CheckedContinuation<Void, Never>?
-    init(onWait: @escaping @Sendable () -> Void) { self.onWait = onWait }
-    func wait() async {
+    private var skipping: Int
+    init(skipping: Int = 0, onWait: @escaping @Sendable () -> Void) {
+        self.skipping = skipping
+        self.onWait = onWait
+    }
+    func wait() async -> Bool {
+        if skipping > 0 { skipping -= 1; return false }
         onWait()
         if !released { await withCheckedContinuation { continuation = $0 } }
+        return true
     }
     func release() {
         released = true
