@@ -79,7 +79,11 @@ private final class SnapshotCacheFixtureDriver {
             sleep: { try await delay.sleep($0) }, gridOrigin: ContinuousClock.now)
         let gateway = SnapshotCacheFixtureGateway(offline: mode != "live")
         self.gateway = gateway
-        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in SnapshotCacheFixtureSocket(gateway: gateway) })
+        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in
+            let socket = SnapshotCacheFixtureSocket(gateway: gateway)
+            await gateway.attach(socket)
+            return socket
+        })
         self.client = client
         let cache = SnapshotCache(root: cacheRoot, performanceSignposts: saveGate); self.cache = cache
         let store = AutomationFixtureProfileStore()

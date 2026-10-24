@@ -75,7 +75,6 @@ actor SnapshotCacheFixtureSocket: GatewaySocketConnection {
     private var closed = false
     init(gateway: SnapshotCacheFixtureGateway) {
         self.gateway = gateway
-        Task { await gateway.attach(self) }
     }
     func send(_ data: Data) async throws {
         let request = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
