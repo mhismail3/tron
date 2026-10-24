@@ -88,6 +88,19 @@ retires the root marker. Cold task recovery acknowledges any remaining root mark
 after the task result is durable, preserving other operations in that session.
 Independently owned wake turns retain ordinary completion stamping.
 
+### Bounded lifecycle conformance
+
+`task-lifecycle.reference-model.ts` states quiescent task laws independently of
+the run implementation. Its normal-lane `task-lifecycle.conformance.integration.test.ts`
+drives real Registry/Pi sessions, durable task/marker stores and a faux provider:
+start, Stop, report, same-session resume, terminal Stop and observation. Seeded
+fast-check commands check each step; a controlled late notice delays the second
+real completion stamp until after invocation settlement. The model checks terminal
+run release, immutable predecessor result identity and one distinct durable result
+wake per operation. It does not prove child-process joining, wake delivery, arbitrary
+interleavings, trust, or queue FIFO. Replay generated traces with `TRON_MODEL_SEED`;
+artifacts are written to `packages/gateway/test-results/proof-spike/lifecycle.json`.
+
 ## Entry points
 
 `RuntimeSlot` in [`sessions`](../../sessions/README.md) installs these
@@ -109,6 +122,7 @@ no additional logging or persisted state. Compaction diagnostics remain with the
 ```bash
 scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts src/kernel/run/run-markers.lock.integration.test.ts src/kernel/run/run.store.lock.integration.test.ts
 scripts/tron test gateway src/kernel/run/compaction-policy.integration.test.ts
+scripts/tron test gateway src/kernel/run/task-lifecycle.conformance.integration.test.ts
 scripts/tron verify --module gateway/run
 ```
 

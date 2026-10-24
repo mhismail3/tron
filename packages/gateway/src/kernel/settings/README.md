@@ -43,6 +43,17 @@ transaction order. The session runtime
 supplies its own identity and appliers. Audit records
 are not settings truth, and pending approvals never apply themselves.
 
+`Planned` carries an erased admission brand minted only by `SettingsChangePath`
+after scope, trust and value validation; the concrete `applyStore` port requires
+that plan, including on rollback. Historical Project Undo keeps its existing
+explicit exception. `scripts/settings-proof-lint.mjs` rejects direct, double,
+local-alias and namespace casts to that capability outside its owner in normal
+Gateway lint. The normal `settings-proof.integration.test.ts` lane runs the real
+compiler and linter against positive/missing-proof/forged-cast fixtures.
+This is provenance discipline, not a runtime or linear-security guarantee:
+`any`, JavaScript, indirect type computation and mutation/spread of an admitted
+plan can bypass it. Runtime policy and approval checks remain necessary.
+
 ## Invariants
 
 - No settings data, wire shape, persisted schema or policy is defined twice.
@@ -62,7 +73,9 @@ Callers own persistence failure diagnostics; these stores propagate write failur
 ```bash
 scripts/tron test gateway src/admin/settings-approvals.lock.integration.test.ts \
   src/admin/admin.store.lock.integration.test.ts \
-  src/admin/settings-change.integration.test.ts src/admin/settings-migration.e2e.test.ts
+  src/admin/settings-change.integration.test.ts src/admin/settings-migration.e2e.test.ts \
+  src/kernel/settings/settings-proof.integration.test.ts
+scripts/tron-node exec npm --prefix packages/gateway run lint
 ```
 
 The real settings and run locks cover consumers of this contract.

@@ -1,4 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { RunMarkerStore } from "./run-markers.js";
 import fc from "fast-check";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, expect, it } from "vitest";
@@ -15,6 +17,9 @@ interface Real {
   release?: () => void;
   entered: number;
   trace: string[];
+  lateNotice: boolean;
+  releaseStamp: () => void;
+  terminalFacts: Map<string, string>;
 }
 const evidence: unknown[] = [];
 afterEach(async () => {
@@ -27,6 +32,7 @@ async function assertConforms(model: TaskLifecycleModel, real: Real): Promise<vo
   expect(real.runs).toHaveLength(model.state === "absent" ? 0 : model.generation + 1);
   const owner = homeOwnerOf(real.fixture.registry);
   const wakes = new Set<string>();
+  expect(new Set(real.runs.map(run => run.operationId)).size).toBe(real.runs.length);
   for (const [index, run] of real.runs.entries()) {
     const task = await owner.taskStatus(run.taskId);
     expect(task.sessionId).toBe(real.runs[0]!.sessionId);
@@ -37,6 +43,9 @@ async function assertConforms(model: TaskLifecycleModel, real: Real): Promise<vo
       expect(task.wake).not.toBeNull();
       expect(wakes.has(task.wake!.eventId)).toBe(false);
       wakes.add(task.wake!.eventId);
+      const fact = JSON.stringify([task.sessionId, task.operationId, task.terminalEvidence, task.reportRef, task.wake!.eventId]);
+      if (real.terminalFacts.has(task.taskId)) expect(fact).toBe(real.terminalFacts.get(task.taskId));
+      else real.terminalFacts.set(task.taskId, fact);
     } else {
       expect(task.lifecycle).toBe("active");
       expect(task.wake).toBeNull();
@@ -75,6 +84,11 @@ class TaskCommand implements fc.AsyncCommand<TaskLifecycleModel, Real> {
           });
           return fauxAssistantMessage("Work is complete; the report follows.");
         },
+        ...(real.lateNotice && real.runs.length === 0 ? [async () => {
+          const slot = await real.fixture.registry.acquire(real.runs[0]!.sessionId);
+          await (slot as unknown as { runAttention: { attentionBarrier?: Promise<void> } }).runAttention.attentionBarrier;
+          return fauxAssistantMessage("The background review is ready too.");
+        }] : []),
         fauxAssistantMessage([reportCall(`result-${real.runs.length}`)], { stopReason: "toolUse" }),
       ]);
       const run = this.action === "start"
@@ -85,7 +99,17 @@ class TaskCommand implements fc.AsyncCommand<TaskLifecycleModel, Real> {
       if (current) expect(run.operationId).not.toBe(current.operationId);
     } else if (this.action === "stop" || this.action === "report") {
       if (this.action === "stop") await owner.stopTask({ taskId: current!.taskId, operationId: current!.operationId });
-      else real.release!();
+      else {
+        real.release!();
+        if (real.lateNotice) {
+          const slot = await real.fixture.registry.acquire(current!.sessionId);
+          try {
+            await waitFor(() => slot.canonicalSessionEntries().some(entry => entry.type === "custom"
+              && entry.customType === "tron.chat-invocation.v1"
+              && (entry.data as { receiptKind?: string }).receiptKind === "terminal"), "terminal invocation before delayed reply stamp");
+          } finally { real.releaseStamp(); }
+        }
+      }
       await current!.completion;
     } else if (this.action === "terminal-stop") {
       await expect(owner.stopTask({ taskId: current!.taskId, operationId: current!.operationId })).rejects.toThrow();
@@ -95,17 +119,46 @@ class TaskCommand implements fc.AsyncCommand<TaskLifecycleModel, Real> {
   }
 }
 
-async function scenario(commands: Iterable<fc.AsyncCommand<TaskLifecycleModel, Real>>): Promise<void> {
+async function scenario(commands: Iterable<fc.AsyncCommand<TaskLifecycleModel, Real>>, lateNotice = false): Promise<void> {
   const f = await fixture();
-  const real: Real = { fixture: f, runs: [], entered: 0, trace: [] };
+  let releaseStamp = () => {};
+  if (lateNotice) {
+    const directory = join(f.cwd, ".pi", "extensions");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "model-late-notice.ts"), `export default function(pi) {
+      let sent = false;
+      pi.on("turn_end", event => {
+        if (!sent && event.message.stopReason === "stop") {
+          sent = true;
+          pi.sendMessage({ customType: "model-review", content: "Review completed", display: false }, { triggerTurn: true });
+        }
+      });
+    }`);
+    // Suspend only the second real durable stamp: the historical collision must
+    // arrive after the canonical invocation terminal, not win a scheduler race.
+    const markers = (f.registry as unknown as { markers: RunMarkerStore }).markers;
+    const stamp = markers.reassertAssistantCompletion.bind(markers);
+    const gate = new Promise<void>(resolve => { releaseStamp = resolve; });
+    const seen = new Set<string>();
+    markers.reassertAssistantCompletion = async (...args) => {
+      seen.add(args[2]);
+      if (seen.size > 1) await gate;
+      return stamp(...args);
+    };
+  }
+  const real: Real = { fixture: f, runs: [], entered: 0, trace: [], lateNotice, releaseStamp, terminalFacts: new Map() };
   const model = initialTaskModel();
   try {
     await fc.asyncModelRun(() => ({ model, real }), commands);
     evidence.push({ trace: real.trace, model, sessions: real.runs.map(run => run.sessionId) });
   } catch (error) {
-    evidence.push({ trace: real.trace, model, error: String(error) });
+    const current = real.runs.at(-1);
+    evidence.push({ trace: real.trace, model, error: String(error),
+      ...(current ? { task: await homeOwnerOf(f.registry).taskStatus(current.taskId), snapshot: (await f.registry.acquire(current.sessionId)).snapshot() } : {}),
+      diagnostics: f.events.filter(row => row.topic === "session.diagnostic") });
     throw error;
   } finally {
+    releaseStamp();
     real.release?.();
     const current = real.runs.at(-1);
     if (current) {
@@ -118,6 +171,10 @@ async function scenario(commands: Iterable<fc.AsyncCommand<TaskLifecycleModel, R
 
 it("conforms after Stop, repeated terminal control, report-only reminder and same-session resume", async () => {
   await scenario(["start", "stop", "terminal-stop", "resume", "report", "observe", "resume", "stop"].map(action => new TaskCommand(action as TaskAction)));
+}, 60_000);
+
+it("conforms when a late child notice and report settle before a delayed reply stamp (#1730)", async () => {
+  await scenario(["start", "report", "resume", "stop"].map(action => new TaskCommand(action as TaskAction)), true);
 }, 60_000);
 
 it("conforms step by step for replayable generated task command sequences", async () => {
