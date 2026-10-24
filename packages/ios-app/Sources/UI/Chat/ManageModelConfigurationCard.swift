@@ -18,7 +18,7 @@ struct ManageModelConfigurationCard: View {
                 presentation: .keys(["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]),
                 embedded: true, modelConfiguration: true)
         }
-        .tronSettingsVisualTheme(accent: .tronPrimary)
+        .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
         .controlSize(.small)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(home ? "home-model-summary" : "session-model-summary")

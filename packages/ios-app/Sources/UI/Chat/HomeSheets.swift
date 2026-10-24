@@ -269,7 +269,7 @@ struct HomeSheet: View {
         .tronManagedSheet(item: $childDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
             HomeSheet(destination: child, profileID: profileID, sessionID: sessionID, onOpenSession: onOpenSession,
                       onChanged: { returnsFromBrowsing = false; onChanged?() })
-                .tronSettingsVisualTheme(accent: accent)
+                .tronSettingsVisualTheme(accent: accent, surfaceAccent: visualTheme?.surfaceAccent ?? .tronPrimarySurface)
         }
         .tronManagedSheet(isPresented: $showingMemoryInfo, identity: "home.\(profileID).memory-info.\(destination.id)") {
             if let metadata = memoryMetadata {
@@ -281,11 +281,11 @@ struct HomeSheet: View {
                     }
                     .tronScrollEdgeChrome()
                 }
-                .tronSettingsVisualTheme(accent: accent)
+                .tronSettingsVisualTheme(accent: accent, surfaceAccent: visualTheme?.surfaceAccent ?? .tronPrimarySurface)
             }
         }
         .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
-            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent)
+            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent, surfaceAccent: visualTheme?.surfaceAccent ?? .tronPrimarySurface)
         }
         #if HOSTED_TEST
         // Retains the mounted pause action so hosted journeys can invoke it after

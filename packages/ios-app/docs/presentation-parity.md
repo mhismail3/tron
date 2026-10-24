@@ -155,7 +155,11 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Accents.** Group accents flow from `SettingsGroupCard` through every progressive sheet; a
   destination reachable elsewhere reads the inherited theme and names only its standalone
   fallback (`tronSettingsVisualTheme(inheriting:)`). Project Trust, Gateway actions and
-  warning/error/destructive/log-level colors stay semantic.
+  warning/error/destructive/log-level colors stay semantic. A theme carries readable ink and
+  its surface tint together; inheriting a destination preserves both. Dark Burgundy's primary
+  Home surfaces use canonical deep-wine `tronPrimarySurface` glass with lifted `tronPrimary`
+  text/icons. Light Burgundy and other primary themes resolve both roles identically; explicit
+  semantic accents retain their own ink/tint unless the caller supplies a surface role.
 - **Captions and notices.** Passive explanations use `TronSettingsCaption` in
   `TronTypography.settingsRowSubtext` (never smaller than rows), attached eight points below with
   `tronSettingsCaption`. Actionable failures use `TronSettingsNotice` with a trailing Retry.
