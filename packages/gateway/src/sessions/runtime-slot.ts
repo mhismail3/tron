@@ -56,7 +56,6 @@ import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js"
 import { createHomeTaskWorkerExtension } from "../kernel/delegation/task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../kernel/delegation/task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
-import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../kernel/host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../kernel/settings/settings-change.js";
 import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
@@ -1618,7 +1617,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
               }
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
-            ...tronModuleFactories(this.dependencies.modules, sessionContext),
+            ...this.dependencies.modules.registrations(this.dependencies.modules.runtimeOrder, sessionContext),
             ...(modelRuntimePolicy?.extensions(sessionContext,
               managedSubagents?.requireChildExtensions.bind(managedSubagents)) ?? []),
             ...(this.taskWorker ? [{ name: "tron-home-task-worker", factory: createHomeTaskWorkerExtension({

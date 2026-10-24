@@ -9,6 +9,8 @@ map/construction/mutation authority, shared synchronous `liveRuntime` read and
 mutex-ordered `orderedRuntime` read. Profile modules supply domain recipes over
 those operations; no Registry-produced Home provider exists. Registry/Slot's
 physical relocation and worker binding/control transfer remain separate work.
+Ordinary extension registration reads the composition-configured order on the
+actual K3 host; native frames do not select product modules or keep another list.
 
 ## Owns
 

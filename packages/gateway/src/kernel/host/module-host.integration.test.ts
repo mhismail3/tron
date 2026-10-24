@@ -41,16 +41,16 @@ describe("kernel/host module host", () => {
     const a = descriptor<{ value: number }>("a", () => tracked("a", { contract: { value: 7 } }));
     const b = descriptor<void>("b", (host) => { events.push(`b read ${host.contract(a).value}`); return tracked("b", {}); }, [a as ModuleDescriptor<unknown>]);
     const c = descriptor<void>("c", () => tracked("c", {}));
-    const host = await ModuleHost.start([a, b, c] as ModuleDescriptor<unknown>[], { tronHome: "/unused", log });
+    const host = await ModuleHost.start([a, b, c] as ModuleDescriptor<unknown>[], { tronHome: "/unused", log }, []);
     expect(host.contract(a)).toEqual({ value: 7 });
     await expect(host.stop()).rejects.toThrow("One or more modules failed to stop");
     expect(events).toEqual(["start a", "b read 7", "start b", "start c", "stop c", "stop b", "stop a"]);
 
     const undeclared = descriptor<void>("undeclared", (gateway) => { gateway.contract(a); return {}; });
-    await expect(ModuleHost.start([a, undeclared] as ModuleDescriptor<unknown>[], { tronHome: "/unused", log }))
+    await expect(ModuleHost.start([a, undeclared] as ModuleDescriptor<unknown>[], { tronHome: "/unused", log }, []))
       .rejects.toThrow("Module undeclared does not declare a in dependsOn");
     const early = descriptor<void>("early", (gateway) => { gateway.contract(a); return {}; }, [a as ModuleDescriptor<unknown>]);
-    await expect(ModuleHost.start([early, a] as ModuleDescriptor<unknown>[], { tronHome: "/unused", log }))
+    await expect(ModuleHost.start([early, a] as ModuleDescriptor<unknown>[], { tronHome: "/unused", log }, []))
       .rejects.toThrow("Module a is not started before early");
   });
 
@@ -59,23 +59,23 @@ describe("kernel/host module host", () => {
     const modelUsed = (name: string) => descriptor<void>(name, () => ({
       hooks: { modelUsed: () => name } as Partial<KernelHooks>, stop: async () => { stopped.push(name); },
     }));
-    await expect(ModuleHost.start([modelUsed("first"), modelUsed("second")], { tronHome: "/unused", log }))
+    await expect(ModuleHost.start([modelUsed("first"), modelUsed("second")], { tronHome: "/unused", log }, []))
       .rejects.toThrow("Policy hook modelUsed is implemented by both first and second");
     expect(stopped).toEqual(["second", "first"]);
 
     const unknown = descriptor<void>("unknown", () => ({ hooks: { notAHook: () => {} } as unknown as Partial<KernelHooks> }));
-    await expect(ModuleHost.start([unknown], { tronHome: "/unused", log })).rejects.toThrow("implements unknown hook notAHook");
+    await expect(ModuleHost.start([unknown], { tronHome: "/unused", log }, [])).rejects.toThrow("implements unknown hook notAHook");
     const serves = (name: string) => descriptor<void>(name, () => ({ rpc: { "x.read": { kind: "read", handle: async () => name } } }));
-    await expect(ModuleHost.start([serves("one"), serves("two")], { tronHome: "/unused", log })).rejects.toThrow("RPC x.read is served by both one and two");
+    await expect(ModuleHost.start([serves("one"), serves("two")], { tronHome: "/unused", log }, [])).rejects.toThrow("RPC x.read is served by both one and two");
     const failing = descriptor<void>("failing", () => { throw new Error("start failed"); });
     stopped.length = 0;
-    await expect(ModuleHost.start([modelUsed("kept"), failing], { tronHome: "/unused", log })).rejects.toThrow("start failed");
+    await expect(ModuleHost.start([modelUsed("kept"), failing], { tronHome: "/unused", log }, [])).rejects.toThrow("start failed");
     expect(stopped).toEqual(["kept"]);
   });
 
   it("admits unique profile recipes by identity and rejects reserved/duplicate names with joined startup cleanup", async () => {
     const recipe = { ...ORDINARY_SESSION_PROFILE, name: "named" };
-    const host = await ModuleHost.start([descriptor("owner", () => ({ profiles: [recipe] }))], { tronHome: "/unused", log });
+    const host = await ModuleHost.start([descriptor("owner", () => ({ profiles: [recipe] }))], { tronHome: "/unused", log }, []);
     try {
       // An admitted recipe cannot be renamed out from under its selected runtimes.
       Reflect.set(recipe, "name", "renamed");
@@ -88,7 +88,7 @@ describe("kernel/host module host", () => {
       const owns = (module: string, profiles: ModuleInstance["profiles"]) => descriptor(module, () => ({
         profiles, stop: async () => { stopped.push(module); },
       }));
-      await expect(ModuleHost.start([owns("first", [recipe]), owns("second", [{ ...recipe, name }])], { tronHome: "/unused", log }))
+      await expect(ModuleHost.start([owns("first", [recipe]), owns("second", [{ ...recipe, name }])], { tronHome: "/unused", log }, []))
         .rejects.toThrow(`Profile ${name} is already registered`);
       expect(stopped).toEqual(["second", "first"]);
     }
@@ -105,7 +105,7 @@ describe("kernel/host module host", () => {
       instances.push(instance);
       return instance;
     });
-    const host = await ModuleHost.start([observer("first"), observer("second")], { tronHome: "/unused", log });
+    const host = await ModuleHost.start([observer("first"), observer("second")], { tronHome: "/unused", log }, []);
     const retired = () => host.observers("sessionRetired").map(hook => (hook as () => string)());
     expect(retired()).toEqual(["first", "second"]);
     expect(host.capabilities()).toEqual(["first.v1", "second.v1"]);
@@ -125,7 +125,8 @@ describe("kernel/host module host", () => {
     const trust = new TrustService(join(root, "agent"));
     const openAIModelEligibility = new OpenAIModelEligibility();
     const display = new DisplayOwner(new DisplayArtifactStore(tronHome), undefined, () => registry);
-    const modules = await ModuleHost.start(gatewayModules(() => ({ registry, display, openAIModelEligibility, home: { tronHome, agentDir: join(root, "agent"), trust, knowledge: () => registry.knowledge, settings: () => registry.settings } })).modules, { tronHome, log });
+    const composition = gatewayModules(() => ({ registry, display, openAIModelEligibility, home: { tronHome, agentDir: join(root, "agent"), trust, knowledge: () => registry.knowledge, settings: () => registry.settings } }));
+    const modules = await ModuleHost.start(composition.modules, { tronHome, log }, composition.runtimeOrder);
     const registry = new RuntimeRegistry({
       settingsSchema: TEST_SETTINGS_SCHEMA,
       modules, agentDir: join(root, "agent"), tronHome, idleRuntimeMs: 60_000, trust,

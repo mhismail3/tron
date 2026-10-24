@@ -29,7 +29,7 @@ it("K3 notification hooks resolve optional owners per call and admit real termin
     });
     host = await ModuleHost.start([createNotifyModule(() => ({ notifications: available, machineId: "machine-hooks" }))], {
       tronHome: home, log: { log: () => {} },
-    });
+    }, []);
     expect(host.policy("runTerminal")!()).toBeUndefined();
     expect(host.policy("interactionRequired")!()).toBeUndefined();
     available = notifications;

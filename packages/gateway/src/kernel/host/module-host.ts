@@ -187,9 +187,10 @@ interface Started {
  * answers contracts, per-runtime extensions, descriptor RPCs, capabilities and
  * hook dispatch, and stops modules in reverse order. */
 export class ModuleHost {
-  private constructor(private readonly started: readonly Started[]) {}
+  private constructor(private readonly started: readonly Started[], readonly runtimeOrder: readonly string[]) {}
 
-  static async start(composition: readonly ModuleDescriptor<unknown>[], platform: Omit<GatewayHost, "contract">): Promise<ModuleHost> {
+  static async start(composition: readonly ModuleDescriptor<unknown>[], platform: Omit<GatewayHost, "contract">,
+    runtimeOrder: readonly string[]): Promise<ModuleHost> {
     const started: Started[] = [];
     const startedContract = (module: ModuleDescriptor<unknown>, reader: string): unknown => {
       const entry = started.find(candidate => candidate.descriptor === module);
@@ -213,10 +214,10 @@ export class ModuleHost {
       }
       ModuleHost.admit(started);
     } catch (error) {
-      await new ModuleHost(started).stop().catch(() => {});
+      await new ModuleHost(started, runtimeOrder).stop().catch(() => {});
       throw error;
     }
-    return new ModuleHost(started);
+    return new ModuleHost(started, runtimeOrder);
   }
 
   /** Composition errors fail at start, never at the first call. */

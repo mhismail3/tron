@@ -1,4 +1,5 @@
 import { createWebResearchModule } from "../workspace/web-research-module.js";
+import { ORDINARY_MODULE_NAMES } from "../extensions/tron-modules.js";
 import { ModuleHost, type GatewayHost } from "../kernel/host/module-host.js";
 import { settlementModule } from "../kernel/host/settlement-module.js";
 import { createContextWindowModule } from "../providers/context-window-policy.js";
@@ -42,7 +43,7 @@ export function gatewayModules(owners: () => ModuleOwners) {
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));
   const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners, () => owners().home.modelQueue);
-  return { home: home.owner, providers, modules: [
+  return { home: home.owner, providers, runtimeOrder: ORDINARY_MODULE_NAMES, modules: [
     workspaceModule,
     settlementModule,
     providers,
@@ -66,6 +67,6 @@ export function gatewayModules(owners: () => ModuleOwners) {
 export async function startGatewayModules(platform: Omit<GatewayHost, "contract">, owners: () => ModuleOwners) {
   initTheme();
   const composition = gatewayModules(owners);
-  const modules = await ModuleHost.start(composition.modules, platform);
+  const modules = await ModuleHost.start(composition.modules, platform, composition.runtimeOrder);
   return { modules, home: composition.home, recentModels: modules.contract(composition.providers) };
 }

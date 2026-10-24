@@ -35,7 +35,10 @@ identity refusal; native frames keep lineage selection and physical replacement 
 - **Contracts.** `GatewayHost.contract(m)` returns module `m`'s started contract
   only when `m` is in the reader's `dependsOn` and started earlier.
   `ModuleHost.contract` is composition's read.
-- **Session extensions.** `registrations(names, session)` asks the named modules
+- **Session extensions.** Composition supplies the required ordinary `runtimeOrder`
+  to `ModuleHost.start`; the host retains that single configuration reference for
+  native registration and descriptor summaries. It defines no product module names.
+  `registrations(names, session)` asks the named modules
   for their Pi extensions in recipe order, without reordering or normalizing
   module metadata (K-0 §3). SessionContext
   carries per-runtime identity, presentation, receipt joining, late-bound settings

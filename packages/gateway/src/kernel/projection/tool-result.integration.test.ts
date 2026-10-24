@@ -17,7 +17,7 @@ it("K3.toolResultProjection keeps provenance, exact call/session receipts and lo
   try {
     host = await ModuleHost.start([workspaceModule, createDisplayModule(() => ({ artifacts, liveViews: views }))], {
       tronHome: home, log: { log: () => {} },
-    });
+    }, []);
     const sessionId = "session";
     const loadToken = views.beginSessionLoad(sessionId);
     const result = {
@@ -57,7 +57,7 @@ it("K3.toolResultProjection leaves browser results unchanged when the optional l
   try {
     host = await ModuleHost.start([workspaceModule, createDisplayModule(() => ({ artifacts, liveViews: undefined }))], {
       tronHome: home, log: { log: () => {} },
-    });
+    }, []);
     const result = { content: [{ type: "text", text: "No browser view" }] };
     expect(host.policy("toolResultProjection")!().observeBrowserResult({
       owner: { id: "browser", title: "Browser", source: "git:github.com/fitchmultz/pi-agent-browser-native" },
