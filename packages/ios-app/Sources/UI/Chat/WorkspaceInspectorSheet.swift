@@ -315,12 +315,14 @@ struct WorkspaceInspectorSheet: View {
             HStack(spacing: 8) {
                 Image(systemName: "folder.fill")
                     .foregroundStyle(Color.tronPrimary)
-                Text(owner.inspection?.root ?? "Loading workspace…")
-                    .font(TronTypography.codeContent)
-                    .foregroundStyle(Color.tronPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(owner.inspection?.root ?? "Loading workspace…")
+                        .font(TronTypography.codeContent)
+                        .foregroundStyle(Color.tronPrimary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .scrollBounceBehavior(.basedOnSize)
             }
             if let repository = owner.inspection?.repository {
                 repositoryStatus(repository)
@@ -342,21 +344,7 @@ struct WorkspaceInspectorSheet: View {
         .padding(.bottom, 12)
     }
 
-    @ViewBuilder private func repositoryStatus(_ repository: SessionWorkspaceRepository) -> some View {
-        #if HOSTED_TEST
-        if ProcessInfo.processInfo.arguments.contains("-six-ui-wrap") {
-            // Visual-review alternative B; not a shipping preference or state.
-            ToolChipFlowLayout(spacing: 7) { repositoryPills(repository) }
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            scrollingRepositoryStatus(repository)
-        }
-        #else
-        scrollingRepositoryStatus(repository)
-        #endif
-    }
-
-    private func scrollingRepositoryStatus(_ repository: SessionWorkspaceRepository) -> some View {
+    private func repositoryStatus(_ repository: SessionWorkspaceRepository) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 7) { repositoryPills(repository) }
                 .padding(.vertical, 1)

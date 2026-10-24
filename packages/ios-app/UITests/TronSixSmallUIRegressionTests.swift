@@ -95,10 +95,10 @@ import UIKit
         }
     }
 
-    func testWorkspaceNarrowAndWrappingOptionsDoNotOverlapPath() {
+    func testWorkspaceNarrowAndAccessibilitySizesDoNotOverlapPath() {
         let largest = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         for extra in [["-six-ui-narrow"], ["-six-ui-narrow"] + largest,
-                      ["-six-ui-wrap"], ["-six-ui-wrap", "-six-ui-narrow"] + largest] {
+                      [], largest] {
             let app = launch("workspace", extra: extra)
             let path = app.staticTexts[root].firstMatch
             XCTAssertTrue(path.waitForExistence(timeout: 8), app.debugDescription)

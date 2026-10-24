@@ -101,7 +101,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   container: Workspace (`workspace-inspector.v1`), Instructions, Resources (tags Global, Project or
   External; Commands and Subagents preview a body whose View All opens the shared reader), Session
   History (`session-history-pages.v1`), Subagent History; Session Settings (Repository Overrides last);
-  Terminal and Export as HTML/JSON. Workspace gives its middle-truncated path a full line above a
+  Terminal and Export as HTML/JSON. Workspace gives its single-line horizontally scrolling path a full line above a
   horizontally scrolling status-pill row; status content stays clipped to that row. Manage Session, Manage Home and every sheet they open take
   the selected primary sheet theme (semantic colors aside). Session's usage, Model, workspace/history
   and settings containers share one primary ink/`tronPrimarySurface` theme scope; Terminal/export stay
