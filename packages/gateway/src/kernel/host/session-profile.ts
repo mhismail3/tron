@@ -1,4 +1,5 @@
 import type { createAgentSessionServices, ModelRuntime } from "../pi/coding-agent.js";
+import type { Model } from "../pi/ai.js";
 
 export type ProfileResourceOptions = Pick<NonNullable<NonNullable<Parameters<typeof createAgentSessionServices>[0]>["resourceLoaderOptions"]>,
   "noExtensions" | "noContextFiles" | "skillsOverride" | "systemPromptOverride" | "appendSystemPromptOverride">;
@@ -15,8 +16,8 @@ interface ProfileRecipe {
   readonly managedSubagents: boolean;
   readonly directBash: boolean;
   readonly tools?: readonly string[];
-  /** Only fixed physical models; a virtual model routes on a transcript the profile does not own. */
-  readonly physicalModelsOnly?: boolean;
+  /** Native selection metadata and the profile owner’s explicit-change admission. */
+  readonly modelSelection?: Readonly<{ physicalOnly: true; assertAllowed(model: Model<any>): void }>;
   readonly launchDefaults: "settings-home-recipe" | "none";
   readonly compaction: "policy" | "disabled";
   readonly settingsActor: "home" | "agent";

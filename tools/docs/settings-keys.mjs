@@ -1,6 +1,6 @@
 // Print the Gateway settings schema (KEYS, RECORD_SUBJECTS, LAYERS) as JSON for
-// `scripts/tron docs settings` (tools/docs/README.md). The schema module is loaded,
-// not parsed, because keys are built in code (template ids, role maps, helpers).
+// `scripts/tron docs settings` (tools/docs/README.md). Real composition constructs
+// the schema; keys are built in code (template ids, role maps, owner contributions).
 // Node strips TypeScript; this hook maps the sources' `./x.js` specifiers to `./x.ts`.
 import { existsSync } from "node:fs";
 import { registerHooks } from "node:module";
@@ -16,7 +16,8 @@ registerHooks({
   },
 });
 
-const [schemaPath, typesPath] = process.argv.slice(2);
-const schema = await import(pathToFileURL(schemaPath).href);
+const [compositionPath, typesPath] = process.argv.slice(2);
+const { createGatewaySettingsSchema } = await import(pathToFileURL(compositionPath).href);
+const schema = createGatewaySettingsSchema();
 const types = await import(pathToFileURL(typesPath).href);
 process.stdout.write(JSON.stringify({ layers: types.LAYERS, keys: schema.KEYS, subjects: schema.RECORD_SUBJECTS }));

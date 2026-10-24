@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -12,7 +13,8 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthBroker } from "../admin/auth-broker.js";
 import { TrustService } from "../admin/trust-service.js";
-import { SettingsModel } from "../admin/settings-model.js";
+import { SettingsStoreAdapter } from "../admin/settings-model.js";
+import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
 import { MacTerminalKeys } from "../security/mac-terminal.js";
@@ -349,7 +351,7 @@ describe("settings.resolve request span", () => {
       }
     }
     const macTerminalKeys = new FixtureMacTerminalKeys(join(root, "ssh"));
-    const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys });
+    const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys }));
     const registry = await createTestRegistry({
       agentDir,
       tronHome: join(root, "tron"),

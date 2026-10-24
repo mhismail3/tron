@@ -1,3 +1,4 @@
+import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { HOME_SESSION_PROFILE_NAME } from "../modules/home/home-session-profile.js";
 import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
 import type { LineageRuntimePort, SessionLineagePolicy } from "../kernel/host/session-lineage.js";
@@ -19,7 +20,6 @@ import {
   SettingsManager,
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
-import { sessionRuntimeView } from "../providers/openai-model-eligibility.js";
 import type {
   AdministrativeDrainBlockerCategory,
   AdministrativeDrainBlockerSummary,
@@ -98,7 +98,6 @@ import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../modules/hom
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
 import { modelQueueKey } from "../kernel/settings/tool-contract.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
-import { applyHomeCacheRetention } from "../modules/home/home-request-policy.js";
 import type { HomeKernelPorts } from "../modules/home/home-module.js";
 import {
   CatalogDiscovery,
@@ -542,7 +541,7 @@ export class RuntimeRegistry {
   private readonly exports: BlobStore;
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
-  private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
+  private settingsOwners: { model: import("../kernel/settings/settings-model.js").SettingsModel; changes: import("../kernel/settings/settings-change.js").SettingsChangePath } | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
@@ -689,6 +688,7 @@ export class RuntimeRegistry {
       machineId?: string;
       notifications?: NotificationService;
       readonly displayArtifacts: DisplayArtifactStore;
+      readonly settingsSchema: SettingsSchema;
       workRegistry?: GatewayWorkRegistry;
       /** A discovery pass that stopped at one of its budgets instead of the end
        * of its roots, with the counts it spent. A directory past the stop is
@@ -825,10 +825,6 @@ export class RuntimeRegistry {
       taskSessions: this,
       knowledge: () => this.knowledgeService,
       readSearchCut: sessionId => this.readSearchCut(sessionId),
-      runtime: async () => ({
-        runtime: applyHomeCacheRetention(sessionRuntimeView(this.options.gatewayModelRuntime ?? await this.dependencies().createModelRuntime())),
-        ownership: this.options.gatewayModelRuntime ? "borrowed" as const : "owned" as const,
-      }),
       changes: () => this.settingsOwners?.changes,
       workerChoice: {
         homeRuntime: async sessionId => (await this.acquire(sessionId)).snapshot(),
@@ -850,7 +846,7 @@ export class RuntimeRegistry {
 
   /** Installs the settings model and its change path for the `settings` tool.
    * Both are built over this registry, so slots read them late-bound. */
-  setSettings(model: import("../admin/settings-model.js").SettingsModel, changes: import("../admin/settings-model.js").SettingsChangePath): void {
+  setSettings(model: import("../kernel/settings/settings-model.js").SettingsModel, changes: import("../kernel/settings/settings-change.js").SettingsChangePath): void {
     if (this.settingsOwners && this.settingsOwners.changes !== changes) throw new Error("Settings are already installed");
     this.settingsOwners = { model, changes };
   }
@@ -1684,6 +1680,7 @@ export class RuntimeRegistry {
       blobs: this.blobs,
       exports: this.exports,
       displayArtifacts: this.options.displayArtifacts,
+      settingsSchema: this.options.settingsSchema,
       workspace: this.workspace,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,

@@ -2,7 +2,6 @@
   "comment": "Shrink-only: scripts/tron layers --update removes fixed entries; new violations are never added (tools/layers/README.md).",
   "violations": [
     "two-way gateway/admin <-> gateway/home",
-    "two-way gateway/admin <-> gateway/machine",
     "two-way gateway/admin <-> gateway/run",
     "two-way gateway/admin <-> gateway/transport",
     "two-way gateway/automations <-> gateway/transport",
@@ -33,10 +32,8 @@
     "upward gateway/run (L2) -> gateway/home (L3)",
     "upward gateway/run (L2) -> gateway/knowledge (L3)",
     "upward gateway/run (L2) -> gateway/notifications (L3)",
-    "upward gateway/run (L2) -> gateway/providers (L3)",
     "upward gateway/run (L2) -> gateway/workspace (L3)",
     "upward gateway/security (L3) -> gateway/transport (L4)",
-    "upward gateway/session-catalog (L2) -> gateway/admin (L3)",
     "upward gateway/session-catalog (L2) -> gateway/automations (L3)"
   ]
 }

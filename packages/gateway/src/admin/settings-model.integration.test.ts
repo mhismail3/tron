@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -9,10 +10,13 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "./trust-service.js";
 import { createSettingsManager } from "./settings-sdk-manager.js";
-import { SettingsChangePath, SettingsModel } from "./settings-model.js";
+import { SettingsStoreAdapter } from "./settings-model.js";
+import { SettingsChangePath } from "../kernel/settings/settings-change.js";
+import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
-import { KEYS, terminalIdleLimitMs } from "./settings-schema.js";
+import { terminalIdleLimitMs } from "../kernel/settings/settings-schema.js";
+const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { Resolution, ResolvedKey, SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
 import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "../kernel/settings/settings-types.js";
@@ -95,17 +99,17 @@ async function fixture() {
   });
   registries.push(registry);
   await registry.initialize();
-  const settingsModel = new SettingsModel({
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA,
     agentDir, tronHome, trust, modelRuntime,
     // Production wiring (gateway-main): a chat's live registry, else the scope's.
     toolCatalog: async target => target.kind === "session" ? registry.liveToolCatalog(target.sessionId)
       : scopeTools.list(target.kind === "project" ? target.cwd : undefined),
-  });
+  }));
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), new SettingsApprovals(tronHome), {
     setTrust: async (project, decision) => trust.setAndApply(project, decision,
       async inspection => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
       async inspection => { await registry.commitProjectReload(inspection.projectDir); }),
-  }, agentDir);
+  });
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
@@ -239,7 +243,7 @@ describe("settings.resolve", () => {
     // Keep raw SDK parity for every other key. Tools cross the production
     // admission boundary: the repository cannot widen the executable ceiling.
     const piTrusted = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: true }), model);
-    const admittedTools = (await createSettingsManager(project, agentDir, true)).getDefaultTools();
+    const admittedTools = (await createSettingsManager(TEST_SETTINGS_SCHEMA, project, agentDir, true)).getDefaultTools();
     piTrusted["tools.active"] = admittedTools;
     for (const [key, expected] of Object.entries(piTrusted)) {
       const qualifiers = key.startsWith("context.compaction.") && key !== "context.compaction.enabled" ? { model: modelKey } : undefined;
@@ -548,8 +552,8 @@ describe("settings renderer contract", () => {
 
   it("serves option lists that follow the target's model, page catalogs, and refuse keys with no options", async () => {
     const f = await fixture();
-    const reasoner = f.settingsModel.modelRuntime.getModel(f.model.provider, f.model.id)!;
-    const plain = f.settingsModel.modelRuntime.getModel(f.model.provider, "plain")!;
+    const reasoner = f.settingsModel.owner.modelRuntime.getModel(f.model.provider, f.model.id)!;
+    const plain = f.settingsModel.owner.modelRuntime.getModel(f.model.provider, "plain")!;
     const plainKey = `${plain.provider}/${plain.id}`;
 
     // Thinking levels: the target's chat model's own levels, labelled as the schema labels them.

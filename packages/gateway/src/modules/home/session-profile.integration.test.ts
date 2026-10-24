@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
-import { disposeFixtures, fixture } from "../../../test-support/home-task-fixture.js";
+import { disposeFixtures, fixture, TASK_VIRTUAL_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
 
 const evidence: unknown[] = [];
@@ -12,6 +12,19 @@ afterAll(async () => {
 });
 
 type Tools = { availableTools: { name: string }[] };
+
+it("refuses virtual explicit choices for a Home creation-profile runtime without settings services", async () => {
+  const f = await fixture();
+  const slot = await f.registry.create(f.cwd, "home");
+  expect(homeOwnerOf(f.registry).profileFor(slot.id, slot.cwd)).toBe("unnamed");
+  const before = slot.snapshot().model;
+  await expect(slot.setModel(f.model.provider, TASK_VIRTUAL_MODEL_ID)).rejects.toMatchObject({
+    code: "invalid_request", message: "Tron Home requires a fixed physical model; virtual models are not supported",
+  });
+  expect(slot.snapshot().model).toEqual(before);
+  evidence.push({ case: "creation-profile-model-constraint", before, after: slot.snapshot().model });
+});
+
 
 it("uses an explicit creation profile once, then reconstructs an unrecorded session as ordinary", async () => {
   const f = await fixture();

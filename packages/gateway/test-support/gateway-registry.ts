@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { DisplayArtifactStore } from "../src/display/display-artifact-store.js";
 import type { BrowserLiveViewRegistry } from "../src/display/browser-live-view.js";
 import { ModelQueueOwner, modelQueueProjectionPath, type ModelQueueOptions } from "../src/providers/model-queue.js";
@@ -6,15 +7,16 @@ import type { RecentModelStore } from "../src/providers/recent-models.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import type { ModelRuntime } from "../src/kernel/pi/coding-agent.js";
 import { createProviderModelRuntime } from "../src/providers/provider-runtime.js";
-import { OpenAIModelEligibility } from "../src/providers/openai-model-eligibility.js";
+import { OpenAIModelEligibility, sessionRuntimeView } from "../src/providers/openai-model-eligibility.js";
+import { applyHomeCacheRetention } from "../src/modules/home/home-request-policy.js";
 import { startGatewayModules, type ModuleOwners } from "../src/main/modules.js";
 import type { SessionSearchService } from "../src/sessions/session-search-service.js";
 import type { HomeComposition } from "../src/modules/home/home-module.js";
 import type { HomeOwner } from "../src/modules/home/home-owner.js";
 
-type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "displayArtifacts">;
+type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "displayArtifacts" | "settingsSchema">;
 /** Home's composition inputs a test may supply; the rest are the registry's own. */
-type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "notifications" | "machineId" | "homeTaskDiagnostic" | "modelQueue">;
+type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "notifications" | "machineId" | "homeTaskDiagnostic" | "modelQueue" | "runtime">;
 
 const homes = new WeakMap<RuntimeRegistry, () => HomeOwner>();
 const recents = new WeakMap<RuntimeRegistry, RecentModelStore>();
@@ -58,12 +60,16 @@ export async function createTestRegistry(options: RegistryOptions & HomeTestOpti
   const display = { artifacts: new DisplayArtifactStore(options.tronHome), liveViews: browserLiveViews };
   const home: HomeComposition = {
     modelQueue,
+    runtime: async () => ({
+      runtime: applyHomeCacheRetention(sessionRuntimeView(registryOptions.gatewayModelRuntime ?? await createProviderModelRuntime(options.agentDir, modelRuntimeFactory))),
+      ownership: registryOptions.gatewayModelRuntime ? "borrowed" : "owned",
+    }),
     tronHome: options.tronHome, agentDir: options.agentDir, trust: options.trust, notifications: options.notifications, machineId: options.machineId,
     homeTaskDiagnostic: options.homeTaskDiagnostic, homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport,
   };
   const { modules, home: owner, recentModels } = await startGatewayModules({ tronHome: options.tronHome, log: { log: () => {} } },
     () => ({ registry, home, display, openAIModelEligibility, connections, scheduleToolOperations, recentModelsChanged, persistenceDiagnostic: options.persistenceDiagnostic, sessionSearch: sessionSearch?.() }));
-  const registry: RuntimeRegistry = new RuntimeRegistry({ ...registryOptions, modules, displayArtifacts: display.artifacts,
+  const registry: RuntimeRegistry = new RuntimeRegistry({ ...registryOptions, modules, displayArtifacts: display.artifacts, settingsSchema: TEST_SETTINGS_SCHEMA,
     createModelRuntime: () => createProviderModelRuntime(options.agentDir, modelRuntimeFactory) });
   displays.set(registry, display.artifacts);
   if (modelQueue) queues.set(registry, modelQueue);

@@ -1,36 +1,6 @@
 import { JEV_MAX_ESTIMATED_CHARGE_CENTS, type JevDecisionClient } from "../knowledge/jev-client.js";
-import { redactProcessText } from "../kernel/projection/process-activity.js";
-import type { ActorKind } from "../kernel/settings/settings-record.js";
-import type { Tier, Direction } from "../kernel/settings/tool-contract.js";
-
-/** The gate supplies metadata and a deliberately lossy diff, never stores,
- * credentials, target paths, transcripts or executable instructions. */
-export interface SettingsRiskInput {
-  key: string;
-  layer: string;
-  actor: ActorKind;
-  reason: string;
-  before: unknown;
-  after: unknown;
-  redacted: boolean;
-  direction: Direction;
-  floor: Tier;
-  web: boolean;
-}
-export interface SettingsRiskAssessment { tier: Tier; rationale: string }
-
-/** Free-form values are not needed to classify a schema key's change. Keep
- * booleans/numbers and array cardinality; never send arbitrary value text. */
-export function riskValue(value: unknown): unknown {
-  if (value == null || typeof value === "boolean" || typeof value === "number") return value ?? null;
-  if (Array.isArray(value)) return { kind: "array", count: value.length };
-  return { kind: typeof value, withheld: true };
-}
-
-export function riskReason(reason: string | undefined): string {
-  // Use the existing broad untrusted-text redactor, not a second secret regex.
-  return redactProcessText(reason ?? "").slice(0, 1_024);
-}
+import type { SettingsRiskInput, SettingsRiskAssessment } from "../kernel/settings/settings-change.js";
+import type { Tier } from "../kernel/settings/tool-contract.js";
 
 const RATIONALES = {
   baseline: "The deterministic floor is sufficient.",

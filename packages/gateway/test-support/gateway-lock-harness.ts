@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { createTestRegistry, homeOwnerOf } from "./gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,7 +10,9 @@ import {
   type AssistantMessage, type SimpleStreamOptions, type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import { TrustService } from "../src/admin/trust-service.js";
-import { SettingsChangePath, SettingsModel } from "../src/admin/settings-model.js";
+import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
+import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
+import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import { OutsideChanges } from "../src/admin/settings-outside.js";
@@ -262,15 +265,15 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } }).sessionCatalog.whenPublished();
 
   // Production settings wiring (gateway-main.ts): every read reconciles outside changes.
-  const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(root, "home", ".ssh")) });
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(root, "home", ".ssh")) }));
   const settingsRecord = new SettingsChangeRecord(tronHome);
-  const outside = new OutsideChanges(tronHome, agentDir, settingsRecord, settingsModel.observedReaders);
-  settingsModel.observeOutside(outside);
+  const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, settingsRecord, settingsModel.owner.observedReaders);
+  settingsModel.owner.observeOutside(outside);
   const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(tronHome), {
     setTrust: async (project, decision) => trust.setAndApply(project, decision,
       async (inspection) => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
       async (inspection) => { await registry.commitProjectReload(inspection.projectDir); }),
-  }, agentDir);
+  });
   registry.setSettings(settingsModel, settingsChanges);
 
   // The relay boundary: what would be pushed to the maintainer's iPhone.

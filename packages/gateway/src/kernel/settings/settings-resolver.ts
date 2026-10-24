@@ -1,9 +1,8 @@
-import { type SettingsTarget, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "../kernel/settings/tool-contract.js";
+import { type SettingsTarget, type Badge, type LayerValue, type ResolvedKey, type Resolution, type Qualifiers } from "./tool-contract.js";
 import { dirname, join } from "node:path";
-import { KEYS, keyForHome, keyDefault, floorInstances, schemaKey, type Binding, type KeyDeclaration } from "./settings-schema.js";
-import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "../kernel/settings/settings-types.js";
-import { canonicalSettingsTarget, scopeAdmitted, scopeForStore } from "../kernel/settings/scope-resolution.js";
-import { instanceId } from "./settings-outside.js";
+import { keyForHome, keyDefault, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "./settings-types.js";
+import { canonicalSettingsTarget, scopeAdmitted, scopeForStore, instanceId } from "./scope-resolution.js";
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
 
 
@@ -22,7 +21,7 @@ import { projectSettingPath, projectSettingsDiagnostics } from "./settings-proje
 
 const BOTTOM_UP: readonly StoreLayer[] = ["default", "global", "home", "session", "project"];
 
-function readPath(document: Record<string, unknown> | undefined, path: readonly string[]): unknown {
+export function readPath(document: unknown, path: readonly string[]): unknown {
   let current: unknown = document;
   for (const segment of path) {
     if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined;
@@ -113,20 +112,20 @@ function layerApplied(stores: SettingsStores, layer: StoreLayer): { applied: boo
 }
 
 /** Resolve every key (or the requested ones) for a target. */
-export function resolveSettings(target: SettingsTarget, stores: SettingsStores, options: ResolveOptions): Resolution {
+export function resolveSettings(schema: SettingsSchema, target: SettingsTarget, stores: SettingsStores, options: ResolveOptions): Resolution {
   const diagnostics = stores.project
-    ? projectSettingsDiagnostics(stores.project.document, join(stores.project.root, ".pi", "settings.json")) : { diagnostics: [] };
-  const applicable = KEYS.map(key => keyForHome(key, stores.layers.includes("home")));
+    ? projectSettingsDiagnostics(schema, stores.project.document, join(stores.project.root, ".pi", "settings.json")) : { diagnostics: [] };
+  const applicable = schema.KEYS.map(key => keyForHome(key, stores.layers.includes("home")));
   const keys = options.keys ? applicable.filter(key => options.keys!.includes(key.id)) : applicable;
   const resolved: ResolvedKey[] = [];
   // Model-qualified keys resolve for the target's effective chat model, which
   // is itself an ordinary key; resolve it first.
   const chatModelKey = applicable.find(key => key.id === "model.ref[role=chat]")!;
   const noDependencies = () => undefined;
-  const chatModel = resolveInstance(chatModelKey, chatModelKey.fixed ?? {}, stores, options, noDependencies).value as { provider: string; id: string } | undefined;
+  const chatModel = resolveInstance(schema, chatModelKey, chatModelKey.fixed ?? {}, stores, options, noDependencies).value as { provider: string; id: string } | undefined;
   // Dependencies are ordinary keys resolved for the same target (doc 7.5).
   const dependencyValue = (id: string) => id === chatModelKey.id ? chatModel
-    : resolveInstance(keyForHome(schemaKey(id), stores.layers.includes("home")), schemaKey(id).fixed ?? {}, stores, options, noDependencies).value;
+    : resolveInstance(schema, keyForHome(schema.schemaKey(id), stores.layers.includes("home")), schema.schemaKey(id).fixed ?? {}, stores, options, noDependencies).value;
   const modelQualifier = chatModel ? `${chatModel.provider}/${chatModel.id}` : undefined;
 
   for (const key of keys) {
@@ -134,8 +133,8 @@ export function resolveSettings(target: SettingsTarget, stores: SettingsStores, 
     // (doc 3.3): Home-only profile keys never appear on an ordinary chat.
     if (target.kind === "session" && !stores.layers.includes("home") && key.layers.home && !key.layers.session) continue;
     if (!Object.keys(key.layers).some(layer => stores.layers.includes(layer as StoreLayer) && scopeAdmitted(key, layer as StoreLayer))) continue;
-    for (const qualifiers of instances(key, target, stores, modelQualifier)) {
-      resolved.push(resolveInstance(key, qualifiers, stores, options, dependencyValue));
+    for (const qualifiers of instances(schema, key, target, stores, modelQualifier)) {
+      resolved.push(resolveInstance(schema, key, qualifiers, stores, options, dependencyValue));
     }
   }
   const projectNotice = stores.project && (stores.project.unreadable || (!stores.project.applied && Object.keys(stores.project.document).length))
@@ -145,7 +144,7 @@ export function resolveSettings(target: SettingsTarget, stores: SettingsStores, 
     ...(projectNotice ? { projectNotice } : {}), keys: resolved, ...diagnostics };
 }
 
-function instances(key: KeyDeclaration, target: SettingsTarget, stores: SettingsStores, model: string | undefined): Qualifiers[] {
+function instances(schema: SettingsSchema, key: KeyDeclaration, target: SettingsTarget, stores: SettingsStores, model: string | undefined): Qualifiers[] {
   const fixed = { ...(key.fixed ?? {}) } as Qualifiers;
   if (key.qualifier === "model") {
     const onlyQualified = Object.values(key.layers).some(binding => binding.store === "pi" && binding.path.includes("{model}"));
@@ -169,7 +168,7 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
   }
   if (key.qualifier === "key") {
     // Floors are Global policy only the maintainer's tap writes; they appear on the Mac target.
-    return target.kind === "global" ? floorInstances().map(instance => ({ ...fixed, ...instance })) : [];
+    return target.kind === "global" ? schema.floorInstances().map(instance => ({ ...fixed, ...instance })) : [];
   }
   if (key.qualifier === "device") {
     // Global policy: the enrolled iPhones appear on the Mac target only.
@@ -183,6 +182,7 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
 }
 
 export function resolveInstance(
+  schema: SettingsSchema,
   key: KeyDeclaration,
   qualifiers: Qualifiers,
   stores: SettingsStores,
@@ -243,7 +243,7 @@ export function resolveInstance(
   if (qualifiers.key && key.qualifier === "key") {
     // A directional approval level names what the agent's change does to the setting.
     badges.push({ kind: "scope", label: qualifiers.direction
-      ? `${schemaKey(qualifiers.key).label}: ${qualifiers.direction === "widen" ? "loosening" : "tightening"}` : schemaKey(qualifiers.key).label });
+      ? `${schema.schemaKey(qualifiers.key).label}: ${qualifiers.direction === "widen" ? "loosening" : "tightening"}` : schema.schemaKey(qualifiers.key).label });
   }
   if (notApplied) {
     badges.push({ kind: "state", label: "Not applied (untrusted)", detail: `${LAYER_LABELS[scopeForStore(notApplied.layer)]}: ${format(notApplied.value)}`,

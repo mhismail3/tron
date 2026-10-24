@@ -1,12 +1,13 @@
 # Settings contract
 
 How every model and harness setting is declared, stored, resolved, changed and shown. Owner:
-the Gateway [`admin` module](../src/admin/README.md); iOS, Home, providers and the push relay
+the Gateway [settings kernel](../src/kernel/settings/README.md), with
+[admin store adapters](../src/admin/README.md); iOS, Home, providers and the push relay
 consume it. Edge cases follow from a [foundation](#foundations), never a new rule.
 
 ## Foundations
 
-- **F1 Schema.** Each setting is one key declared once (`src/admin/settings-schema.ts`): type
+- **F1 Schema.** Each setting is one key declared once (`src/kernel/settings/settings-schema.ts`): type
   and validation, group, scope grants, store bindings, timing, effect point, tier floor,
   writers, redaction and display. `sessionOverridable` and `projectSettable` govern admission;
   store bindings describe owned persistence. iOS renders the served metadata generically.
@@ -46,7 +47,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-49 keys, declared in `packages/gateway/src/admin/settings-schema.ts` (`KEYS`).
+49 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Floor |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -213,7 +214,8 @@ need approval, lowers apply live.
 uncredentialed models, models with a usage-limit error in the last 15 minutes or ≥ 95% usage,
 and moves on after a usage-limit error; captured queues are read-only. Worker thinking is
 `{ "sameAs": "home" }` by default. **Learned-profile changes** (`home.profileChange`, the
-`profile` tool) use `SettingsChangePath.changeProfile`: one quiet `home.profile.item` entry per
+`profile` tool) use Home `HomeProfileItems.change` through the kernel
+`SettingsChangePath.auditSubject` stripe/audit coordinator: one quiet `home.profile.item` entry per
 note, grouped and undone together, refused on a stale revision.
 
 ## Presentation

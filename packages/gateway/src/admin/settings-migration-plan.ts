@@ -4,7 +4,7 @@ import { StringDecoder } from "node:string_decoder";
 import { lstat, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { KEYS, schemaKey } from "./settings-schema.js";
+import { type SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { migrateApprovals, migrateAuditEntry, migrateObserved, migrationObject,
   migrationRefusal, migrationSetPath, parseMigrationObject } from "../kernel/settings/settings-migration-state.js";
 
@@ -90,7 +90,7 @@ export async function settingsMigrationInventory(tronHome: string, agentDir: str
 
 /** Preflight writes only a disposable private plan. No SDK SessionManager is
  * opened and no canonical file changes until the backup transaction commits. */
-export async function captureSettingsMigration(tronHome: string, agentDir: string): Promise<MigrationCapture> {
+export async function captureSettingsMigration(schema: SettingsSchema, tronHome: string, agentDir: string): Promise<MigrationCapture> {
   const inventory = await settingsMigrationInventory(tronHome, agentDir);
   const temporary = await mkdtemp(join(tmpdir(), "tron-settings-migration-plan-"));
   const inputs: MigrationCapture["inputs"] = [];
@@ -98,7 +98,7 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
   const notes: MigrationCapture["notes"] = [];
   const dispose = () => rm(temporary, { recursive: true, force: true });
   try {
-    for (const key of KEYS) {
+    for (const key of schema.KEYS) {
       const binding = key.layers.home;
       if (binding?.store !== "home") continue;
       let value: unknown = inventory.profile;
@@ -158,7 +158,7 @@ export async function captureSettingsMigration(tronHome: string, agentDir: strin
     // The retired record model becomes Home's saved model when none is saved.
     if (Object.hasOwn(inventory.home, "model")) {
       const { model, ...record } = inventory.home;
-      const key = schemaKey("model.ref[role=chat]"), path = (key.layers.home as { path: readonly string[] }).path;
+      const key = schema.schemaKey("model.ref[role=chat]"), path = (key.layers.home as { path: readonly string[] }).path;
       try { await key.type.validate(model, key.id); } catch { migrationRefusal(homePath, "invalid Home record model"); }
       if (path.reduce<unknown>((value, field) => value && typeof value === "object" ? (value as Document)[field] : undefined, profile) === undefined) {
         profile = structuredClone(profile); migrationSetPath(profile, path, model);

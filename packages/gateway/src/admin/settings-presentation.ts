@@ -1,4 +1,4 @@
-import { HOME_PROFILE_SUBJECT, KEYS, SECTIONS, keyForHome, recordSubject, schemaKey, type EntryGuidance, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, SECTIONS, keyForHome, recordSubject, type SettingsSchema, type EntryGuidance, type KeyDeclaration } from "../kernel/settings/settings-schema.js";
 import type { ResolvedKey, Resolution } from "../kernel/settings/tool-contract.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { formatProfileValue } from "../modules/home/home-profile.js";
@@ -105,16 +105,10 @@ export function actorLabel(actor: Actor): string {
   return actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : actor.kind === "outside" ? "Outside Tron" : "You";
 }
 
-/** A key's declaration by id, or undefined for an id this Gateway no longer declares
- * (an old record entry or approval may name one). */
-function declaredKey(id: string): KeyDeclaration | undefined {
-  return KEYS.find(key => key.id === id);
-}
-
 /** History is a disposable projection of permanent audit, not another schema or
  * value store. Retired keys keep their recorded values; known keys reuse their
  * declared formatter. Neither labels nor formatted values are written to audit. */
-export function presentHistoryEntry(entry: ChangeEntry) {
+export function presentHistoryEntry(schema: SettingsSchema, entry: ChangeEntry) {
   if (entry.key === HOME_PROFILE_SUBJECT.id) {
     // A profile item's recorded value is its note's text and state (doc 6.4).
     return { ...entry, presentation: {
@@ -123,7 +117,7 @@ export function presentHistoryEntry(entry: ChangeEntry) {
       display: { before: formatProfileValue(entry.before), after: formatProfileValue(entry.after) },
     } };
   }
-  const key = declaredKey(entry.key);
+  const key = schema.KEYS.find(key => key.id === entry.key);
   const subject = key ? undefined : recordSubject(entry.key);
   const redacted = entry.redacted || key?.redacted;
   const { before, after, fixedAt: _fixedAt, ...redactedEntry } = entry;
@@ -144,12 +138,12 @@ export function presentHistoryEntry(entry: ChangeEntry) {
   };
 }
 
-export function presentResolution(resolution: Resolution, input: PresentationInput): PresentedResolution {
+export function presentResolution(schema: SettingsSchema, resolution: Resolution, input: PresentationInput): PresentedResolution {
   const layer = resolution.target.kind === "global" ? "global" : resolution.target.kind === "project" ? "project"
     : resolution.target.kind === "home" ? "home" : "session";
-  const keys: PresentedKey[] = resolution.keys.filter(key => input.controls === undefined || schemaKey(key.key).writers.length > 0).map(key => ({
+  const keys: PresentedKey[] = resolution.keys.filter(key => input.controls === undefined || schema.schemaKey(key.key).writers.length > 0).map(key => ({
     ...key,
-    presentation: presentKey(keyForHome(schemaKey(key.key), resolution.target.kind === "home"), input.controls, layer),
+    presentation: presentKey(keyForHome(schema.schemaKey(key.key), resolution.target.kind === "home"), input.controls, layer),
   }));
   const sections = SECTIONS.flatMap((section): SettingsSectionPresentation[] =>
     keys.some(key => key.group === section.id) ? [{

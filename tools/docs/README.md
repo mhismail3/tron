@@ -26,7 +26,7 @@ Exit 2: usage.
 | `modules` | `tools/ownership` (`git ls-files '*.module.json'`): id, layer, owned-file count, manifest, and the `README.md` in the manifest's folder when that module owns it. Ownership violations are reported on stderr; the map is still printed |
 | `signals` | In each README.md a module owns, the tables under its `## Signals` heading, up to the next level-1 or level-2 heading (`###` subsections count). Each row keeps all its cells, the first naming the signal, plus a link to its module. Rows are grouped into one table per distinct header and sorted. Fenced code and generated blocks are skipped |
 | `rpc` | The `case` labels of the `switch (method)` in `GatewayService.invoke` (`packages/gateway/src/transport/gateway-service.ts`), grouped by namespace |
-| `settings` | `KEYS` (id, dynamic qualifier, group, allowed layers, Home layers, timing, effect, floor) and `RECORD_SUBJECTS` of `packages/gateway/src/admin/settings-schema.ts`, loaded, not parsed, because keys are built in code. `tools/docs/settings-keys.mjs` runs it under the pinned Node with TypeScript stripping, so the Gateway's `node_modules` must be installed |
+| `settings` | `KEYS` (id, dynamic qualifier, group, allowed layers, Home layers, timing, effect, floor) and `RECORD_SUBJECTS` of `packages/gateway/src/kernel/settings/settings-schema.ts`, constructed through the real `main/settings-schema.ts` owner contributions, not parsed, because keys are built in code. `tools/docs/settings-keys.mjs` runs it under the pinned Node with TypeScript stripping, so the Gateway's `node_modules` must be installed |
 
 ## Generated blocks
 

@@ -13,13 +13,15 @@ import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABIL
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../modules/home/home-memory-browser.js";
 import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { PI_VERSION } from "../kernel/pi/version.js";
-import type { ChangeContext, SessionAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { SettingsStoreAdapter } from "../admin/settings-model.js";
+import type { ChangeContext, SessionAppliers, SettingsChangePath } from "../kernel/settings/settings-change.js";
+import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
 import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { ApprovalRequest } from "../kernel/settings/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
-import { KEYS, SECTIONS, auditSubject, recordSubject, schemaKey } from "../admin/settings-schema.js";
-import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, type HomeProfileOp } from "../modules/home/home-profile.js";
-import type { ObservedStore } from "../admin/settings-outside.js";
+import { SECTIONS, recordSubject, type SettingsSchema } from "../kernel/settings/settings-schema.js";
+import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileOp } from "../modules/home/home-profile.js";
+import type { ObservedStore } from "../kernel/settings/settings-types.js";
 import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
 import { maxTier } from "../kernel/settings/settings-types.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
@@ -246,12 +248,12 @@ function settingsRendererControls(raw: unknown): string[] {
 }
 
 /** A pending request as the iPhone shows it: the diff it would approve. */
-function approvalProjection(request: ApprovalRequest) {
+function approvalProjection(schema: SettingsSchema, request: ApprovalRequest) {
   return {
     requestId: request.requestId, digest: request.digest, createdAt: request.createdAt, expiresAt: request.expiresAt,
     target: request.target, actor: request.actor, requester: requesterLabel(request.actor), ...(request.reason ? { reason: request.reason } : {}),
     changes: request.changes.map(change => {
-      const key = schemaKey(change.key);
+      const key = schema.schemaKey(change.key);
       const format = (value: unknown) => value === undefined ? "Not set" : key.type.format(value, { modelName: () => undefined });
       return {
         changeId: change.changeId, key: change.key, label: key.label, ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}),
@@ -358,7 +360,7 @@ export interface GatewayServiceDependencies {
   terminals: TerminalService;
   trust: TrustService;
   /** The settings model's resolver (docs/settings-model.md). */
-  settingsModel: SettingsModel;
+  settingsModel: SettingsModel<SettingsStoreAdapter>;
   /** The settings model's one change path, with its record. */
   settingsChanges: SettingsChangePath;
   /** Mac Terminal's enrollment facts (security/mac-terminal.ts); absent in a
@@ -460,7 +462,7 @@ export class GatewayService {
       approvals: (event) => this.settingsApprovalsChanged(event),
     });
     // Outside changes reach the same after-apply effects and broadcast, one store at a time.
-    dependencies.settingsModel?.outsideChanges?.observe({
+    dependencies.settingsModel?.owner.outsideChanges?.observe({
       outside: async (entries) => {
         const outside = entries.filter(entry => entry.status === "outside" && !recordSubject(entry.key));
         this.recordSubjectsChangedOutside(entries.filter(entry => entry.status === "outside" && recordSubject(entry.key)));
@@ -509,7 +511,7 @@ export class GatewayService {
 
   /** Tron's own MCP and custom-model writes are Tron's, not outside changes. */
   private async asTronWrite<T>(stores: readonly ObservedStore[], write: () => Promise<T>): Promise<T> {
-    const outside = this.dependencies.settingsModel?.outsideChanges;
+    const outside = this.dependencies.settingsModel?.owner.outsideChanges;
     return outside ? outside.adopt(stores, write) : write();
   }
 
@@ -698,7 +700,7 @@ export class GatewayService {
           if (!this.dependencies.home) throw new GatewayError("unsupported", "Tron Home is not available on this Gateway");
           if (!Array.isArray(params.changes) || params.changes.length < 1 || params.changes.length > 50) throw new GatewayError("invalid_request", "changes holds 1 to 50 profile changes");
           const ops = params.changes.map((raw, index) => profileChangeOp(raw, `changes[${index}]`));
-          return safeJson(await this.dependencies.settingsChanges.changeProfile(ops, {
+          return safeJson(await new HomeProfileItems(() => this.dependencies.knowledge).change(this.dependencies.settingsChanges, ops, {
             actor: { kind: "ui", id: client.identity }, author: { kind: "maintainer" },
             commandId: string(params.commandId, "commandId", { min: 8, max: 120 }),
           }));
@@ -1083,7 +1085,7 @@ export class GatewayService {
           // The key goes first: if removing it fails, the device stays paired
           // and the revoke can be retried, rather than a revoked iPhone keeping
           // a working SSH key.
-          if ((await this.dependencies.settingsModel?.macTerminalKeys?.read())?.[deviceId] !== undefined) {
+          if ((await this.dependencies.settingsModel?.owner.macTerminalKeys?.read())?.[deviceId] !== undefined) {
             await this.dependencies.settingsChanges.change({ kind: "global" }, [{
               key: "permissions.macTerminalKey", qualifiers: { device: deviceId }, layer: "global", op: "unset",
             }], {
@@ -2112,7 +2114,7 @@ export class GatewayService {
         const controls = params.renderer === undefined ? undefined : settingsRendererControls(params.renderer);
         const session = await stage("settings.resolve.session-source", () => this.readSettingsSession(client, target));
         const resolution = await stage("settings.resolve.read", () => this.dependencies.settingsModel.resolve(target, session, keys));
-        return stage("settings.resolve.projection", () => safeJson(presentResolution(resolution, controls ? { controls } : {})));
+        return stage("settings.resolve.projection", () => safeJson(presentResolution(this.dependencies.settingsModel.schema, resolution, controls ? { controls } : {})));
       }
       case "settings.options": {
         rejectUnknownFields(params, ["target", "key", "qualifiers", "query", "cursor", "limit"], method);
@@ -2183,7 +2185,7 @@ export class GatewayService {
         });
       case "settings.approvals": {
         rejectUnknownFields(params, [], method);
-        return safeJson({ requests: (await this.dependencies.settingsChanges.pendingApprovals()).map(approvalProjection) });
+        return safeJson({ requests: (await this.dependencies.settingsChanges.pendingApprovals()).map(request => approvalProjection(this.dependencies.settingsModel.schema, request)) });
       }
       case "settings.decide":
         // The maintainer's decision on a pending change, bound to the exact diff
@@ -2215,7 +2217,7 @@ export class GatewayService {
           ...(params.key === undefined ? {} : { key: string(params.key, "key", { max: 200 }) }),
           ...(params.status === undefined ? {} : { status: string(params.status, "status", { max: 40 }) }),
         });
-        return safeJson({ ...page, entries: page.entries.map(presentHistoryEntry) });
+        return safeJson({ ...page, entries: page.entries.map(entry => presentHistoryEntry(this.dependencies.settingsModel.schema, entry)) });
       }
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));
@@ -2498,7 +2500,7 @@ export class GatewayService {
   private async settingsSession(slot: RuntimeSlot, rawFence: unknown, changes: ReadonlyArray<Pick<ChangeRequest, "key" | "layer">>, workToken?: string): Promise<SessionSettingsSource & { appliers: SessionAppliers }> {
     const fence = rawFence === undefined ? undefined : object(rawFence, "fence");
     if (fence) rejectUnknownFields(fence, ["runtimeGeneration", "model", "revision"], "fence");
-    const bindings = changes.flatMap(change => change.layer === "session" ? [KEYS.find(key => key.id === change.key)?.layers.session] : []);
+    const bindings = changes.flatMap(change => change.layer === "session" ? [this.dependencies.settingsModel.schema.KEYS.find(key => key.id === change.key)?.layers.session] : []);
     if (!fence && bindings.some(binding => binding?.store === "session-settings" || binding?.store === "session" && binding.field !== "tools")) throw new GatewayError("invalid_request", "A Session-scope change needs the fence it read");
     if (fence?.revision === undefined && bindings.some(binding => binding?.store === "session" && binding.field === "contextWindow")) throw new GatewayError("invalid_request", "A context window change needs the fence revision it read");
     const expectation = () => this.configurationExpectation({ expectedRuntimeGeneration: fence!.runtimeGeneration, expectedModel: fence!.model ?? null });
@@ -2539,12 +2541,12 @@ export class GatewayService {
       // whether it pushes (docs/settings-model.md 5.6, F3).
       const loud = changes.filter(change => change.tier !== "quiet");
       if (loud.length) {
-        const what = [...new Set(loud.map(change => auditSubject(change.key)?.label ?? change.key))].join(", ");
+        const what = [...new Set(loud.map(change => this.dependencies.settingsModel.schema.auditSubject(change.key)?.label ?? change.key))].join(", ");
         void this.settingsPush(context.actor, `settings-outside:${changes[0]!.changeId}`, "explicit", "Changed outside Tron",
           `${what} changed outside Tron in ${context.actor.id}. Review it in Tron.`);
       }
     } else if (context.tier === "notify" && context.actor.kind !== "ui" && !context.approved) {
-      const what = [...new Set(changes.map(change => auditSubject(change.key)?.label ?? change.key))].join(", ");
+      const what = [...new Set(changes.map(change => this.dependencies.settingsModel.schema.auditSubject(change.key)?.label ?? change.key))].join(", ");
       void this.settingsPush(context.actor, `settings-applied:${changes[0]!.changeId}`, "explicit", "Setting changed",
         `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
     }
@@ -2574,7 +2576,7 @@ export class GatewayService {
     }
     for (const change of changes) {
       // A record subject (a profile item) has no after-apply effect of its own.
-      const key = KEYS.find(candidate => candidate.id === change.key);
+      const key = this.dependencies.settingsModel.schema.KEYS.find(candidate => candidate.id === change.key);
       if (!key) continue;
       if (key.effect === "reload" && change.layer === "global" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
       if (key.effect === "next-compaction" && (change.layer === "global" || projectDir)) {
@@ -2595,7 +2597,7 @@ export class GatewayService {
    * to the pending set is broadcast so open clients refresh it (doc 5.5). */
   private settingsApprovalsChanged(event: { kind: "pending" | "resolved"; request: ApprovalRequest }): void {
     if (event.kind === "pending") {
-      const what = event.request.changes.map(change => schemaKey(change.key).label).join(", ");
+      const what = event.request.changes.map(change => this.dependencies.settingsModel.schema.schemaKey(change.key).label).join(", ");
       void this.settingsPush(event.request.actor, `settings-approval:${event.request.requestId}`, "waiting", "Approval needed",
         `${actorLabel(event.request.actor)} asks to change ${what}${event.request.reason ? `: ${event.request.reason}` : ""}. Approve or decline in Tron.`, "settings-approval");
     }

@@ -2,11 +2,13 @@ import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { GatewayError } from "../errors.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
+import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { captureSettingsMigration, migrationFileHash, settingsMigrationInventory } from "./settings-migration-plan.js";
 
 /** The caller already holds the canonical runtime lock (gateway-main runs this
  * after acquiring it and binding its listener); this adds no second lock. */
 export interface SettingsMigrationOptions {
+  schema: SettingsSchema;
   tronHome: string;
   agentDir: string;
 }
@@ -96,7 +98,7 @@ export class SettingsMigration {
       await verifyInputs(saved, true);
       return new SettingsMigration(root, saved, false);
     }
-    const capture = await captureSettingsMigration(options.tronHome, options.agentDir);
+    const capture = await captureSettingsMigration(options.schema, options.tronHome, options.agentDir);
     let temporary: string | undefined;
     try {
       const current = await readJournal(journalPath, options);

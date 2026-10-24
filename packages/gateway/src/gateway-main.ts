@@ -13,8 +13,11 @@ import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
 import { macTerminalHostCommand } from "./machine/mac-terminal-host.js";
-import { terminalIdleLimitMs } from "./admin/settings-schema.js";
-import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
+import { terminalIdleLimitMs } from "./kernel/settings/settings-schema.js";
+import { createGatewaySettingsSchema } from "./main/settings-schema.js";
+import { SettingsStoreAdapter } from "./admin/settings-model.js";
+import { SettingsChangePath } from "./kernel/settings/settings-change.js";
+import { SettingsModel } from "./kernel/settings/settings-model.js";
 import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
 import { SettingsChangeRecord } from "./kernel/settings/settings-record.js";
 import { OutsideChanges } from "./admin/settings-outside.js";
@@ -35,6 +38,8 @@ import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { logHomeDiagnostic } from "./modules/home/home-diagnostic.js";
 import type { HomeComposition } from "./modules/home/home-module.js";
+import { applyHomeCacheRetention } from "./modules/home/home-request-policy.js";
+import { sessionRuntimeView } from "./providers/openai-model-eligibility.js";
 import type { HomeTaskDiagnostic } from "./modules/home/home-task-dispatcher.js";
 import { homeWorkspaceDirectory } from "./modules/home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
@@ -195,7 +200,9 @@ const browserLiveViews = new BrowserLiveViewRegistry();
 const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 // Mac Terminal's store is the Gateway user's own ~/.ssh/authorized_keys.
 const macTerminalKeys = new MacTerminalKeys(join(homedir(), ".ssh"));
-const settingsModel = new SettingsModel({
+const settingsSchema = createGatewaySettingsSchema();
+const settingsModel = new SettingsModel(new SettingsStoreAdapter({
+  schema: settingsSchema,
   macTerminalKeys,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
@@ -205,11 +212,11 @@ const settingsModel = new SettingsModel({
     ? sessions.liveToolCatalog(target.sessionId)
     : target.kind === "home" ? sessions.homeToolCatalog()
     : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
-});
+}));
 const settingsRecord = new SettingsChangeRecord(config.tronHome);
 // Outside changes (settings-model.md 5.6): reads compare Global/Project with what Tron last saw.
-const outsideSettings = new OutsideChanges(config.tronHome, config.agentDir, settingsRecord, settingsModel.observedReaders);
-settingsModel.observeOutside(outsideSettings);
+const outsideSettings = new OutsideChanges(settingsSchema, config.tronHome, config.agentDir, settingsRecord, settingsModel.owner.observedReaders);
+settingsModel.owner.observeOutside(outsideSettings);
 const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
@@ -247,6 +254,10 @@ const modelQueue = new ModelQueueOwner({
 });
 const homeComposition: HomeComposition = {
   modelQueue,
+  runtime: async () => ({
+    runtime: applyHomeCacheRetention(sessionRuntimeView(modelRuntime)),
+    ownership: "borrowed",
+  }),
   tronHome: config.tronHome, agentDir: config.agentDir, trust, notifications, machineId: config.machineId,
   homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
   homeMemoryDiagnostic: (record) => {
@@ -412,6 +423,7 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
   machineId: config.machineId,
   notifications,
   displayArtifacts,
+  settingsSchema,
   workRegistry,
   extensionArtifactWarning: ({ reason, owner }) => logger.log(
     "warning",
@@ -804,7 +816,7 @@ async function runStopDrain(): Promise<void> {
 
 // The one settings change path (settings-model.md 5), for agents' tool and the slots alike.
 const settingsRisk = new SettingsRiskEvaluator(jevClient);
-const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
+const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
   assessRisk: async (input, signal) => {
     try { return await settingsRisk.assess(input, signal); }
     catch (error) {
@@ -820,8 +832,8 @@ const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, ne
     async (inspection) => sessions.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),
     async (inspection) => sessions.commitProjectReload(inspection.projectDir),
   ),
-  profile: new HomeProfileItems(() => knowledge),
-}, config.agentDir);
+  undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
+});
 sessions.setSettings(settingsModel, settingsChanges);
 
 const service = new GatewayService({
@@ -909,7 +921,7 @@ await transport.listen(async () => {
   // The shared settings stores move to the three-layer vocabulary while clients
   // see warming-up, before the owners that read them load (sessions.initialize).
   // Never fatal (#1649): a refusal changes nothing, is logged, and retries next start.
-  await migrateSettings({ tronHome: config.tronHome, agentDir: config.agentDir }).then(
+  await migrateSettings({ schema: settingsSchema, tronHome: config.tronHome, agentDir: config.agentDir }).then(
     ({ inputs, replaced, alreadyComplete }) => logger.log("info", alreadyComplete ? "Settings migration already complete"
       : `Settings migration published ${replaced} of ${inputs} shared settings file(s)`, {
       event: "settings.migration", source: "settings", counts: { inputs, replaced } }),

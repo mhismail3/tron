@@ -58,7 +58,9 @@ unaffected by every rule here.
   `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` load. Agent `SYSTEM.md`/
   `APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
-  model on its Gateway-runtime view; no cache warming (`tron-home` answers `stop`). Append guards read the live record.
+  model on its Gateway-runtime view; the profile owns explicit model admission and physical
+  selection metadata. Composition supplies lazy runtime acquisition, proxy isolation and Home
+  cache retention, not Registry. No cache warming (`tron-home` answers `stop`). Append guards read the live record.
 - **Profile changes** run in one serialized owner, replacing a live runtime in place after an
   idle check (else `busy`); the rebuilt runtime adopts Home's saved settings.
 - **Activation:** one admitted input and everything it triggers. Every provider request
@@ -97,7 +99,11 @@ changes keep its store, cursors and spend.
 - **Learned profile:** personal Knowledge notes labelled `home-profile` plus one `kind-<kind>`
   (`preference`, `standing-decision`, `delegation-default`, `fact`). Written only by the
   `profile` tool (unconfirmed) and `home.profileChange` (confirmed, `expectedRevision`), both
-  through `HomeProfileItems` and the undoable settings path. Active items are injected as
+  through `HomeProfileItems`, which owns operation validation, rollback, undo fencing and
+  typed result projection. The kernel `SettingsChangePath.auditSubject` retains the Home
+  stripe through those effects, grouped audit, awaited observer and projection; partial
+  failures restore before ungrouped failure audit and rethrow the original value.
+  Active items are injected as
   `## Learned profile` (≤ `HOME_PROFILE_BOUND_BYTES`, 8 KiB, else IDs only); unavailable
   Knowledge says so. Home chapters are never observed by Knowledge.
 

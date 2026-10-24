@@ -4,7 +4,8 @@
     "gateway-main.module.json",
     "gateway-main.ts",
     "index.ts",
-    "main/modules.ts"
+    "main/modules.ts",
+    "main/settings-schema.ts"
   ],
   "dependsOn": [
     "gateway/apps",
@@ -16,6 +17,7 @@
     "gateway/runtime",
     "gateway/workspace",
     "gateway/admin",
+    "gateway/settings",
     "gateway/home",
     "gateway/automations",
     "gateway/notifications",

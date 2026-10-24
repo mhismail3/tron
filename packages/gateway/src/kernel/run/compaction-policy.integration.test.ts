@@ -6,6 +6,7 @@ import { createAgentSessionServices, createAgentSessionFromServices, ModelRuntim
 import { Type, fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, normalizeContext, type TranscriptContext, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { abortAwareStream } from "../../runtime/abort-aware-stream.js";
 import { compactionAdmission } from "../../admin/settings-admission.js";
+import { TEST_SETTINGS_SCHEMA } from "../../../test-support/settings-schema.js";
 import { CompactionOperationPolicy, compactionPolicyExtension } from "./compaction-policy.js";
 
 /** Captured verbatim from opencode-go rejecting a 48MB conversation: the
@@ -48,7 +49,7 @@ async function fixture(configuration: Record<string, unknown> = {}, adapted = tr
   const { session } = await createAgentSessionFromServices({ services, sessionManager: manager, model: faux.getModel(), thinkingLevel: "high", noTools: "all" });
   cleanup.push(async () => { session.dispose(); await rm(root, { recursive: true, force: true }); });
   if (adapted) {
-    policy = new CompactionOperationPolicy(session, root, compactionAdmission);
+    policy = new CompactionOperationPolicy(session, root, compactionAdmission.bind(undefined, TEST_SETTINGS_SCHEMA));
     session.agent.streamFunction = policy.wrap(abortAwareStream(session.agent.streamFunction));
   }
   // Like RuntimeSlot, bind an actual host callback so reload emits session_start.

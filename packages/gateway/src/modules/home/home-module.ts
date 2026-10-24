@@ -6,8 +6,8 @@ import type { GatewayHost, ModuleDescriptor, RunSettledPolicy, SessionContext } 
 import { createTronHomeExtension } from "./tron-home-extension.js";
 import { homeResearchTools, type HomeResearchTransport } from "./home-research-tools.js";
 import type { HomeMemoryToolAccess } from "./home-memory.js";
-import type { HomeProfileChangeAccess } from "./home-profile.js";
-import type { SettingsChangePath } from "../../admin/settings-model.js";
+import { HomeProfileItems, type HomeProfileChangeAccess } from "./home-profile.js";
+import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
 import { HomeOwner, type HomeOwnerOptions } from "./home-owner.js";
 import { homeAppendGuardHook, type HomeAppendGuardServices } from "./home-append-guard.js";
 import type { HomeDiagnostic } from "./home-diagnostic.js";
@@ -54,6 +54,7 @@ export interface HomeModuleServices {
 
 /** The composition's Home inputs: platform owners and log sinks, never the registry. */
 export interface HomeComposition {
+  runtime: HomeSessionProfileServices["runtime"];
   tronHome: string;
   agentDir: string;
   trust: TrustService;
@@ -73,7 +74,6 @@ export interface HomeComposition {
 /** The registry's generic operations and reads Home is built over (k0-kernel.md §5). */
 export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "sessions" | "runtimes" | "taskSessions" | "memoryModels" | "knowledge"> {
   readSearchCut: Pick<RuntimeRegistry, "readSearchCut">["readSearchCut"];
-  runtime: HomeSessionProfileServices["runtime"];
   changes(): SettingsChangePath | undefined;
   workerChoice: Omit<HomeWorkerChoicePort, "availability">;
 }
@@ -137,7 +137,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
       publicationUncertain: () => owner.publicationUncertain,
     },
     profile: {
-      decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), runtime: ports.runtime,
+      decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), runtime: platform.runtime,
     },
     appendGuard: {
       state: sessionId => owner.chapterStateFor(sessionId),
@@ -155,7 +155,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
     },
     memory: sessionId => owner.memoryToolsFor(sessionId),
     task: (sessionId, request) => owner.taskTool(sessionId, request),
-    profileChanges: session => homeProfileChanges(session, ports.changes()),
+    profileChanges: session => homeProfileChanges(session, ports.changes(), ports.knowledge),
     explicitlyTrustedDirectory: async path => {
       try { return (await platform.trust.inspect(path)).savedDecision === true; } catch { return false; }
     },
@@ -164,9 +164,9 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
 }
 
 /** Home's profile tool resolves the current change path and actor on each call. */
-export function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined): HomeProfileChangeAccess | undefined {
+export function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined, knowledge: HomeKernelPorts["knowledge"]): HomeProfileChangeAccess | undefined {
   if (!changes || !session.profile().profileChanges) return undefined;
-  return { change: (ops, input) => changes.changeProfile(ops, {
+  return { change: (ops, input) => new HomeProfileItems(knowledge).change(changes, ops, {
     actor: { kind: "home", id: session.sessionId(), sessionId: session.sessionId(), toolCallId: input.toolCallId },
     author: input.author, commandId: input.commandId, web: input.web, ...(input.reason ? { reason: input.reason } : {}),
   }) };

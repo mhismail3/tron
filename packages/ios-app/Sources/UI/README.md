@@ -34,9 +34,11 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
 - Appearance stores the app's primary identity in `AppearanceSettings.themeColor`: Emerald,
   Deep Burgundy or Olive Gold. `Color.tronPrimary` reads that observable owner; ink, title,
   icon, container and pill tint share the adaptive ink without recreating navigation or chats.
-  Dark Burgundy separates readable wine-family `tronPrimary` ink from deep-wine
+  Dark Burgundy separates saturated red-dominant `tronPrimary` ink from deep-wine
   `tronPrimarySurface` glass tint. Home dashboard surfaces and the Home/settings sheet family
   consume those canonical roles; light Burgundy and other themes resolve both to the same ink.
+  Dark Burgundy primary ink has a 3:1 rendered contrast floor, an explicit WCAG AA exception
+  for small primary-colored text; light retains 4.5:1.
   `TronSettingsVisualTheme` carries foreground and surface accents together through inherited
   destinations; an explicit semantic accent keeps its own surface unless one is supplied.
   Semantic status and resource identities stay independent. UIKit inputs refresh primary ink

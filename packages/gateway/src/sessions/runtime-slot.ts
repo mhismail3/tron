@@ -59,10 +59,10 @@ import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../kernel/host/session-profile.js";
-import type { ChangeContext, SessionAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
+import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../kernel/settings/settings-change.js";
+import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
 import type { Actor } from "../kernel/settings/settings-record.js";
-import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
 import type {
@@ -155,7 +155,7 @@ import { skillTitle } from "./skill-title.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, subagentDetail, type SubagentCatalog, type SubagentDetail } from "../kernel/delegation/subagent-catalog.js";
 import type { SessionStore } from "../kernel/settings/settings-types.js";
-import { KEYS, hasCompactionApplier, schemaKey } from "../admin/settings-schema.js";
+import { hasCompactionApplier, type SettingsSchema } from "../kernel/settings/settings-schema.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -335,6 +335,7 @@ export interface RuntimeSlotDependencies {
   exports: BlobStore;
   displayArtifacts: DisplayArtifactStore;
   modules: ModuleHost; // started modules whose extensions this runtime registers
+  readonly settingsSchema: SettingsSchema;
   /** The settings model and its one change path, late-bound:
    * installed on the registry after construction (docs/settings-model.md 5.1). */
   settings: () => { model: SettingsModel; changes: SettingsChangePath } | undefined;
@@ -614,8 +615,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */
   private readonly runtimeProfiles = new WeakMap<AgentSession, SessionProfile>();
-
-  protected get virtualModelAPI(): string { return VIRTUAL_MODEL_API; }
 
   private constructor(
     public sessionManager: SessionManager,
@@ -1081,7 +1080,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     if (JSON.stringify(previousPins) !== JSON.stringify(requestPins)) {
       await this.persistSessionSettings({ settings: explicitSettings, requestPins });
     }
-    await applyModelAdmission(session, admission, Boolean(this.taskWorker) || this.liveProfile().physicalModelsOnly === true);
+    await applyModelAdmission(session, admission, Boolean(this.taskWorker) || this.liveProfile().modelSelection?.physicalOnly === true);
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during model admission");
     session.settingsManager.applyOverrides(settings);
     // These SDK controls are copied when Agent is created, not read from its
@@ -1096,16 +1095,16 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   private async persistChatRunSetting(key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting): Promise<number> {
     this.assertChapterWritable();
     const branch = this.sessionManager.getBranch();
-    const settings = changeSessionSetting(readSessionSettings(branch), key, value);
+    const settings = changeSessionSetting(this.dependencies.settingsSchema, readSessionSettings(branch), key, value);
     const fixed = readSessionFixedSettings(branch);
-    if (schemaKey(key).timing === "fixed") {
+    if (this.dependencies.settingsSchema.schemaKey(key).timing === "fixed") {
       fixed[key] = { ...(fixedAt ?? { from: "session", at: new Date().toISOString(), ref: randomUUID() }), value };
     }
     const requestPins = readSessionRequestPins(branch);
     // Tier admission and timing are separate: lowering a floor must not make
     // an unapproved widening live. Only an approval or the maintainer's tap
     // releases the fixed-direction snapshot (including Follow the default).
-    if (typeof schemaKey(key).timing !== "string" && allowFixedDirection) {
+    if (typeof this.dependencies.settingsSchema.schemaKey(key).timing !== "string" && allowFixedDirection) {
       const owners = this.dependencies.settings();
       if (!owners) throw new GatewayError("conflict", "Settings owner is unavailable");
       const { requestPins: _pins, ...chat } = this.settingsSessionLayer();
@@ -1117,7 +1116,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     await this.persistSessionSettings({ settings, requestPins, fixed });
     // The compaction projection follows the Session value at once; its budgets
     // reach the SDK at the next idle admission (refreshCompactionPolicy).
-    if (hasCompactionApplier(schemaKey(key))) {
+    if (hasCompactionApplier(this.dependencies.settingsSchema.schemaKey(key))) {
       try { this.compactionPolicies.get(this.runtime.session)?.refresh(); } catch { /* Published warning is authoritative. */ }
     }
     this.revision += 1;
@@ -1619,7 +1618,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const managedSubagents = profile.managedSubagents ? this.dependencies.managedSubagents : undefined;
       // The Project layer is the root's `.pi/` (settings-model decision 31); the
       // chat keeps its cwd for tools, context files and session grouping.
-      const settingsManager = await createSettingsManager(trust.projectDir, this.dependencies.agentDir, profile.projectSettings && trust.trusted);
+      const settingsManager = await createSettingsManager(this.dependencies.settingsSchema, trust.projectDir, this.dependencies.agentDir, profile.projectSettings && trust.trusted);
       const managedLoaderOptions = await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
       const extensionFactories = profile.extensions !== "ordinary"
@@ -1747,7 +1746,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         : undefined;
       const homeRequestPolicy = this.homeRequestPolicy;
       const compactionSession = created.session;
-      compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir, compactionAdmission,
+      compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir, compactionAdmission.bind(undefined, this.dependencies.settingsSchema),
         profile.compaction === "disabled" ? { disabled: true } : { session: () => readSessionSettings(compactionSession.sessionManager.getBranch()) });
       const taskWorker = this.taskWorker;
       requestPipeline.install(created.session, {
@@ -1836,14 +1835,14 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     const owners = this.dependencies.settings();
     if (!owners) return;
     const session = this.runtime.session;
-    const keys = KEYS.filter(key => key.timing === "fixed" && (key.layers.session?.store === "session" || key.layers.session?.store === "session-settings"));
+    const keys = this.dependencies.settingsSchema.KEYS.filter(key => key.timing === "fixed" && (key.layers.session?.store === "session" || key.layers.session?.store === "session-settings"));
     const defaults = await owners.model.resolve({ kind: "session", sessionId: this.id }, this.settingsSource({ settings: {} }), keys.map(key => key.id));
     const actual = this.settingsSessionLayer();
     const policy = this.contextPolicies.get(session);
     const context = policy?.snapshot();
     const fixed: Record<string, FixedSetting> = {};
     for (const row of defaults.keys) {
-      const binding = schemaKey(row.key).layers.session;
+      const binding = this.dependencies.settingsSchema.schemaKey(row.key).layers.session;
       if (binding?.store !== "session" && binding?.store !== "session-settings") continue;
       const value = binding.store === "session-settings" ? row.value
         : binding.field === "contextWindow" ? context?.effective : actual[binding.field];
@@ -1874,7 +1873,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const fixed = readSessionFixedSettings(this.sessionManager.getBranch());
       for (const role of ["worker", "subagent"] as const) {
         const key = `model.queue[role=${role}]`;
-        const value = await schemaKey(key).type.validate(queues[role], key);
+        const value = await this.dependencies.settingsSchema.schemaKey(key).type.validate(queues[role], key);
         fixed[key] = { value, from: "delegate", at: new Date().toISOString(), ref: randomUUID(),
           via: "home-profile", reason: "Resolved at task launch; later Home profile changes do not retarget this worker" };
       }

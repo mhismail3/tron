@@ -2,13 +2,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { SettingsManager } from "../kernel/pi/coding-agent.js";
-import { KEYS, type Binding } from "./settings-schema.js";
+import { type SettingsSchema, type Binding } from "../kernel/settings/settings-schema.js";
 import { GatewayError } from "../errors.js";
 
 /** Validate declared repository values, not ignored/safety fields. Missing
  * fields inherit; malformed declared fields must not silently become Global. */
-export async function validateProjectSettings(raw: Record<string, unknown>): Promise<void> {
-  for (const key of KEYS) {
+export async function validateProjectSettings(schema: SettingsSchema, raw: Record<string, unknown>): Promise<void> {
+  for (const key of schema.KEYS) {
     const binding = key.projectSettable ? key.layers.project : undefined;
     if (!binding) continue;
     try {
@@ -64,9 +64,9 @@ function paths(binding: Binding): readonly (readonly string[])[] {
   return binding.store === "pi-model-ref" ? [["defaultProvider"], ["defaultModel"]]
     : binding.store === "pi" ? [binding.path, ...(binding.qualified ? [binding.qualified] : [])] : [];
 }
-export function admittedProjectSettings(raw: Document): Document {
+export function admittedProjectSettings(schema: SettingsSchema, raw: Document): Document {
   const admitted: Document = Object.create(null);
-  for (const key of KEYS) {
+  for (const key of schema.KEYS) {
     const binding = key.projectSettable ? key.layers.project : undefined;
     if (binding) for (const path of paths(binding)) copyPath(raw, admitted, path);
   }
@@ -86,8 +86,8 @@ function removePath(raw: Document, path: readonly string[]): void {
     }
   }
 }
-function replaceProjectProjection(raw: Document, next: Document): Document {
-  for (const key of KEYS) {
+function replaceProjectProjection(schema: SettingsSchema, raw: Document, next: Document): Document {
+  for (const key of schema.KEYS) {
     const binding = key.projectSettable ? key.layers.project : undefined;
     if (!binding) continue;
     for (const path of paths(binding)) { removePath(raw, path); copyPath(next, raw, path); }
@@ -98,7 +98,7 @@ function replaceProjectProjection(raw: Document, next: Document): Document {
 /** The SDK's public SettingsStorage seam, over the same canonical files and
  * proper-lockfile protocol. This is an admission projection, never another
  * settings store. Writes merge into the locked raw document, not the projection. */
-export async function createSettingsManager(projectDir: string, agentDir: string, projectTrusted: boolean): Promise<SettingsManager> {
+export async function createSettingsManager(schema: SettingsSchema, projectDir: string, agentDir: string, projectTrusted: boolean): Promise<SettingsManager> {
   const storage: Parameters<typeof SettingsManager.fromStorage>[0] = {
     withLock(scope, transform) {
       const path = scope === "global" ? join(agentDir, "settings.json") : join(projectDir, ".pi", "settings.json");
@@ -121,14 +121,14 @@ export async function createSettingsManager(projectDir: string, agentDir: string
         if (existsSync(dirname(path))) release = acquire();
         const current = existsSync(path) ? readFileSync(path, "utf8") : undefined;
         const raw = scope === "project" ? document(current) : undefined;
-        const next = transform(raw ? JSON.stringify(admittedProjectSettings(raw)) : current);
+        const next = transform(raw ? JSON.stringify(admittedProjectSettings(schema, raw)) : current);
         if (next !== undefined) {
           mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
           if (!release) {
             release = acquire();
             if (existsSync(path)) throw new Error("Settings file was created concurrently; refresh before writing");
           }
-          writeFileSync(path, raw ? JSON.stringify(replaceProjectProjection(raw, document(next)), null, 2) + "\n" : next, { mode: 0o600 });
+          writeFileSync(path, raw ? JSON.stringify(replaceProjectProjection(schema, raw, document(next)), null, 2) + "\n" : next, { mode: 0o600 });
         }
       } catch (error) {
         throw new Error(`Settings file ${path}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
@@ -136,6 +136,6 @@ export async function createSettingsManager(projectDir: string, agentDir: string
     },
   };
   const manager = SettingsManager.fromStorage(storage, { projectTrusted });
-  if (projectTrusted) await validateProjectSettings(manager.getProjectSettings() as Record<string, unknown>);
+  if (projectTrusted) await validateProjectSettings(schema, manager.getProjectSettings() as Record<string, unknown>);
   return manager;
 }

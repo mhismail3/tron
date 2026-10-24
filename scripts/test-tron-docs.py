@@ -238,7 +238,7 @@ class FixtureTests(unittest.TestCase):
             export type LayerId = typeof LAYERS[number];
             """
         schema = """\
-            import { LAYERS, type LayerId } from "../kernel/settings/tool-contract.js";
+            import { LAYERS, type LayerId } from "./tool-contract.js";
             const both = (path: string) => ({ project: path, mac: path });
             const ROLES = ["worker", "background"] as const;
             export const KEYS: readonly { id: string; layers: Partial<Record<LayerId, string>> }[] = [
@@ -250,8 +250,11 @@ class FixtureTests(unittest.TestCase):
             export const RECORD_SUBJECTS = [{ id: "tools.mcp.server", group: "tools", qualifier: "server", floor: "notify" }];
             void LAYERS;
             """
-        self.module("packages/gateway/src/admin", "admin", {"settings-schema.ts": schema})
-        self.module("packages/gateway/src/kernel/settings", "settings", {"tool-contract.ts": types})
+        self.module("packages/gateway/src/kernel/settings", "settings", {"settings-schema.ts": schema, "tool-contract.ts": types})
+        self.module("packages/gateway/src/main", "main", {"settings-schema.ts": """\
+            import { KEYS, RECORD_SUBJECTS } from "../kernel/settings/settings-schema.js";
+            export function createGatewaySettingsSchema() { return { KEYS, RECORD_SUBJECTS }; }
+            """})
         self.write("settings.md", "<!-- tron docs settings -->\n<!-- /tron docs -->\n")
         self.write("root.module.json", json.dumps({"layer": "L5", "owns": ["settings.md", "root.module.json"]}))
         self.docs("update")
@@ -264,26 +267,29 @@ class FixtureTests(unittest.TestCase):
         self.assertIn("| `tools.mcp.server` | tools | server | notify |", (self.repo / "settings.md").read_text())
 
         # Known bad: a key added to the schema leaves the committed block stale.
-        self.write("packages/gateway/src/admin/settings-schema.ts", schema.replace(
+        self.write("packages/gateway/src/kernel/settings/settings-schema.ts", schema.replace(
             '"background"]', '"background", "subagent"]'))
         self.assertIn("settings.md: `tron docs settings` is stale", self.docs("check", code=1))
 
     def test_check_against_a_base_needs_gateway_dependencies_only_when_a_loaded_block_can_change(self) -> None:
         """#1640: a Markdown-only change in a worktree without Gateway node_modules checks its generated docs."""
         schema = "export const KEYS = [];\nexport const RECORD_SUBJECTS = [];\n"
-        self.module("packages/gateway/src/admin", "admin", {"settings-schema.ts": schema})
         self.module("packages/gateway/src/kernel/settings", "settings",
-                    {"tool-contract.ts": "export const LAYERS = [];\n"})
+                    {"settings-schema.ts": schema, "tool-contract.ts": "export const LAYERS = [];\n"})
+        self.module("packages/gateway/src/main", "main", {"settings-schema.ts": """\
+            import { KEYS, RECORD_SUBJECTS } from "../kernel/settings/settings-schema.js";
+            export function createGatewaySettingsSchema() { return { KEYS, RECORD_SUBJECTS }; }
+            """})
         self.write("settings.md", "<!-- tron docs settings -->\n<!-- /tron docs -->\n")
         self.write("other.md", "# Other\n")
         self.write("root.module.json", json.dumps({"layer": "L5", "owns": ["settings.md", "other.md", "root.module.json"]}))
         self.docs("update")
         # The schema now needs a package this worktree has not installed, as a fresh worktree's Gateway does.
-        self.write("packages/gateway/src/admin/settings-schema.ts", 'import "@earendil-works/pi-ai";\n' + schema)
+        self.write("packages/gateway/src/kernel/settings/settings-schema.ts", 'import "@earendil-works/pi-ai";\n' + schema)
         self.git("add", "-A")
         self.git("-c", "user.name=F", "-c", "user.email=f@example.invalid", "commit", "-q", "-m", "base")
         missing = self.docs("check", code=1)
-        self.assertIn("settings.md: loading packages/gateway/src/admin/settings-schema.ts needs the Gateway "
+        self.assertIn("settings.md: loading packages/gateway/src/kernel/settings/settings-schema.ts needs the Gateway "
                       "dependencies, and packages/gateway/node_modules is missing (install with:", missing)
         self.assertIn("ERR_MODULE_NOT_FOUND", missing)
         self.write("other.md", "# Other, edited\n")
