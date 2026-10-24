@@ -7,8 +7,8 @@ enum ThemeColor: String, CaseIterable, Identifiable, Sendable {
     var label: String {
         switch self { case .emerald: "Emerald"; case .burgundy: "Deep Burgundy"; case .oliveGold: "Olive Gold" }
     }
-    /// AA ink on the neutral sheet and on low-opacity containers/pills derived
-    /// from this same ink. Dark mode lifts the hue rather than using dark pigment.
+    /// Light ink targets small-text AA. Dark Burgundy deliberately uses deeper
+    /// wine-red ink with a 3:1 floor and an explicit small-text AA exception.
     var lightHex: String {
         switch self { case .emerald: "#065F46"; case .burgundy: "#57152F"; case .oliveGold: "#514B10" }
     }
@@ -17,8 +17,7 @@ enum ThemeColor: String, CaseIterable, Identifiable, Sendable {
     }
     var ink: Color { Color(lightHex: lightHex, darkHex: darkHex) }
 
-    /// Burgundy needs a dark wine pigment in glass, not the lifted foreground
-    /// ink: using readable ink as the tint makes containers dusty pink.
+    /// Burgundy glass uses a deeper wine pigment independent of foreground ink.
     var surfaceTint: Color {
         self == .burgundy ? Color(lightHex: lightHex, darkHex: "#5B1735") : ink
     }
