@@ -185,7 +185,7 @@ struct HomeButtonIndicator: View {
                 .frame(width: 34, height: 34)
                 .foregroundStyle(accent)
         case .working:
-            ProcessActivityOrb(mode: .solving, size: 30)
+            ProcessActivityOrb(mode: .solving, size: 30, accent: accent)
         case .waitingForUser:
             Image(systemName: "questionmark.bubble.fill")
                 .font(TronTypography.sans(size: 22, weight: .semibold))

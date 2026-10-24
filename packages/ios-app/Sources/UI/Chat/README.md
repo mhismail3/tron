@@ -34,6 +34,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   locally. **Archived (N)** appears after every workspace only for a non-zero count, reads
   `archived: "only"` pages per server, and scrolls the list only for the user's own expansion.
   Search filters titles locally (`SessionTitleSearch`); content search is Home's `session_search`.
+  The floating Home button's resting logo and working orb share `tronPrimary`; its waiting-for-user
+  glyph keeps semantic amber.
 - **Opening.** Every new presentation synchronizes a fresh bounded latest page behind an opaque
   surface with a centered pulse; cached or paged prefixes are never its baseline. One optional
   exact backward page fills a sparse tail. After one covered display frame the transcript reveals,
