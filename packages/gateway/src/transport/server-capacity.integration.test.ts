@@ -46,7 +46,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
-    const activeGateway = new GatewayServer({
+    const activeGateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 512 * 1_024, maximumOutboundBytes,
       devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
@@ -158,7 +158,7 @@ describe("WebSocket connection and outbound capacity", () => {
       : (await devices.pair((await devices.ensureEnrollment()).code, "Phone")).token;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 1_048_576,
@@ -249,7 +249,7 @@ describe("WebSocket connection and outbound capacity", () => {
       }
       return { method };
     });
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumOutboundBytes: 8_192,
       maximumConnections: 2, devices, logger: logger as any, sessions: sessions as any,
       uploads: {} as any, auth: { detachClient: vi.fn() } as any,
@@ -345,13 +345,14 @@ describe("WebSocket connection and outbound capacity", () => {
     const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
     const removeDevice = vi.fn(async () => cleanupGate);
     const service = new GatewayService({
+      display: {} as never,
       config: { tronHome: root },
       devices,
       sessions: {},
       receipts: new CommandReceiptStore(root),
       iosDeviceInstallService: { removeDevice, isUsable: false } as never,
     } as never);
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 16_384,
@@ -415,13 +416,14 @@ describe("WebSocket connection and outbound capacity", () => {
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const service = new GatewayService({
+      display: {} as never,
       config: { tronHome: root },
       devices,
       sessions: {},
       receipts: new CommandReceiptStore(root),
       iosDeviceInstallService: { isUsable: false, removeDevice: async () => {} } as never,
     } as never);
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 16_384,
@@ -499,7 +501,7 @@ describe("WebSocket connection and outbound capacity", () => {
       releaseClient: vi.fn(),
       invoke: vi.fn(async (_client: unknown, method: string) => ({ method })),
     };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 16_384,
@@ -562,7 +564,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, devices, logger: logger as any,
       uploads: {} as any,
       sessions: { unsubscribeClient: vi.fn() } as any,
@@ -626,7 +628,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const maximumNodes = Array.from({ length: 4 }, (_, index) => Array(index === 3 ? 8_189 : 8_190).fill(0));
     expect(Buffer.byteLength(JSON.stringify(maximumNodes))).toBeLessThan(1_048_576);
     const subscriptions = new Set<string>();
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 1_048_576,
       devices, uploads: {} as any,
       sessions: {
@@ -740,7 +742,7 @@ describe("WebSocket connection and outbound capacity", () => {
       gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8,
       machineId: "i".repeat(256), machineName: "n".repeat(1_024), capabilities: ["sessions.v1"],
     };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 1_048_576, devices, uploads: {} as any,
       sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
@@ -775,7 +777,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const phone = await devices.pair((await devices.ensureEnrollment()).code, "Phone");
     const port = await unusedPort();
     const logger = { log: vi.fn() };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumConnections: 8, maximumConnectionsPerIdentity: 2,
       devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
@@ -836,7 +838,7 @@ describe("WebSocket connection and outbound capacity", () => {
       const port = await unusedPort();
       const peers: WebSocket[] = [];
       const physicalSockets: import("node:net").Socket[] = [];
-      const gateway = new GatewayServer({
+      const gateway = new GatewayServer({ display: {} as never,
         host: "127.0.0.1", port, maxFrameBytes: 1_048_576,
         maximumConnections: peerCount, maximumConnectionsPerIdentity: peerCount,
         devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
@@ -969,7 +971,7 @@ describe("WebSocket connection and outbound capacity", () => {
       memoryUsage: () => ({ heapUsed: 1_024, rss: 2_048 }), heapLimitBytes: () => 1_048_576,
       eventLoopDelay: () => ({ p50Ms: 0, p99Ms: 0, maxMs: 0 }),
     });
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 512 * 1_024, maximumOutboundBytes,
       devices, uploads: {} as never, sessions: { unsubscribeClient: vi.fn() } as never,
       auth: { detachClient: vi.fn() } as never, service: {
@@ -1228,7 +1230,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const phone = await devices.pair((await devices.ensureEnrollment()).code, "Phone");
     const port = await unusedPort();
     const logger = { log: vi.fn() };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 16_384,
@@ -1295,7 +1297,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const phone = await devices.pair((await devices.ensureEnrollment()).code, "Phone");
     const port = await unusedPort();
     const logger = { log: vi.fn() };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumConnectionsPerIdentity: 1,
       devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
@@ -1342,7 +1344,7 @@ describe("WebSocket connection and outbound capacity", () => {
       releaseClient: vi.fn(),
       invoke: vi.fn(),
     };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 16_384,
@@ -1459,7 +1461,7 @@ describe("WebSocket connection and outbound capacity", () => {
       gates.set(method, entry);
       return entry;
     };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 1_048_576,
       devices, logger: logger as any, uploads: {} as any,
       disposableReadDeadlinesMs: new Map([...DISPOSABLE_READ_DEADLINES_MS.keys()].map((method) => [method, 80])),

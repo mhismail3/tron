@@ -1,4 +1,4 @@
-import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { existsSync } from "node:fs";
 import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -120,7 +120,7 @@ async function openRegistry(f: {
     homeMemorySummarizer: () => async () => fauxAssistantMessage("HOME-MEMORY-LINE"),
   });
   registries.push(registry);
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { tronHome: f.tronHome } as unknown as GatewayConfig,
     modelRuntime: f.runtime,
     sessions: registry,

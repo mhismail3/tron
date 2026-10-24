@@ -1,5 +1,5 @@
 import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -110,7 +110,7 @@ async function fixture() {
       async inspection => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
       async inspection => { await registry.commitProjectReload(inspection.projectDir); }),
   });
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
     broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },

@@ -57,7 +57,7 @@ async function fixture(maximumHttpRequests = 128) {
   const acquireBlob = vi.fn();
   const logger = new GatewayLogger(join(root, "gateway.jsonl"));
   const log = vi.spyOn(logger, "log");
-  const gateway = new GatewayServer({
+  const gateway = new GatewayServer({ display: {} as never,
     host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumHttpRequests,
     devices, uploads: {} as any, sessions: { acquireBlob, unsubscribeClient: vi.fn() } as any,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,

@@ -1,4 +1,4 @@
-import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -149,7 +149,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     if (!address || typeof address === "string") throw new Error("probe did not bind");
     const port = address.port;
     await new Promise<void>((resolve) => probe.close(() => resolve()));
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: displayOwnerOf(value.registry),
       host: "127.0.0.1", port, maxFrameBytes: 64 * 1_024, devices,
       uploads: {} as any, sessions: value.registry,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
@@ -335,11 +335,12 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     const receipts = new CommandReceiptStore(value.root);
     cleanup.push(() => receipts.dispose());
     const service = new GatewayService({
+      display: displayOwnerOf(registry),
       config: { tronHome: value.root, machineId: "machine-terminal-test", machineName: "Fixture Mac" },
       devices, sessions: registry, notifications, receipts,
       uploads: {}, terminals: { belongsToSession: () => false }, logger: { log() {} },
     } as never);
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: displayOwnerOf(registry),
       host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
       devices, sessions: registry, service, uploads: {} as never,
       auth: { detachClient() {}, cancelOwner() {} } as never, logger: { log() {} } as never,

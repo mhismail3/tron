@@ -9,7 +9,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 /**
  * Settings decisions and submissions at the Gateway RPC boundary (#1642), with
@@ -41,7 +41,7 @@ async function gateway() {
   const { settingsModel, settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway,
     sessions: f.registry, home: () => homeOwnerOf(f.registry), registry: f.registry });
   await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(f.registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
     modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry, home: homeOwnerOf(f.registry),
     receipts: new CommandReceiptStore(f.tronHome), uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES),

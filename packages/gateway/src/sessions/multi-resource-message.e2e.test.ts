@@ -8,7 +8,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { INVOCATION_RECEIPT_TYPE } from "../kernel/run/invocation-receipts.js";
-import { homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 /** Repeatable evidence for #311: `npx vitest run src/sessions/multi-resource-message.e2e.test.ts`. */
 const REPORT = "test-results/multi-resource-message.json";
@@ -33,7 +33,7 @@ describe("one message invoking several skills and prompts (#311)", () => {
     const slot = await f.registry.create(f.cwd);
     await slot.setModel(f.model.provider, f.model.id);
 
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
       uploads: new UploadStore(join(f.root, "composer-uploads"), 1024),
       receipts: new CommandReceiptStore(join(f.root, "composer-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "composer-client", identity: "device:composer-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;

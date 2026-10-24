@@ -65,7 +65,7 @@ describe("terminal attachment revocation after session deletion", () => {
       },
     };
     const sessions = { subscribe: vi.fn(), unsubscribe: vi.fn(), unsubscribeClient: vi.fn() };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 16_384,
@@ -167,7 +167,7 @@ describe("terminal attachment revocation after session deletion", () => {
         throw new Error(`unexpected method ${method}`);
       },
     };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 16_384,

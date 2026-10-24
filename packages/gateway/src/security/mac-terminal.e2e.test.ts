@@ -1,5 +1,5 @@
 import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { Socket, createServer } from "node:net";
 import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
@@ -162,7 +162,7 @@ async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory:
   const devices = new DeviceStore(tronHome, "machine");
   await devices.initialize();
   const pair = async (name: string) => (await devices.pair((await devices.ensureEnrollment()).code, name)).deviceId;
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(sessions),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, devices, sessions, receipts: new CommandReceiptStore(tronHome),
     macTerminal: new MacTerminalHost(keys, { hostKeyDirectory, port, hostCommand: () => hostCommand }),

@@ -1,4 +1,4 @@
-import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { homeMemoryChange } from "../../test-support/session-settings-change.js";
@@ -84,7 +84,7 @@ async function fixture(options: { shareGatewayRuntime: boolean }) {
     homeMemorySummarizer: () => summarizer,
   });
   cleanups.push(async () => { await registry.dispose(); });
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { tronHome } as unknown as GatewayConfig, modelRuntime: gateway, sessions: registry, home: homeOwnerOf(registry),
     receipts: new CommandReceiptStore(join(tronHome, "receipts")),
     broadcast: () => {},

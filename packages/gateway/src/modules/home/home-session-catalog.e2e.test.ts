@@ -8,7 +8,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 import { UploadStore } from "../../machine/upload-store.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 
 afterEach(disposeFixtures);
 
@@ -38,7 +38,7 @@ describe("Home chapters in the dashboard session list", () => {
     await ordinary.rename("Home");
     await home.rename("An ordinary-looking chapter");
 
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: owner,
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: owner,
       uploads: new UploadStore(join(f.root, "catalog-uploads"), 1024),
       receipts: new CommandReceiptStore(join(f.root, "catalog-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "catalog-client", identity: "device:catalog-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
@@ -101,7 +101,7 @@ describe("Home chapters in the dashboard session list", () => {
     await (await f.registry.acquire(worker)).rename("Ordinary-looking session");
 
     const rows = async (registry = f.registry) => {
-      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: registry, home: homeOwnerOf(registry),
+      const service = new GatewayService({ display: displayOwnerOf(registry), config: { tronHome: f.tronHome }, sessions: registry, home: homeOwnerOf(registry),
         uploads: new UploadStore(join(f.root, "worker-uploads"), 1024),
         receipts: new CommandReceiptStore(join(f.root, "worker-receipts")) } as unknown as GatewayServiceDependencies);
       const client = { id: "worker-client", identity: "device:worker-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;

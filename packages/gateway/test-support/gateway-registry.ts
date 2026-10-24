@@ -1,5 +1,6 @@
 import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { DisplayArtifactStore } from "../src/display/display-artifact-store.js";
+import { DisplayOwner } from "../src/display/display-modules.js";
 import type { BrowserLiveViewRegistry } from "../src/display/browser-live-view.js";
 import { ModelQueueOwner, modelQueueProjectionPath, type ModelQueueOptions } from "../src/providers/model-queue.js";
 import { ProviderUsageOwner } from "../src/providers/provider-usage.js";
@@ -14,19 +15,25 @@ import type { SessionSearchService } from "../src/sessions/session-search-servic
 import type { HomeComposition } from "../src/modules/home/home-module.js";
 import type { HomeOwner } from "../src/modules/home/home-owner.js";
 
-type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "displayArtifacts" | "settingsSchema">;
+type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "settingsSchema">;
 /** Home's composition inputs a test may supply; the rest are the registry's own. */
 type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "notifications" | "machineId" | "homeTaskDiagnostic" | "modelQueue" | "runtime">;
 
 const homes = new WeakMap<RuntimeRegistry, () => HomeOwner>();
 const recents = new WeakMap<RuntimeRegistry, RecentModelStore>();
 const queues = new WeakMap<RuntimeRegistry, ModelQueueOwner>();
-const displays = new WeakMap<RuntimeRegistry, DisplayArtifactStore>();
+const displays = new WeakMap<RuntimeRegistry, DisplayOwner>();
+
+export function displayOwnerOf(registry: RuntimeRegistry): DisplayOwner {
+  const owner = displays.get(registry);
+  if (!owner) throw new Error("This registry was not built by createTestRegistry");
+  return owner;
+}
 
 export function displayStoreOf(registry: RuntimeRegistry): DisplayArtifactStore {
   const owner = displays.get(registry);
   if (!owner) throw new Error("This registry was not built by createTestRegistry");
-  return owner;
+  return owner.artifacts;
 }
 
 export function queueOwnerOf(registry: RuntimeRegistry): ModelQueueOwner | undefined {
@@ -57,7 +64,7 @@ export async function createTestRegistry(options: RegistryOptions & HomeTestOpti
     projectionPath: modelQueueProjectionPath(options.tronHome),
     ...(modelQueueDiagnostic ? { log: modelQueueDiagnostic } : {}),
   }) : undefined;
-  const display = { artifacts: new DisplayArtifactStore(options.tronHome), liveViews: browserLiveViews };
+  const display = new DisplayOwner(new DisplayArtifactStore(options.tronHome), browserLiveViews, () => registry);
   const home: HomeComposition = {
     modelQueue,
     runtime: async () => ({
@@ -69,9 +76,13 @@ export async function createTestRegistry(options: RegistryOptions & HomeTestOpti
   };
   const { modules, home: owner, recentModels } = await startGatewayModules({ tronHome: options.tronHome, log: { log: () => {} } },
     () => ({ registry, home, display, openAIModelEligibility, connections, scheduleToolOperations, recentModelsChanged, persistenceDiagnostic: options.persistenceDiagnostic, sessionSearch: sessionSearch?.() }));
-  const registry: RuntimeRegistry = new RuntimeRegistry({ ...registryOptions, modules, displayArtifacts: display.artifacts, settingsSchema: TEST_SETTINGS_SCHEMA,
+  const registry: RuntimeRegistry = new RuntimeRegistry({ ...registryOptions, modules, settingsSchema: TEST_SETTINGS_SCHEMA,
+    beforeSessionRekey: async (previousId, nextId, runtime) => {
+      await display.grantReferences(previousId, nextId, runtime);
+      await registryOptions.beforeSessionRekey?.(previousId, nextId, runtime);
+    },
     createModelRuntime: () => createProviderModelRuntime(options.agentDir, modelRuntimeFactory) });
-  displays.set(registry, display.artifacts);
+  displays.set(registry, display);
   if (modelQueue) queues.set(registry, modelQueue);
   homes.set(registry, owner);
   recents.set(registry, recentModels);

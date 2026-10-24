@@ -18,12 +18,15 @@ import type { ToolProjectionMetadata } from "../projection/projection.js";
 import type { GatewayWorkHandle } from "./gateway-work-registry.js";
 import type { RunMarkerStore } from "./run-markers.js";
 
+import type { ToolReferences } from "../projection/tool-result.js";
+
 /** Native frame and canonical readers, not copied runtime state. FixedAt is an opaque settings
  * provenance token: interpreted only by the concrete settings persistence owner. */
 export abstract class RunRuntime<FixedAt> {
   abstract readonly cwd: string;
   abstract readonly sessionFile: string | undefined;
   abstract readonly canonicalEntryCount: number;
+  abstract toolResultReferences(): ToolReferences;
   abstract readonly inboxAttributedMessages: Set<string>;
   abstract assertHomePromptAdmission(): void;
   abstract assertHomeWakeAdmissible(session: AgentSession): Promise<void>;

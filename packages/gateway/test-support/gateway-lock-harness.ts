@@ -1,5 +1,5 @@
 import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
-import { createTestRegistry, homeOwnerOf } from "./gateway-registry.js";
+import { createTestRegistry, homeOwnerOf, displayOwnerOf } from "./gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -300,7 +300,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const uploads = new UploadStore(tronHome, 1_048_576);
   const service = new GatewayService({
     config: { machineId: "lock-machine", machineGroupID: "lock-group", machineName: "Lock Mac", tronHome, agentDir },
-    modelRuntime, devices, sessions: registry, modules: registry.moduleHost, trust, settingsModel, settingsChanges, receipts,
+    modelRuntime, devices, sessions: registry, display: displayOwnerOf(registry), modules: registry.moduleHost, trust, settingsModel, settingsChanges, receipts,
     ...(options.home ? { home: homeOwnerOf(registry) } : {}),
     ...(automations ? { automations } : {}),
     notifications: notificationService
@@ -330,7 +330,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       : unreachable("auth"),
   } as unknown as GatewayServiceDependencies);
   server = new GatewayServer({
-    host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576, devices, sessions: registry, service,
+    host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576, devices, sessions: registry, display: displayOwnerOf(registry), service,
     uploads,
     auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
     logger: { log: () => {} } as never,

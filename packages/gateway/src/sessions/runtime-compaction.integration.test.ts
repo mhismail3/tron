@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -266,7 +266,7 @@ describe("compaction operation admission and authoritative reconciliation", { co
     const item = await boundaryFixture();
     const fresh = await item.registry.create(item.slot.cwd);
     const registry = item.registry.administrativeWorkRegistry;
-    const service = new GatewayService({
+    const service = new GatewayService({ display: displayOwnerOf(item.registry),
       config: { tronHome: join(item.root, "tron") }, sessions: item.registry, ...item.settings, broadcast: () => {},
       uploads: { removeSession: async () => {} }, sessionDeleted: () => {},
       receipts: new CommandReceiptStore(join(item.root, "tron")), workRegistry: registry,

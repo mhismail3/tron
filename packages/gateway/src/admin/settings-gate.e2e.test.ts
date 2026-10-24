@@ -1,4 +1,4 @@
-import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -120,7 +120,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   });
   const pushes: Array<{ kind: string; title?: string; message: string; sessionId: string; category?: string }> = [];
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, home: homeOwnerOf(registry), receipts: new CommandReceiptStore(tronHome),
     uploads: new UploadStore(tronHome, DEFAULT_MAX_UPLOAD_BYTES),
@@ -1071,7 +1071,7 @@ describe("settings risk gate", () => {
     const { settingsModel, settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway,
       sessions: f.registry, home: () => homeOwnerOf(f.registry), registry: f.registry });
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
-    const service = new GatewayService({
+    const service = new GatewayService({ display: displayOwnerOf(f.registry),
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
       modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(f.tronHome), uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES),

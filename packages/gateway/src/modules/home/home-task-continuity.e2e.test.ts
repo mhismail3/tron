@@ -3,7 +3,7 @@
  * GatewayService and GatewayServer with a faux model; the claim journey runs the real
  * `scripts/tron work` CLI and owner-status helper against this Gateway over its socket.
  */
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { execFile, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
@@ -54,9 +54,10 @@ async function listen(f: Fixture) {
       ? { envelope: "[Attached image: screenshot.png]", images: [{ type: "image", data: PIXEL, mimeType: "image/png" }], attachments: [], photoCount: 1, fileAttachmentCount: 0 }
       : { envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 },
   };
-  const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry), uploads,
+  const service = new GatewayService({
+    display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry), uploads,
     receipts: new CommandReceiptStore(join(f.root, "receipts")), logger: { log: () => {} } } as unknown as GatewayServiceDependencies);
-  const server = new GatewayServer({ host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576, devices, sessions: f.registry, service,
+  const server = new GatewayServer({ display: displayOwnerOf(f.registry), host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576, devices, sessions: f.registry, service,
     uploads: uploads as never,
     auth: { cancelOwner: () => {}, detachClient: () => {} } as never, logger: { log: () => {} } as never });
   await server.listen();

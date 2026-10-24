@@ -52,7 +52,7 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
   const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
   const port = await unusedPort();
   const logger = { log: vi.fn() };
-  const gateway = new GatewayServer({
+  const gateway = new GatewayServer({ display: {} as never,
     host: "127.0.0.1", port, maxFrameBytes: BACKLOG_PAD_BYTES * 4, devices,
     uploads: {} as never,
     sessions: { unsubscribeClient: vi.fn() } as never,

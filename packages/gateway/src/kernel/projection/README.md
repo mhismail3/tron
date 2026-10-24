@@ -13,9 +13,10 @@ ownership. `session-pages` owns runtime/leaf/anchor fencing and canonical histor
 reads; `activity` bounds delivery-time wire views. Archive, recency, stream identity,
 queue and lifecycle facts remain with their authoritative owners.
 
-`ToolResultProjection` is the display module's single policy hook. Canonical,
-streaming and cold/tree projectors take an explicit display callback; runtime
-adapters resolve the current hook for each call. Browser observation stays at
+`ToolResultProjection` is the display module's single policy hook, including retained-resource
+initialization and full-tree reconciliation. The native runtime exposes its one session/leaf
+reference cut; authorization and resource I/O stay with display. Canonical, streaming and
+cold/tree projectors take an explicit display callback; runtime adapters resolve the current hook for each call. Browser observation stays at
 the attributed tool-result boundary with its exact provenance and load token;
 the module closes over its live-view owner. No default validator or legacy
 projection path bypasses the policy.

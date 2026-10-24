@@ -101,7 +101,7 @@ describe("global provider resources", () => {
     };`);
     await configure(f.agentDir, [f.extensionPath]);
     const resources = await f.createResources();
-    const gateway = new GatewayService({ modelRuntime: f.runtime, sessions: { isAdministrativeDrainStarted: false }, globalProviderResources: resources } as unknown as GatewayServiceDependencies);
+    const gateway = new GatewayService({ display: {} as never, modelRuntime: f.runtime, sessions: { isAdministrativeDrainStarted: false }, globalProviderResources: resources } as unknown as GatewayServiceDependencies);
     const result = await gateway.invoke(client, "model.list", { limit: 200 }) as { models: Array<Record<string, unknown>>; nextCursor?: string };
     const models = [...result.models];
     let cursor = result.nextCursor;
@@ -120,7 +120,7 @@ describe("global provider resources", () => {
     const f = await fixture();
     const resources = await f.createResources();
     await f.runtime.setRuntimeApiKey("typesafe", "fixture-only-typesafe-key");
-    const gateway = new GatewayService({ modelRuntime: f.runtime, sessions: { isAdministrativeDrainStarted: false }, globalProviderResources: resources } as unknown as GatewayServiceDependencies);
+    const gateway = new GatewayService({ display: {} as never, modelRuntime: f.runtime, sessions: { isAdministrativeDrainStarted: false }, globalProviderResources: resources } as unknown as GatewayServiceDependencies);
 
     await expect(gateway.invoke(client, "provider.list", {})).resolves.toMatchObject({
       providers: expect.arrayContaining([
@@ -172,7 +172,7 @@ describe("global provider resources", () => {
     expect(f.runtime.getModels()).toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: "global-fixture", id: "fixture-model" }),
     ]));
-    const dashboard = new GatewayService({
+    const dashboard = new GatewayService({ display: {} as never,
       modelRuntime: f.runtime,
       sessions: { isAdministrativeDrainStarted: false },
       globalProviderResources: resources,
@@ -342,7 +342,7 @@ describe("global provider resources", () => {
     await configure(f.agentDir, [initial]);
     const resources = await f.createResources();
     f.broadcast.mockClear();
-    const dashboard = new GatewayService({
+    const dashboard = new GatewayService({ display: {} as never,
       modelRuntime: f.runtime,
       sessions: { isAdministrativeDrainStarted: false },
       globalProviderResources: resources,

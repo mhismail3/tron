@@ -9,7 +9,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import type { Resolution } from "../kernel/settings/tool-contract.js";
-import { homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 // Real Registry/Pi/provider/RPC boundaries, not declaration-table assertions.
 // This RED checkpoint names the approved behavior before changing any owner.
@@ -24,7 +24,7 @@ async function setup() {
   const f = await fixture();
   const dependencies = { registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway };
   const { settingsModel, settingsChanges } = settingsDependencies({ ...dependencies, sessions: f.registry, home: () => homeOwnerOf(f.registry) });
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(f.registry),
     config: { machineId: "settings-machine", machineGroupID: "settings-group", machineName: "Test Mac", agentDir: f.agentDir, tronHome: f.tronHome },
     modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry,
     home: homeOwnerOf(f.registry), receipts: new CommandReceiptStore(f.tronHome), broadcast: () => {},

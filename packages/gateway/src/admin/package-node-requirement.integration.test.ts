@@ -63,7 +63,7 @@ describe("packages.list projects each package's engines.node against the Gateway
     };
     const events: Array<{ topic: string; payload: JsonValue }> = [];
     const broadcast = (topic: string, payload: JsonValue) => { events.push({ topic, payload }); };
-    const gateway = new GatewayService({
+    const gateway = new GatewayService({ display: {} as never,
       sessions: { isAdministrativeDrainStarted: false },
       packages: new PackageService(agentDir, new TrustService(agentDir), broadcast),
       receipts: new CommandReceiptStore(join(root, "receipts")),

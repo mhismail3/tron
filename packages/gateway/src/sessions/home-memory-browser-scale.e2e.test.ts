@@ -1,4 +1,4 @@
-import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Manage Home → Memory at a real Home's scale (#940): three chapters, 1200+
  * messages and tens of megabytes of canonical JSONL, built through the real
@@ -71,7 +71,7 @@ async function openGateway(root: string, runtime: ModelRuntime): Promise<Gateway
     homeMemorySummarizer: () => summarizer,
   });
   const receipts = new CommandReceiptStore(join(tronHome, "receipts"));
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { tronHome } as unknown as GatewayConfig,
     modelRuntime: runtime, sessions: registry, home: homeOwnerOf(registry), receipts, broadcast: () => {},
     ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => homeOwnerOf(registry), registry }),

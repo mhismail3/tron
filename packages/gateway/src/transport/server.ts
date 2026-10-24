@@ -11,6 +11,7 @@ import type { DeviceIdentity, DeviceStore } from "../security/device-store.js";
 import { RateLimiter } from "../security/rate-limiter.js";
 import type { UploadStore } from "../machine/upload-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { DisplayOwner } from "../display/display-modules.js";
 import type { BlobByteRange } from "../sessions/blob-store.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import type { GatewayLogger, LogLevel } from "./logger.js";
@@ -788,6 +789,7 @@ export class GatewayServer {
       devices: DeviceStore;
       uploads: UploadStore;
       sessions: RuntimeRegistry;
+      display: Pick<DisplayOwner, "acquireArtifact">;
       auth: AuthBroker;
       service: GatewayService;
       logger: GatewayLogger;
@@ -1561,9 +1563,9 @@ export class GatewayServer {
         sendJson(response, 416, { error: publicError(error) });
         return;
       }
-      let lease: Awaited<ReturnType<RuntimeRegistry["acquireDisplayArtifact"]>>;
+      let lease: Awaited<ReturnType<DisplayOwner["acquireArtifact"]>>;
       try {
-        lease = await this.options.sessions.acquireDisplayArtifact(sessionID, artifactID, requestedRange, signal);
+        lease = await this.options.display.acquireArtifact(sessionID, artifactID, requestedRange, signal);
       } catch (error) {
         const details = error instanceof GatewayError && error.details && typeof error.details === "object"
           ? error.details as { rangeUnsatisfiable?: unknown; totalSize?: unknown }

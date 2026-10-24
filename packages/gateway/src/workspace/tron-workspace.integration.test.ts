@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, displayOwnerOf } from "../../test-support/gateway-registry.js";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
@@ -146,7 +146,7 @@ describe("Tron workspace through the pinned runtime", () => {
     expect(canonical).toContain('"name":"report.md"');
     const artifactId = JSON.parse(canonical.split("\n").find(line => line.includes('"schema":"tron.display.v1"'))!).message.details.display.artifact.id;
     await writeFile(join(files, "report.md"), "Changed original");
-    const lease = await f.registry.acquireDisplayArtifact(f.slot.id, artifactId);
+    const lease = await displayOwnerOf(f.registry).acquireArtifact(f.slot.id, artifactId);
     const chunks: Buffer[] = [];
     for await (const chunk of lease.stream) chunks.push(Buffer.from(chunk));
     await lease.release();

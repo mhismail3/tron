@@ -232,7 +232,7 @@ async function gatewayFixture(options: { enabled?: boolean } = {}): Promise<Gate
   const addresses: LanAddress[] = [{ address: "::1", family: "IPv6" }];
   const log = { log: vi.fn() };
   const port = await unusedPort();
-  const gateway = new GatewayServer({
+  const gateway = new GatewayServer({ display: {} as never,
     host: "127.0.0.1", port, maxFrameBytes: 64 * 1_024, devices,
     uploads: {} as never,
     sessions: { unsubscribeClient: vi.fn() } as never,

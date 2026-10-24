@@ -31,7 +31,7 @@ async function fixture(native?: NativeLiveClient) {
     ? await views.registerNative(registration.sessionId, (await views.catalogNative(registration.sessionId))[0]!.handle)
     : views.register({ ...registration, loadToken });
   let authorized = true;
-  const server = new GatewayServer({ host: "127.0.0.1", port: 0, maxFrameBytes: 64 * 1024, devices,
+  const server = new GatewayServer({ display: {} as never, host: "127.0.0.1", port: 0, maxFrameBytes: 64 * 1024, devices,
     uploads: {} as never, sessions: {} as never, auth: { cancelOwner() {} } as never, service: {} as never,
     logger: { log() {} } as never, liveViews: views,
     authorizeBrowserLiveView: (session, view, generation) => authorized && session === registration.sessionId

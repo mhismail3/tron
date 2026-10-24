@@ -1,4 +1,4 @@
-import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home end to end: the real `EpisodicMemory` behind Home's request seam,
  * driven through the Gateway RPC surface, with a deterministic faux compactor and
@@ -286,7 +286,7 @@ async function openRegistry(f: Fixture): Promise<void> {
   });
   registries.push(registry);
   const receipts = new CommandReceiptStore(join(f.tronHome, "receipts"));
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { tronHome: f.tronHome } as unknown as GatewayConfig,
     modelRuntime: f.runtime,
     sessions: registry,
@@ -1735,7 +1735,7 @@ describe("Tron Home activations end to end", () => {
       const enrollment = await devices.ensureEnrollment();
       const paired = await devices.pair(enrollment.code, "browser fixture");
       const records: Array<Record<string, unknown>> = [];
-      const server = new GatewayServer({
+      const server = new GatewayServer({ display: displayOwnerOf(f.registry),
         host: "127.0.0.1", port: 0, maxFrameBytes: 1024 * 1024,
         devices, sessions: f.registry, service: f.service, uploads: {} as never,
         auth: { detachClient: () => {}, cancelOwner: () => {} } as never,
@@ -2471,7 +2471,7 @@ describe("Tron Home activations end to end", () => {
       }
       return result;
     };
-    const server = new GatewayServer({
+    const server = new GatewayServer({ display: displayOwnerOf(f.registry),
       host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
       devices, sessions: f.registry, service: f.service,
       uploads: { removeSession: async () => {} } as never,
@@ -2677,7 +2677,7 @@ describe("Tron Home activations end to end", () => {
       if (method === "session.close") methods.push("session.close:completed");
       return result;
     };
-    const server = new GatewayServer({
+    const server = new GatewayServer({ display: displayOwnerOf(f.registry),
       host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
       devices, sessions: f.registry, service: f.service, uploads: uploads as never,
       auth: { cancelOwner: () => {}, detachClient: () => {} } as never,

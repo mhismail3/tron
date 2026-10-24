@@ -148,7 +148,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
   const port = await unusedPort();
   const logger = { log: vi.fn() };
   gatewayLog = logger.log;
-  const gateway = new GatewayServer({
+  const gateway = new GatewayServer({ display: {} as never,
     host: "127.0.0.1", port, maxFrameBytes: 16_384, devices,
     uploads: {} as never,
     sessions: { unsubscribeClient: vi.fn() } as never,

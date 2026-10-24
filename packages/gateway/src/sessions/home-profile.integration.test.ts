@@ -1,5 +1,5 @@
 import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
-import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's learned profile (#731), end to end: the `profile` tool called by a
  * faux Home model inside real activations, the real Knowledge store behind it,
@@ -240,7 +240,7 @@ async function fixture(label: string): Promise<Fixture> {
   registry.setSettings(settingsModel, settingsChanges);
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const pushes: Array<{ title: string; message: string }> = [];
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime: runtime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
     notifications: { enqueue: async (push: { title: string; message: string }) => { pushes.push(push); } },

@@ -141,11 +141,10 @@ import {
   subagentProcessesFromActivity,
 } from "../kernel/projection/process-activity.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { tronContext } from "../workspace/tron-core-extension.js";
 import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
-import type { ToolDisplayProjection } from "../kernel/projection/tool-result.js";
+import type { ToolDisplayProjection, ToolReferences } from "../kernel/projection/tool-result.js";
 import { trustedExtensionOriginKind } from "../kernel/projection/extension-origin.js";
 import { DirectBashProcessOwner } from "../kernel/run/direct-bash-process-owner.js";
 import type { ContextPolicy, ModuleHost, SessionContext } from "../kernel/host/module-host.js";
@@ -333,7 +332,6 @@ export interface RuntimeSlotDependencies {
   trust: TrustService;
   blobs: BlobStore;
   exports: BlobStore;
-  displayArtifacts: DisplayArtifactStore;
   modules: ModuleHost; // started modules whose extensions this runtime registers
   readonly settingsSchema: SettingsSchema;
   /** The settings model and its one change path, late-bound:
@@ -423,9 +421,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   private readonly createdAt = new Date().toISOString();
   /** Disposable derived annotation; canonical JSONL remains the authority. */
   private forkBoundary: ForkBoundaryAnchor | undefined;
-  private displayArtifactReferenceKey: string | undefined;
-  private displayArtifactReferences: string[] = [];
-  private browserLiveReferences = new Set<string>();
+  private toolReferenceCut: { key: string; value: ToolReferences } | undefined;
   private eventSequence = 0;
   public disposed = false;
   /** Set by the registry when it publishes this slot as a live runtime. Only a
@@ -1490,34 +1486,18 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return path && existsSync(path) ? path : undefined;
   }
 
-  private refreshDisplayReferences(): void {
+  /** One admitted reference cut for the exact native session and selected leaf. */
+  toolResultReferences(): ToolReferences {
     const manager = this.runtime.session.sessionManager;
     const leafID = manager.getLeafId();
     const key = `${manager.getSessionId()}\0${leafID ?? "root"}`;
-    if (this.displayArtifactReferenceKey !== key) {
+    if (this.toolReferenceCut?.key !== key) {
       const branch = leafID ? manager.getBranch(leafID) : [];
-      const references = this.dependencies.modules.policy("toolResultProjection")?.().references(branch, manager.getSessionId());
-      this.displayArtifactReferences = references?.artifacts ?? [];
-      this.browserLiveReferences = references?.liveViews ?? new Set();
-      this.displayArtifactReferenceKey = key;
+      const value = this.dependencies.modules.policy("toolResultProjection")?.().references(branch, manager.getSessionId())
+        ?? { artifacts: [], liveViews: new Set<string>() };
+      this.toolReferenceCut = { key, value };
     }
-  }
-
-  displayArtifactIDs(): string[] {
-    this.refreshDisplayReferences();
-    return [...this.displayArtifactReferences];
-  }
-
-  referencesDisplayArtifact(artifactID: string): boolean {
-    this.refreshDisplayReferences();
-    return this.displayArtifactReferences.includes(artifactID);
-  }
-
-  referencesBrowserLiveView(viewId: string, generation: string): boolean {
-    // Cache only admitted canonical display references for this exact leaf;
-    // arbitrary tool details cannot grant live-view access.
-    this.refreshDisplayReferences();
-    return this.browserLiveReferences.has(`${viewId}\0${generation}`);
+    return this.toolReferenceCut.value;
   }
 
   sessionEnvironment(): Record<string, string> {
@@ -5242,14 +5222,13 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     });
   }
 
-  async reconcileDisplayArtifactOwnership(): Promise<void> {
+  async reconcileToolResultOwnership(): Promise<void> {
     const manager = this.runtime.session.sessionManager;
-    const references = new Set(this.dependencies.modules.policy("toolResultProjection")?.().references(manager.getEntries(), this.id).artifacts ?? []);
-    await this.dependencies.displayArtifacts.reconcileSession(this.id, references);
+    await this.dependencies.modules.policy("toolResultProjection")?.().reconcile(manager.getEntries(), this.id);
   }
 
   private reconcileCanonicalDisplayArtifacts(): void {
-    void this.reconcileDisplayArtifactOwnership().catch((error) => {
+    void this.reconcileToolResultOwnership().catch((error) => {
       this.emit("session.extensionError", safeJson({
         message: error instanceof Error
           ? error.message

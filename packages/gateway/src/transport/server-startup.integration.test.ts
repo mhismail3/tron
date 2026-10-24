@@ -13,7 +13,7 @@ function makeServer(overrides: {
   authenticate?: () => Promise<unknown>;
   invoke?: ReturnType<typeof vi.fn>;
 } = {}): GatewayServer {
-  return new GatewayServer({
+  return new GatewayServer({ display: {} as never,
     host: "127.0.0.1",
     port: 0,
     maxFrameBytes: 64 * 1_024,

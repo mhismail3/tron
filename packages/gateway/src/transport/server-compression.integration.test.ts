@@ -62,7 +62,7 @@ async function startGateway() {
     if (method === "test.oversized") return { transcript: OVERSIZED_CONTENT };
     return { method, padBytes: params.pad?.length ?? 0 };
   });
-  const gateway = new GatewayServer({
+  const gateway = new GatewayServer({ display: {} as never,
     host: "127.0.0.1", port, maxFrameBytes: MAXIMUM_FRAME_BYTES, devices, logger: logger as any,
     uploads: {} as any,
     sessions: { subscribe: vi.fn(), unsubscribe: vi.fn(), unsubscribeClient: vi.fn() } as any,

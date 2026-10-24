@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
 /**
  * Installed Swift apps (#1157), end to end through a real RuntimeRegistry and
  * GatewayService: a faux model calls the `swift_app` tool in an ordinary
@@ -70,7 +70,7 @@ async function gateway(root: string, faux: ReturnType<typeof fauxProvider>): Pro
   });
   registries.push(registry);
   await registry.initialize();
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     sessions: registry, modules: registry.moduleHost, receipts: new CommandReceiptStore(tronHome), broadcast: () => {},
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },

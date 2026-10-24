@@ -1,5 +1,5 @@
 import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -194,6 +194,7 @@ describe("cold session.open request span", () => {
     // Only the dependencies `session.open` never reaches are absent; the
     // registry, receipts, uploads, auth and the logger are real.
     const service = new GatewayService({
+      display: displayOwnerOf(registry),
       config: { tronHome: root },
       devices,
       sessions: registry,
@@ -206,7 +207,7 @@ describe("cold session.open request span", () => {
       broadcast: () => {},
     } as unknown as GatewayServiceDependencies);
     const port = await unusedPort();
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: displayOwnerOf(registry),
       host: "127.0.0.1",
       port,
       // The snapshot response of a large session is bounded by the page budget;
@@ -373,13 +374,14 @@ describe("settings.resolve request span", () => {
     const uploads = new UploadStore(root, 1_024);
     const auth = new AuthBroker(await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), () => {});
     const service = new GatewayService({
+      display: displayOwnerOf(registry),
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root, agentDir },
       devices, sessions: registry, receipts: new CommandReceiptStore(root), uploads, auth, logger,
       trust, settingsModel, modelRuntime,
       requestRestart: () => {}, sessionDeleted: () => {}, broadcast: () => {},
     } as unknown as GatewayServiceDependencies);
     const port = await unusedPort();
-    gateway = new GatewayServer({ host: "127.0.0.1", port, maxFrameBytes: 4 * 1_048_576, devices, uploads, sessions: registry, auth, service, logger });
+    gateway = new GatewayServer({ display: displayOwnerOf(registry), host: "127.0.0.1", port, maxFrameBytes: 4 * 1_048_576, devices, uploads, sessions: registry, auth, service, logger });
     await gateway.listen();
     const frames: SocketFrame[] = [];
     socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${localToken}` } });

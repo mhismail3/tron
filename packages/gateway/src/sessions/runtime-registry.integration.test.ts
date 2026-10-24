@@ -1,4 +1,4 @@
-import { createTestRegistry, displayStoreOf } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, displayStoreOf, displayOwnerOf } from "../../test-support/gateway-registry.js";
 import type { RunPersistence } from "../kernel/run/run-persistence.js";
 import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
@@ -1464,7 +1464,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       await catalogOwner(fixture.registry).reconcile();
       await expect(fixture.registry.sessionIDsForStorageMaintenance())
         .rejects.toMatchObject({ code: "busy", retryable: true });
-      await expect(fixture.registry.maintainDisplayArtifacts()).rejects.toMatchObject({ code: "busy" });
+      await expect(displayOwnerOf(fixture.registry).maintainArtifacts()).rejects.toMatchObject({ code: "busy" });
     } finally {
       evidence.mockRestore();
     }
@@ -1475,7 +1475,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     } finally { await displayLease.release(); }
     // Only a subsequent successful membership cut can authorize orphan removal.
     const membership = vi.spyOn(fixture.registry, "sessionIDsForStorageMaintenance").mockResolvedValueOnce(new Set());
-    await fixture.registry.maintainDisplayArtifacts();
+    await displayOwnerOf(fixture.registry).maintainArtifacts();
     membership.mockRestore();
     await expect(store.acquire(display.id, fixture.manager.getSessionId())).rejects.toMatchObject({ code: "not_found" });
     // Storage and an exact canonical session remain usable even when the
@@ -8133,14 +8133,14 @@ export default function (pi) {
     fixture.manager.appendMessage(result("active", active));
 
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    expect(slot.displayArtifactIDs()).toEqual([active.id]);
-    expect(slot.referencesDisplayArtifact(abandoned.id)).toBe(false);
-    expect(slot.referencesDisplayArtifact(active.id)).toBe(true);
-    await expect(fixture.registry.acquireDisplayArtifact(
+    expect(displayOwnerOf(fixture.registry).artifactIDs(slot)).toEqual([active.id]);
+    expect(displayOwnerOf(fixture.registry).referencesArtifact(slot, abandoned.id)).toBe(false);
+    expect(displayOwnerOf(fixture.registry).referencesArtifact(slot, active.id)).toBe(true);
+    await expect(displayOwnerOf(fixture.registry).acquireArtifact(
       fixture.manager.getSessionId(),
       abandoned.id,
     )).rejects.toMatchObject({ code: "not_found" });
-    const lease = await fixture.registry.acquireDisplayArtifact(
+    const lease = await displayOwnerOf(fixture.registry).acquireArtifact(
       fixture.manager.getSessionId(),
       active.id,
     );
@@ -8167,11 +8167,11 @@ export default function (pi) {
     fixture.manager.appendMessage(result("spoof", "other-tool"));
     fixture.manager.appendMessage(result("active"));
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    expect(slot.referencesBrowserLiveView("abandoned", "generation")).toBe(false);
-    expect(slot.referencesBrowserLiveView("spoof", "generation")).toBe(false);
-    expect(slot.referencesBrowserLiveView("active", "wrong-generation")).toBe(false);
-    expect(slot.referencesBrowserLiveView("active", "generation")).toBe(true);
-    expect(fixture.registry.authorizeBrowserLiveView(fixture.manager.getSessionId(), "active", "generation")).toBe(true);
+    expect(displayOwnerOf(fixture.registry).referencesLiveView(slot, "abandoned", "generation")).toBe(false);
+    expect(displayOwnerOf(fixture.registry).referencesLiveView(slot, "spoof", "generation")).toBe(false);
+    expect(displayOwnerOf(fixture.registry).referencesLiveView(slot, "active", "wrong-generation")).toBe(false);
+    expect(displayOwnerOf(fixture.registry).referencesLiveView(slot, "active", "generation")).toBe(true);
+    expect(displayOwnerOf(fixture.registry).authorizeLiveView(fixture.manager.getSessionId(), "active", "generation")).toBe(true);
   });
 
   it("authorizes provider-bound browser actions only on their admitted call and canonical branch", async () => {
@@ -8192,10 +8192,10 @@ export default function (pi) {
     fixture.manager.appendMessage(result("active"));
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     for (const id of ["abandoned", "copied", "wrong-session"]) {
-      expect(slot.referencesBrowserLiveView(id, "generation")).toBe(false);
+      expect(displayOwnerOf(fixture.registry).referencesLiveView(slot, id, "generation")).toBe(false);
     }
-    expect(slot.referencesBrowserLiveView("active", "generation")).toBe(true);
-    expect(slot.referencesBrowserLiveView("active", "wrong-generation")).toBe(false);
+    expect(displayOwnerOf(fixture.registry).referencesLiveView(slot, "active", "generation")).toBe(true);
+    expect(displayOwnerOf(fixture.registry).referencesLiveView(slot, "active", "wrong-generation")).toBe(false);
     const transcript = slot.snapshot().transcript;
     const projected = (callId: string) => transcript.find(item => item.kind === "message" && item.toolCallId === callId);
     expect(projected("active")).toHaveProperty("display.kind", "browser_live");

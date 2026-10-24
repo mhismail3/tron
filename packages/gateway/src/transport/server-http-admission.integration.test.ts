@@ -35,7 +35,7 @@ describe("Gateway HTTP admission and retirement", () => {
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
     const port = await unusedPort();
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 16_384, devices, uploads: {} as any, sessions: {} as any,
       auth: {} as any, service: { info: () => ({ protocolVersion: 8 }) } as any, logger: { log: () => {} } as any,
     });
@@ -61,7 +61,7 @@ describe("Gateway HTTP admission and retirement", () => {
     const bound = new Promise<void>(resolve => { began = resolve; });
     const warmup = new Promise<void>(resolve => { fail = resolve; });
     const headers = new Promise<void>(resolve => { received = resolve; });
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 16_384, devices, uploads: {} as any, sessions: {} as any,
       auth: {} as any, service: { info: () => ({ protocolVersion: 8 }) } as any, logger: { log: () => {} } as any,
     });
@@ -103,7 +103,7 @@ describe("Gateway HTTP admission and retirement", () => {
     });
     const logger = { log: vi.fn() };
     const invoke = vi.fn();
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 16_384, devices, uploads: {} as any,
       sessions: { unsubscribeClient: vi.fn() } as any, auth: { detachClient: vi.fn() } as any,
       service: { info: () => ({ protocolVersion: 8 }), releaseClient: vi.fn(), invoke } as any,
@@ -147,7 +147,7 @@ describe("Gateway HTTP admission and retirement", () => {
         };
       }),
     };
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port, maxFrameBytes: 16_384,
       maximumHttpRequests: 2, maximumHttpRequestsPerIdentity: 1,
       devices, uploads: {} as any, sessions: sessions as any,

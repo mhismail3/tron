@@ -90,7 +90,7 @@ async function fixture() {
     Date.now,
     (payload) => broadcasts.push(payload),
   );
-  const service = new GatewayService({
+  const service = new GatewayService({ display: {} as never,
     config: { tronHome: root },
     notifications,
     sessions: { isAdministrativeDrainStarted: false },

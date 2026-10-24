@@ -89,7 +89,7 @@ async function startGateway(): Promise<Harness> {
   const logger = { log: vi.fn() };
   // Only the heartbeat interval is virtual: socket I/O and waits stay real.
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-  const gateway = new GatewayServer({
+  const gateway = new GatewayServer({ display: {} as never,
     host: "127.0.0.1",
     port,
     maxFrameBytes: 16_384,

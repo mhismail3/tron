@@ -116,7 +116,7 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
       },
     }).attachRuntime(runtime);
     const trust = new TrustService(join(root, "agent"));
-    const service = new GatewayService({
+    const service = new GatewayService({ display: {} as never,
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root },
       modelRuntime: runtime,
       trust,
@@ -158,7 +158,7 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
       upstreamUrls.push(String(input));
       return fetch(server!.url, init);
     } }).attachRuntime(runtime);
-    const service = new GatewayService({
+    const service = new GatewayService({ display: {} as never,
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root },
       modelRuntime: runtime,
       globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation() },

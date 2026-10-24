@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -159,6 +159,7 @@ async function fixture(options: {
     };
     const receipts = new CommandReceiptStore(root);
     const service = new GatewayService({
+      display: displayOwnerOf(registry),
       config: { tronHome: root },
       devices,
       sessions: registry,
@@ -168,7 +169,7 @@ async function fixture(options: {
       logger: { log: captureLog },
       sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
     } as never);
-    server = new GatewayServer({
+    server = new GatewayServer({ display: displayOwnerOf(registry),
       host: "127.0.0.1",
       port: 0,
       maxFrameBytes: 1_048_576,

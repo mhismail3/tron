@@ -83,7 +83,7 @@ describe("two-phase session synchronization protocol", () => {
       unsubscribe: vi.fn(),
       unsubscribeClient: vi.fn(),
     };
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 1_024,
@@ -343,7 +343,7 @@ describe("synchronization catch-up overflow recovery", () => {
       unsubscribe: vi.fn(),
       unsubscribeClient: vi.fn(),
     };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 1_048_576,
@@ -500,7 +500,7 @@ describe("connection-wide synchronization ownership", () => {
       },
     };
     const sessions = { subscribe: vi.fn(), unsubscribe: vi.fn(), unsubscribeClient: vi.fn() };
-    gateway = new GatewayServer({
+    gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1", port: address.port, maxFrameBytes: 1_048_576,
       maximumSynchronizationBytes: 1_000,
       devices, uploads: {} as any, sessions: sessions as any,
@@ -668,7 +668,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
       },
     };
     const logger = { log: vi.fn() };
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 512 * 1_024,
@@ -824,7 +824,7 @@ describe("disposable read cancellation", () => {
       unsubscribe: vi.fn(),
       unsubscribeClient: vi.fn(),
     };
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 1_024,
@@ -1031,7 +1031,7 @@ describe("mobile presentation slot", () => {
       unsubscribe: vi.fn(),
       unsubscribeClient: vi.fn(),
     };
-    const gateway = new GatewayServer({
+    const gateway = new GatewayServer({ display: {} as never,
       host: "127.0.0.1",
       port,
       maxFrameBytes: 1_024,

@@ -29,10 +29,8 @@ function makeServer(
     maxFrameBytes: 64 * 1_024,
     devices: { authenticateAndAdmit: async (_token: unknown, register: (identity: { kind: "device"; deviceId: string }) => unknown) => register({ kind: "device", deviceId: "device" }) } as never,
     uploads: { acquire: acquireUpload } as never,
-    sessions: {
-      acquireBlob,
-      acquireDisplayArtifact: async () => { throw new GatewayError("not_found", "missing"); },
-    } as never,
+    sessions: { acquireBlob } as never,
+    display: { acquireArtifact: async () => { throw new GatewayError("not_found", "missing"); } },
     auth: {} as never,
     service: {} as never,
     logger: { log: () => {} } as never,
@@ -212,7 +210,7 @@ describe("Gateway blob HTTP leases", () => {
   it("authorizes and range-streams immutable display artifacts by exact session", async () => {
     const gateway = makeServer(async () => { throw new GatewayError("not_found", "missing"); });
     const artifactID = "00000000-0000-4000-8000-000000000001";
-    (gateway as any).options.sessions.acquireDisplayArtifact = async (
+    (gateway as any).options.display.acquireArtifact = async (
       sessionID: string,
       id: string,
       range?: BlobByteRange,
@@ -249,7 +247,7 @@ describe("Gateway blob HTTP leases", () => {
   it("returns 416 for malformed and unsatisfiable display ranges", async () => {
     const gateway = makeServer(async () => { throw new GatewayError("not_found", "missing"); });
     const artifactID = "00000000-0000-4000-8000-000000000001";
-    (gateway as any).options.sessions.acquireDisplayArtifact = async () => {
+    (gateway as any).options.display.acquireArtifact = async () => {
       throw new GatewayError(
         "invalid_request",
         "Requested display artifact byte range is not satisfiable",
@@ -280,7 +278,7 @@ describe("Gateway blob HTTP leases", () => {
     const artifact = await store.ingest(workspace, "note.txt", "session-1");
     const gateway = makeServer(async () => { throw new GatewayError("not_found", "missing"); });
     let streamClosed: Promise<{ closed: true } | { error: unknown }> | undefined;
-    (gateway as any).options.sessions.acquireDisplayArtifact = async (sessionID: string, id: string) => {
+    (gateway as any).options.display.acquireArtifact = async (sessionID: string, id: string) => {
       const lease = await store.acquire(id, sessionID);
       // A fake release counter cannot catch descriptor double-close on 304,
       // where no pipeline consumes the stream or installs an error listener.

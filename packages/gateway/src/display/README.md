@@ -15,9 +15,9 @@ settlement](../../docs/native-tool-settlement.md).
 
 ## Contract
 
-**Display descriptors.** `display-modules.ts` owns display/native-capture metadata.
-Composition supplies the shared artifact store and live views directly; native
-capture remains absent without live views, without a registry service getter.
+**Display descriptors.** `display-modules.ts` owns `DisplayOwner` and display/native-capture
+metadata. Composition supplies its shared store, live views and lazy native session reads;
+native capture remains absent without live views. Transport consumes the owner directly.
 The display projection also admits canonical artifact/live-view references in one scan;
 runtime slots cache its result only for the exact current session and leaf.
 It also admits each extension load with a display-owned session/generation/token scope;
@@ -40,9 +40,12 @@ local, private, reserved, link-local or multicast address; the Gateway never fet
 them. The tool's model guidance asks for proactive, honestly labelled visuals and
 prefers `inline` for bounded images; that is guidance, not a transport default.
 
-**Artifact store.** One durable store constructed by composition and lent to the
-registry/slots for storage coordination, separate from the
-transient `BlobStore`: random logical IDs over immutable SHA-256 objects, session
+**Artifact store.** `DisplayOwner` coordinates one durable store constructed by
+composition, separate from the transient `BlobStore`. Its traced lane admits reads and
+session removal; Core supplies live deletion/membership facts and one exact-leaf reference
+cut. Storage initialization remains parallel with blob initialization, then loaded-runtime
+ownership reconciliation is awaited through the projection policy. Maintenance reads fresh
+catalog membership, and rekey grants complete before identity commit. Store internals own: random logical IDs over immutable SHA-256 objects, session
 owner links that survive restart and pass to a fork before its identity commit.
 Ownership reconciles against the complete JSONL tree (abandoned branches keep theirs);
 deletion and catalog maintenance drop links, objects go with the last owner and

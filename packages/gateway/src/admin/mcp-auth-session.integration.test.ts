@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -131,7 +131,7 @@ describe("MCP auth through a live Gateway session", () => {
     const slot = await registry.create(cwd);
     const model = faux.getModel(); await slot.setModel(model.provider, model.id);
     const devices = new DeviceStore(join(root, "gateway"), "machine"); await devices.initialize();
-    const service = new GatewayService({ config: { tronHome: root }, sessions: registry, devices, auth,
+    const service = new GatewayService({ display: displayOwnerOf(registry), config: { tronHome: root }, sessions: registry, devices, auth,
       receipts: new CommandReceiptStore(root), uploads: new UploadStore(root, 1024), broadcast: () => {},
       requestRestart: () => {}, sessionDeleted: () => {},
     } as unknown as GatewayServiceDependencies);

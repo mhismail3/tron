@@ -96,7 +96,6 @@ import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../modules/home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
 import { modelQueueKey } from "../kernel/settings/tool-contract.js";
-import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { HomeKernelPorts } from "../modules/home/home-module.js";
 import {
   CatalogDiscovery,
@@ -509,7 +508,6 @@ export class RuntimeRegistry {
    * here, or runs and archive commits can deadlock. */
   private readonly attentionLane = new RequestSpanLane("registry.attention-lane");
   /** Linearizes display lease admission with canonical session deletion. */
-  private readonly displayArtifactLane = new RequestSpanLane("registry.display-lane");
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
   private readonly workspace: TronWorkspace;
@@ -617,7 +615,7 @@ export class RuntimeRegistry {
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
       sessionListChanged: () => void;
       sessionRekeyed?: (previousId: string, nextId: string) => void;
-      beforeSessionRekey?: (previousId: string, nextId: string) => Promise<void>;
+      beforeSessionRekey?: (previousId: string, nextId: string, runtime: RuntimeSlot) => Promise<void>;
       beforeSessionDelete?: (sessionId: string) => Promise<void>;
       sessionClosed?: (sessionId: string) => void;
       persistenceDiagnostic?: (sessionId: string, code: string) => void;
@@ -660,7 +658,6 @@ export class RuntimeRegistry {
       resources?: ResourceRecorder;
       machineId?: string;
       notifications?: NotificationService;
-      readonly displayArtifacts: DisplayArtifactStore;
       readonly settingsSchema: SettingsSchema;
       workRegistry?: GatewayWorkRegistry;
       /** A discovery pass that stopped at one of its budgets instead of the end
@@ -1017,17 +1014,9 @@ export class RuntimeRegistry {
     await Promise.all([
       this.blobs.initialize(),
       this.exports.initialize(),
-      this.options.displayArtifacts.initialize(),
+      this.options.modules.policy("toolResultProjection")?.().initializeStorage(),
     ]);
-    await Promise.all([...this.slots.values()].map((slot) => slot.reconcileDisplayArtifactOwnership()));
-  }
-
-  async maintainDisplayArtifacts(): Promise<void> {
-    await this.options.displayArtifacts.maintain(() => this.sessionIDsForStorageMaintenance());
-  }
-
-  async removeDisplayArtifacts(sessionID: string): Promise<void> {
-    await this.displayArtifactLane.run(() => this.options.displayArtifacts.removeSession(sessionID));
+    await Promise.all([...this.slots.values()].map((slot) => slot.reconcileToolResultOwnership()));
   }
 
   private async reconcileCanonicalAttention(
@@ -1213,13 +1202,7 @@ export class RuntimeRegistry {
         // the previous ID's run is no longer the owner of either record.
         this.pendingArchiveRestorations.delete(previousId);
         this.pendingArchiveRestorations.delete(nextId);
-        // The forked branch already owns its exact canonical display references.
-        // Publish those owner links before committing the new session identity so
-        // a successful fork can never expose a dangling artifact reference.
-        for (const artifactID of slot.displayArtifactIDs()) {
-          await this.options.displayArtifacts.grant(artifactID, nextId, previousId);
-        }
-        await this.options.beforeSessionRekey?.(previousId, nextId);
+        await this.options.beforeSessionRekey?.(previousId, nextId, slot);
         // A rebind is the only identity change the Gateway owns: a reset
         // identity (new session or fork) persists beneath a new path, and a
         // migrate moves the row to the replacement's canonical file.
@@ -1652,7 +1635,6 @@ export class RuntimeRegistry {
       trust: this.options.trust,
       blobs: this.blobs,
       exports: this.exports,
-      displayArtifacts: this.options.displayArtifacts,
       settingsSchema: this.options.settingsSchema,
       workspace: this.workspace,
       markers: this.markers,
@@ -4609,35 +4591,8 @@ export class RuntimeRegistry {
     }
   }
 
-  private async authorizeDisplayArtifact(sessionID: string, artifactID: string): Promise<boolean> {
-    // Retention ownership is necessary but never sufficient: every read must
-    // also be backed by an exact reference on this session's canonical branch.
-    // Do not repair owner links from an arbitrary transcript reference; fork
-    // ownership is committed transactionally by the rekey path above.
-    if (!this.options.displayArtifacts.hasOwner(artifactID, sessionID)) return false;
-    const slot = await this.acquire(sessionID);
-    return slot.referencesDisplayArtifact(artifactID);
-  }
+  /** Native live ownership without acquiring or constructing a runtime. */
+  liveRuntime(sessionID: string): RuntimeSlot | undefined { return this.slots.get(sessionID); }
 
-  authorizeBrowserLiveView(sessionID: string, viewId: string, generation: string): boolean {
-    if (this.deletingSessionIds.has(sessionID)) return false;
-    const slot = this.slots.get(sessionID);
-    return slot !== undefined && !slot.isDisposed && slot.referencesBrowserLiveView(viewId, generation);
-  }
-
-  async acquireDisplayArtifact(
-    sessionID: string,
-    artifactID: string,
-    requestedRange?: import("./blob-store.js").BlobByteRange,
-    signal?: AbortSignal,
-  ) {
-    return abortableRead(signal, () => this.displayArtifactLane.run(async () => {
-      if (this.deletingSessionIds.has(sessionID)
-        || !await this.authorizeDisplayArtifact(sessionID, artifactID)) {
-        throw new GatewayError("not_found", "Display artifact is unavailable");
-      }
-      signal?.throwIfAborted();
-      return this.options.displayArtifacts.acquire(artifactID, sessionID, requestedRange);
-    }, signal), lease => lease.release());
-  }
+  isDeletingSession(sessionID: string): boolean { return this.deletingSessionIds.has(sessionID); }
 }

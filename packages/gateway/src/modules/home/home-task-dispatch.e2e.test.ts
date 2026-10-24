@@ -1,4 +1,4 @@
-import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import * as fileSystem from "node:fs/promises";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { spawn, spawnSync } from "node:child_process";
@@ -100,7 +100,7 @@ describe("Home task authorization RPC", () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     await (await dispatch(f, "scope-setup")).completion;
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(join(f.root, "authorization-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "authorization-terminal", identity: "device:authorization-test", isLocal: true } as unknown as ClientContext;
     const rpc = async (method: string, params: unknown = {}) => await service.invoke(client, method, params) as any;
@@ -124,7 +124,7 @@ describe("Home task authorization RPC", () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     await (await dispatch(f, "valid-scope")).completion;
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(join(f.root, "valid-scope-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { identity: "device:authorization-test", isLocal: true } as ClientContext;
     const before = await homeOwnerOf(f.registry).taskPermissions();
@@ -205,7 +205,7 @@ describe("Home task authorization RPC", () => {
     const before = await list();
     f.registry = await f.restart();
     // A fresh production RPC owner must read the same durable decision.
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(join(f.root, "authorization-receipts")) } as unknown as GatewayServiceDependencies);
     expect(await service.invoke({ identity: "device:authorization-test", isLocal: true } as ClientContext, "home.taskPermissions", {})).toEqual(before);
     expect(await refused(f, "after-deny")).toBe(requestId);
@@ -947,7 +947,7 @@ describe("Home task list RPC", () => {
     const owner = homeOwnerOf(f.registry);
     const store = (owner as any).tasks.store as HomeTaskStore;
     await store.initialize();
-    const service = new GatewayService({ sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
     const client = { clientId: "task-list-reader" } as ClientContext;
     const intent = { text: "Finite work" };
     for (let i = 0; i < 5; i++) {
@@ -981,7 +981,7 @@ describe("Home task list RPC", () => {
     await expect(service.invoke(client, "home.taskList", { cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict" });
     await chmod(f.tronHome, 0o755);
     const cold = await f.restart();
-    const fenced = new GatewayService({ sessions: cold, home: homeOwnerOf(cold) } as unknown as GatewayServiceDependencies);
+    const fenced = new GatewayService({ display: displayOwnerOf(cold), sessions: cold, home: homeOwnerOf(cold) } as unknown as GatewayServiceDependencies);
     await chmod(f.tronHome, 0o700);
     await expect(fenced.invoke(client, "home.taskList", {})).rejects.toMatchObject({ code: "conflict", details: { reason: "unsafe-state" } });
     evidence.push({ case: "task-list-pages", first, second, third, staleCursorRefused: true, recoveryFenceRefused: true });
@@ -1026,7 +1026,7 @@ describe("Home task list RPC", () => {
       if (records.has(`${info.dev}:${info.ino}`)) reads += 0.5;
       return info;
     });
-    const service = new GatewayService({ sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
     const client = { clientId: "task-list-reader" } as ClientContext;
     reads = 0;
     const lists = await Promise.all(Array.from({ length: 20 }, () => service.invoke(client, "home.taskList", { limit: 50 }))) as Array<{ items: unknown[]; counts: { finished: number } }>;
@@ -1332,7 +1332,7 @@ describe("Home task production dispatch", () => {
     await home.prompt("Continue after replacement"); await waitFor(() => home.snapshot().configurationBlocker === null, "replacement terminal");
     expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "blocked" } });
     expect(JSON.stringify(home.canonicalSessionEntries())).not.toContain("Verified result");
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: owner,
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: owner,
       uploads: new UploadStore(join(f.root, "redelivery-uploads"), 1024),
       receipts: new CommandReceiptStore(join(f.root, "redelivery-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "inbox-terminal", identity: "device:inbox-test", isLocal: true } as unknown as ClientContext;
@@ -1382,7 +1382,7 @@ describe("Home task production dispatch", () => {
     // The openable predecessor is a readable canonical session, not just a name.
     expect((await f.registry.acquire(predecessor)).id).toBe(predecessor);
     const uploads = new UploadStore(join(f.root, "uploads"), 1024);
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: owner, uploads,
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: owner, uploads,
       receipts: new CommandReceiptStore(join(f.root, "attachment-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "attachment-client", identity: "device:attachment-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
     // The sealed predecessor stays read-only: a physical prompt to it is refused.
@@ -1474,7 +1474,7 @@ describe("Home task production dispatch", () => {
       await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, operationId: "stale-operation", text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
       await expect(slot.steerHomeTask({ ...control, operationId: "stale-operation" }, "stale slot control")).rejects.toThrow(/stale|changed|conflict/i);
       // The removed controller generation is an unknown RPC parameter, refused before any Stop intent is written.
-      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+      const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
         receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
       const client = { id: "control-terminal", identity: "device:control-test", isLocal: true } as unknown as ClientContext;
       await expect(service.invoke(client, "home.stopTask",
@@ -1528,7 +1528,7 @@ describe("Home task production dispatch", () => {
       await expect(homeOwnerOf(f.registry).stopTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
       await expect(slot.stopHomeTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
       expect(cancelled).toBe(false);
-      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+      const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
         receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
       // A draining transport must keep status/exact Stop available; this is an
       // isolated service flag, never a live Gateway restart.
@@ -1713,7 +1713,7 @@ describe("Home task production dispatch", () => {
     await cp(namespace, copy, { recursive: true, preserveTimestamps: true });
     await rm(namespace, { recursive: true }); await rename(copy, namespace);
     await expect(dispatch(f, "before-confirmation")).rejects.toThrow(/reconfirmation/);
-    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
       receipts: new CommandReceiptStore(join(f.root, "receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "terminal-test", identity: "device:task-test", isLocal: true } as unknown as ClientContext;
     await expect(service.invoke(client, "home.reconfirmPermissions", { commandId: "confirm-permissions", unexpected: true })).rejects.toThrow(/unexpected|unknown/i);

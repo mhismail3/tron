@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
 import { request } from "node:http";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -100,7 +100,7 @@ async function fixture() {
     belongsToSession: (id: string, sessionId: string) => terminal?.id === id && terminal.sessionId === sessionId,
   };
   const logs: Array<{ level: string; message: string; fields?: Record<string, unknown> }> = [];
-  const service = new GatewayService({
+  const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { tronHome: root }, devices, sessions: registry, receipts, uploads, terminals,
     logger: { log: (level: string, message: string, fields?: Record<string, unknown>) => logs.push({ level, message, fields }) }, iosDeviceInstallService: install,
   } as never);
@@ -111,7 +111,7 @@ async function fixture() {
     void task.then(() => pending.delete(task), () => pending.delete(task));
     return task;
   });
-  server = new GatewayServer({
+  server = new GatewayServer({ display: displayOwnerOf(registry),
     host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
     devices, sessions: registry, service, uploads: uploads as never,
     auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
