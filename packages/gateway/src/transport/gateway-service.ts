@@ -13,13 +13,15 @@ import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABIL
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../modules/home/home-memory-browser.js";
 import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { PI_VERSION } from "../kernel/pi/version.js";
-import type { ChangeContext, SessionAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { SettingsStoreAdapter } from "../admin/settings-model.js";
+import type { ChangeContext, SessionAppliers, SettingsChangePath } from "../kernel/settings/settings-change.js";
+import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
 import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { ApprovalRequest } from "../kernel/settings/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SECTIONS, recordSubject, type SettingsSchema } from "../kernel/settings/settings-schema.js";
-import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, type HomeProfileOp } from "../modules/home/home-profile.js";
-import type { ObservedStore } from "../admin/settings-outside.js";
+import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileOp } from "../modules/home/home-profile.js";
+import type { ObservedStore } from "../kernel/settings/settings-types.js";
 import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
 import { maxTier } from "../kernel/settings/settings-types.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
@@ -358,7 +360,7 @@ export interface GatewayServiceDependencies {
   terminals: TerminalService;
   trust: TrustService;
   /** The settings model's resolver (docs/settings-model.md). */
-  settingsModel: SettingsModel;
+  settingsModel: SettingsModel<SettingsStoreAdapter>;
   /** The settings model's one change path, with its record. */
   settingsChanges: SettingsChangePath;
   /** Mac Terminal's enrollment facts (security/mac-terminal.ts); absent in a
@@ -460,7 +462,7 @@ export class GatewayService {
       approvals: (event) => this.settingsApprovalsChanged(event),
     });
     // Outside changes reach the same after-apply effects and broadcast, one store at a time.
-    dependencies.settingsModel?.outsideChanges?.observe({
+    dependencies.settingsModel?.owner.outsideChanges?.observe({
       outside: async (entries) => {
         const outside = entries.filter(entry => entry.status === "outside" && !recordSubject(entry.key));
         this.recordSubjectsChangedOutside(entries.filter(entry => entry.status === "outside" && recordSubject(entry.key)));
@@ -509,7 +511,7 @@ export class GatewayService {
 
   /** Tron's own MCP and custom-model writes are Tron's, not outside changes. */
   private async asTronWrite<T>(stores: readonly ObservedStore[], write: () => Promise<T>): Promise<T> {
-    const outside = this.dependencies.settingsModel?.outsideChanges;
+    const outside = this.dependencies.settingsModel?.owner.outsideChanges;
     return outside ? outside.adopt(stores, write) : write();
   }
 
@@ -698,7 +700,7 @@ export class GatewayService {
           if (!this.dependencies.home) throw new GatewayError("unsupported", "Tron Home is not available on this Gateway");
           if (!Array.isArray(params.changes) || params.changes.length < 1 || params.changes.length > 50) throw new GatewayError("invalid_request", "changes holds 1 to 50 profile changes");
           const ops = params.changes.map((raw, index) => profileChangeOp(raw, `changes[${index}]`));
-          return safeJson(await this.dependencies.settingsChanges.changeProfile(ops, {
+          return safeJson(await new HomeProfileItems(() => this.dependencies.knowledge).change(this.dependencies.settingsChanges, ops, {
             actor: { kind: "ui", id: client.identity }, author: { kind: "maintainer" },
             commandId: string(params.commandId, "commandId", { min: 8, max: 120 }),
           }));
@@ -1083,7 +1085,7 @@ export class GatewayService {
           // The key goes first: if removing it fails, the device stays paired
           // and the revoke can be retried, rather than a revoked iPhone keeping
           // a working SSH key.
-          if ((await this.dependencies.settingsModel?.macTerminalKeys?.read())?.[deviceId] !== undefined) {
+          if ((await this.dependencies.settingsModel?.owner.macTerminalKeys?.read())?.[deviceId] !== undefined) {
             await this.dependencies.settingsChanges.change({ kind: "global" }, [{
               key: "permissions.macTerminalKey", qualifiers: { device: deviceId }, layer: "global", op: "unset",
             }], {

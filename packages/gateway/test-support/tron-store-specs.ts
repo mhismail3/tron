@@ -3,7 +3,9 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { SettingsChangePath, SettingsModel } from "../src/admin/settings-model.js";
+import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
+import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
+import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import { TrustService } from "../src/admin/trust-service.js";
@@ -87,13 +89,13 @@ async function settingsPath(home: string, knowledge?: KnowledgeService) {
   await mkdir(agentDir, { recursive: true });
   const trust = new TrustService(agentDir);
   const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-  const model = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(home, "ssh")) });
+  const model = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(home, "ssh")) }));
   const record = new SettingsChangeRecord(home);
   const approvals = new SettingsApprovals(home);
-  const path = new SettingsChangePath(model, record, approvals, {
+  const path: SettingsChangePath = new SettingsChangePath(model, record, approvals, {
     setTrust: async () => { throw new Error("The settings corpus sets no trust"); },
-    ...(knowledge ? { profile: new HomeProfileItems(() => knowledge) } : {}),
-  }, agentDir);
+    ...(knowledge ? { undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(path, entry, context) } : {}),
+  });
   return { model, record, path, approvals };
 }
 
@@ -449,18 +451,19 @@ export const STORES: readonly StoreSpec[] = [
     record: (home) => withWorkspace(home, async (workspace) => {
       const knowledge = new KnowledgeService(new KnowledgeStore(workspace, () => {}));
       const { path } = await settingsPath(home, knowledge);
+      const profile = new HomeProfileItems(() => knowledge);
       const context = (commandId: string) => ({ actor: { kind: "ui" as const, id: IDENTITY }, author: { kind: "maintainer" as const }, commandId, reason: "Corpus profile" });
       // Home learns unconfirmed items; the maintainer confirms, supersedes and retires them.
-      const learned = await path.changeProfile([
+      const learned = await profile.change(path, [
         { action: "learn", kind: "preference", text: "Prefers concise answers" },
         { action: "learn", kind: "standing-decision", text: "Lands with plain Git" },
         { action: "learn", kind: "fact", text: "Works from an iPhone" },
       ], { actor: { kind: "home", id: CORPUS_IDS.session }, author: { kind: "home", sessionId: CORPUS_IDS.session, entryId: "corpus-entry-0001" },
         commandId: "corpus-profile-0001", reason: "Corpus profile" });
       const [preference, decision, fact] = learned.saved.map((saved) => (saved as { id: string }).id);
-      await path.changeProfile([{ action: "confirm", id: preference! }], context("corpus-profile-0002"));
-      await path.changeProfile([{ action: "supersede", id: decision!, kind: "standing-decision", text: "Lands with plain Git after tests" }], context("corpus-profile-0003"));
-      await path.changeProfile([{ action: "retire", id: fact!, reason: "No longer true" }], context("corpus-profile-0004"));
+      await profile.change(path, [{ action: "confirm", id: preference! }], context("corpus-profile-0002"));
+      await profile.change(path, [{ action: "supersede", id: decision!, kind: "standing-decision", text: "Lands with plain Git after tests" }], context("corpus-profile-0003"));
+      await profile.change(path, [{ action: "retire", id: fact!, reason: "No longer true" }], context("corpus-profile-0004"));
     }),
     read: (home) => withWorkspace(home, async (workspace) => {
       const knowledge = new KnowledgeService(new KnowledgeStore(workspace, () => {}));

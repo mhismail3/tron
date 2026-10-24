@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Declared settings schema, precedence and shared vocabulary, with durable
-audit/approval stores. The session context and change path use one contract
-and one persisted store format.
+Declared settings schema, resolution/request pins and the audited change engine,
+with durable audit/approval stores. Session contexts and store adapters share
+one contract and one persisted store format.
 
 ## Owns
 
@@ -13,6 +13,13 @@ code floors and schema indexes. Composition supplies Home tool names, the run
 compaction limit and security validation without upward imports.
 `settings-resolver.ts` owns layer precedence, qualification, composition, clamping
 and state badges; `settings-project-diagnostics.ts` owns bounded Project diagnostics.
+`settings-model.ts` owns target resolution and fixed-direction request pins.
+`settings-change.ts` owns planning, tiers, approvals, ordered application/reverse
+rollback, outside-write brackets, Home recipe companion effects and target stripes.
+Store reads/catalogs, provider admission and binding I/O enter through its owner ports.
+Home supplies learned-profile operations and typed result projection; `auditSubject`
+keeps their validation, restoration, grouped audit and awaited observer/projection
+under the same Home stripe, without moving Knowledge DTOs into the kernel.
 `tool-contract.ts`: layer/tier/qualifier and model-reference/queue role/key vocabulary,
 retired scope-name mapping
 shared by session readers and store migration, and tool request, resolution,
@@ -30,8 +37,9 @@ validation; admin owns the migration transaction, backups and publication.
 ## Contract
 
 `SettingsToolAccess` resolves and changes the current session settings and drains
-its pending outcomes. Admin loads stores and supplies runtime option/format sources
-to the kernel resolver; change orchestration remains in admin. The session runtime
+its pending outcomes. Admin loads stores, supplies runtime option/format sources
+and applies concrete store bindings; the kernel owns read/change policy and
+transaction order. The session runtime
 supplies its own identity and appliers. Audit records
 are not settings truth, and pending approvals never apply themselves.
 
@@ -43,7 +51,7 @@ are not settings truth, and pending approvals never apply themselves.
 ## Entry points
 
 `SettingsToolAccess`, `ChangeRequest`, `ChangeResult`, `Resolution`,
-`SettingsChangeRecord`, `SettingsApprovals`.
+`SettingsModel`, `SettingsChangePath`, `SettingsChangeRecord`, `SettingsApprovals`.
 
 ## Signals
 
@@ -61,5 +69,5 @@ The real settings and run locks cover consumers of this contract.
 
 ## Not here
 
-Store loading, dynamic catalogs, change orchestration and UI rendering:
+Store loading, dynamic catalogs, concrete binding I/O and UI rendering:
 [admin](../../admin/README.md).

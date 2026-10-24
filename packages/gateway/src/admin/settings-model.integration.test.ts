@@ -10,7 +10,9 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "./trust-service.js";
 import { createSettingsManager } from "./settings-sdk-manager.js";
-import { SettingsChangePath, SettingsModel } from "./settings-model.js";
+import { SettingsStoreAdapter } from "./settings-model.js";
+import { SettingsChangePath } from "../kernel/settings/settings-change.js";
+import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
 import { terminalIdleLimitMs } from "../kernel/settings/settings-schema.js";
@@ -97,17 +99,17 @@ async function fixture() {
   });
   registries.push(registry);
   await registry.initialize();
-  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA,
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA,
     agentDir, tronHome, trust, modelRuntime,
     // Production wiring (gateway-main): a chat's live registry, else the scope's.
     toolCatalog: async target => target.kind === "session" ? registry.liveToolCatalog(target.sessionId)
       : scopeTools.list(target.kind === "project" ? target.cwd : undefined),
-  });
+  }));
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), new SettingsApprovals(tronHome), {
     setTrust: async (project, decision) => trust.setAndApply(project, decision,
       async inspection => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
       async inspection => { await registry.commitProjectReload(inspection.projectDir); }),
-  }, agentDir);
+  });
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
@@ -550,8 +552,8 @@ describe("settings renderer contract", () => {
 
   it("serves option lists that follow the target's model, page catalogs, and refuse keys with no options", async () => {
     const f = await fixture();
-    const reasoner = f.settingsModel.modelRuntime.getModel(f.model.provider, f.model.id)!;
-    const plain = f.settingsModel.modelRuntime.getModel(f.model.provider, "plain")!;
+    const reasoner = f.settingsModel.owner.modelRuntime.getModel(f.model.provider, f.model.id)!;
+    const plain = f.settingsModel.owner.modelRuntime.getModel(f.model.provider, "plain")!;
     const plainKey = `${plain.provider}/${plain.id}`;
 
     // Thinking levels: the target's chat model's own levels, labelled as the schema labels them.

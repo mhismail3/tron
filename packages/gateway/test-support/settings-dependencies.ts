@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { createQueueSummarizer } from "../src/episodic/episodic-compactor.js";
 import { ModelQueueOwner } from "../src/providers/model-queue.js";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { SettingsChangePath, SettingsModel } from "../src/admin/settings-model.js";
+import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
+import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
+import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import type { TrustService } from "../src/admin/trust-service.js";
@@ -29,20 +31,20 @@ export function settingsDependencies(input: {
   /** The change path's clock; a fixture advances it to test expiry. */
   now?: () => Date;
   /** Option catalog for `catalog.tools` keys, wired as gateway-main wires it. */
-  toolCatalog?: ConstructorParameters<typeof SettingsModel>[0]["toolCatalog"];
-}): { settingsModel: SettingsModel; settingsChanges: SettingsChangePath } {
-  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA,
+  toolCatalog?: ConstructorParameters<typeof SettingsStoreAdapter>[0]["toolCatalog"];
+}): { settingsModel: SettingsModel<SettingsStoreAdapter>; settingsChanges: SettingsChangePath } {
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA,
     agentDir: input.agentDir, tronHome: input.tronHome, trust: input.trust, modelRuntime: input.modelRuntime,
     ...(input.toolCatalog ? { toolCatalog: input.toolCatalog } : {}),
-  });
-  const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(input.tronHome), new SettingsApprovals(input.tronHome), {
+  }));
+  const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, new SettingsChangeRecord(input.tronHome), new SettingsApprovals(input.tronHome), {
     setTrust: async (project, decision) => {
       return input.trust.setAndApply(project, decision,
         async (inspection) => { await input.sessions?.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false); },
         async (inspection) => { await input.sessions?.commitProjectReload(inspection.cwd); });
     },
-    ...(input.knowledge ? { profile: new HomeProfileItems(input.knowledge) } : {}),
-  }, input.agentDir, input.now);
+    ...(input.knowledge ? { undoSubject: (entry, context) => new HomeProfileItems(() => input.knowledge?.()).undo(settingsChanges, entry, context) } : {}),
+  }, input.now);
   input.registry?.setSettings(settingsModel, settingsChanges);
   return { settingsModel, settingsChanges };
 }

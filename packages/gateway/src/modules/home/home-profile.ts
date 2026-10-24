@@ -1,4 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import type { SettingsChangePath, SubjectContext, SubjectWrite, ChangeContext } from "../../kernel/settings/settings-change.js";
+import type { ChangeEntry } from "../../kernel/settings/settings-record.js";
+import type { ChangeResult } from "../../kernel/settings/tool-contract.js";
 import { Type, type TSchema } from "../../kernel/pi/ai.js";
 import type { ExtensionToolContext, ToolDefinition } from "../../kernel/pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
@@ -175,7 +178,7 @@ function unavailableSection(reason: string): string {
 //
 // Every profile change, Home's `profile` tool and the maintainer's `home.profileChange`
 // alike, runs through `HomeProfileItems` inside the settings change path
-// (`SettingsChangePath.changeProfile`), which serializes it, records one audit entry per
+// (`SettingsChangePath.auditSubject`), which serializes it, records one audit entry per
 // note it touched and makes it undoable (docs/settings-model.md 6.4). The actor decides
 // only what the note says about confirmation: Home's changes stay inferred until the
 // maintainer confirms them, and the maintainer's own edits are confirmed by definition.
@@ -302,11 +305,76 @@ function staleConflict(error: unknown, current: HomeProfileItem | undefined): un
  * undo. It holds no state: each call reads the profile through `readHomeProfile`, writes
  * notes through the Knowledge owner with its revision fence, and reads back what it wrote.
  */
+export interface ProfileChangeContext extends SubjectContext { author: HomeProfileAuthor }
+export interface ProfileChangeResult extends ChangeResult {
+  status: "applied";
+  saved: HomeProfileSaved[];
+  items: ReturnType<typeof profileListItem>[];
+}
+
 export class HomeProfileItems {
   constructor(private readonly knowledge: () => KnowledgeService | undefined) {}
 
   available(): boolean {
     return this.knowledge() !== undefined;
+  }
+
+  /** Domain operations stay here; the settings engine owns their stripe and audit. */
+  async change(changes: SettingsChangePath, ops: readonly HomeProfileOp[], context: ProfileChangeContext): Promise<ProfileChangeResult> {
+    if (!this.available()) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
+    if (ops.length === 0 || ops.length > 50) throw new GatewayError("invalid_request", "A profile change holds 1 to 50 changes");
+    return changes.auditSubject(async () => {
+      const applied: Array<{ saved: HomeProfileSaved; writes: HomeProfileWrite[] }> = [];
+      const audited = (write: HomeProfileWrite): SubjectWrite => ({
+        ...write, direction: ops[applied.findIndex(done => done.writes.includes(write))]?.action === "retire" ? "narrow" : "widen",
+      });
+      try {
+        for (const [index, op] of ops.entries()) applied.push(await this.apply(op, context.author, `${context.commandId}:${index}`));
+      } catch (error) {
+        for (const [index, done] of [...applied].reverse().entries()) {
+          await this.restore(done.writes.map(write => ({ id: write.id, value: write.before })), context.author, `${context.commandId}:rollback:${index}`)
+            .catch(() => undefined);
+        }
+        const failure = applied.length ? `Rolled back: ${error instanceof Error ? error.message : String(error)}` : "";
+        return { status: "failed", context, writes: applied.flatMap(done => done.writes).map(audited), error, failure };
+      }
+      const writes = applied.flatMap(done => done.writes);
+      return { status: "applied", context, writes: writes.map(audited), result: { writes, saved: applied.map(done => done.saved) } };
+    }, async (result, audit) => {
+      const read = await this.read();
+      const items = result.writes.flatMap(write => read.items.filter(item => item.id === write.id)).map(profileListItem);
+      return { ...audit, status: "applied", saved: result.saved, items };
+    });
+  }
+
+  /** Group/value fencing, restoration and projection all remain under the Home stripe. */
+  async undo(changes: SettingsChangePath, entry: ChangeEntry, context: Omit<ChangeContext, "undoOf">): Promise<ProfileChangeResult> {
+    if (!this.available()) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
+    if (context.actor.kind !== "ui") throw new GatewayError("invalid_request", "Only the maintainer undoes a profile change");
+    return changes.auditSubject(async () => {
+      const members = entry.group ? await changes.record.group(entry.group.id, entry.group.size) : [entry];
+      if (members.some(member => member.status !== "applied")) throw new GatewayError("conflict", "Only an applied change can be undone");
+      const ids = members.map(member => member.qualifiers?.note ?? "");
+      const current = await this.values(ids);
+      for (const member of members) {
+        const now = current.get(member.qualifiers?.note ?? "") ?? null;
+        const after = member.after ?? null;
+        if (JSON.stringify(now) !== JSON.stringify(after)) {
+          throw new GatewayError("conflict", "The profile item changed since; undo would overwrite a newer change", false,
+            { current: now as never, after: after as never, display: { current: formatProfileValue(now), after: formatProfileValue(after) } });
+        }
+      }
+      const commandId = context.commandId ?? randomUUID();
+      const writes = await this.restore(members.map(member => ({ id: member.qualifiers!.note!, value: (member.before ?? null) as never })),
+        { kind: "maintainer" }, commandId, "Undo");
+      const undoOf = new Map(members.map(member => [member.qualifiers!.note!, member.changeId]));
+      return { status: "applied", context: { actor: context.actor, commandId },
+        writes: writes.map(write => ({ ...write, direction: "widen" as const, ...(undoOf.get(write.id) ? { undoOf: undoOf.get(write.id)! } : {}) })), result: writes };
+    }, async (writes, audit) => {
+      const read = await this.read();
+      const items = writes.flatMap(write => read.items.filter(item => item.id === write.id)).map(profileListItem);
+      return { ...audit, status: "applied", saved: [], items };
+    });
   }
 
   private owner(): KnowledgeService {

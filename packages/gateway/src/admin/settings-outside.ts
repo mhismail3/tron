@@ -9,7 +9,7 @@ import { readJsonDocument } from "../util/json.js";
 import { gitHeadState, projectSettingsPath, stagedBlob, type GitHeadState } from "./project-settings-writer.js";
 import type { ChangeEntry, SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { type GitResult, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
-import type { OutsideMark, FloorOverrides } from "../kernel/settings/settings-types.js";
+import type { OutsideMark, FloorOverrides, ObservedStore, PlannedWrite } from "../kernel/settings/settings-types.js";
 import { keyDefault, floorFor, recordSubject, type SettingsSchema, type Binding, type KeyDeclaration } from "../kernel/settings/settings-schema.js";
 import { readPath } from "../kernel/settings/settings-resolver.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
@@ -37,8 +37,6 @@ import { formatStoredSetting } from "../kernel/settings/settings-types.js";
  * stores (F2), and the record stays audit only.
  */
 
-export type ObservedStore = { kind: "global" } | { kind: "trust" } | { kind: "mcp" } | { kind: "models" }
-  | { kind: "project"; root: string } | { kind: "project-mcp"; root: string };
 type ProjectObservedStore = Extract<ObservedStore, { root: string }>;
 const isProjectStore = (store: ObservedStore): store is ProjectObservedStore => store.kind === "project" || store.kind === "project-mcp";
 
@@ -76,8 +74,6 @@ export interface ObservedReaders {
   floors(): Promise<FloorOverrides>;
 }
 
-/** One planned write the change path brackets: its observed store and instance. */
-export interface PlannedWrite { store: ObservedStore; instance: string; changeId: string; value: unknown }
 
 function storeId(store: ObservedStore): string {
   return isProjectStore(store) ? `${store.kind}:${store.root}` : store.kind;

@@ -1,7 +1,8 @@
 # Settings contract
 
 How every model and harness setting is declared, stored, resolved, changed and shown. Owner:
-the Gateway [`admin` module](../src/admin/README.md); iOS, Home, providers and the push relay
+the Gateway [settings kernel](../src/kernel/settings/README.md), with
+[admin store adapters](../src/admin/README.md); iOS, Home, providers and the push relay
 consume it. Edge cases follow from a [foundation](#foundations), never a new rule.
 
 ## Foundations
@@ -213,7 +214,8 @@ need approval, lowers apply live.
 uncredentialed models, models with a usage-limit error in the last 15 minutes or ≥ 95% usage,
 and moves on after a usage-limit error; captured queues are read-only. Worker thinking is
 `{ "sameAs": "home" }` by default. **Learned-profile changes** (`home.profileChange`, the
-`profile` tool) use `SettingsChangePath.changeProfile`: one quiet `home.profile.item` entry per
+`profile` tool) use Home `HomeProfileItems.change` through the kernel
+`SettingsChangePath.auditSubject` stripe/audit coordinator: one quiet `home.profile.item` entry per
 note, grouped and undone together, refused on a stale revision.
 
 ## Presentation

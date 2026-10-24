@@ -24,6 +24,7 @@ import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-regi
  *     recorded as Changes and reach the next activation as they now stand;
  *  F12 a stale maintainer edit or undo is refused with the current state;
  *  F13 Home's own profile changes are recorded and undoable by the maintainer.
+ *  F14 a failed profile batch leaves earlier writes applied or gives them a successful/grouped audit.
  *
  * The retained artifact is `test-results/home-profile/report.json`.
  */
@@ -41,7 +42,9 @@ import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
-import { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import { SettingsStoreAdapter } from "../admin/settings-model.js";
+import { SettingsChangePath } from "../kernel/settings/settings-change.js";
+import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
 import { HomeProfileItems } from "../modules/home/home-profile.js";
@@ -228,12 +231,12 @@ async function fixture(label: string): Promise<Fixture> {
   registry.setKnowledgeService(knowledge);
   // The one settings change path, wired as gateway-main wires it: Home's profile tool
   // and the maintainer's home.profileChange share its profile applier and record.
-  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime: runtime });
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime: runtime }));
   const record = new SettingsChangeRecord(tronHome);
-  const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
+  const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
     setTrust: async () => { throw new Error("trust is not changed here"); },
-    profile: new HomeProfileItems(() => knowledge),
-  }, agentDir);
+    undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
+  });
   registry.setSettings(settingsModel, settingsChanges);
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const pushes: Array<{ title: string; message: string }> = [];
@@ -771,6 +774,47 @@ describe("Tron Home learned profile", () => {
     expect((await noteAt(f, launch.id)).content).toMatchObject({ title: "Launch is Monday.", confirmed: false });
     recordCase("stale-edit-and-undo-refused", { staleRefine: tabs.id, staleUndo: launch.id });
   }, 120_000);
+
+  it("F14: a later conflicting profile operation restores earlier writes and records only ungrouped failed diffs", async () => {
+    const f = await fixture("partial-failure");
+    await homeActivation(f, "Remember two batch preferences.", [
+      profileCall({ action: "learn", kind: "preference", text: "Keep batch changes reversible." }, "call-batch-a"),
+      profileCall({ action: "learn", kind: "fact", text: "The review happens on Tuesday." }, "call-batch-b"),
+      say("Saved both."),
+    ]);
+    const first = await itemText(f, "Keep batch changes reversible.");
+    const before = await noteAt(f, first.id);
+    const stale = await itemText(f, "The review happens on Tuesday.");
+    await change(f, [{ action: "refine", id: stale.id, expectedRevision: stale.revisionId, text: "The review happens on Wednesday." }], "batch-newer");
+    const current = await noteAt(f, stale.id);
+    const batchId = command("partial-batch");
+    const failure: unknown = await f.service.invoke(maintainer, "home.profileChange", { commandId: batchId, changes: [
+      { action: "refine", id: first.id, expectedRevision: first.revisionId, text: "Keep approved batch changes reversible." },
+      { action: "refine", id: stale.id, expectedRevision: stale.revisionId, text: "The review happens on Thursday." },
+    ] }).then(() => null, (error: unknown) => error);
+    expect(failure).toMatchObject({ code: "conflict", details: { current: { id: stale.id, text: "The review happens on Wednesday." } } });
+    if (!(failure instanceof Error)) throw new Error("the conflicting operation did not return its error");
+    const entries = (await f.record.page({ limit: 200, filter: entry => entry.commandId === batchId })).entries;
+    expect(entries).toHaveLength(1);
+    const failed = entries[0]!;
+    expect(failed).toMatchObject({ status: "failed", key: "home.profile.item", actor: { kind: "ui" }, target: { kind: "home" },
+      qualifiers: { note: first.id }, failure: `Rolled back: ${failure.message}`,
+      before: { text: "Keep batch changes reversible.", state: "active", confirmed: false },
+      after: { text: "Keep approved batch changes reversible.", state: "active", confirmed: true } });
+    expect(failed.group).toBeUndefined();
+    const restored = await noteAt(f, first.id);
+    expect(restored.content).toEqual(before.content);
+    expect((await listed(f)).find(item => item.id === first.id)).toMatchObject({ text: "Keep batch changes reversible.", status: "active", confirmed: false });
+    const unchanged = await noteAt(f, current.id);
+    expect(unchanged.revisionId).toBe(current.revisionId);
+    expect(unchanged.content).toEqual(current.content);
+    const zeroWriteId = command("zero-write-conflict");
+    await expect(f.service.invoke(maintainer, "home.profileChange", { commandId: zeroWriteId, changes: [
+      { action: "refine", id: stale.id, expectedRevision: stale.revisionId, text: "The review happens on Thursday." },
+    ] })).rejects.toMatchObject({ code: "conflict" });
+    expect((await f.record.page({ limit: 200, filter: entry => entry.commandId === zeroWriteId })).entries).toEqual([]);
+    recordCase("partial-profile-failure", { note: restored.id, status: failed.status, grouped: failed.group !== undefined, zeroWriteEntries: 0 });
+  });
 
   it("F13: Home's own profile changes are recorded, and the maintainer's undo of one retires the learned note", async () => {
     const f = await fixture("home-recorded");

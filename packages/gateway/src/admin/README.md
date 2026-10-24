@@ -2,8 +2,8 @@
 
 ## Purpose
 
-The Gateway's administration owners: settings store/options adapters and the
-one audited, tiered change path over the kernel's declared schema/resolver, and
+The Gateway's administration owners: settings store/options/binding-I/O adapters
+for the kernel's audited, tiered read/change engine, and
 the Mac-side admin services: trust, provider auth, packages and resources, MCP,
 custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 
@@ -13,8 +13,8 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 |---|---|
 | Settings declarations and binding admission | [kernel schema](../kernel/settings/settings-schema.ts) (`createSettingsSchema`, `KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
 | SDK scope admission and operational model selection | `settings-sdk-manager.ts`, `settings-admission.ts` |
-| Store/options adapter and presentation | `settings-model.ts` (`SettingsModel`), `settings-presentation.ts`; [kernel resolver and diagnostics](../kernel/settings/README.md) |
-| Change path and policy | `settings-model.ts` (`SettingsChangePath`), `settings-risk.ts`; audit/approvals: [kernel settings](../kernel/settings/README.md) |
+| Store/options adapter and presentation | `settings-model.ts` (`SettingsStoreAdapter`), `settings-presentation.ts`; [kernel resolver and diagnostics](../kernel/settings/README.md) |
+| Risk-provider adapter | `settings-risk.ts`; read/change engine, transaction order and audit/approvals: [kernel settings](../kernel/settings/README.md) |
 | Migration transaction, backups and publication | `settings-migration.ts`, `settings-migration-plan.ts`; shared-store value transforms: [kernel settings](../kernel/settings/README.md) |
 | Appliers and outside writers | `project-settings-writer.ts`, `trust-service.ts`, `settings-outside.ts` (`OutsideChanges`) |
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
@@ -64,10 +64,12 @@ Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`,
 (a thin client of resolve and change); Home's tool may target a delegated
 worker by `taskId`.
 
-Ports in: `gateway-main.ts` wires `SettingsModel`, `SettingsChangePath`,
+Ports in: `gateway-main.ts` wires kernel `SettingsModel`/`SettingsChangePath`,
+admin `SettingsStoreAdapter`,
 `OutsideChanges` and the risk evaluator; `GatewayService` dispatches the RPCs,
 pushes and broadcasts; `RuntimeSlot` supplies the Session-scope applier, fence and
-running-worker `announce`; Home supplies `HomeProfileItems` for learned notes.
+running-worker `announce`; Home owns learned-note operations/undo and typed
+post-observer projection through `HomeProfileItems` and the kernel audited-subject seam.
 `main/settings-schema.ts` constructs one immutable schema from Home tool names,
 the run compaction limit and security key validation. Registry/Slot, the read/change
 owners and store adapters receive that same schema before optional settings services
@@ -103,8 +105,8 @@ are installed; schema access never evaluates their late-bound service getter.
 - Add or change a key: [kernel schema](../kernel/settings/settings-schema.ts) `KEYS`, then
   `scripts/tron docs update` refreshes the key table in the contract doc.
 - Resolve a target: `SettingsModel.resolve` / `options`.
-- Change or decide: `SettingsChangePath.change`, `undo`, `applyAgain`, `decide`,
-  `changeProfile`.
+- Change or decide: kernel `SettingsChangePath.change`, `undo`, `applyAgain`, `decide`.
+- Learned profile: Home `HomeProfileItems.change` / `undo` under `SettingsChangePath.auditSubject`.
 - Outside detection: `OutsideChanges` (`reconcile`, `adopt`, `dispose`).
 - Agent tool and web mark: `tron-settings-extension.ts`.
 
