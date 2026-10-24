@@ -119,6 +119,27 @@ final class TronHomeSheetsUITests: XCTestCase {
         shot("1723-retire-destructive")
     }
 
+    /// Native task-detail visual review, using the same long check-in in both themes.
+    @MainActor func testTaskDetailSubtextReviewLight() { captureTaskDetailSubtext("light", arguments: []) }
+    @MainActor func testTaskDetailSubtextReviewDark() { captureTaskDetailSubtext("dark", arguments: ["-home-dark"]) }
+
+    @MainActor private func captureTaskDetailSubtext(_ name: String, arguments: [String]) {
+        let app = launchPolishManage(arguments + ["-home-task-padding-review"])
+        defer { app.terminate() }
+        open(app, element(app, "home-manage-tasks"), ready: "home-task-terminal", name: "task-subtext-list")
+        expand(app, done: "home-sheet-done-tasks")
+        open(app, element(app, "home-task-terminal"), ready: "home-task-detail", name: "task-subtext-detail")
+        expand(app, done: "home-sheet-done-task")
+        shot("1771-\(name)-task-header")
+        app.swipeUp()
+        shot("1771-\(name)-task-result-worker")
+        let geometry = ["home-task-model-subtext", "home-task-subagents-subtext", "home-task-spend-subtext", "home-task-checkin-subtext"].map {
+            "\($0): \(element(app, $0).frame)"
+        }.joined(separator: "\n")
+        let measurement = XCTAttachment(string: geometry)
+        measurement.name = "1771-\(name)-subtext-geometry"; measurement.lifetime = .keepAlways; add(measurement)
+    }
+
     @MainActor func testWorkerRowsUseStandardSubtext() {
         let app = launchPolishManage(); defer { app.terminate() }
         openPolishProfileItem(app)
