@@ -177,23 +177,27 @@ def parse_timestamp(value: Any) -> Optional[datetime]:
     if not text:
         return None
     try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        match = ISO_TIMESTAMP.match(text)
-        if match is None:
-            return None
-        year, month, day, hour, minute, second, fraction, offset = match.groups()
-        microsecond = int((fraction or "0").ljust(6, "0")[:6])
-        parsed = datetime(int(year), int(month), int(day), int(hour), int(minute),
-                          int(second), microsecond)
-        if offset and offset != "Z":
-            digits = offset[1:].replace(":", "")
-            sign = 1 if offset[0] == "+" else -1
-            parsed = parsed.replace(tzinfo=timezone(sign * timedelta(
-                hours=int(digits[:2]), minutes=int(digits[2:4]))))
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            # Python 3.9 cannot read the nanoseconds real exports carry.
+            match = ISO_TIMESTAMP.match(text)
+            if match is None:
+                return None
+            year, month, day, hour, minute, second, fraction, offset = match.groups()
+            microsecond = int((fraction or "0").ljust(6, "0")[:6])
+            parsed = datetime(int(year), int(month), int(day), int(hour), int(minute),
+                              int(second), microsecond)
+            if offset and offset != "Z":
+                digits = offset[1:].replace(":", "")
+                sign = 1 if offset[0] == "+" else -1
+                parsed = parsed.replace(tzinfo=timezone(sign * timedelta(
+                    hours=int(digits[:2]), minutes=int(digits[2:4]))))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
 
 
 def format_timestamp(value: Optional[datetime]) -> Optional[str]:
@@ -372,6 +376,7 @@ def read_jsonl(path: Path) -> Tuple[List[Record], int]:
             record = record_from_object(value, str(path), number)
             if record is None:
                 skipped += 1
+                print(f"warning: {path}:{number}: skipped unreadable record", file=sys.stderr)
                 continue
             records.append(record)
     return records, skipped

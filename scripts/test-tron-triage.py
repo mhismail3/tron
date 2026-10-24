@@ -562,6 +562,48 @@ class OutputSafetyTests(TriageFixture):
                 self.assertEqual({p: p.read_bytes() for p in before}, before)
 
 
+class TimestampInputTests(TriageFixture):
+    """Malformed dates are loud skipped rows, not fatal CLI errors."""
+
+    def test_invalid_rows_preserve_valid_nanosecond_and_offset_records(self):
+        valid = ("2026-09-28T09:40:00.123456789Z",
+                 "2026-09-28T11:40:00.123456789+02:00",
+                 "2026-09-28T11:40:00.123456789+0200")
+        invalid = ("2026-02-30T10:00:00Z", "2026-13-01T10:00:00Z",
+                   "2026-09-28T25:00:00Z", "2026-09-28T10:00:00+24:00",
+                   "0001-01-01T00:00:00+14:00", "9999-12-31T23:59:59-14:00")
+        phone = self.write("phone.jsonl", [app_record(t, "app.foregrounded", "foreground")
+                                           for t in valid + invalid])
+        gateway = self.gateway([gateway_record(t, "connection.opened", "info", "opened")
+                                for t in valid + invalid])
+        before = {p: p.read_bytes() for p in (phone, gateway)}
+        completed = subprocess.run(
+            [str(FRONT_DOOR), str(phone), "--gateway-logs", str(self.logs), "--json"],
+            capture_output=True, text=True, timeout=120)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        report = json.loads(completed.stdout)
+        self.assertEqual(report["summary"]["phoneRecords"], len(valid))
+        self.assertEqual(report["summary"]["gatewayRecords"], len(valid))
+        self.assertEqual(report["inputs"]["phoneExports"][0]["unreadableLines"], len(invalid))
+        self.assertEqual(report["inputs"]["gatewayLogs"]["files"][0]["unreadableLines"], len(invalid))
+        for path in before:
+            for number in range(len(valid) + 1, len(valid) + len(invalid) + 1):
+                self.assertIn(f"{path}:{number}: skipped unreadable record", completed.stderr)
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+
+    def test_table_reports_the_skipped_calendar_row(self):
+        phone = self.write("phone.jsonl", [
+            app_record("2026-09-28T09:40:00.123456789Z", "app.foregrounded", "foreground"),
+            app_record("2026-02-30T10:00:00Z", "app.foregrounded", "bad date"),
+        ])
+        completed = subprocess.run(
+            [str(FRONT_DOOR), str(phone), "--no-gateway-logs"],
+            capture_output=True, text=True, timeout=120)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("1 unreadable line(s)", completed.stdout)
+        self.assertIn(f"{phone}:2: skipped unreadable record", completed.stderr)
+
+
 class ReviewRegressionTests(TriageFixture):
     """The failure modes an independent review found on the branch.
 

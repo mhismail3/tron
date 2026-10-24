@@ -5,6 +5,8 @@
 # logs written before protocol 6. Inputs are read only; nothing is sent
 # anywhere. Report output refuses phone/selected Gateway input aliases,
 # including hardlinks; publication replaces the output entry without following it.
+# Invalid record timestamps are skipped and counted; stderr names
+# the unreadable file/row without echoing its contents.
 # scripts/tron_triage.py owns the rules and the report schema.
 
 set -euo pipefail
