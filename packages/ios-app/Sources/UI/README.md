@@ -104,6 +104,10 @@ None.
 
 ## Verify
 
+Activity primary ink is checked against the rendered primary title/plus across all themes,
+light/dark, dashboard working dots and composer active/recent/extension states:
+`TronMobileUITests/TronActivityPrimaryColorUITests/testActivityInkFollowsPrimaryThemeLightAndDark`.
+
 ```bash
 scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth \

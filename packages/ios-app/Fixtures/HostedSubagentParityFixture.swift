@@ -103,6 +103,14 @@ struct HostedSubagentParityFixture: View {
                 {"version":1,"revision":1,"asOf":"\(startedAt)","activeCount":0,"recentCount":1,"problemCount":0,"visibility":"recent"}
                 """.utf8))
         }
+        if arguments.contains("-activity-preview-extension") {
+            snapshot.processActivities = []
+            snapshot.extensionPresentation = .init(version: 3, hostEpoch: "fixture-host", revision: 1,
+                capabilities: [], diagnostics: [], semanticState: .init(statuses: [:], statusOwners: [:],
+                    working: .init(visible: false), widgets: [.init(key: "fixture", lines: ["Activity fixture"],
+                        placement: .aboveEditor, owner: ExtensionOwner(id: "fixture", title: "Fixture", source: "npm:fixture"))],
+                    toolsExpanded: false, editorRevision: 0, editorText: ""), surfaces: [], pendingInteractions: [])
+        }
         self.snapshot = snapshot
     }
 
