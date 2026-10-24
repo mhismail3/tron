@@ -10,7 +10,8 @@ import { gitHeadState, projectSettingsPath, stagedBlob, type GitHeadState } from
 import type { ChangeEntry, SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { type GitResult, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
 import type { OutsideMark, FloorOverrides } from "../kernel/settings/settings-types.js";
-import { KEYS, keyDefault, floorFor, recordSubject, schemaKey, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { keyDefault, floorFor, recordSubject, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { readPath } from "./settings-resolver.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
 import { formatStoredSetting } from "../kernel/settings/settings-types.js";
 /**
@@ -115,45 +116,12 @@ export function observedInstance(key: KeyDeclaration, layer: string, binding: Bi
   return { store, instance: instanceId(key.id, modelQualified ? { ...fixed, model: qualifiers.model! } : fixed) };
 }
 
-function readPath(document: unknown, path: readonly string[]): unknown {
-  let current = document;
-  for (const segment of path) {
-    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined;
-    if (!Object.prototype.hasOwnProperty.call(current, segment)) return undefined;
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
-}
 
 function modelsAt(document: Record<string, unknown>, path: readonly string[]): string[] {
   const container = readPath(document, path.slice(0, path.indexOf("{model}")));
   return container && typeof container === "object" && !Array.isArray(container) ? Object.keys(container) : [];
 }
 
-/** Every key instance a pi settings document holds at a layer, from the schema. */
-function piInstances(document: Record<string, unknown>, layer: "global" | "project"): Map<string, ObservedValue> {
-  const values = new Map<string, ObservedValue>();
-  const add = (key: KeyDeclaration, qualifiers: Qualifiers, value: unknown) => {
-    if (value === undefined) return;
-    values.set(instanceId(key.id, qualifiers), { key: key.id, ...(Object.keys(qualifiers).length ? { qualifiers } : {}), value });
-  };
-  for (const key of KEYS) {
-    const binding = key.layers[layer];
-    const fixed = (key.fixed ?? {}) as Qualifiers;
-    if (binding?.store === "pi-model-ref") {
-      const provider = document.defaultProvider, id = document.defaultModel;
-      if (typeof provider === "string" && typeof id === "string") add(key, fixed, { provider, id });
-    }
-    if (binding?.store !== "pi") continue;
-    for (const path of [binding.path, ...(binding.qualified ? [binding.qualified] : [])]) {
-      if (!path.includes("{model}")) { add(key, fixed, readPath(document, path)); continue; }
-      for (const model of modelsAt(document, path)) {
-        add(key, { ...fixed, model }, readPath(document, path.map(segment => segment === "{model}" ? model : segment)));
-      }
-    }
-  }
-  return values;
-}
 
 /** One instance per entry of a subject's container (`mcpServers`, `providers`),
  * hashed: a server or provider definition may carry headers, keys or commands. */
@@ -170,28 +138,11 @@ function subjectInstances(document: unknown, subjectId: string): Map<string, Obs
   return values;
 }
 
-function trustInstances(document: Record<string, unknown>): Map<string, ObservedValue> {
-  const key = schemaKey("permissions.projectTrust");
-  const values = new Map<string, ObservedValue>();
-  for (const [project, decision] of Object.entries(document)) {
-    if (typeof decision !== "boolean") continue;
-    const qualifiers = { ...(key.fixed ?? {}), project };
-    values.set(instanceId(key.id, qualifiers), { key: key.id, qualifiers, value: decision });
-  }
-  return values;
-}
 
 const digestOf = (text: string | undefined) => text === undefined ? "" : createHash("sha256").update(text).digest("hex");
 
-/** Redacted keys are compared by digest; their values never enter observed state or audit. */
-function observed(value: ObservedValue): ObservedValue {
-  if (!schemaKeyOrUndefined(value.key)?.redacted || value.value === undefined) return value;
-  const { value: secret, ...rest } = value;
-  return { ...rest, hash: createHash("sha256").update(JSON.stringify(secret)).digest("hex") };
-}
 const fingerprint = (value: ObservedValue | undefined) => value === undefined ? null : value.hash ?? JSON.stringify(value.value ?? null);
 const subjectOf = (store: ObservedStore) => store.kind === "mcp" || store.kind === "project-mcp" ? "tools.mcp.server" : store.kind === "models" ? "accounts.models.provider" : undefined;
-function schemaKeyOrUndefined(id: string): KeyDeclaration | undefined { return KEYS.find(key => key.id === id); }
 
 export class OutsideChanges {
   private readonly mutex = new AsyncMutex();
@@ -207,6 +158,7 @@ export class OutsideChanges {
   private failed: ((error: unknown) => void) | undefined;
 
   constructor(
+    private readonly schema: SettingsSchema,
     private readonly tronHome: string,
     private readonly agentDir: string,
     private readonly record: SettingsChangeRecord,
@@ -232,6 +184,51 @@ export class OutsideChanges {
     void work.then(() => this.reconciliations.delete(work), () => this.reconciliations.delete(work));
     return work;
   }
+
+  /** Every key instance a pi settings document holds at a layer, from the schema. */
+  private piInstances(document: Record<string, unknown>, layer: "global" | "project"): Map<string, ObservedValue> {
+    const values = new Map<string, ObservedValue>();
+    const add = (key: KeyDeclaration, qualifiers: Qualifiers, value: unknown) => {
+      if (value === undefined) return;
+      values.set(instanceId(key.id, qualifiers), { key: key.id, ...(Object.keys(qualifiers).length ? { qualifiers } : {}), value });
+    };
+    for (const key of this.schema.KEYS) {
+      const binding = key.layers[layer];
+      const fixed = (key.fixed ?? {}) as Qualifiers;
+      if (binding?.store === "pi-model-ref") {
+        const provider = document.defaultProvider, id = document.defaultModel;
+        if (typeof provider === "string" && typeof id === "string") add(key, fixed, { provider, id });
+      }
+      if (binding?.store !== "pi") continue;
+      for (const path of [binding.path, ...(binding.qualified ? [binding.qualified] : [])]) {
+        if (!path.includes("{model}")) { add(key, fixed, readPath(document, path)); continue; }
+        for (const model of modelsAt(document, path)) {
+          add(key, { ...fixed, model }, readPath(document, path.map(segment => segment === "{model}" ? model : segment)));
+        }
+      }
+    }
+    return values;
+  }
+
+  private trustInstances(document: Record<string, unknown>): Map<string, ObservedValue> {
+    const key = this.schema.schemaKey("permissions.projectTrust");
+    const values = new Map<string, ObservedValue>();
+    for (const [project, decision] of Object.entries(document)) {
+      if (typeof decision !== "boolean") continue;
+      const qualifiers = { ...(key.fixed ?? {}), project };
+      values.set(instanceId(key.id, qualifiers), { key: key.id, qualifiers, value: decision });
+    }
+    return values;
+  }
+
+  /** Redacted keys are compared by digest; their values never enter observed state or audit. */
+  private observed(value: ObservedValue): ObservedValue {
+    if (!this.schemaKeyOrUndefined(value.key)?.redacted || value.value === undefined) return value;
+    const { value: secret, ...rest } = value;
+    return { ...rest, hash: createHash("sha256").update(JSON.stringify(secret)).digest("hex") };
+  }
+
+  private schemaKeyOrUndefined(id: string): KeyDeclaration | undefined { return this.schema.KEYS.find(key => key.id === id); }
 
   private async compareStores(stores: readonly ObservedStore[], heads?: ReadonlyMap<string, GitHeadState | undefined>): Promise<void> {
     const entries: ChangeEntry[] = [];
@@ -404,7 +401,7 @@ export class OutsideChanges {
     if (!current) return;
     const id = storeId(store);
     const state = document.stores[id];
-    const values = Object.fromEntries([...current].map(([instance, value]) => [instance, observed(value)]));
+    const values = Object.fromEntries([...current].map(([instance, value]) => [instance, this.observed(value)]));
     const git = isProjectStore(store) ? await gitHeadState(store.root) : undefined;
     if (!state) {
       document.stores[id] = { digest: digestOf(text), values, tron: {}, outside: {}, ...(git ? { head: git.head, staged: [] } : {}), seen: this.now().toISOString() };
@@ -460,16 +457,16 @@ export class OutsideChanges {
       if (text === undefined || !text.trim()) return new Map();
       try {
         const parsed = JSON.parse(text) as unknown;
-        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? trustInstances(parsed as Record<string, unknown>) : undefined;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? this.trustInstances(parsed as Record<string, unknown>) : undefined;
       } catch { return undefined; }
     }
     if (store.kind === "global") {
-      try { return piInstances(await this.readers.global(), "global"); } catch { return undefined; }
+      try { return this.piInstances(await this.readers.global(), "global"); } catch { return undefined; }
     }
     // An unparseable project file (merge markers) has unknown values: keep the
     // last observed ones until it parses again, rather than reporting removals.
     const document = await this.readers.project((store as ProjectObservedStore).root).catch(() => undefined);
-    return document === undefined ? undefined : piInstances(document, "project");
+    return document === undefined ? undefined : this.piInstances(document, "project");
   }
 
   /** One store's comparison. With `planned`, the bracketed writes are Tron's. */
@@ -495,7 +492,7 @@ export class OutsideChanges {
     if (!state) {
       // First sight is the baseline: nothing to compare with yet.
       document.stores[id] = {
-        digest, values: Object.fromEntries([...current].map(([instance, value]) => [instance, observed(value)])), tron: {}, outside: {},
+        digest, values: Object.fromEntries([...current].map(([instance, value]) => [instance, this.observed(value)])), tron: {}, outside: {},
         ...(git ? { head: git.head, staged: [] } : {}), seen: at,
       };
       if (!planned) return [];
@@ -506,10 +503,10 @@ export class OutsideChanges {
     const instances = new Set([...Object.keys(state.values), ...current.keys()]);
     for (const instance of instances) {
       const before = state.values[instance];
-      const after = current.has(instance) ? observed(current.get(instance)!) : undefined;
+      const after = current.has(instance) ? this.observed(current.get(instance)!) : undefined;
       const write = planned?.get(instance);
       if (write) {
-        const landed = write.value === undefined ? after === undefined : after !== undefined && fingerprint(after) === fingerprint(observed({ key: after.key, value: write.value }));
+        const landed = write.value === undefined ? after === undefined : after !== undefined && fingerprint(after) === fingerprint(this.observed({ key: after.key, value: write.value }));
         const recorded = applied?.get(write.changeId);
         if (landed && recorded) {
           // The recorded entry that holds this value (an approval's fact, not its request).
@@ -527,12 +524,12 @@ export class OutsideChanges {
       entries.push(entry);
       state.outside[instance] = {
         changeId: entry.changeId, applyAgain: state.tron[instance] !== undefined,
-        before: entry.redacted ? "Set" : formatStoredSetting(schemaKeyOrUndefined(entry.key)?.type, before?.value),
-        after: entry.redacted ? (after ? "Set" : "Not set") : formatStoredSetting(schemaKeyOrUndefined(entry.key)?.type, after?.value),
+        before: entry.redacted ? "Set" : formatStoredSetting(this.schemaKeyOrUndefined(entry.key)?.type, before?.value),
+        after: entry.redacted ? (after ? "Set" : "Not set") : formatStoredSetting(this.schemaKeyOrUndefined(entry.key)?.type, after?.value),
       };
       delete state.tron[instance];
     }
-    state.values = Object.fromEntries([...current].map(([instance, value]) => [instance, observed(value)]));
+    state.values = Object.fromEntries([...current].map(([instance, value]) => [instance, this.observed(value)]));
     state.digest = digest;
     state.seen = at;
     if (git) {
@@ -544,7 +541,7 @@ export class OutsideChanges {
 
   private outsideEntry(store: ObservedStore, value: ObservedValue, before: ObservedValue | undefined, after: ObservedValue | undefined,
     replaced: string | undefined, floors: FloorOverrides, git: { head: string | null; branch: string | null; root: string; path: string } | undefined, at: string): ChangeEntry {
-    const key = schemaKeyOrUndefined(value.key);
+    const key = this.schemaKeyOrUndefined(value.key);
     const subject = recordSubject(value.key);
     const qualifiers = value.qualifiers ?? {};
     const defaultValue = key ? keyDefault(key, qualifiers) : undefined;

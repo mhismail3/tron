@@ -3,7 +3,7 @@ import { getCurrentTools } from "../kernel/pi/ai.js";
 import type { SessionEntry, SessionManager } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { RETIRED_SCOPES, type FixedSetting } from "../kernel/settings/tool-contract.js";
-import { hasSessionSettingsApplier, schemaKey } from "../admin/settings-schema.js";
+import { hasSessionSettingsApplier, type SettingsSchema } from "../admin/settings-schema.js";
 
 export const SESSION_SETTINGS_ENTRY = "tron.settings.v1";
 
@@ -84,8 +84,8 @@ function readChatSnapshots(entries: readonly SessionEntry[], field: "fixed" | "r
 
 /** The schema owns paths; callers cannot name an arbitrary SDK field. Undefined
  * deletes a Session override, so the next request follows the resolver again. */
-export function changeSessionSetting(settings: Record<string, unknown>, id: string, value: unknown): Record<string, unknown> {
-  const key = schemaKey(id);
+export function changeSessionSetting(schema: SettingsSchema, settings: Record<string, unknown>, id: string, value: unknown): Record<string, unknown> {
+  const key = schema.schemaKey(id);
   const binding = key.layers.session;
   if (!hasSessionSettingsApplier(key) || binding?.store !== "session-settings") {
     throw new GatewayError("unsupported", "This setting has no live Chat applier");

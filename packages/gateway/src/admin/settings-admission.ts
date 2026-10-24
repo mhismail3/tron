@@ -1,7 +1,7 @@
 import type { AgentSession, SettingsManager } from "../kernel/pi/coding-agent.js";
 import type { CompactionConfiguration } from "../protocol/types.js";
 import { resolveSettings } from "./settings-resolver.js";
-import { schemaKey } from "./settings-schema.js";
+import { type SettingsSchema } from "./settings-schema.js";
 import type { Resolution } from "../kernel/settings/tool-contract.js";
 import { clampThinkingLevel, type Model, type ThinkingLevel } from "../kernel/pi/ai.js";
 import { GatewayError } from "../errors.js";
@@ -9,12 +9,12 @@ import { assertNewModelChoice } from "../providers/openai-model-eligibility.js";
 
 /** The compaction owner supplies its boundary snapshot; settings owns all
  * precedence/qualification, including the operation's model instance. */
-export function compactionAdmission(settings: SettingsManager, session: Record<string, unknown>, model?: string): CompactionConfiguration {
+export function compactionAdmission(schema: SettingsSchema, settings: SettingsManager, session: Record<string, unknown>, model?: string): CompactionConfiguration {
   const slash = model?.indexOf("/") ?? -1;
   const ref = model && slash > 0 ? { provider: model.slice(0, slash), id: model.slice(slash + 1) } : undefined;
   const fields = { enabled: "context.compaction.enabled", reserveTokens: "context.compaction.reserveTokens",
     keepRecentTokens: "context.compaction.keepRecentTokens", instructions: "context.compaction.instructions", thinkingLevel: "model.thinking[role=summarizer]" } as const;
-  const result = resolveSettings({ kind: "session", sessionId: "compaction" }, {
+  const result = resolveSettings(schema, { kind: "session", sessionId: "compaction" }, {
     layers: ["project", "session", "global", "default"], session: { settings: session, ...(ref ? { model: ref } : {}) },
     project: { root: "", document: settings.getProjectSettings() as Record<string, unknown>, applied: settings.isProjectTrusted() },
     global: settings.getGlobalSettings() as Record<string, unknown>, gateway: {}, floors: {}, trust: {}, macTerminal: {},
@@ -23,7 +23,7 @@ export function compactionAdmission(settings: SettingsManager, session: Record<s
   for (const [field, key] of Object.entries(fields)) {
     const row = result.keys.find(row => row.key === key)!;
     try {
-      const value = schemaKey(key).type.validate(row.value, key);
+      const value = schema.schemaKey(key).type.validate(row.value, key);
       if (value instanceof Promise) throw new Error("Compaction validation must finish at its synchronous operation boundary");
       configuration[field] = value;
     } catch {

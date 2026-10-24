@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,7 +87,7 @@ async function settingsPath(home: string, knowledge?: KnowledgeService) {
   await mkdir(agentDir, { recursive: true });
   const trust = new TrustService(agentDir);
   const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-  const model = new SettingsModel({ agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(home, "ssh")) });
+  const model = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(home, "ssh")) });
   const record = new SettingsChangeRecord(home);
   const approvals = new SettingsApprovals(home);
   const path = new SettingsChangePath(model, record, approvals, {

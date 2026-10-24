@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { connect, createServer as createNetServer } from "node:net";
@@ -46,7 +47,7 @@ async function copiedState() {
   // choices exercise migration without exposing or contacting copied accounts.
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ ...global, sessionDir: join(agentDir, "sessions"), defaultProvider: "fixture", defaultModel: "global", retry: { maxRetries: 1 } }));
   await writeFile(profilePath, JSON.stringify({ ...profile, model: { ...profile.model, chat: { provider: "fixture", id: "profile" } } }));
-  const options: SettingsMigrationOptions = { tronHome, agentDir };
+  const options: SettingsMigrationOptions = { schema: TEST_SETTINGS_SCHEMA, tronHome, agentDir };
   const settings = join(tronHome, "gateway", "settings");
   const journalPath = join(settings, "migrations", "three-layer-v1", "journal.json");
   return { root, tronHome, agentDir, profilePath, settings, journalPath, options };

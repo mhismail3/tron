@@ -1,5 +1,5 @@
 import type { Diagnostic } from "../kernel/settings/tool-contract.js";
-import { KEYS } from "./settings-schema.js";
+import type { SettingsSchema } from "./settings-schema.js";
 
 /** An exact JSON path for applied values; diagnostics bound untrusted key names. */
 export function projectSettingPath(parts: readonly string[]): string {
@@ -9,10 +9,10 @@ export function projectSettingPath(parts: readonly string[]): string {
 
 /** Report ignored fields without copying their values or descending into unknown
  * objects. Both traversal and output are bounded independently of repo content. */
-export function projectSettingsDiagnostics(raw: Record<string, unknown>, file: string): {
+export function projectSettingsDiagnostics(schema: SettingsSchema, raw: Record<string, unknown>, file: string): {
   diagnostics: Diagnostic[]; diagnosticsTruncated?: true;
 } {
-  const rules = KEYS.flatMap(key => {
+  const rules = schema.KEYS.flatMap(key => {
     const binding = key.layers.project ?? key.layers.global;
     const paths = binding?.store === "pi-model-ref" ? [["defaultProvider"], ["defaultModel"]]
       : binding?.store === "pi" ? [binding.path, ...(binding.qualified ? [binding.qualified] : [])] : [];

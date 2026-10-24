@@ -11,7 +11,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 
 | Area | Files |
 |---|---|
-| Settings declarations and binding admission | `settings-schema.ts` (`KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
+| Settings declarations and binding admission | `settings-schema.ts` (`createSettingsSchema`, `KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
 | SDK scope admission and operational model selection | `settings-sdk-manager.ts`, `settings-admission.ts` |
 | Resolution and presentation | `settings-resolver.ts`, `settings-model.ts` (`SettingsModel`), `settings-presentation.ts`, `settings-project-diagnostics.ts` |
 | Change path and policy | `settings-model.ts` (`SettingsChangePath`), `settings-risk.ts`; audit/approvals: [kernel settings](../kernel/settings/README.md) |
@@ -68,6 +68,10 @@ Ports in: `gateway-main.ts` wires `SettingsModel`, `SettingsChangePath`,
 `OutsideChanges` and the risk evaluator; `GatewayService` dispatches the RPCs,
 pushes and broadcasts; `RuntimeSlot` supplies the Session-scope applier, fence and
 running-worker `announce`; Home supplies `HomeProfileItems` for learned notes.
+`main/settings-schema.ts` constructs one immutable schema from Home tool names,
+the run compaction limit and security key validation. Registry/Slot, the read/change
+owners and store adapters receive that same schema before optional settings services
+are installed; schema access never evaluates their late-bound service getter.
 
 ## Invariants
 

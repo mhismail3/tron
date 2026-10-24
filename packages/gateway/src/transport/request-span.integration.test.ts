@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -349,7 +350,7 @@ describe("settings.resolve request span", () => {
       }
     }
     const macTerminalKeys = new FixtureMacTerminalKeys(join(root, "ssh"));
-    const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys });
+    const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys });
     const registry = await createTestRegistry({
       agentDir,
       tronHome: join(root, "tron"),

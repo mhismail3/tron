@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
 import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's learned profile (#731), end to end: the `profile` tool called by a
@@ -227,7 +228,7 @@ async function fixture(label: string): Promise<Fixture> {
   registry.setKnowledgeService(knowledge);
   // The one settings change path, wired as gateway-main wires it: Home's profile tool
   // and the maintainer's home.profileChange share its profile applier and record.
-  const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime: runtime });
+  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime: runtime });
   const record = new SettingsChangeRecord(tronHome);
   const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
     setTrust: async () => { throw new Error("trust is not changed here"); },

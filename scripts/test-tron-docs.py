@@ -252,6 +252,10 @@ class FixtureTests(unittest.TestCase):
             """
         self.module("packages/gateway/src/admin", "admin", {"settings-schema.ts": schema})
         self.module("packages/gateway/src/kernel/settings", "settings", {"tool-contract.ts": types})
+        self.module("packages/gateway/src/main", "main", {"settings-schema.ts": """\
+            import { KEYS, RECORD_SUBJECTS } from "../admin/settings-schema.js";
+            export function createGatewaySettingsSchema() { return { KEYS, RECORD_SUBJECTS }; }
+            """})
         self.write("settings.md", "<!-- tron docs settings -->\n<!-- /tron docs -->\n")
         self.write("root.module.json", json.dumps({"layer": "L5", "owns": ["settings.md", "root.module.json"]}))
         self.docs("update")
@@ -274,6 +278,10 @@ class FixtureTests(unittest.TestCase):
         self.module("packages/gateway/src/admin", "admin", {"settings-schema.ts": schema})
         self.module("packages/gateway/src/kernel/settings", "settings",
                     {"tool-contract.ts": "export const LAYERS = [];\n"})
+        self.module("packages/gateway/src/main", "main", {"settings-schema.ts": """\
+            import { KEYS, RECORD_SUBJECTS } from "../admin/settings-schema.js";
+            export function createGatewaySettingsSchema() { return { KEYS, RECORD_SUBJECTS }; }
+            """})
         self.write("settings.md", "<!-- tron docs settings -->\n<!-- /tron docs -->\n")
         self.write("other.md", "# Other\n")
         self.write("root.module.json", json.dumps({"layer": "L5", "owns": ["settings.md", "other.md", "root.module.json"]}))

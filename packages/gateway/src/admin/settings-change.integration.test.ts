@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { generateKeyPairSync } from "node:crypto";
 import { MacTerminalKeys } from "../security/mac-terminal.js";
@@ -23,7 +24,8 @@ import { JEV_MAX_ESTIMATED_CHARGE_CENTS } from "../knowledge/jev-client.js";
 import { CONTROLS, type SettingsStores } from "../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "./settings-resolver.js";
 import { type Resolution } from "../kernel/settings/tool-contract.js";
-import { KEYS, type KeyDeclaration } from "./settings-schema.js";
+import { type KeyDeclaration } from "./settings-schema.js";
+const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { PresentedResolution } from "./settings-presentation.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
@@ -277,7 +279,7 @@ describe("outside settings retirement", () => {
     const reading = outsideLatch(), reader = outsideLatch(), publishing = outsideLatch(), observer = outsideLatch(), finished = outsideLatch();
     let hold = false, disposed = false;
     const errors: unknown[] = [];
-    const outside = new OutsideChanges(f.tronHome, f.agentDir, f.record, {
+    const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, f.tronHome, f.agentDir, f.record, {
       ...f.settingsModel.observedReaders,
       global: async () => {
         const values = await f.settingsModel.observedReaders.global();
@@ -332,7 +334,7 @@ describe("outside settings retirement", () => {
     const f = await fixture(owner);
     const publishing = outsideLatch(), observer = outsideLatch(), publishingSecond = outsideLatch(), secondObserver = outsideLatch();
     let calls = 0, disposed = false;
-    const outside = new OutsideChanges(f.tronHome, f.agentDir, f.record, f.settingsModel.observedReaders);
+    const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, f.tronHome, f.agentDir, f.record, f.settingsModel.observedReaders);
     owner.outsides.push(outside);
     await outside.reconcile([{ kind: "global" }]);
     const destination = join(f.root, "observer-destination");
@@ -417,10 +419,10 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
   owner.registries.push(registry);
   await registry.initialize();
   const macTerminalKeys = new MacTerminalKeys(join(root, "home", ".ssh"));
-  const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime, macTerminalKeys });
+  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys });
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   // Production wiring: every read reconciles outside changes (doc 5.6).
-  const outside = new OutsideChanges(tronHome, agentDir, record, settingsModel.observedReaders);
+  const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.observedReaders);
   settingsModel.observeOutside(outside);
   owner.outsides.push(outside);
   const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {

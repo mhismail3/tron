@@ -6,7 +6,7 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TERMINAL_IDLE_DEFAULT_MINUTES, schemaKey } from "../admin/settings-schema.js";
+import { TERMINAL_IDLE_DEFAULT_MINUTES, TERMINAL_IDLE_KEY } from "../admin/settings-schema.js";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import { TerminalService } from "./terminal-service.js";
@@ -73,7 +73,7 @@ export function macTerminalHostCommand(tronHome: string, nodePath = process.exec
  * Gateway: the same key, store and validation the Gateway resolves. An
  * unreadable or invalid value keeps every shell (null is "off"). */
 async function macTerminalIdleLimitMs(tronHome: string): Promise<number | null> {
-  const key = schemaKey("setup.terminalIdleMinutes");
+  const key = TERMINAL_IDLE_KEY;
   const binding = key.layers.global;
   const path = binding && "path" in binding ? binding.path : [];
   let document: unknown;

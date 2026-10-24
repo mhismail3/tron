@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { randomUUID } from "node:crypto";
 import { createQueueSummarizer } from "../src/episodic/episodic-compactor.js";
 import { ModelQueueOwner } from "../src/providers/model-queue.js";
@@ -30,7 +31,7 @@ export function settingsDependencies(input: {
   /** Option catalog for `catalog.tools` keys, wired as gateway-main wires it. */
   toolCatalog?: ConstructorParameters<typeof SettingsModel>[0]["toolCatalog"];
 }): { settingsModel: SettingsModel; settingsChanges: SettingsChangePath } {
-  const settingsModel = new SettingsModel({
+  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA,
     agentDir: input.agentDir, tronHome: input.tronHome, trust: input.trust, modelRuntime: input.modelRuntime,
     ...(input.toolCatalog ? { toolCatalog: input.toolCatalog } : {}),
   });
