@@ -1,4 +1,32 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { AsyncMutex } from "./async-mutex.js";
+
+/**
+ * A registry lane that reports its queue wait to the current request span. The
+ * mutex hands over inside its own operation, so the exact moment the wait ends
+ * is known there; the wait is [request, handover), and the work the lock admits
+ * stays attributed to the span that measures it. `AsyncMutex` runs the admitted
+ * operation in this caller's async context, so its nested stages stay on this
+ * request.
+ */
+export class RequestSpanLane extends AsyncMutex {
+  constructor(private readonly spanLabel: string) {
+    super();
+  }
+
+  override run<T>(operation: () => Promise<T> | T, signal?: AbortSignal): Promise<T> {
+    const span = currentRequestSpan();
+    if (span === undefined) return super.run(operation, signal);
+    return span.wait(
+      this.spanLabel,
+      (acquired) => super.run(() => {
+        acquired();
+        return operation();
+      }, signal),
+    );
+  }
+}
+
 
 /** Requests this process has admitted and not yet answered. One live span is one
  * request the transport is serving; span construction and `breakdown` are the

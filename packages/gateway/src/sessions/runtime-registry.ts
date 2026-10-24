@@ -36,10 +36,9 @@ import {
   SessionPresentationPresenceRegistry,
   type SessionPresentationPresenceProjection,
 } from "../kernel/projection/session-presentation-presence.js";
-import { AsyncMutex } from "../util/async-mutex.js";
 import { QueuedWorkGate } from "../util/queued-work-gate.js";
 import { abortableRead } from "../util/abortable-read.js";
-import { currentRequestSpan, stage } from "../util/request-span.js";
+import { currentRequestSpan, RequestSpanLane, stage } from "../util/request-span.js";
 import type { ResourceRecorder, ResourceRuntimeEntry } from "../util/resource-recorder.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
@@ -464,32 +463,6 @@ interface IdleEviction {
   slot: RuntimeSlot;
   committed: boolean;
   completion?: Promise<boolean>;
-}
-
-/**
- * A registry lane that reports its queue wait to the current request span. The
- * mutex hands over inside its own operation, so the exact moment the wait ends
- * is known there; the wait is [request, handover), and the work the lock admits
- * stays attributed to the span that measures it. `AsyncMutex` runs the admitted
- * operation in this caller's async context, so its nested stages stay on this
- * request.
- */
-class RequestSpanLane extends AsyncMutex {
-  constructor(private readonly spanLabel: string) {
-    super();
-  }
-
-  override run<T>(operation: () => Promise<T> | T, signal?: AbortSignal): Promise<T> {
-    const span = currentRequestSpan();
-    if (span === undefined) return super.run(operation, signal);
-    return span.wait(
-      this.spanLabel,
-      (acquired) => super.run(() => {
-        acquired();
-        return operation();
-      }, signal),
-    );
-  }
 }
 
 export class RuntimeRegistry {
