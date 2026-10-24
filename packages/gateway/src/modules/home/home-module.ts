@@ -77,8 +77,9 @@ export interface HomeComposition {
 }
 
 /** The registry's generic operations and reads Home is built over (k0-kernel.md §5). */
-export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "runtimes" | "taskSessions" | "knowledge">, HomeTaskPolicyInputs {
-  sessions: Omit<HomeOwnerOptions["sessions"], "createHomeSession" | "homeModel" | "chooseHomeModel" | "chapterMetrics" | "hasConversation">;
+export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "runtimes" | "taskSessions" | "knowledge">,
+  HomeTaskPolicyInputs, Pick<RuntimeRegistry, "runtimeEntries" | "retireIdleRuntime"> {
+  sessions: Omit<HomeOwnerOptions["sessions"], "createHomeSession" | "homeModel" | "chooseHomeModel" | "chapterMetrics" | "hasConversation" | "retireHomeRuntimes">;
   createSession(cwd: string, profile: string): Promise<{ readonly id: string }>;
   acquire(sessionId: string): ReturnType<RuntimeRegistry["acquire"]>;
   readSearchCut: Pick<RuntimeRegistry, "readSearchCut">["readSearchCut"];
@@ -99,6 +100,25 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
       sessions: {
         ...ports.sessions,
         createHomeSession: async (cwd) => (await ports.createSession(cwd, HOME_SESSION_PROFILE_NAME)).id,
+        retireHomeRuntimes: async () => {
+          // Publication recovery runs after construction of the canonical owner.
+          // Keep native map keys/order and re-read authority after every await.
+          const homes = ports.runtimeEntries().filter(([sessionId]) => owner!.chapterStateFor(sessionId).homeId);
+          for (const [sessionId, slot] of homes) {
+            await slot.retireAfterSettled();
+            const retired = await ports.retireIdleRuntime({
+              sessionId,
+              slot,
+              reason: "publication-uncertain",
+              eligible: () => owner!.publicationUncertain
+                && ports.runtimes.runtimeOf(sessionId) === slot
+                && !slot.isBusy,
+            });
+            if (!retired && ports.runtimes.runtimeOf(sessionId) === slot && !slot.isDisposed) {
+              throw new GatewayError("conflict", "A stale Home runtime could not be retired after ledger publication uncertainty", true);
+            }
+          }
+        },
         chapterMetrics: async (sessionId) => {
           const slot = ports.runtimes.runtimeOf(sessionId);
           if (!slot) return coldHomeChapterMetrics(ports.sessions.sessionFile(sessionId));

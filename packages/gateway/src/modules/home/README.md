@@ -41,6 +41,9 @@ unaffected by every rule here.
   explicit chapter choices, including their K6 scope, actor and chapter fence.
   Native ports supply the late settings owners and current runtime; a host with
   no settings owner retains its existing SDK-only choice behavior.
+- **Uncertain publication.** Home selects its native runtime projections and owns
+  ordered settle/retire eligibility and refusal policy. Native retirement retains the
+  canonical map, identity, busy, lease and disposal checks; recovery reads that authority.
 - **Chapter evidence.** Home owns live/cold size and entry measurements and
   durable-conversation checks. Native ports provide only current runtime and
   canonical path reads; cold measurement fences the finite file cut by size,

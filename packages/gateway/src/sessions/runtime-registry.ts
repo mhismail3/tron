@@ -723,6 +723,8 @@ export class RuntimeRegistry {
     return {
       createSession: (cwd, profile) => this.create(cwd, profile),
       acquire: sessionId => this.acquire(sessionId),
+      runtimeEntries: () => this.runtimeEntries(),
+      retireIdleRuntime: input => this.retireIdleRuntime(input),
       sessions: {
         currentSessionModel: sessionId => this.slots.get(sessionId)?.snapshot().model ?? null,
         sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
@@ -738,7 +740,6 @@ export class RuntimeRegistry {
 
         replaceRuntimeForProfile: (sessionId, commit) => this.replaceHomeRuntimeForProfile(sessionId, commit),
         serializeSessionMutation: (sessionId, commit) => this.serializeSessionMutation(sessionId, commit),
-        retireHomeRuntimes: () => this.retireUncertainHomeRuntimes(),
         wakeHome: async (sessionId) => (await this.acquire(sessionId)).admitHomeWake(),
       },
       runtimes: {
@@ -3878,7 +3879,7 @@ export class RuntimeRegistry {
   /** One idle runtime's retirement under an eligibility closure that is checked
    * under the mutex and again inside the slot's own disposal commit, so a
    * subscription or a run that arrives mid-eviction keeps the runtime live. */
-  private async retireIdleRuntime(input: {
+  async retireIdleRuntime(input: {
     sessionId: string;
     slot: RuntimeSlot;
     reason: Extract<RuntimeEvictionReason, "idle" | "capacity" | "bytes" | "heap" | "publication-uncertain">;
@@ -3922,26 +3923,6 @@ export class RuntimeRegistry {
       return false;
     } finally {
       if (this.idleEvictions.get(id)?.slot === slot) this.idleEvictions.delete(id);
-    }
-  }
-
-  /** Drop every live Home projection after an uncertain ledger replacement.
-   * Acquisitions are globally stale-marked until every old slot is retired. */
-  private async retireUncertainHomeRuntimes(): Promise<void> {
-    const homes = [...this.slots].filter(([sessionId]) => this.lineage().state(sessionId).lineageId);
-    for (const [sessionId, slot] of homes) {
-      await slot.retireAfterSettled();
-      const retired = await this.retireIdleRuntime({
-        sessionId,
-        slot,
-        reason: "publication-uncertain",
-        eligible: () => this.lineage().publicationUncertain()
-          && this.slots.get(sessionId) === slot
-          && !slot.isBusy,
-      });
-      if (!retired && this.slots.get(sessionId) === slot && !slot.isDisposed) {
-        throw new GatewayError("conflict", "A stale Home runtime could not be retired after ledger publication uncertainty", true);
-      }
     }
   }
 

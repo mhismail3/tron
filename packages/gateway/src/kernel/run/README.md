@@ -58,7 +58,9 @@ Gateway-owned execution primitives layered on Pi's session loop.
 
 The native registry retains runtime membership. `runtimeEntries()` supplies a disposable,
 insertion-ordered read snapshot; domain catalogs select and format that view outside the
-registry. It is not a second runtime owner or membership cache.
+registry. It is not a second runtime owner or membership cache. `retireIdleRuntime`
+keeps physical retirement and exact resource checks native; Home supplies its uncertain-
+publication selection, eligibility and refusal policy over those operations.
 
 `RuntimeSlot` extends the kernel's `RunOperations`: one actual runtime object, not a
 binding DTO or forwarded run algorithm. Peer owners read that authority directly;
