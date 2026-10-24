@@ -135,9 +135,10 @@ Commands:
   work auth setup|status            Store the agents' dedicated GitHub token once in
                                     Keychain (maintainer, Terminal), or show its login,
                                     scopes and expiry; every work command checks it first
-  work cleanup [--all] [--dry-run]  Remove this task worktree and its branches once its
-                                    PR merged at its head; --all: every one under the
-                                    worktree root, naming why each other is kept
+  work cleanup [--all] [--dry-run]  Remove this task worktree and its branches after
+                                    exact-head completion and local-preservation proofs;
+                                    --all checks every one under the worktree root,
+                                    naming why each other is kept
 
 There is no deploy command. Production deployment is manual-only.
 EOF
