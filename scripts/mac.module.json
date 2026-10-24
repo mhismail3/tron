@@ -2,6 +2,8 @@
   "layer": "L5",
   "owns": [
     "mac.module.json",
+    "mac.md",
+    "test-tron-mac-reinstall.py",
     "test-cua-assets.sh",
     "test-tron-mac-replace.py",
     "test-verify-mac-install.py",
