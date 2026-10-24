@@ -54,6 +54,8 @@ struct TronMobileApp: App {
                 HostedToolSheetsPolishFixture().environment(hostedModel)
             } else if ProcessInfo.processInfo.arguments.contains("-tron-home-dashboard-fixture") {
                 HostedHomeDashboardFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-snapshot-cache-fixture") {
+                HostedSnapshotCacheFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-configuration-fixture") {
                 HostedSessionConfigurationFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-diagnostics-export-fixture") {

@@ -25,6 +25,31 @@ scripts/tron-ios-test run --only-testing TronMobileUITests/GatewayEventDeliveryC
 The existing `Locks/*Tests.swift` convention selects these contracts for module
 baselines through the manifest's consumer graph. They do not record anything.
 
+## Snapshot cache process/filesystem kernel
+
+`SnapshotCachePersistenceContractTests` launches the hosted app with a UUID-scoped
+temporary root and the production SnapshotCache/AppModel owners. It observes actual
+file envelopes/digest names plus public catalog/snapshot values across app process
+termination/relaunch. Version 3/4 readability, invalid/oversized envelope discard,
+summary-only rows, archived count without archived rows, profile separation,
+generation fencing and removal tombstones are storage contracts, not new formats.
+
+The serialized GatewaySocketConnection peer supplies catalog/snapshot/summary
+input; it does not implement persistence. Existing clock and signpost ports hold
+the summary delay and a real save before file I/O, exposing background API join
+and profile-retirement ordering while the app UI remains responsive. Gates are
+run-local and explicitly released during cleanup. No filesystem substitute,
+private cache counters, new shipping hooks or goldens are used. This API-level
+checkpoint test does not prove OS background-assertion expiration behavior.
+
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileUITests/SnapshotCachePersistenceContractTests
+```
+
+Each final fixture cleanup removes only its UUID root. The cold-relaunch case
+intentionally retains that root between its two processes, then cleans it.
+
 ## Visual locks
 
 UI locks pin what the user sees in hosted-fixture screen states, so a
