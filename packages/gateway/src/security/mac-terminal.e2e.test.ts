@@ -13,7 +13,7 @@ import { SettingsStoreAdapter } from "../admin/settings-model.js";
 import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../kernel/settings/settings-record.js";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { DeviceStore } from "./device-store.js";
 import { MAC_TERMINAL_SOURCES, MacTerminalHost, MacTerminalKeys, type MacTerminalStatus } from "./mac-terminal.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";

@@ -21,7 +21,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { homeMemoryChange } from "../../test-support/session-settings-change.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { HomeSourceProofs } from "../episodic/home-source.js";
 import type { HomeMemoryEvidencePage, HomeMemoryView, HomeStatus } from "../protocol/types.js";

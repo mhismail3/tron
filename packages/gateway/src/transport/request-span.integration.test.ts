@@ -12,7 +12,7 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthBroker } from "../admin/auth-broker.js";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { SettingsStoreAdapter } from "../admin/settings-model.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { UploadStore } from "../machine/upload-store.js";

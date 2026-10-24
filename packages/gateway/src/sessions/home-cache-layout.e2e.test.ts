@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import type { GatewayConfig } from "../config.js";
 import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, cachePieces } from "../episodic/cache-layout.js";
 import { EPISODIC_COMPACT_PROMPT } from "../episodic/episodic-compactor.js";

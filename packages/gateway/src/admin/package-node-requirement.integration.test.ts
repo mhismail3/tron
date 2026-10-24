@@ -6,7 +6,7 @@ import type { JsonValue } from "../protocol/types.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { PackageService } from "./package-service.js";
-import { TrustService } from "./trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 
 /**
  * #243: a Pi package whose `engines.node` excludes the Gateway's Node installs

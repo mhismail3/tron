@@ -85,7 +85,7 @@ import type {
 import { AsyncMutex } from "../util/async-mutex.js";
 import { stage } from "../util/request-span.js";
 import type { ResourceRecorder } from "../util/resource-recorder.js";
-import type { TrustService } from "../admin/trust-service.js";
+import type { TrustService } from "../kernel/resources/trust-service.js";
 import type { BlobStore } from "./blob-store.js";
 import {
   SESSION_EXPORT_MAX_ITEM_BYTES,

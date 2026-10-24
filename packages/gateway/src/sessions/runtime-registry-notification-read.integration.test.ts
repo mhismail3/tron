@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { NotificationGrantStore, notificationHash } from "../notifications/grant-store.js";
 import { NotificationService } from "../notifications/notification-service.js";
 import type { PushRelayClient } from "../notifications/relay-client.js";

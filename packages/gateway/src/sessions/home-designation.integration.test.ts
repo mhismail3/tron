@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, type FauxProviderHandle } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import type { HomeDesignation, HomeStatus } from "../protocol/types.js";
 import type { GatewayConfig } from "../config.js";
 import type { NotificationService } from "../notifications/notification-service.js";

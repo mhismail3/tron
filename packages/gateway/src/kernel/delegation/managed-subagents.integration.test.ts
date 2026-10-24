@@ -9,7 +9,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 import { expect, it } from "vitest";
 import { PackageService } from "../../admin/package-service.js";
 import { GatewayLogger } from "../../transport/logger.js";
-import { TrustService } from "../../admin/trust-service.js";
+import { TrustService } from "../resources/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";

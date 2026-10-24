@@ -10,7 +10,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPrompt, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { TronWorkspace } from "./tron-workspace.js";
 import { waitFor } from "../../test-support/wait-for.js";
 

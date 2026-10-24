@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { GatewayScheduleToolOperations } from "../automations/automation-tool-operations.js";
 import type { ScheduleToolRequest } from "../automations/tron-schedule-extension.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";

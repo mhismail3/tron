@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { onTestFinished, vi } from "vitest";
-import { TrustService } from "../src/admin/trust-service.js";
+import { TrustService } from "../src/kernel/resources/trust-service.js";
 import type { NotificationService } from "../src/notifications/notification-service.js";
 import type { SessionSummaryUpdate } from "../src/protocol/types.js";
 import type { GatewayWorkRegistry } from "../src/kernel/run/gateway-work-registry.js";

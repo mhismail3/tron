@@ -6,7 +6,7 @@ import { fauxProvider } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { BrowserLiveViewRegistry } from "./browser-live-view.js";
 
 it.each(["replace", "dispose"] as const)("K1 display retirement revokes only the retiring runtime's exact view and load on %s", async boundary => {

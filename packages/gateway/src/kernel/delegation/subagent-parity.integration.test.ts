@@ -8,7 +8,7 @@ import { ChildProcess } from "node:child_process";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
-import { TrustService } from "../../admin/trust-service.js";
+import { TrustService } from "../resources/trust-service.js";
 import { PackageService } from "../../admin/package-service.js";
 import { contextDeliveryMetadataByEntry } from "../run/context-delivery-receipts.js";
 import { subagentProcessesFromActivity } from "../projection/process-activity.js";

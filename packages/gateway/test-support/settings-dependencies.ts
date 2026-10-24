@@ -8,7 +8,7 @@ import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
-import type { TrustService } from "../src/admin/trust-service.js";
+import type { TrustService } from "../src/kernel/resources/trust-service.js";
 import type { HomeOwner } from "../src/modules/home/home-owner.js";
 import type { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { HomeProfileItems } from "../src/modules/home/home-profile.js";

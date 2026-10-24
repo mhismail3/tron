@@ -45,7 +45,7 @@ import { GitWorktreeService, type SessionSourceControlRequest } from "../machine
 import { MAXIMUM_PROMPT_ATTACHMENTS, type UploadStore } from "../machine/upload-store.js";
 import { DISPLAY_CAPABILITY, DISPLAY_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../display/display-contract.js";
 import type { TerminalService } from "../machine/terminal-service.js";
-import type { TrustService } from "../admin/trust-service.js";
+import type { TrustService } from "../kernel/resources/trust-service.js";
 import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { PackageService } from "../admin/package-service.js";
 import type { GlobalProviderResources } from "../admin/global-provider-resources.js";

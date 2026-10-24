@@ -7,7 +7,7 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "../kernel/delegation/delegated-provider.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";

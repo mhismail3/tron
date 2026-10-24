@@ -9,7 +9,7 @@ import {
   type AssistantMessage, type SimpleStreamOptions, type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import {
   clientEventTrace, collapseRepeatedRequests, compareWithGolden, eventShapePaths, hashPromptText,

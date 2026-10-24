@@ -2,7 +2,7 @@ import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { TrustService } from "../../admin/trust-service.js";
+import { TrustService } from "../resources/trust-service.js";
 
 import { initializeRegistry, temporaryRoot } from "../../../test-support/runtime-registry-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";

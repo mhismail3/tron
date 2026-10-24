@@ -10,6 +10,11 @@ K4 owns executable resource admission and canonical Project-root identity.
 Git process owner. The actual spawned process, environment sanitization, output
 bounds, exit rules and retirement live in `util/git-inspection.ts`.
 
+`trust-service.ts` owns the one Pi ProjectTrustStore and serialized trust changes,
+including inherited decisions, standalone directories, worktree propagation and
+compensating runtime application/commit rollback. Admin supplies binding I/O;
+the canonical resource owner supplies the trust decision used by sessions.
+
 ## Contract
 
 `projectRoot(cwd)` returns the real worktree root, or the caller’s cwd when Git
@@ -22,11 +27,13 @@ A linked worktree has its own root; inherited Git selectors never redirect it.
 
 ## Entry points
 
-`projectRoot`.
+`TrustService`, `TrustInspection`, `PropagatedTrustDecision`, `projectRoot`.
 
 ## Signals
 
 Git launch, timeout and output failures propagate as existing Gateway errors.
+Unresolved decisions refuse resource loading with `trust_required`; incomplete
+compensation refuses with the existing trust rollback error.
 
 ## Verify
 

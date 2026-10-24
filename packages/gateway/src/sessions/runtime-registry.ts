@@ -38,7 +38,7 @@ import { QueuedWorkGate } from "../util/queued-work-gate.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { currentRequestSpan, RequestSpanLane, stage } from "../util/request-span.js";
 import type { ResourceRecorder, ResourceRuntimeEntry } from "../util/resource-recorder.js";
-import type { TrustService } from "../admin/trust-service.js";
+import type { TrustService } from "../kernel/resources/trust-service.js";
 import { BlobStore } from "./blob-store.js";
 import {
   SESSION_EXPORT_MAX_ITEM_BYTES,

@@ -10,7 +10,7 @@ import { loadSessionFreeExtensions } from "./session-free-extensions.js";
 import { resourceDistribution } from "../sessions/resource-distribution.js";
 import type { ToolCatalogEntry } from "./settings-model.js";
 import { PI_BUILTIN_TOOL_NAMES } from "../kernel/settings/settings-types.js";
-import type { TrustService } from "./trust-service.js";
+import type { TrustService } from "../kernel/resources/trust-service.js";
 
 /** The tools a Mac or Project `defaultTools` selection can name, without a session.
  *

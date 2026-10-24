@@ -20,7 +20,7 @@ vi.mock("../../util/durable-json.js", async importOriginal => {
   };
 });
 
-import { TrustService } from "../../admin/trust-service.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
 import { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { HomeOwner } from "./home-owner.js";
 import { homeTaskPolicy } from "./home-task-worker-choice.js";

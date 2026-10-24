@@ -8,7 +8,7 @@ import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent
 import { fauxAssistantMessage, fauxProvider, type AssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { fileURLToPath } from "node:url";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import type { GatewayConfig } from "../config.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import type { HomeStatus } from "../protocol/types.js";

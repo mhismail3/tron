@@ -34,7 +34,7 @@ import {
   type AssistantMessage, type FauxProviderHandle, type Message, type ToolCall,
 } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicMessageRecord, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicStore } from "../episodic/episodic-store.js";
 import { HOME_MEMORY_VIEW_MARKER, type HomeMemoryUnavailableReason } from "../modules/home/home-memory.js";

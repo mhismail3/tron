@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
-import { TrustService } from "../../admin/trust-service.js";
+import { TrustService } from "../resources/trust-service.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { ManagedSubagents } from "./managed-subagents.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";

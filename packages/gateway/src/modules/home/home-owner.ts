@@ -22,7 +22,7 @@ import { historyEntry } from "../../kernel/projection/history.js";
 import type { EpisodicMemory } from "../../episodic/episodic-memory.js";
 import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, homeMemoryToolDisplay, type HomeMemoryViewRequest } from "./home-memory-browser.js";
 import { GatewayError } from "../../errors.js";
-import type { TrustService } from "../../admin/trust-service.js";
+import type { TrustService } from "../../kernel/resources/trust-service.js";
 import { EPISODIC_DEFAULTS, EpisodicMemoryError, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import { EpisodicSourceChangedError } from "../../episodic/episodic-source.js";
 import { HomeSourceProofs, readCanonicalHomeDeltas, readCanonicalHomeIndex, readCanonicalHomeEvidence, type HomeSourceChapter, type HomeSourceSnapshot } from "../../episodic/home-source.js";

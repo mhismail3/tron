@@ -15,7 +15,7 @@ import { isVirtualModel } from "../providers/virtual-model.js";
 import { updateJsonLocked } from "../util/json.js";
 import { gitHeadState, projectGitState, readProjectDocument, writeProjectSettings } from "./project-settings-writer.js";
 import { observedInstance, projectStores, type ObservedReaders, type OutsideChanges } from "./settings-outside.js";
-import type { TrustService } from "./trust-service.js";
+import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { type FormatContext, type ModelRefValue, type OptionSources, type SettingsStores, type FloorOverrides, type ResolveOptions, type ObservedStore, type PlannedWrite } from "../kernel/settings/settings-types.js";

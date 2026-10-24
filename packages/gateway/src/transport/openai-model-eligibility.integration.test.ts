@@ -9,7 +9,7 @@ import { settingsDependencies } from "../../test-support/settings-dependencies.j
 import { sessionSettingChange } from "../../test-support/session-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { OpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { GatewayError } from "../errors.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
 import { ProviderUsageOwner } from "../providers/provider-usage.js";

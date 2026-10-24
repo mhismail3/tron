@@ -4,10 +4,10 @@ import {
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SettingsManager,
-} from "../kernel/pi/coding-agent.js";
-import { GatewayError } from "../errors.js";
-import { projectRoot } from "../kernel/resources/project-root.js";
-import { AsyncMutex } from "../util/async-mutex.js";
+} from "../pi/coding-agent.js";
+import { GatewayError } from "../../errors.js";
+import { projectRoot } from "./project-root.js";
+import { AsyncMutex } from "../../util/async-mutex.js";
 
 /**
  * Trust belongs to the Project root, not to the chat's cwd: the root's `.pi/`

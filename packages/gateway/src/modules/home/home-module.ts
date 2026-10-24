@@ -25,7 +25,7 @@ import { assertChapterWritable, HomeChapterIdentityReplacementError } from "./ho
 import { coldHomeChapterMetrics, homeOpenRefusal } from "./home-session-recovery.js";
 import { homeInputAdmission } from "./home-input-admission.js";
 import { dispatchWithWorkerChoice, homeTaskPolicy, homeTaskModelQueues, type HomeTaskPolicyInputs, type HomeWorkerChoicePort } from "./home-task-worker-choice.js";
-import type { TrustService } from "../../admin/trust-service.js";
+import type { TrustService } from "../../kernel/resources/trust-service.js";
 import type { HomeTaskDiagnostic, HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
 import { readHomeSessionEntry, type HomeSessionReader } from "./home-session-read.js";
 import type { HomeMemoryDiagnostic } from "./home-memory.js";

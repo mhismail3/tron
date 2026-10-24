@@ -4,7 +4,7 @@
 
 The Gateway's administration owners: settings store/options/binding-I/O adapters
 for the kernel's audited, tiered read/change engine, and
-the Mac-side admin services: trust, provider auth, packages and resources, MCP,
+the Mac-side admin services: trust binding I/O, provider auth, packages and resources, MCP,
 custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 
 ## Owns
@@ -16,7 +16,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | Store/options adapter and presentation | `settings-model.ts` (`SettingsStoreAdapter`), `settings-presentation.ts`; [kernel resolver and diagnostics](../kernel/settings/README.md) |
 | Risk-provider adapter | `settings-risk.ts`; read/change engine, transaction order and audit/approvals: [kernel settings](../kernel/settings/README.md) |
 | Migration transaction, backups and publication | `settings-migration.ts`, `settings-migration-plan.ts`; shared-store value transforms: [kernel settings](../kernel/settings/README.md) |
-| Appliers and outside writers | `project-settings-writer.ts`, `trust-service.ts`, `settings-outside.ts` (`OutsideChanges`) |
+| Appliers and outside writers | `project-settings-writer.ts`, [kernel trust owner](../kernel/resources/trust-service.ts), `settings-outside.ts` (`OutsideChanges`) |
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
 | Provider auth and model catalog | `auth-broker.ts`, `model-config-service.ts`, `global-provider-resources.ts` |
 | Packages, extensions, hooks, tools | `package-service.ts`, `package-provides.ts`, `session-free-extensions.ts`, `hook-resources.ts`, `tool-catalog.ts` |

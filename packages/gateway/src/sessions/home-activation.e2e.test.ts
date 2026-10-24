@@ -64,7 +64,7 @@ vi.mock("../modules/home/home-session-recovery.js", async importOriginal => {
   };
 });
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicMemory } from "../episodic/episodic-memory.js";
 import { createQueueSummarizer } from "../episodic/episodic-compactor.js";

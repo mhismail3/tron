@@ -8,7 +8,7 @@ import { piCliBundle } from "./kernel/pi/packages.js";
 import { loadConfig } from "./config.js";
 import { GatewayError } from "./errors.js";
 import { DeviceStore } from "./security/device-store.js";
-import { TrustService } from "./admin/trust-service.js";
+import { TrustService } from "./kernel/resources/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";

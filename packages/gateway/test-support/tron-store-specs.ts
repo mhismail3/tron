@@ -8,7 +8,7 @@ import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
-import { TrustService } from "../src/admin/trust-service.js";
+import { TrustService } from "../src/kernel/resources/trust-service.js";
 import { SwiftAppStore } from "../src/modules/apps/swift-app-store.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
 import { HomeOwner } from "../src/modules/home/home-owner.js";

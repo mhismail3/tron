@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { RuntimeRegistry } from "./runtime-registry.js";

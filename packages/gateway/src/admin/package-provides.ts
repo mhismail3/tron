@@ -17,7 +17,7 @@ import {
   loadSessionFreeExtensions,
   type SessionFreeExtensionLoad,
 } from "./session-free-extensions.js";
-import type { TrustService } from "./trust-service.js";
+import type { TrustService } from "../kernel/resources/trust-service.js";
 
 /** Per-kind cap on the names one installed package reports. `provides` is a
  * presentation summary; the flat `resources` inventory stays authoritative for

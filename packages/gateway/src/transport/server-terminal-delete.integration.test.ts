@@ -7,7 +7,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayError } from "../errors.js";
 import { DeviceStore } from "../security/device-store.js";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 
 import { GatewayServer } from "./server.js";
 import { waitFor } from "../../test-support/wait-for.js";

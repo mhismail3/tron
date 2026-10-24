@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
-import { TrustService } from "../../admin/trust-service.js";
+import { TrustService } from "../resources/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { delegatedProviderEnvironment } from "./delegated-provider.js";

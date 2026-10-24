@@ -42,7 +42,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { AuthBroker } from "../../src/admin/auth-broker.js";
-import { TrustService } from "../../src/admin/trust-service.js";
+import { TrustService } from "../../src/kernel/resources/trust-service.js";
 import { UploadStore } from "../../src/machine/upload-store.js";
 import type { JsonValue } from "../../src/protocol/types.js";
 import { DeviceStore } from "../../src/security/device-store.js";

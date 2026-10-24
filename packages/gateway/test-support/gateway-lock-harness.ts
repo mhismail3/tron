@@ -9,7 +9,7 @@ import {
   fauxAssistantMessage, fauxProvider, getCurrentSystemPrompt, getCurrentTools,
   type AssistantMessage, type SimpleStreamOptions, type TranscriptContext,
 } from "@earendil-works/pi-ai";
-import { TrustService } from "../src/admin/trust-service.js";
+import { TrustService } from "../src/kernel/resources/trust-service.js";
 import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";

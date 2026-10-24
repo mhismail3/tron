@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { vi } from "vitest";
-import { TrustService } from "../src/admin/trust-service.js";
+import { TrustService } from "../src/kernel/resources/trust-service.js";
 import { NotificationService } from "../src/notifications/notification-service.js";
 import { NotificationGrantStore } from "../src/notifications/grant-store.js";
 import type { PushRelayClient } from "../src/notifications/relay-client.js";

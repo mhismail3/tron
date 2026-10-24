@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
-import { TrustService } from "../../admin/trust-service.js";
+import { TrustService } from "../resources/trust-service.js";
 import type { ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../../protocol/types.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import type { RuntimeSlot } from "../../sessions/runtime-slot.js";

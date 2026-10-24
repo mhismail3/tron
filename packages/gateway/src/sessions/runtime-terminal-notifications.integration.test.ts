@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { ModelRuntime, type SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { NotificationGrantStore } from "../notifications/grant-store.js";
 import { NotificationService, type NotificationInboxItem } from "../notifications/notification-service.js";
 import { PushRelayClient, relaySignature } from "../notifications/relay-client.js";

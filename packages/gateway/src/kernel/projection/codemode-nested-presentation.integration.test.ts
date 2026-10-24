@@ -7,7 +7,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserLiveViewRegistry } from "../../display/browser-live-view.js";
 import type { NativeLiveClient, NativeLiveClientFactory } from "../../display/native-live-view.js";
-import { TrustService } from "../../admin/trust-service.js";
+import { TrustService } from "../resources/trust-service.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 

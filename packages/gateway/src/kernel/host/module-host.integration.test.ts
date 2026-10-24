@@ -2,7 +2,7 @@ import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../../admin/trust-service.js";
+import { TrustService } from "../resources/trust-service.js";
 import { TEST_SETTINGS_SCHEMA } from "../../../test-support/settings-schema.js";
 import { DisplayOwner } from "../../display/display-modules.js";
 import { DisplayArtifactStore } from "../../display/display-artifact-store.js";

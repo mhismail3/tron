@@ -8,7 +8,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthBroker } from "./auth-broker.js";
-import { TrustService } from "./trust-service.js";
+import { TrustService } from "../kernel/resources/trust-service.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { GatewayService, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
