@@ -24,6 +24,9 @@ export interface SessionLineagePolicy {
   openRefusal(sessionId: string, path: string): Promise<Error | undefined>;
   /** Throws the lineage owner's refusal when the session may not be written. */
   assertWritable(sessionId: string): void;
+  /** Exact refusal for an identity the native frame has selected as lineage-bound.
+   * Read-only construction; the native owner retains the physical replacement guard. */
+  identityRefusal(sessionId: string): Error;
   /** Every lineage member is fenced while its owner reconciles an uncertain publication. */
   publicationUncertain(): boolean;
 }

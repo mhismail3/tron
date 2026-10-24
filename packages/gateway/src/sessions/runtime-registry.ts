@@ -1611,7 +1611,7 @@ export class RuntimeRegistry {
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       modules: this.options.modules,
       settings: () => this.settingsOwners,
-      lineageState: (sessionId: string) => this.lineage().state(sessionId),
+      sessionLineage: () => this.lineage(),
       homeTaskSettings: async (sessionId: string, taskId: string, purpose: "resolve" | "change") => {
         const target = await this.taskLedger().settingsTarget(sessionId, taskId, purpose);
         return { ...target, slot: await this.acquire(target.sessionId) };

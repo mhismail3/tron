@@ -20,7 +20,7 @@ import type { RequestPolicyHook } from "../../kernel/host/request-policy.js";
 import type { InputAdmissionPolicy } from "../../kernel/host/input-admission.js";
 import type { SessionLineagePolicy } from "../../kernel/host/session-lineage.js";
 import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../../kernel/host/kernel-lifecycle.js";
-import { assertChapterWritable } from "./home-chapter-state.js";
+import { assertChapterWritable, HomeChapterIdentityReplacementError } from "./home-chapter-state.js";
 import { coldHomeChapterMetrics, homeOpenRefusal } from "./home-session-recovery.js";
 import { homeInputAdmission } from "./home-input-admission.js";
 import { dispatchWithWorkerChoice, homeTaskPolicy, homeTaskModelQueues, type HomeTaskPolicyInputs, type HomeWorkerChoicePort } from "./home-task-worker-choice.js";
@@ -210,6 +210,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
       },
       openRefusal: (sessionId, path) => homeOpenRefusal(sessionId, path, owner.chapterStateFor(sessionId)),
       assertWritable: sessionId => assertChapterWritable(owner.chapterStateFor(sessionId)),
+      identityRefusal: sessionId => new HomeChapterIdentityReplacementError(sessionId),
       publicationUncertain: () => owner.publicationUncertain,
     },
     profile: {

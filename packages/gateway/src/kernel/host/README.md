@@ -23,7 +23,8 @@ delivery state and budgeting remain module-owned.
 construction/publication with an opaque issuer-interpreted authority object. Its
 lineage policy also reads open-refusal evidence: the module owns evidence and refusal
 construction; native admission throws that exact fact before SDK open, without a
-module workflow mirror or another runtime owner.
+module workflow mirror or another runtime owner. The same policy supplies the exact
+identity refusal; native frames keep lineage selection and physical replacement checks.
 
 ## Contract
 

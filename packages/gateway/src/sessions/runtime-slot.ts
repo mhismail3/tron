@@ -51,8 +51,7 @@ import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../kernel/run/compaction-policy.js";
 import type { RequestPolicy } from "../kernel/host/request-policy.js";
-import { HomeChapterIdentityReplacementError } from "../modules/home/home-chapter-state.js";
-import type { SessionLineageState } from "../kernel/host/session-lineage.js";
+import type { SessionLineagePolicy } from "../kernel/host/session-lineage.js";
 import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js";
 import { createHomeTaskWorkerExtension } from "../kernel/delegation/task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../kernel/delegation/task-subagents.js";
@@ -373,7 +372,7 @@ export interface RuntimeSlotDependencies {
   archivedAt: (sessionId: string) => string | undefined;
   /** Physical chapter state is consulted only by mutation owners. The registry
    * answers it from the composed `sessionLineage` owner; any other session is unsealed. */
-  lineageState: (sessionId: string) => SessionLineageState;
+  sessionLineage: () => SessionLineagePolicy;
 }
 
 interface RuntimeDrainBlockerFact {
@@ -884,7 +883,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   get isHomeChapter(): boolean {
     // Creation-time Home is already isolated before its designation record is
     // committed. Settings/provenance must use that same runtime scope.
-    return this.liveProfile().chapter || this.dependencies.lineageState(this.id).lineageId !== undefined;
+    return this.liveProfile().chapter || this.dependencies.sessionLineage().state(this.id).lineageId !== undefined;
   }
 
   /** Home's saved settings govern only a runtime running the Home profile; a
@@ -1978,8 +1977,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     if (this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)) {
       throw new GatewayError("conflict", "Task worker session identity cannot be replaced");
     }
-    if (this.dependencies.lineageState(this.id).lineageId || this.liveProfile().chapter) {
-      throw new HomeChapterIdentityReplacementError(this.id);
+    const lineage = this.dependencies.sessionLineage();
+    if (lineage.state(this.id).lineageId || this.liveProfile().chapter) {
+      throw lineage.identityRefusal(this.id);
     }
   }
 
@@ -2121,7 +2121,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       if (this.runtime.session.isStreaming || blocking.length || drain.length) {
         throw new GatewayError("busy", `The worker session is busy (${[...new Set([...blocking, ...drain])].join(", ") || "streaming"}); resume it when that finishes`, true);
       }
-      if (this.liveProfile().chapter || this.dependencies.lineageState(this.id).lineageId) {
+      if (this.liveProfile().chapter || this.dependencies.sessionLineage().state(this.id).lineageId) {
         throw new GatewayError("conflict", "A Home chapter cannot run a task");
       }
       if (this.taskWorker?.controlsActive || this.runTerminal.taskWait || this.activeOperationId !== undefined || this.operation !== undefined

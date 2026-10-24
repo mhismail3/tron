@@ -37,6 +37,8 @@ unaffected by every rule here.
   chapter over native session creation. Its tool catalog keeps the curated names and
   describes them from the first non-disposed lineage member in native map order;
   the unloaded view never starts a runtime or enumerates every chapter's tools.
+- **Identity refusal.** Home constructs its exact lineage identity error; native
+  frames retain membership/profile selection, mutation ordering and physical guards.
 - **Model choice.** Home's owner factory reads its saved model recipe and owns
   explicit chapter choices, including their K6 scope, actor and chapter fence.
   Native ports supply the late settings owners and current runtime; a host with
