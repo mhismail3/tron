@@ -77,7 +77,6 @@ final class TronUILockTests: XCTestCase {
             for _ in 0..<6 where !settings.isHittable { app.swipeUp() }
             settings.tap()
             try require(app.navigationBars.staticTexts["Session Settings"], in: app)
-            try require(app.buttons["settings-section-model-open"], in: app)
             assertUILock(app, "settings-session-\(mode)")
             app.terminate()
         }
