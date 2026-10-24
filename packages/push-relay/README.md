@@ -200,22 +200,20 @@ proof of presentation or human receipt.
 
 ## Local validation
 
-Use the repository-pinned Node version when available:
+From the repository root, use the pinned Node version:
 
 ```bash
-cd packages/push-relay
-npm ci
-npm run check
-npm test
-npm run build           # production-config dry-run only; does not deploy
-npm run build:sandbox   # isolated sandbox-config dry-run only
+scripts/tron-node exec npm --prefix packages/push-relay ci
+scripts/tron-node exec npm --prefix packages/push-relay run check
+scripts/tron-node exec npm --prefix packages/push-relay test
+scripts/tron-node exec npm --prefix packages/push-relay run build          # production dry-run only
+scripts/tron-node exec npm --prefix packages/push-relay run build:sandbox  # sandbox dry-run only
 ```
 
 Tests run in the Workers Vitest pool and exercise the real SQLite Durable Object
-boundary. Outbound APNs requests are intercepted locally. Hosted CI
-(`scripts/tron ci relay.check`) runs the pinned install, type check, production-config
-Wrangler dry run and tests; it never receives deployment credentials or deploys either
-environment.
+boundary. Outbound APNs requests are intercepted locally. Run these checks directly;
+there is no hosted relay gate. Both Wrangler builds are dry runs and do not deploy
+either environment.
 
 `package.json` `overrides` exist only to clear security advisories in the
 development toolchain, so that `npm audit` stays clean (#489):
