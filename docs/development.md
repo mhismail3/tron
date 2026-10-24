@@ -51,7 +51,8 @@ unsigned native add-ons and has no `npx`. Packaging, `scripts/tron dev`,
 Use `scripts/verify-ci-toolchain.sh node` to verify the current executable and
 reject duplicated version mirrors. Install native project generation with
 `scripts/install-ci-tools.sh xcodegen`; both `scripts/tron ios generate` and
-`scripts/tron mac generate` reject a mismatched XcodeGen. `TRON_CI_TOOLS_DIR`
+`scripts/tron mac generate` reject a mismatched XcodeGen. The verifier compares the
+complete `Version: <pin>` response, not a version substring. `TRON_CI_TOOLS_DIR`
 relocates that cache (default `.ci-tools`) for the installer, project
 generation, the Mac bundle script, `scripts/tron-ios-test`,
 `scripts/ios-gateway-e2e-test` and `scripts/tron-profile-ios`; the iOS runner fixtures use it to serve a

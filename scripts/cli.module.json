@@ -11,6 +11,7 @@
     "test-main-source.py",
     "test-tron-node.py",
     "test-tron-npm-bytecode.sh",
+    "test-verify-ci-toolchain.py",
     "tron",
     "tron-node",
     "tron-version",

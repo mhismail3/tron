@@ -24,7 +24,9 @@ for tool in "$@"; do
       xcrun simctl list runtimes | grep -F "iOS $TRON_CI_IOS_RUNTIME_VERSION" >/dev/null
       ;;
     xcodegen)
-      xcodegen --version | grep -F "$TRON_CI_XCODEGEN_VERSION" >/dev/null
+      xcodegen_version="$(xcodegen --version)"
+      [[ "$xcodegen_version" == "Version: $TRON_CI_XCODEGEN_VERSION" ]] \
+        || { echo "XcodeGen must be exactly $TRON_CI_XCODEGEN_VERSION" >&2; exit 1; }
       presets="$(cd "$(dirname "$(command -v xcodegen)")/../share/xcodegen/SettingPresets" 2>/dev/null && pwd -P)" \
         || { echo "xcodegen setting presets are unavailable" >&2; exit 1; }
       [[ -f "$presets/base.yml" && -f "$presets/Platforms/iOS.yml" && -f "$presets/Platforms/macOS.yml" ]] \
