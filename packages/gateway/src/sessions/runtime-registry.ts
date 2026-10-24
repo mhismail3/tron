@@ -543,7 +543,7 @@ export class RuntimeRegistry {
   private readonly exports: BlobStore;
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
-  private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
+  private settingsOwners: { model: import("../kernel/settings/settings-model.js").SettingsModel; changes: import("../kernel/settings/settings-change.js").SettingsChangePath } | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
@@ -852,7 +852,7 @@ export class RuntimeRegistry {
 
   /** Installs the settings model and its change path for the `settings` tool.
    * Both are built over this registry, so slots read them late-bound. */
-  setSettings(model: import("../admin/settings-model.js").SettingsModel, changes: import("../admin/settings-model.js").SettingsChangePath): void {
+  setSettings(model: import("../kernel/settings/settings-model.js").SettingsModel, changes: import("../kernel/settings/settings-change.js").SettingsChangePath): void {
     if (this.settingsOwners && this.settingsOwners.changes !== changes) throw new Error("Settings are already installed");
     this.settingsOwners = { model, changes };
   }

@@ -79,9 +79,9 @@ describe("Home task subagents: the subagent model queue", () => {
       async () => {
         // The worker launch snapshot already exists. A subsequent Home edit must
         // neither retarget its child nor change ordinary Mac-derived subagents.
-        const profile = JSON.parse(readFileSync(settings.settingsModel.profilePath, "utf8"));
+        const profile = JSON.parse(readFileSync(settings.settingsModel.owner.profilePath, "utf8"));
         profile.modelQueue.subagent = ["queue-child/mac"];
-        writeFileSync(settings.settingsModel.profilePath, JSON.stringify(profile));
+        writeFileSync(settings.settingsModel.owner.profilePath, JSON.stringify(profile));
         if (blocked) {
           const task = await homeOwnerOf(f.registry).taskStatus("task-one");
           if (!task.sessionId) throw new Error("Worker must be admitted before its first request");

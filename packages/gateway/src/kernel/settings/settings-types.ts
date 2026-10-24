@@ -4,6 +4,12 @@ import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from ".
 
 
 
+export type ObservedStore = { kind: "global" } | { kind: "trust" } | { kind: "mcp" } | { kind: "models" }
+  | { kind: "project"; root: string } | { kind: "project-mcp"; root: string };
+
+/** One planned write the change path brackets: its observed store and instance. */
+export interface PlannedWrite { store: ObservedStore; instance: string; changeId: string; value: unknown }
+
 /** Private persistence metadata, never an outward settings scope or grant. */
 export type StoreLayer = "session" | "home" | "project" | "global" | "default";
 

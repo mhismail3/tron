@@ -59,7 +59,8 @@ import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../kernel/host/session-profile.js";
-import type { ChangeContext, SessionAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice } from "../admin/settings-model.js";
+import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../kernel/settings/settings-change.js";
+import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
 import type { Actor } from "../kernel/settings/settings-record.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -335,9 +336,9 @@ export interface RuntimeSlotDependencies {
   exports: BlobStore;
   displayArtifacts: DisplayArtifactStore;
   modules: ModuleHost; // started modules whose extensions this runtime registers
+  readonly settingsSchema: SettingsSchema;
   /** The settings model and its one change path, late-bound:
    * installed on the registry after construction (docs/settings-model.md 5.1). */
-  readonly settingsSchema: SettingsSchema;
   settings: () => { model: SettingsModel; changes: SettingsChangePath } | undefined;
   workspace: TronWorkspace;
   markers: RunMarkerStore;

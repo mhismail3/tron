@@ -97,7 +97,11 @@ changes keep its store, cursors and spend.
 - **Learned profile:** personal Knowledge notes labelled `home-profile` plus one `kind-<kind>`
   (`preference`, `standing-decision`, `delegation-default`, `fact`). Written only by the
   `profile` tool (unconfirmed) and `home.profileChange` (confirmed, `expectedRevision`), both
-  through `HomeProfileItems` and the undoable settings path. Active items are injected as
+  through `HomeProfileItems`, which owns operation validation, rollback, undo fencing and
+  typed result projection. The kernel `SettingsChangePath.auditSubject` retains the Home
+  stripe through those effects, grouped audit, awaited observer and projection; partial
+  failures restore before ungrouped failure audit and rethrow the original value.
+  Active items are injected as
   `## Learned profile` (≤ `HOME_PROFILE_BOUND_BYTES`, 8 KiB, else IDs only); unavailable
   Knowledge says so. Home chapters are never observed by Knowledge.
 

@@ -12,7 +12,8 @@ import type { JsonValue } from "../protocol/types.js";
 import type { TrustService } from "./trust-service.js";
 import { loadPackageProvides, type InstalledPackage } from "./package-provides.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { type OutsideChanges, type PlannedWrite } from "./settings-outside.js";
+import { type OutsideChanges } from "./settings-outside.js";
+import type { PlannedWrite } from "../kernel/settings/settings-types.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 

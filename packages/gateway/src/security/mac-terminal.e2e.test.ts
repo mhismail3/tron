@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
-import { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import { SettingsStoreAdapter } from "../admin/settings-model.js";
+import { SettingsChangePath } from "../kernel/settings/settings-change.js";
+import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { TrustService } from "../admin/trust-service.js";
 import { DeviceStore } from "./device-store.js";
@@ -153,10 +155,10 @@ async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory:
   registries.push(sessions);
   await sessions.initialize();
   const keys = new MacTerminalKeys(sshDirectory);
-  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: keys });
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: keys }));
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), new SettingsApprovals(tronHome), {
     setTrust: async () => { throw new Error("not used"); },
-  }, agentDir);
+  });
   const devices = new DeviceStore(tronHome, "machine");
   await devices.initialize();
   const pair = async (name: string) => (await devices.pair((await devices.ensureEnrollment()).code, name)).deviceId;

@@ -15,7 +15,9 @@ import { TerminalService } from "./machine/terminal-service.js";
 import { macTerminalHostCommand } from "./machine/mac-terminal-host.js";
 import { terminalIdleLimitMs } from "./kernel/settings/settings-schema.js";
 import { createGatewaySettingsSchema } from "./main/settings-schema.js";
-import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
+import { SettingsStoreAdapter } from "./admin/settings-model.js";
+import { SettingsChangePath } from "./kernel/settings/settings-change.js";
+import { SettingsModel } from "./kernel/settings/settings-model.js";
 import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
 import { SettingsChangeRecord } from "./kernel/settings/settings-record.js";
 import { OutsideChanges } from "./admin/settings-outside.js";
@@ -197,7 +199,7 @@ const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 // Mac Terminal's store is the Gateway user's own ~/.ssh/authorized_keys.
 const macTerminalKeys = new MacTerminalKeys(join(homedir(), ".ssh"));
 const settingsSchema = createGatewaySettingsSchema();
-const settingsModel = new SettingsModel({
+const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   schema: settingsSchema,
   macTerminalKeys,
   agentDir: config.agentDir,
@@ -208,11 +210,11 @@ const settingsModel = new SettingsModel({
     ? sessions.liveToolCatalog(target.sessionId)
     : target.kind === "home" ? sessions.homeToolCatalog()
     : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
-});
+}));
 const settingsRecord = new SettingsChangeRecord(config.tronHome);
 // Outside changes (settings-model.md 5.6): reads compare Global/Project with what Tron last saw.
-const outsideSettings = new OutsideChanges(settingsSchema, config.tronHome, config.agentDir, settingsRecord, settingsModel.observedReaders);
-settingsModel.observeOutside(outsideSettings);
+const outsideSettings = new OutsideChanges(settingsSchema, config.tronHome, config.agentDir, settingsRecord, settingsModel.owner.observedReaders);
+settingsModel.owner.observeOutside(outsideSettings);
 const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
@@ -808,7 +810,7 @@ async function runStopDrain(): Promise<void> {
 
 // The one settings change path (settings-model.md 5), for agents' tool and the slots alike.
 const settingsRisk = new SettingsRiskEvaluator(jevClient);
-const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
+const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
   assessRisk: async (input, signal) => {
     try { return await settingsRisk.assess(input, signal); }
     catch (error) {
@@ -824,8 +826,8 @@ const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, ne
     async (inspection) => sessions.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),
     async (inspection) => sessions.commitProjectReload(inspection.projectDir),
   ),
-  profile: new HomeProfileItems(() => knowledge),
-}, config.agentDir);
+  undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
+});
 sessions.setSettings(settingsModel, settingsChanges);
 
 const service = new GatewayService({

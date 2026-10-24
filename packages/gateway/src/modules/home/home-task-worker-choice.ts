@@ -5,7 +5,7 @@ import { isVirtualModel } from "../../providers/virtual-model.js";
 import { ModelQueueExhausted, type ModelQueueOwner } from "../../providers/model-queue.js";
 import { splitModelRef } from "../../kernel/settings/tool-contract.js";
 import { SUBAGENT_QUEUE_MODEL, type QueueModelState } from "../../providers/model-queue-extension.js";
-import type { SettingsModel } from "../../admin/settings-model.js";
+import type { SettingsModel } from "../../kernel/settings/settings-model.js";
 import type { SessionSnapshot } from "../../protocol/types.js";
 import type { HomeOwner } from "./home-owner.js";
 import type { HomeTaskDispatchRequest } from "./home-task-dispatcher.js";

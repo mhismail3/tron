@@ -13,7 +13,9 @@ import { fauxProvider } from "@earendil-works/pi-ai";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "./trust-service.js";
-import { SettingsChangePath, SettingsModel } from "./settings-model.js";
+import { SettingsStoreAdapter } from "./settings-model.js";
+import { SettingsChangePath } from "../kernel/settings/settings-change.js";
+import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
 import { OutsideChanges } from "./settings-outside.js";
@@ -280,9 +282,9 @@ describe("outside settings retirement", () => {
     let hold = false, disposed = false;
     const errors: unknown[] = [];
     const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, f.tronHome, f.agentDir, f.record, {
-      ...f.settingsModel.observedReaders,
+      ...f.settingsModel.owner.observedReaders,
       global: async () => {
-        const values = await f.settingsModel.observedReaders.global();
+        const values = await f.settingsModel.owner.observedReaders.global();
         if (hold) { reading.release(); await reader.promise; }
         return values;
       },
@@ -334,7 +336,7 @@ describe("outside settings retirement", () => {
     const f = await fixture(owner);
     const publishing = outsideLatch(), observer = outsideLatch(), publishingSecond = outsideLatch(), secondObserver = outsideLatch();
     let calls = 0, disposed = false;
-    const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, f.tronHome, f.agentDir, f.record, f.settingsModel.observedReaders);
+    const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, f.tronHome, f.agentDir, f.record, f.settingsModel.owner.observedReaders);
     owner.outsides.push(outside);
     await outside.reconcile([{ kind: "global" }]);
     const destination = join(f.root, "observer-destination");
@@ -419,11 +421,11 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
   owner.registries.push(registry);
   await registry.initialize();
   const macTerminalKeys = new MacTerminalKeys(join(root, "home", ".ssh"));
-  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys });
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   // Production wiring: every read reconciles outside changes (doc 5.6).
-  const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.observedReaders);
-  settingsModel.observeOutside(outside);
+  const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders);
+  settingsModel.owner.observeOutside(outside);
   owner.outsides.push(outside);
   const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
     ...(options.assessRisk ? { assessRisk: options.assessRisk } : {}),
@@ -432,7 +434,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
         async inspection => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
         async inspection => { await registry.commitProjectReload(inspection.projectDir); });
     },
-  }, agentDir);
+  });
   registry.setSettings(settingsModel, settingsChanges);
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   // The relay boundary: what would be pushed to the maintainer's iPhone.
