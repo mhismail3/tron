@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { WorkspaceInspectionService, inspectGitPath, projectRoot } from "./workspace-inspection-service.js";
+import { WorkspaceInspectionService, inspectGitPath } from "./workspace-inspection-service.js";
+import { projectRoot } from "../kernel/resources/project-root.js";
 
 const execFileAsync = promisify(execFile);
 const roots: string[] = [];

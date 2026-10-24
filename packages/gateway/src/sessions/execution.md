@@ -150,7 +150,7 @@ up its worktree and compare-delete its branch; uncertain residue is kept; proces
 groups are retired or the outcome is unknown. Roots are checked no-follow and by
 realpath containment. Worktrees outlive sessions. `git.inspect` returns ≤ 200
 branches and 100 commits as hints only. Git operations share
-`machine/workspace-git-environment.ts`, which ignores inherited `GIT_DIR`,
+`util/workspace-git-environment.ts`, which ignores inherited `GIT_DIR`,
 `GIT_WORK_TREE`, `GIT_INDEX_FILE` and object-directory variables. Structure, context
 and resource changes refresh open surfaces; provider, settings, trust, package and
 custom-model changes publish bounded global invalidations.

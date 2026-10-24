@@ -6,7 +6,7 @@ import {
   SettingsManager,
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
-import { projectRoot } from "../machine/workspace-inspection-service.js";
+import { projectRoot } from "../kernel/resources/project-root.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 
 /**

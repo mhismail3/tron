@@ -8,7 +8,7 @@ native capture and `computer` clients.
 
 ## Owns
 
-`filesystem-service.ts`, `workspace-inspection-service.ts` (`projectRoot`),
+`filesystem-service.ts`, `workspace-inspection-service.ts` (workspace projection),
 `git-worktree-service.ts`, `upload-store.ts`, `terminal-service.ts`,
 `mac-terminal-host.ts`, `native-capture-client.ts`, `native-capture-transport.ts`,
 `cua-client.ts`, path containment and workspace bounds.

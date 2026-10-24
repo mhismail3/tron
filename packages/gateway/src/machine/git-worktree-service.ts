@@ -4,7 +4,7 @@ import { lstat, mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { asUncertainOutcome, GatewayError, isUncertainOutcome } from "../errors.js";
 import { containedWithin } from "./path-containment.js";
-import { workspaceGitEnvironment } from "./workspace-git-environment.js";
+import { workspaceGitEnvironment } from "../util/workspace-git-environment.js";
 
 const GIT = process.env.TRON_GIT_PATH ?? "/usr/bin/git";
 const COMMAND_TIMEOUT_MS = 10_000;

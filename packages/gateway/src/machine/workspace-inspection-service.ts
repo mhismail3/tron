@@ -2,16 +2,13 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { spawn } from "node:child_process";
+import { runGit, type GitResult } from "../util/git-inspection.js";
 import { GatewayError } from "../errors.js";
 import { containedWithin } from "./path-containment.js";
-import { workspaceGitEnvironment } from "./workspace-git-environment.js";
+
 import { WORKSPACE_MAXIMUM_ENTRIES, WORKSPACE_MAXIMUM_PROJECTED_BYTES, projectBoundedEntries } from "./workspace-bounds.js";
 
-const GIT = process.env.TRON_GIT_PATH ?? "/usr/bin/git";
-const GIT_TIMEOUT_MS = 5_000;
 const HISTORY_TIMEOUT_MS = 10_000;
-const GIT_MAX_OUTPUT_BYTES = 768 * 1_024;
 const DIFF_MAX_OUTPUT_BYTES = 480 * 1_024;
 const WORKSPACE_FILE_MAXIMUM_BYTES = 25 * 1_048_576;
 const WORKSPACE_MAXIMUM_CHANGES = 5_000;
@@ -50,13 +47,6 @@ interface WorkspaceInspection {
   root: string;
   revision: string;
   repository?: WorkspaceRepositoryInspection;
-}
-
-interface GitResult {
-  stdout: Buffer;
-  stderr: Buffer;
-  exitCode: number;
-  truncated: boolean;
 }
 
 interface RepositoryContext {
@@ -137,101 +127,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-async function runGit(
-  cwd: string,
-  arguments_: string[],
-  options: {
-    timeoutMs?: number;
-    maximumBytes?: number;
-    allowedExitCodes?: readonly number[];
-    truncate?: boolean;
-  } = {},
-): Promise<GitResult> {
-  const maximumBytes = options.maximumBytes ?? GIT_MAX_OUTPUT_BYTES;
-  const allowedExitCodes = options.allowedExitCodes ?? [0];
-  return await new Promise<GitResult>((resolvePromise, rejectPromise) => {
-    const child = spawn(GIT, ["--no-pager", "-C", cwd, ...arguments_], {
-      cwd,
-      env: {
-        ...workspaceGitEnvironment(),
-        LC_ALL: "C",
-        LANG: "C",
-        GIT_OPTIONAL_LOCKS: "0",
-        GIT_TERMINAL_PROMPT: "0",
-        GIT_PAGER: "cat",
-        PAGER: "cat",
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-      detached: process.platform !== "win32",
-    });
-    const killProcessGroup = () => {
-      if (process.platform !== "win32" && child.pid !== undefined) {
-        try {
-          process.kill(-child.pid, "SIGKILL");
-          return;
-        } catch {
-          // Fall back to the direct child if the process group already retired.
-        }
-      }
-      child.kill("SIGKILL");
-    };
-    const chunks: Buffer[] = [];
-    const errors: Buffer[] = [];
-    let bytes = 0;
-    let errorBytes = 0;
-    let truncated = false;
-    let timedOut = false;
-    let overflowed = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killProcessGroup();
-    }, options.timeoutMs ?? GIT_TIMEOUT_MS);
-    timer.unref();
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (truncated) return;
-      if (chunk.length > maximumBytes - bytes) {
-        if (options.truncate) {
-          const remaining = Math.max(0, maximumBytes - bytes);
-          if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
-          bytes = maximumBytes;
-          truncated = true;
-          killProcessGroup();
-        } else {
-          overflowed = true;
-          killProcessGroup();
-        }
-        return;
-      }
-      chunks.push(chunk);
-      bytes += chunk.length;
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      const remaining = Math.max(0, 16_384 - errorBytes);
-      if (remaining > 0) errors.push(chunk.subarray(0, remaining));
-      errorBytes += Math.min(chunk.length, remaining);
-    });
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      rejectPromise(new GatewayError("internal", `Git could not be started: ${error.message}`, true));
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      if (timedOut) return rejectPromise(new GatewayError("busy", "Git inspection timed out", true));
-      if (overflowed) return rejectPromise(new GatewayError("conflict", "Git output exceeded the bounded inspection limit", true));
-      if (truncated && options.truncate) return resolvePromise({
-        stdout: Buffer.concat(chunks), stderr: Buffer.concat(errors), exitCode: code ?? -1, truncated: true,
-      });
-      if (code === null || !allowedExitCodes.includes(code)) {
-        const detail = Buffer.concat(errors).toString("utf8").trim().slice(0, 1_000);
-        return rejectPromise(new GatewayError("conflict", detail ? `Git inspection failed: ${detail}` : "Git inspection failed", true));
-      }
-      resolvePromise({ stdout: Buffer.concat(chunks), stderr: Buffer.concat(errors), exitCode: code, truncated: false });
-    });
-  });
-}
-
 function splitNul(output: Buffer): string[] {
   const values = output.toString("utf8").split("\0");
   if (values.at(-1) === "") values.pop();
@@ -276,29 +171,6 @@ async function repositoryRoot(cwd: string): Promise<string | undefined> {
   const value = result.stdout.toString("utf8").trim();
   if (!value) throw new GatewayError("conflict", "Git did not report a repository root", true);
   return await realpath(value);
-}
-
-/**
- * The Project root of a canonical chat cwd: the directory whose `.pi/` is the
- * Project layer, keys project trust and is the SDK session's `projectDir`
- * (settings-model decision 31). It is the realpath of the enclosing Git
- * worktree's top level, so each linked worktree is its own Project. Whenever
- * Git gives no work tree (no repository, a cwd inside `.git`, a refused
- * ownership check, or no usable `git`), the cwd itself is the Project, which is
- * the behavior without a root. A timeout or oversized answer stays a retryable
- * error, so a slow Git can never key one decision to two directories. The chat
- * keeps its own cwd for tools and context files.
- */
-export async function projectRoot(cwd: string): Promise<string> {
-  let result: GitResult;
-  try {
-    result = await runGit(cwd, ["rev-parse", "--show-toplevel"], { maximumBytes: 8_192, allowedExitCodes: [0, 1, 128] });
-  } catch (error) {
-    if (error instanceof GatewayError && error.code === "internal") return cwd;
-    throw error;
-  }
-  const value = result.stdout.toString("utf8").trim();
-  return result.exitCode === 0 && value ? await realpath(value) : cwd;
 }
 
 async function statusInspectionFromRoot(workspaceRoot: string): Promise<WorkspaceRepositoryInspection | undefined> {
