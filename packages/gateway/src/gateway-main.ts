@@ -67,6 +67,8 @@ import { GatewayAutomationExecutor } from "./automations/automation-executor.js"
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import type { ScheduleToolOperations } from "./automations/tron-schedule-extension.js";
 import { DisplayArtifactStore } from "./display/display-artifact-store.js";
+import { DisplayOwner } from "./display/display-modules.js";
+import { RequestSpanLane } from "./transport/request-span.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
 import { HomeProfileItems } from "./modules/home/home-profile.js";
@@ -198,6 +200,8 @@ const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
 const displayArtifacts = new DisplayArtifactStore(config.tronHome);
+const display = new DisplayOwner(displayArtifacts, browserLiveViews, () => sessions,
+  new RequestSpanLane("registry.display-lane"));
 // Mac Terminal's store is the Gateway user's own ~/.ssh/authorized_keys.
 const macTerminalKeys = new MacTerminalKeys(join(homedir(), ".ssh"));
 const settingsSchema = createGatewaySettingsSchema();
@@ -303,7 +307,7 @@ const homeComposition: HomeComposition = {
 };
 const { modules, home } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
   () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch,
-    display: { artifacts: displayArtifacts, liveViews: browserLiveViews },
+    display,
     recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}), persistenceDiagnostic }));
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),
@@ -354,7 +358,10 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
   sessionListChanged: () => transport?.notifySessionListChanged(),
   sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
-  beforeSessionRekey: (previousId, nextId) => automations.rekeySessionTarget(previousId, nextId),
+  beforeSessionRekey: async (previousId, nextId, runtime) => {
+    await display.grantReferences(previousId, nextId, runtime);
+    await automations.rekeySessionTarget(previousId, nextId);
+  },
   beforeSessionDelete: (sessionId) => automations.blockSessionTarget(sessionId),
   sessionClosed: (sessionId) => {
     auth.cancelSession(sessionId);
@@ -422,7 +429,6 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
   homeTaskDiagnostic,
   machineId: config.machineId,
   notifications,
-  displayArtifacts,
   settingsSchema,
   workRegistry,
   extensionArtifactWarning: ({ reason, owner }) => logger.log(
@@ -841,7 +847,7 @@ const service = new GatewayService({
   providerUsage,
   modelRuntime,
   devices,
-  sessions, modules,
+  sessions, modules, display,
   filesystem,
   uploads,
   terminals: terminal,
@@ -892,13 +898,13 @@ transport = new GatewayServer({
   lanEndpoint: config.lanEndpoint,
   devices,
   uploads,
-  sessions,
+  sessions, display,
   liveViews: browserLiveViews,
   auth,
   service,
   logger,
   resourceSampler,
-  authorizeBrowserLiveView: (sessionId, viewId, generation) => sessions.authorizeBrowserLiveView(sessionId, viewId, generation),
+  authorizeBrowserLiveView: (sessionId, viewId, generation) => display.authorizeLiveView(sessionId, viewId, generation),
 });
 
 const supervised = process.env.TRON_GATEWAY_SUPERVISED === "1";
@@ -999,7 +1005,7 @@ const maintainStorage = async (): Promise<void> => {
   try {
     const [status] = await Promise.all([
       uploads.maintain(() => sessions.sessionIDsForStorageMaintenance()),
-      sessions.maintainDisplayArtifacts(),
+      display.maintainArtifacts(),
     ]);
     if (status.storagePressure !== uploadStoragePressure) {
       logger.log(
