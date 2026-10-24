@@ -59,6 +59,6 @@
     "fast-check": "4.10.2",
     "oxlint": "1.88.0",
     "typescript": "7.0.2",
-    "vitest": "5.0.3"
+    "vitest": "5.0.5"
   }
 }
