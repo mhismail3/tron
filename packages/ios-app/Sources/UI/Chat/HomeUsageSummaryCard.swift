@@ -137,7 +137,7 @@ struct HomeUsageSummaryCard: View {
                     .coordinateSpace(.named(HomeUsageCardLayout.coordinateSpace))
                 }
                 .buttonStyle(.plain)
-                .tronGlassSurface(accent: .tronPrimary, cornerRadius: 12, tintOpacity: 0.14, interactive: true)
+                .tronGlassSurface(accent: .tronPrimarySurface, cornerRadius: 12, tintOpacity: 0.14, interactive: true)
                 .accessibilityElement(children: .ignore)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityLabel(accessibilitySummary)

@@ -93,7 +93,7 @@ struct DashboardChrome<Content: View>: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
-            .tronDashboardFloatingCircle(accent: .tronPrimary)
+            .tronDashboardFloatingCircle(accent: .tronPrimarySurface)
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
         }

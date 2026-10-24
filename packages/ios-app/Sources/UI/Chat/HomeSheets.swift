@@ -180,6 +180,8 @@ struct HomeSheet: View {
         // Session's sub-sheets do (#799, #811).
         .presentationDetents(detents)
         .presentationDragIndicator(.hidden)
+        .environment(\.tronSettingsVisualTheme, visualTheme ?? TronSettingsVisualTheme(
+            accent: .tronPrimary, surfaceAccent: .tronPrimarySurface))
         .tint(accent)
         .onPresentationRetire { owner.retire() }
     }

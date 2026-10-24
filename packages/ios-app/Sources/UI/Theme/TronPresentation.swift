@@ -78,9 +78,11 @@ enum TronLongContentPolicy {
 struct TronSettingsVisualTheme {
     let accent: Color
     let informationalAccent: Color
+    let surfaceAccent: Color
 
-    init(accent: Color) {
+    init(accent: Color, surfaceAccent: Color? = nil) {
         self.accent = accent
+        self.surfaceAccent = surfaceAccent ?? accent
         informationalAccent = accent.mix(with: .tronSlate, by: 0.58)
     }
 }
@@ -121,10 +123,11 @@ extension EnvironmentValues {
 
 private struct TronSettingsVisualThemeModifier: ViewModifier {
     let accent: Color
+    let surfaceAccent: Color?
 
     func body(content: Content) -> some View {
         content
-            .environment(\.tronSettingsVisualTheme, TronSettingsVisualTheme(accent: accent))
+            .environment(\.tronSettingsVisualTheme, TronSettingsVisualTheme(accent: accent, surfaceAccent: surfaceAccent))
             .tint(accent)
     }
 }
@@ -134,7 +137,9 @@ private struct TronInheritedSettingsVisualThemeModifier: ViewModifier {
     @Environment(\.tronSettingsVisualTheme) private var inherited
 
     func body(content: Content) -> some View {
-        content.tronSettingsVisualTheme(accent: inherited?.accent ?? fallback)
+        content
+            .environment(\.tronSettingsVisualTheme, inherited ?? TronSettingsVisualTheme(accent: fallback))
+            .tint(inherited?.accent ?? fallback)
     }
 }
 
@@ -233,7 +238,7 @@ private struct TronGlassSurfaceModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        let resolvedAccent = respectsSettingsTheme ? settingsTheme?.accent ?? accent : accent
+        let resolvedAccent = respectsSettingsTheme ? settingsTheme?.surfaceAccent ?? accent : accent
         content
             .contentShape(shape)
             .glassEffect(
@@ -255,7 +260,7 @@ private struct TronScrollSurfaceModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        let resolvedAccent = settingsTheme?.accent ?? accent
+        let resolvedAccent = settingsTheme?.surfaceAccent ?? accent
         content
             .contentShape(shape)
             .background {
@@ -284,8 +289,8 @@ extension View {
 
     /// Applies one visual identity to a progressive settings destination and
     /// every nested sheet it presents.
-    func tronSettingsVisualTheme(accent: Color) -> some View {
-        modifier(TronSettingsVisualThemeModifier(accent: accent))
+    func tronSettingsVisualTheme(accent: Color, surfaceAccent: Color? = nil) -> some View {
+        modifier(TronSettingsVisualThemeModifier(accent: accent, surfaceAccent: surfaceAccent))
     }
 
     /// A settings destination's own accent, used only when nothing opened it with

@@ -338,7 +338,7 @@ struct SessionContextSheet: View {
                 // Manage Session summary's local adjustment.
                 .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
                 // Every destination follows Manage Session's emerald sheet theme.
-                .tronSettingsVisualTheme(accent: .tronPrimary)
+                .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
             }
             .tronTextEntrySheet(
                 "Rename Session",

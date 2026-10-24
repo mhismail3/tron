@@ -1455,7 +1455,7 @@ struct HistoricalSessionRow: View {
         return DashboardListRow(
             title: session.title,
             subtitle: showsContext ? projectServerContext : nil,
-            accent: .tronPrimary
+            accent: .tronPrimarySurface
         ) {
             DashboardIndicatorSwap(state: indicatorState) { _ in sessionIndicator }
         } trailing: {

@@ -118,7 +118,7 @@ struct SettingsView: View {
                         action: { showsNotifications = true }
                     )
                     SettingsChangesLink(scope: .all, onOpenSession: onImported)
-                        .tronSettingsVisualTheme(accent: .tronPrimary)
+                        .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Global Settings") }
                 ToolbarItem(placement: .confirmationAction) {
@@ -374,7 +374,7 @@ struct SessionSettingsView: View {
                     } else {
                         if project == nil {
                             TronSettingsGroup("Settings", accent: .tronPrimary) { links(rows, sections) }
-                                .tronSettingsVisualTheme(accent: .tronPrimary)
+                                .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
                         }
                     }
                 }
@@ -504,6 +504,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let destination: () -> Destination
     let label: Label
     let accent: Color?
+    let surfaceAccent: Color?
     /// Settings destinations open at medium and expand to large; a destination
     /// that publishes `TronSheetFitHeightKey` (the model picker) passes `.contentFit`.
     let detents: TronSheetDetentPolicy
@@ -521,6 +522,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         accessibilityLabel: String,
         identity: String? = nil,
         accent: Color? = nil,
+        surfaceAccent: Color? = nil,
         detents: TronSheetDetentPolicy = .fixed([.medium, .large]),
         onDismiss: (() -> Void)? = nil,
         fileID: String = #fileID,
@@ -534,6 +536,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         self.identity = identity ?? "settings.\(accessibilityLabel)"
         _isPresented = PresentationState(wrappedValue: false, key: "\(self.identity)@\(fileID):\(line)")
         self.accent = accent
+        self.surfaceAccent = surfaceAccent
         self.detents = detents
         self.onDismiss = onDismiss
         self.destination = destination
@@ -579,8 +582,10 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     /// The theme wraps the Done too, so it takes the same tint as the title (#963).
     @ViewBuilder
     private func themed(_ content: some View) -> some View {
-        if let resolved = accent ?? inheritedTheme?.accent {
-            content.tronSettingsVisualTheme(accent: resolved)
+        if let accent {
+            content.tronSettingsVisualTheme(accent: accent, surfaceAccent: surfaceAccent)
+        } else if let inheritedTheme {
+            content.environment(\.tronSettingsVisualTheme, inheritedTheme).tint(inheritedTheme.accent)
         } else {
             content
         }

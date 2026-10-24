@@ -87,7 +87,8 @@ extension HomeSheet {
         if let sessionID {
             let title = "Home Settings"
             TronGlassCard(accent: accent) {
-                TronProgressiveSheetLink(accessibilityLabel: title, identity: "home.settings", accent: accent) {
+                TronProgressiveSheetLink(accessibilityLabel: title, identity: "home.settings", accent: accent,
+                                         surfaceAccent: .tronPrimarySurface) {
                     SessionSettingsView(sessionID: sessionID, ownedLayers: ["session"], homeProfileID: profileID)
                         .tronNavigationTitle(title, accent: accent)
                 } label: {
