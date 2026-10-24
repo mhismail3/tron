@@ -900,13 +900,14 @@ struct ModelPicker: View {
 
     private func row(_ model: ModelSummary) -> some View {
         let summary = ModelCardFacts.rowSummary(model)
-        let identity = model.pickerIdentity
+        let identity = "\(model.provider)/\(model.id)"
         return TronCatalogOptionRow(
-            title: model.displayName, summary: summary, detail: identity,
+            title: model.displayName, summary: summary, detail: identity, detailIsIdentifier: true,
             badge: model.virtual == true ? "Virtual route" : nil,
             isSelected: selection == model.ref, isApplying: selectionAvailability.isApplying,
             isEnabled: selectionAvailability.canSelect, action: { select(model.ref) }
         )
+        .tronListMarkers("model-picker-row-\(model.provider)/\(model.id)")
         #if HOSTED_TEST
         .modifier(ModelPickerHostedActionModifier(
             id: "picker.row.\(model.provider)/\(model.id)",

@@ -353,8 +353,9 @@ struct SessionSettingsView: View {
         let shown = Set(sections.filter { section in
             model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
         }.map(\.id))
-        let rows = (homeProfileID == nil ? ["context", "model", "workers", "approvals", "run", "tools"] : ["workers", "approvals", "run", "tools"])
+        let rows = (homeProfileID == nil ? ["context", "tools", "model", "workers", "approvals", "run"] : ["workers", "tools", "approvals", "run"])
             .filter(shown.contains)
+        let moreRows = rows.filter { ["model", "workers", "approvals", "run"].contains($0) }
         // The chat's project, read-only, below its own choices; Manage Session's
         // Workspace row already names the branch. Its notices are listed there once.
         let project = homeProfileID == nil ? projectCWD.flatMap { cwd in
@@ -383,7 +384,8 @@ struct SessionSettingsView: View {
                 .accessibilityIdentifier(homeProfileID == nil ? "session-settings-content" : "home-settings-content")
                 if let project {
                     ProjectSettingsSections(cwd: project.cwd, profileID: project.profileID, showsWorkspace: false,
-                                            sessionSettings: AnyView(links(rows, sections)))
+                                            sessionSettings: AnyView(links(rows.filter { !moreRows.contains($0) }, sections)),
+                                            sessionSettingsAfterTrust: moreRows.isEmpty ? nil : AnyView(links(moreRows, sections)))
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("session-project-settings")
                 }

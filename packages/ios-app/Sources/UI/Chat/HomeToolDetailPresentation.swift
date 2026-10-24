@@ -2,7 +2,7 @@ import Foundation
 import TronMobileCore
 
 /// The purpose-built detail of one Home tool call (`delegate`, `task`, `settings`,
-/// `profile`, `zoom`, `date`, `memory_search`): what was asked, what happened and
+/// `profile`, `zoom`, `date`, `memory_search`, `checkin`): what was asked, what happened and
 /// the content it carried, as header, rows, Markdown texts and line lists that
 /// `HomeToolDetailSections` renders with the shared settings components.
 ///
@@ -58,7 +58,7 @@ struct HomeToolDetailPresentation: Hashable, Sendable {
     let header: Header
     let sections: [Section]
 
-    static let toolNames: Set<String> = ["delegate", "task", "settings", "profile", "zoom", "date", "memory_search"]
+    static let toolNames: Set<String> = ["delegate", "task", "settings", "profile", "zoom", "date", "memory_search", "checkin"]
 
     static func make(tool: ChatToolPresentation) -> HomeToolDetailPresentation? {
         let name = tool.toolName ?? tool.title
@@ -76,6 +76,7 @@ struct HomeToolDetailPresentation: Hashable, Sendable {
         case "zoom": zoom(call)
         case "date": date(call)
         case "memory_search": memorySearch(call)
+        case "checkin": checkin(call)
         default: nil
         }
     }

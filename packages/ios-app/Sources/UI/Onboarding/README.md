@@ -32,7 +32,9 @@ workspace browser, the model picker and the provider authentication prompt sheet
   Onboarding, New Session, Automation, Trusted Projects, server and paired-device source folders.
 - **Model picker.** `ModelPicker` (title **Models**) organizes one catalog read into a Recent rail
   (the Gateway's bounded recent-model history), a Latest rail (Gateway release dates) and one
-  collapsible section per provider; cards show context window and Gateway-projected prices. The
+  collapsible section per provider; rail cards show context window and Gateway-projected prices.
+  List options compose `TronCatalogOptionRow` over `TronSettingsRow`: standard subtext facts and a
+  monospaced canonical provider/model ID without a label prefix; search and selection keep their owners. The
   picker owns no usage list, date table or price table. `ModelSelectionAvailability` is a
   value-only projection of session admission and pending receipts: applying shows a pulse in a
   fixed slot, a blocked state exposes a 44-point lock that opens the full reason.

@@ -208,6 +208,7 @@ struct TronCatalogOptionRow: View {
     let title: String
     var summary: String? = nil
     var detail: String? = nil
+    var detailIsIdentifier = false
     var badge: String? = nil
     var icon: String = "cpu"
     let isSelected: Bool
@@ -220,51 +221,13 @@ struct TronCatalogOptionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Group {
-                    if isSelected && isApplying {
-                        TronPulseLoadingIndicator(accent: theme?.accent ?? .tronPrimary, size: 14)
-                    } else {
-                        Image(systemName: isSelected ? "checkmark.circle.fill" : icon)
-                            .foregroundStyle(accent)
-                            .accessibilityLabel(isSelected ? "Selected" : title)
-                    }
-                }
-                .frame(width: 22)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(title)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                        if let badge {
-                            Text(badge)
-                                .font(TronTypography.secondaryDescription)
-                                .foregroundStyle(Color.tronTextSecondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.tronCyan.opacity(0.12), in: Capsule())
-                        }
-                    }
-                    // Uniform fact lines preserve lazy-list scroll estimates.
-                    if let summary {
-                        Text(summary)
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .lineLimit(1)
-                    }
-                    if let detail {
-                        Text(detail)
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .lineLimit(2)
-                    }
-                }
-                Spacer(minLength: 8)
+            TronSettingsRow(icon: isSelected ? "checkmark.circle.fill" : icon,
+                            title: title, subtitle: summary, accent: accent,
+                            subtitleColor: .tronTextSecondary,
+                            footnote: detail, footnoteIsIdentifier: detailIsIdentifier,
+                            iconIsLoading: isSelected && isApplying) {
+                if let badge { TronStatusPill(text: badge, accent: .tronCyan) }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .tronScrollSurface(accent: accent, cornerRadius: 14, tintOpacity: isSelected ? 0.18 : 0.08)

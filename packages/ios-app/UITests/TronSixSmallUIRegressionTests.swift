@@ -26,7 +26,8 @@ import UIKit
             let app = launch("toast", mode: mode)
             let card = app.staticTexts["in-app-notice-card"].firstMatch
             XCTAssertTrue(card.waitForExistence(timeout: 8))
-            let title = app.navigationBars.staticTexts["Notifications"].firstMatch
+            // A notice correctly covers the navigation title; use visible primary ink below it.
+            let title = app.staticTexts["six-ui-primary-reference"].firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 8))
             Thread.sleep(forTimeInterval: 0.7)
             let screenshot = app.screenshot()
@@ -66,6 +67,19 @@ import UIKit
         app.terminate()
     }
 
+    func testModelRowUsesSharedSubtextAndMonospacedID() {
+        let app = launch("models", extra: ["-six-ui-typography"])
+        for slot in ["subtext", "metadata"] {
+            let actual = app.descendants(matching: .any)["model-picker-row-opencode-go/deepseek-v4-pro-\(slot)"].firstMatch
+            let reference = app.descendants(matching: .any)["six-ui-row-reference-\(slot)"].firstMatch
+            XCTAssertTrue(actual.waitForExistence(timeout: 8), app.debugDescription)
+            XCTAssertTrue(reference.exists)
+            XCTAssertEqual(actual.frame.height, reference.frame.height, accuracy: 0.5, "Catalog \(slot) must use the shared row's type metrics")
+            XCTAssertEqual(actual.frame.width, reference.frame.width, accuracy: 0.5, "ID glyph advances must match the shared monospaced reference")
+        }
+        app.terminate()
+    }
+
     func testWorkspacePathNeverIntersectsStatusPills() {
         for extra in [[], ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]] {
             let app = launch("workspace", extra: extra)
@@ -77,6 +91,22 @@ import UIKit
                 XCTAssertFalse(path.frame.intersects(pill.frame), "Workspace path \(path.frame) overlaps \(label) \(pill.frame)")
             }
             attach(app.screenshot(), "workspace-no-overlap-\(extra.isEmpty ? "standard" : "accessibility")")
+            app.terminate()
+        }
+    }
+
+    func testWorkspaceNarrowAndWrappingOptionsDoNotOverlapPath() {
+        let largest = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        for extra in [["-six-ui-narrow"], ["-six-ui-narrow"] + largest,
+                      ["-six-ui-wrap"], ["-six-ui-wrap", "-six-ui-narrow"] + largest] {
+            let app = launch("workspace", extra: extra)
+            let path = app.staticTexts[root].firstMatch
+            XCTAssertTrue(path.waitForExistence(timeout: 8), app.debugDescription)
+            for label in ["b8d31a1d", "Clean", "Detached HEAD"] {
+                let pill = app.staticTexts[label].firstMatch
+                XCTAssertTrue(pill.waitForExistence(timeout: 8), app.debugDescription)
+                XCTAssertFalse(path.frame.intersects(pill.frame), "Narrow/accessibility workspace path must not overlap \(label)")
+            }
             app.terminate()
         }
     }
@@ -95,6 +125,28 @@ import UIKit
                 XCTAssertTrue(app.descendants(matching: .any)["home-tool-row-Blocker"].firstMatch.exists)
             }
             XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Checkin Object")).firstMatch.exists)
+            app.terminate()
+        }
+    }
+
+    func testCheckinValuesMatchCanonicalReceipt() {
+        for blocked in [false, true] {
+            let app = launch(blocked ? "checkin-blocked" : "checkin")
+            let expected = [
+                ("Attention", blocked ? "Requested" : "None"),
+                ("Needs attention", blocked ? "Yes" : "No"),
+                ("Done", "Prepared the six UI changes and captured light and dark simulator previews."),
+                ("Next", "Review the previews, then run focused UI regressions after approval."),
+                ("Timestamp", "2026")
+            ] + (blocked ? [("Blocker", "Visual approval is needed before testing and landing.")] : [])
+            for (title, value) in expected {
+                let row = app.descendants(matching: .any)["home-tool-row-\(title)"].firstMatch
+                guard row.waitForExistence(timeout: 8) else {
+                    XCTFail("Missing readable check-in receipt field: \(title)"); app.terminate(); return
+                }
+                for _ in 0..<4 where !row.isHittable { app.swipeUp() }
+                XCTAssertTrue(row.label.contains(value), "\(title) must preserve receipt value: \(row.label)")
+            }
             app.terminate()
         }
     }

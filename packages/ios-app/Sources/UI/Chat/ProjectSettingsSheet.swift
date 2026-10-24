@@ -84,6 +84,8 @@ struct ProjectSettingsSections: View {
     /// Session Settings supplies its rows to the one group that also owns trust.
     /// Standalone Project Settings keeps its existing project/workspace layout.
     var sessionSettings: AnyView? = nil
+    /// More Settings follows Project Trust in the same Session settings card.
+    var sessionSettingsAfterTrust: AnyView? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var trust: ProjectTrustSummary?
@@ -138,6 +140,10 @@ struct ProjectSettingsSections: View {
                     }
                     .accessibilityValue(trust?.stateTitle ?? "")
                     .accessibilityIdentifier("project-settings-trust")
+                    if let sessionSettingsAfterTrust {
+                        TronSettingsDivider()
+                        sessionSettingsAfterTrust
+                    }
                     if showsWorkspace {
                         TronSettingsDivider()
                         TronSettingsRow(icon: "arrow.triangle.branch", title: "Workspace",

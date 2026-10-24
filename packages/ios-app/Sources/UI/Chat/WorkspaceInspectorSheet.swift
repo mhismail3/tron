@@ -310,37 +310,20 @@ struct WorkspaceInspectorSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "folder.fill")
-                        .foregroundStyle(Color.tronPrimary)
-                    Text(owner.inspection?.root ?? "Loading workspace…")
-                        .font(TronTypography.codeContent)
-                        .foregroundStyle(Color.tronPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .frame(minWidth: 96, maxWidth: .infinity, alignment: .leading)
-
-                if let repository = owner.inspection?.repository {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 7) {
-                            ToolStaticChip(icon: "arrow.triangle.branch", text: branchLabel(repository), accent: .tronPrimary)
-                            ToolStaticChip(
-                                icon: repository.dirty ? "pencil.and.list.clipboard" : "checkmark.circle",
-                                text: repository.dirty ? "\(repository.changes.count) changed" : "Clean",
-                                accent: .tronPrimary
-                            )
-                            if repository.detached {
-                                ToolStaticChip(icon: "link.badge.plus", text: "Detached HEAD", accent: .tronPrimary)
-                            }
-                        }
-                        .padding(.vertical, 1)
-                    }
-                    .frame(maxWidth: 230, alignment: .trailing)
-                    .defaultScrollAnchor(.trailing)
-                    .scrollClipDisabled()
-                }
+            // The path owns a full line. Status ink can never escape into it,
+            // even with a long detached commit or accessibility-sized text.
+            HStack(spacing: 8) {
+                Image(systemName: "folder.fill")
+                    .foregroundStyle(Color.tronPrimary)
+                Text(owner.inspection?.root ?? "Loading workspace…")
+                    .font(TronTypography.codeContent)
+                    .foregroundStyle(Color.tronPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let repository = owner.inspection?.repository {
+                repositoryStatus(repository)
             }
             if owner.inspection != nil, owner.inspection?.repository == nil {
                 Text("This workspace is not version controlled by Git.")
@@ -357,6 +340,37 @@ struct WorkspaceInspectorSheet: View {
         .padding(.horizontal, 18)
         .padding(.top, 10)
         .padding(.bottom, 12)
+    }
+
+    @ViewBuilder private func repositoryStatus(_ repository: SessionWorkspaceRepository) -> some View {
+        #if HOSTED_TEST
+        if ProcessInfo.processInfo.arguments.contains("-six-ui-wrap") {
+            // Visual-review alternative B; not a shipping preference or state.
+            ToolChipFlowLayout(spacing: 7) { repositoryPills(repository) }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            scrollingRepositoryStatus(repository)
+        }
+        #else
+        scrollingRepositoryStatus(repository)
+        #endif
+    }
+
+    private func scrollingRepositoryStatus(_ repository: SessionWorkspaceRepository) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) { repositoryPills(repository) }
+                .padding(.vertical, 1)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    @ViewBuilder private func repositoryPills(_ repository: SessionWorkspaceRepository) -> some View {
+        ToolStaticChip(icon: "arrow.triangle.branch", text: branchLabel(repository), accent: .tronPrimary)
+        ToolStaticChip(icon: repository.dirty ? "pencil.and.list.clipboard" : "checkmark.circle",
+                       text: repository.dirty ? "\(repository.changes.count) changed" : "Clean", accent: .tronPrimary)
+        if repository.detached {
+            ToolStaticChip(icon: "link.badge.plus", text: "Detached HEAD", accent: .tronPrimary)
+        }
     }
 
     private var tabPicker: some View {

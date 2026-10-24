@@ -19,14 +19,14 @@ struct HostedSixSmallUIFixture: View {
                         destination
                     } else {
                         NavigationStack {
-                    destination
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button { showing = false } label: { Image(systemName: "checkmark").tronToolbarAction() }
-                                    .accessibilityLabel("Done")
-                            }
+                            destination
+                                .toolbar {
+                                    ToolbarItem(placement: .confirmationAction) {
+                                        Button { showing = false } label: { Image(systemName: "checkmark").tronToolbarAction() }
+                                            .accessibilityLabel("Done")
+                                    }
+                                }
                         }
-                }
                     }
                 }
                 .tronTopBlur(.sheet)
@@ -60,14 +60,26 @@ struct HostedSixSmallUIFixture: View {
         case "models":
             ModelPicker(selection: $selection, models: Self.models)
                 .tronNavigationTitle("Models")
+                .safeAreaInset(edge: .bottom) {
+                    if ProcessInfo.processInfo.arguments.contains("-six-ui-typography") {
+                        TronSettingsRow(icon: nil, title: "Shared row reference",
+                                        subtitle: "1M context · $0.30 / $1.20 · Sep 2026",
+                                        footnote: "opencode-go/deepseek-v4-pro", footnoteIsIdentifier: true) {}
+                            .tronListMarkers("six-ui-row-reference")
+                            .padding(.horizontal, 16)
+                    }
+                }
         case "workspace":
             WorkspaceInspectorSheet(sessionID: "fixture-chat")
+                .frame(maxWidth: ProcessInfo.processInfo.arguments.contains("-six-ui-narrow") ? 320 : .infinity)
         case "checkin", "checkin-blocked":
             ToolDetailSheet(tool: Self.checkin(blocked: surface == "checkin-blocked"), density: .expanded)
                 .tronNavigationTitle("Checkin")
         default:
-            Text("Simulator preview · synthetic values")
+            Text("Simulator preview · primary theme reference")
                 .font(TronTypography.settingsRowSubtext)
+                .foregroundStyle(Color.tronPrimary)
+                .accessibilityIdentifier("six-ui-primary-reference")
                 .tronNavigationTitle("Notifications")
         }
     }
