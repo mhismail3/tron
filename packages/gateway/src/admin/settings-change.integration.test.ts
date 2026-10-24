@@ -4,7 +4,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { MacTerminalKeys } from "../security/mac-terminal.js";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -989,6 +989,46 @@ describe("outside changes to MCP servers and custom models", () => {
     await watcherDelivers(f.outside, f.agentDir);
     return f;
   };
+
+  caseEach(["mcp-auth.json", "coalesced.lock"])("reconciles missed global MCP drift from the directory hint %s (#1900)", async (filename, owner) => {
+    const f = await fixture(owner);
+    // A target outside the watched directory controls the missing-filename
+    // condition without replacing fs.watch or depending on FSEvents dropping it.
+    const target = join(f.root, "shared-mcp.json");
+    await writeFile(target, JSON.stringify({ mcpServers: {} }));
+    await symlink(target, join(f.agentDir, "mcp.json"));
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" } });
+    const failures: string[] = [];
+    const filenames: string[] = [];
+    f.outside.startWatching(error => { failures.push(String(error)); });
+    const native = f.outside as unknown as { watchers: Map<string, import("node:fs").FSWatcher>; timers: Map<string, NodeJS.Timeout>; reconciliations: Set<Promise<void>> };
+    // Passive listeners retain the native hints; the owner alone decides rescans.
+    for (const watcher of native.watchers.values()) {
+      watcher.on("change", (_event, name) => { filenames.push(String(name)); });
+    }
+    const hint = async () => {
+      await writeFile(join(f.agentDir, filename), "{}\n");
+      await new Promise(resolve => setTimeout(resolve, 400)); // past the existing 250ms coalescer
+    };
+    try {
+      // Establish native delivery using only the unrelated file: rewriting a
+      // settings file here could itself admit a rescan of the subsequent drift.
+      await waitFor(async () => { await hint(); return filenames.includes(filename); }, "the native auth-file directory event");
+      await waitFor(() => native.timers.size === 0 && native.reconciliations.size === 0, "initial native rescans settle before controlled drift");
+      filenames.length = 0;
+      await writeFile(target, JSON.stringify({ mcpServers: { "missed-write": { command: "echo", args: ["fixture"] } } }));
+      await waitFor(async () => {
+        await hint();
+        return f.pushes.some(push => push.message.includes("MCP server missed-write"));
+      }, "an unclassified directory event publishes the missed MCP change");
+      const entries = (await f.history()).filter(entry => entry.actor.kind === "outside");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "missed-write" }, status: "outside", redacted: true });
+      expect(failures).toEqual([]);
+    } finally {
+      transcript.push({ case: "coalesced global directory hint", detail: { filename, filenames, pushes: f.pushes, failures } });
+    }
+  }, 30_000); // New controlled missing-event case owns the 12s hang-bound failure plus fixture setup.
 
   caseIt("records global Mac mcp.json edits per server by digest, pushes, refreshes the MCP owner, and never records Tron's own writes", async owner => {
     const f = await stagedFixture(owner);

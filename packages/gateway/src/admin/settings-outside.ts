@@ -42,7 +42,6 @@ const isProjectStore = (store: ObservedStore): store is ProjectObservedStore => 
 
 /** The bound on known projects, least recently read first out. */
 const OBSERVED_PROJECT_LIMIT = 64;
-const AGENT_FILES = new Set(["settings.json", "trust.json", "mcp.json", "models.json"]);
 const PROJECT_FILES = new Set(["settings.json", "mcp.json"]);
 const STAGED_LIMIT = 20;
 
@@ -250,7 +249,9 @@ export class OutsideChanges {
     if (this.disposal) throw new Error("Outside settings comparison is disposed");
     this.watching = true;
     this.failed = failed;
-    this.watchDirectory("agent", this.agentDir, name => AGENT_FILES.has(name), [{ kind: "global" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }]);
+    // Native coalescing may deliver only a neighbouring auth/lock filename.
+    // Digests decide relevance; unchanged stores skip their canonical readers.
+    this.watchDirectory("agent", this.agentDir, () => true, [{ kind: "global" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }]);
   }
 
   dispose(): Promise<void> {

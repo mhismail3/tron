@@ -92,6 +92,10 @@ are installed; schema access never evaluates their late-bound service getter.
   24 hours, evaluated on use.
 - Tron's own writes are bracketed (`begin`/`end`, `adopt`) and never reported as
   outside changes; Tron never re-applies a value on its own.
+- Any agent-directory event prompts the existing coalesced four-store digest scan:
+  native filenames may omit the changed settings file. Unchanged digests skip their
+  canonical readers and emit no audit or push; accepted scans and observers are
+  joined by `dispose`.
 - Tron stages Project writes and never commits, pushes or opens a pull request.
 - Changing a model or thinking never persists a default. A masked Chat write
   refuses without replacing the stored choice. Operational Project selections
@@ -117,6 +121,7 @@ are installed; schema access never evaluates their late-bound service getter.
 | `settings.risk.failed` | warning | Risk classification failed or hit its 1.5 s deadline; the deterministic tier stands |
 | `settings.notification.failed` | warning | A notify or pending-approval push could not be queued; the change is already recorded |
 | `settings.outside.failed` | warning | An outside-change comparison failed |
+| `settings-change.json` → `coalesced global directory hint` (test only) | test artifact | Native hints, push and errors for missed MCP drift; run the focused `#1900` reproduction below to distinguish filename-filter loss from audit/push ordering |
 | `settings.migration` | info | The three-layer migration of the shared settings stores ran after the listener bound: `counts.inputs`, `counts.replaced`, or "already complete" |
 | `settings.migration-failed` | error | That migration refused; every shared store is unchanged, startup continued, and it retries next start. `error` names the file and reason |
 | `session_configuration_*` on a `busy` settings refusal | retryable error | Home's runtime boundary refused before recipe publication; its stored and SDK selections remain unchanged |
@@ -139,6 +144,7 @@ scripts/tron verify --module gateway/admin
 scripts/tron test gateway src/admin/settings-model.integration.test.ts \
   src/admin/settings-change.integration.test.ts src/admin/settings-gate.e2e.test.ts
 scripts/tron docs check
+scripts/tron test gateway src/admin/settings-change.integration.test.ts -t 'reconciles missed global MCP drift'
 ```
 
 Behavior locks: `admin.lock.integration.test.ts`,
