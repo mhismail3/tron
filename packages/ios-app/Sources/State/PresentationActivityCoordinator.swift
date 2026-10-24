@@ -290,6 +290,13 @@ struct TronPresentationSurface<Content: View>: View {
             .modifier(TronNativeSheetCanvas())
             #if HOSTED_TEST
             .background { HostedPresentationProbe.nativeView?(token.id) }
+            // Native sheets host this content in a new transaction root. The
+            // presenter's canvas transaction does not fence its layout updates.
+            .transaction { transaction in
+                if ProcessInfo.processInfo.environment["TRON_UI_LOCK_RENDERING"] == "1" {
+                    transaction.disablesAnimations = true
+                }
+            }
             #endif
             .environment(\.tronPresentationStateScope, stateScope)
             .environment(\.tronPresentationSurfaceToken, token)

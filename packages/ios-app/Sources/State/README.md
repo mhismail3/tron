@@ -85,6 +85,11 @@ disposable projection or an in-flight command owner.
   archived rows. Only catalog changes write it; live summaries coalesce into one trailing save;
   backgrounding writes inside the draft checkpoint's assertion.
 
+- **Static UI locks.** Only `HOSTED_TEST` with `TRON_UI_LOCK_RENDERING=1` disables
+  animation at each `TronPresentationSurface` content root. Native sheets create
+  independent transaction roots; their layout updates cannot rely on the presenter's
+  transaction ([UI locks](../../UITests/Locks/README.md)). Normal journeys are unchanged.
+
 ## Invariants
 
 - One authority per fact: no second lifecycle phase, receipt map, queue mirror or event journal.
