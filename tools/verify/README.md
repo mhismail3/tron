@@ -102,9 +102,9 @@ Modules may declare extra consumer verification using explicit tracked inputs:
 
 ```json
 "verify": [
-  "scripts/tron test tooling scripts/test-consumer.py scripts/verify-contract.py",
-  "scripts/tron test gateway src/transport/example.integration.test.ts",
-  "scripts/tron test ios run --only-testing TronMobileUITests/ExampleUITests"
+  "scripts/tron test tooling scripts/test-tron-verify.py scripts/verify-gateway-protocol-contract.py",
+  "scripts/tron test gateway src/transport/command-receipts.lock.integration.test.ts",
+  "scripts/tron test ios run --only-testing TronMobileUITests/SnapshotCachePersistenceContractTests"
 ]
 ```
 
