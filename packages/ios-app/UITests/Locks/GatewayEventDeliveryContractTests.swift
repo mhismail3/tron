@@ -145,16 +145,21 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
     }
 
     func testCoalescingKeepsLatestPayloadWithoutTakingAnotherSlot() async throws {
-        try await withClient(policy: .init(maximumEvents: 2, maximumBytes: 4096)) { client, peer in
-            try await self.fence(client, peer: peer, frames: [
-                try self.frame("session.listChanged", value: "old"),
-                try self.frame("lock.other"),
-                try self.frame("session.listChanged", value: "latest")])
+        let original = try frame("session.listChanged", value: String(repeating: "o", count: 100))
+        let other = try frame("lock.other")
+        let latest = try frame("session.listChanged", value: "latest")
+        try await withClient(policy: .init(maximumEvents: 2, maximumBytes: original.count + other.count)) { client, peer in
+            try await self.fence(client, peer: peer, frames: [original, other, latest])
             let first = await self.next(client.events)
-            let second = await self.next(client.events)
             XCTAssertEqual(first?.event.topic, "session.listChanged")
             XCTAssertEqual(first?.event.payload.objectValue?["value"]?.stringValue, "latest")
+            // Shrinking the replacement and dequeuing it must release its
+            // actual bytes, not leave the replaced frame charged to the queue.
+            try await self.fence(client, peer: peer, frames: [try self.frame("lock.after-replacement")])
+            let second = await self.next(client.events)
+            let third = await self.next(client.events)
             XCTAssertEqual(second?.event.topic, "lock.other")
+            XCTAssertEqual(third?.event.topic, "lock.after-replacement")
             let diagnostics = await client.diagnostics()
             XCTAssertFalse(diagnostics.contains { $0.overflowReason != nil })
         }
