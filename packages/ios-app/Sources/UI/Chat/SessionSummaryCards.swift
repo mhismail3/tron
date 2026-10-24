@@ -138,7 +138,7 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
                     SessionContextSegmentLegend(segments: segments)
                 } else {
                     ProgressView(value: percent, total: 100)
-                        .tint(Color.tronEmerald)
+                        .tint(Color.tronPrimary)
                         .accessibilityLabel("Context used")
                         .accessibilityValue("\(Int(percent.rounded())) percent")
                 }
@@ -156,7 +156,7 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
                         .accessibilityIdentifier("session-usage-detail")
                 }
                 ProgressView(value: 0, total: 100)
-                    .tint(Color.tronEmerald)
+                    .tint(Color.tronPrimary)
                     .accessibilityLabel("Context estimate pending")
                     .accessibilityValue("Displayed as zero percent until refreshed")
             }

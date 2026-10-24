@@ -95,13 +95,17 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   A child transcript is a read-only `ReadOnlySubagentSessionStore` lease whose only mutation is the
   capability-gated stop (`process-transcript-abort.v1`).
 - **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing), then the
-  shared emerald `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Effort and
+  shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Effort and
   Context Window); the existing settings renderer owns reads, writes, pending approvals and Revert. Session
   container: Workspace (`workspace-inspector.v1`), Instructions, Resources (tags Global, Project or
   External; Commands and Subagents preview a body whose View All opens the shared reader), Session
   History (`session-history-pages.v1`), Subagent History; Session Settings (Repository Overrides last);
   Terminal and Export as HTML/JSON. Manage Session, Manage Home and every sheet they open take
-  the emerald sheet theme (semantic colors aside); a sub-sheet's `title` constant (or
+  the selected primary sheet theme (semantic colors aside). The plain context usage bar,
+  attributed Tools/Rules/Skills source capsules, and history prompt/response icons and Current
+  pill resolve `tronPrimary` in their shared owners; source capsule fill and Current pill
+  fill/border derive from the same ink. Other history kinds retain semantic colors.
+  A sub-sheet's `title` constant (or
   `HomeSheetDestination.title`) is also its row's label.
 - **Home.** The pinned row routes the `openSessionId` from `home.status`; Home's composer sends
   `home.prompt` and follows a successor chapter carrying the unsent draft. A chat claiming Home has
@@ -164,7 +168,8 @@ Classes under `TronMobileUITests/`: `TronHomeControlsUITests`, `TronHomeDashboar
 Workspace cover/uncover, Manage model writes and scoped Settings routes),
 `TronSubsheetReliabilityUITests` (fresh Profile item and Chapter first taps, reopen/foreground,
 Canonical transcript medium→large and fresh medium reset, shared presenter lifecycle/haptics),
-`TronDashboardHomeButtonUITests`, `TronNewSessionUITests`, `TronSubagentParityUITests`,
+`TronDashboardHomeButtonUITests`, `TronSharedPrimaryAccentsUITests` (native usage, attributed
+source badges and history ink across primary themes in light/dark), `TronNewSessionUITests`, `TronSubagentParityUITests`,
 `TronToolSheetsPolishUITests`, `TronChatDisplayStripUITests`, `TronChatAnnotationUITests`,
 `TronComposerUploadUITests`, `TronChatHapticsUITests`, `TronReadonlyAttachmentUITests`, `TronCameraCaptureUITests`,
 `TronSessionRowClockUITests`, and the Home, Manage Session and Ask User journeys in

@@ -489,7 +489,7 @@ private struct AgentInstructionsEntryRow: View {
     let icon: String
 
     var body: some View {
-        let tag = ResourceTagLabel(title: AgentInstructionsPresentation.sourceTag(entry.source), accent: .tronEmerald)
+        let tag = ResourceTagLabel(title: AgentInstructionsPresentation.sourceTag(entry.source), accent: .tronPrimary)
         TronSettingsRow(icon: icon, title: entry.name ?? entry.text,
                         subtitle: entry.name == nil ? nil : entry.text, subtitleLineLimit: nil,
                         titleFont: entry.name == nil ? TronTypography.body
