@@ -70,7 +70,7 @@ UNAVAILABLE = {
         "Phase 2 K-0 and pilot module #1348"),
     "M2.navigationProbe": ("A fresh-agent probe run at milestones, not a repository computation.",
         "Milestone steward (plan §14.8)"),
-    "M4.sliceVerifyTime": ("`scripts/tron verify --changed` does not exist yet.",
+    "M4.sliceVerifyTime": ("`scripts/tron verify --changed` records timings per run; they are not derivable from Git objects.",
         "0.11 scripts/tron verify #1354"),
 }
 

@@ -106,6 +106,9 @@ owner, and never carry a number:
 | `M2.navigationProbe` | milestone steward (fresh-agent probe) |
 | `M4.sliceVerifyTime` | 0.11 `scripts/tron verify` |
 
+Verify records per-run step timings in `test-results/verify/<sha>.json`.
+Metrics does not read those reports: execution duration is not derivable from Git objects.
+
 Import edges are deliberately not inferred from text search: type-only, dynamic,
 re-exported and path-mapped imports make a grep graph wrong in both directions.
 
