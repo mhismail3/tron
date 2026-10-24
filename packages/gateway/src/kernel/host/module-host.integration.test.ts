@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../../admin/trust-service.js";
+import { DisplayArtifactStore } from "../../display/display-artifact-store.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { OpenAIModelEligibility } from "../../providers/openai-model-eligibility.js";
@@ -121,9 +122,10 @@ describe("kernel/host module host", () => {
     const tronHome = join(root, "tron");
     const trust = new TrustService(join(root, "agent"));
     const openAIModelEligibility = new OpenAIModelEligibility();
-    const modules = await ModuleHost.start(gatewayModules(() => ({ registry, openAIModelEligibility, home: { tronHome, agentDir: join(root, "agent"), trust } })).modules, { tronHome, log });
+    const display = { artifacts: new DisplayArtifactStore(tronHome), liveViews: undefined };
+    const modules = await ModuleHost.start(gatewayModules(() => ({ registry, display, openAIModelEligibility, home: { tronHome, agentDir: join(root, "agent"), trust } })).modules, { tronHome, log });
     const registry = new RuntimeRegistry({
-      modules, agentDir: join(root, "agent"), tronHome, idleRuntimeMs: 60_000, trust,
+      modules, agentDir: join(root, "agent"), tronHome, idleRuntimeMs: 60_000, trust, displayArtifacts: display.artifacts,
       createModelRuntime: () => createProviderModelRuntime(join(root, "agent")),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

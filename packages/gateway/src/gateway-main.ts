@@ -61,6 +61,7 @@ import { AutomationService } from "./automations/automation-service.js";
 import { GatewayAutomationExecutor } from "./automations/automation-executor.js";
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import type { ScheduleToolOperations } from "./automations/tron-schedule-extension.js";
+import { DisplayArtifactStore } from "./display/display-artifact-store.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
 import { HomeProfileItems } from "./modules/home/home-profile.js";
@@ -191,6 +192,7 @@ const trust = new TrustService(config.agentDir, { standaloneDirectories: [homeWo
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
+const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 // Mac Terminal's store is the Gateway user's own ~/.ssh/authorized_keys.
 const macTerminalKeys = new MacTerminalKeys(join(homedir(), ".ssh"));
 const settingsModel = new SettingsModel({
@@ -290,6 +292,7 @@ const homeComposition: HomeComposition = {
 };
 const { modules, home } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
   () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch,
+    display: { artifacts: displayArtifacts, liveViews: browserLiveViews },
     recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}), persistenceDiagnostic }));
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),
@@ -408,7 +411,7 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
   homeTaskDiagnostic,
   machineId: config.machineId,
   notifications,
-  browserLiveViews,
+  displayArtifacts,
   workRegistry,
   extensionArtifactWarning: ({ reason, owner }) => logger.log(
     "warning",

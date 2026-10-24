@@ -11,7 +11,7 @@ import { computerModule } from "../display/computer-module.js";
 import { appsModule } from "../modules/apps/module.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 import { createCoreModule } from "../workspace/core-module.js";
-import { createDisplayModule, createNativeCaptureModule } from "../display/display-modules.js";
+import { createDisplayModule, createNativeCaptureModule, type DisplayModuleServices } from "../display/display-modules.js";
 import { createScheduleModule } from "../automations/schedule-module.js";
 import { createNotifyModule } from "../notifications/notify-module.js";
 import { createHomeModules, type HomeComposition } from "../modules/home/home-module.js";
@@ -23,8 +23,9 @@ import type { SessionSearchService } from "../sessions/session-search-service.js
 /** The owners modules read per runtime: the registry's own services and the
  * composition's, which never pass through the registry. */
 export interface ModuleOwners extends RecentModelSignals {
-  registry: Pick<RuntimeRegistry, "knowledge" | "displayModuleServices" | "notifyModuleServices" | "homeKernel">;
+  registry: Pick<RuntimeRegistry, "knowledge" | "notifyModuleServices" | "homeKernel">;
   home: HomeComposition;
+  display: DisplayModuleServices;
   openAIModelEligibility: OpenAIModelEligibility;
   connections?: ConnectionOwner | undefined;
   scheduleToolOperations?: ScheduleToolOperations | undefined;
@@ -48,9 +49,9 @@ export function gatewayModules(owners: () => ModuleOwners) {
     createCoreModule(() => ({ knowledge: registry().knowledge, connections: owners().connections })),
     settingsModule,
     askUserModule,
-    createDisplayModule(() => registry().displayModuleServices()),
+    createDisplayModule(() => owners().display),
     appsModule,
-    createNativeCaptureModule(() => registry().displayModuleServices()),
+    createNativeCaptureModule(() => owners().display),
     computerModule,
     createScheduleModule(() => owners().scheduleToolOperations),
     createNotifyModule(() => registry().notifyModuleServices()),
