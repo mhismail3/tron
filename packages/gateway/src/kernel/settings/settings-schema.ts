@@ -1,8 +1,8 @@
-import { GatewayError } from "../errors.js";
-import { boolean, integer, object, string, arrayOfStrings } from "../util/validation.js";
-import { type FloorOverrides, type Control, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "../kernel/settings/settings-types.js";
-import { TIERS, MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Tier, type Direction } from "../kernel/settings/tool-contract.js";
-import type { StoreLayer } from "../kernel/settings/settings-types.js";
+import { GatewayError } from "../../errors.js";
+import { boolean, integer, object, string, arrayOfStrings } from "../../util/validation.js";
+import { type FloorOverrides, type Control, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "./settings-types.js";
+import { TIERS, MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Tier, type Direction } from "./tool-contract.js";
+import type { StoreLayer } from "./settings-types.js";
 
 /**
  * Canonical setting declarations (docs/settings-contract.md F1): the resolver,

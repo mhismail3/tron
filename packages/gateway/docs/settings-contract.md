@@ -6,7 +6,7 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 
 ## Foundations
 
-- **F1 Schema.** Each setting is one key declared once (`src/admin/settings-schema.ts`): type
+- **F1 Schema.** Each setting is one key declared once (`src/kernel/settings/settings-schema.ts`): type
   and validation, group, scope grants, store bindings, timing, effect point, tier floor,
   writers, redaction and display. `sessionOverridable` and `projectSettable` govern admission;
   store bindings describe owned persistence. iOS renders the served metadata generically.
@@ -46,7 +46,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-49 keys, declared in `packages/gateway/src/admin/settings-schema.ts` (`KEYS`).
+49 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Floor |
 | --- | --- | --- | --- | --- | --- | --- | --- |

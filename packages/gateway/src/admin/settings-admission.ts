@@ -1,7 +1,7 @@
 import type { AgentSession, SettingsManager } from "../kernel/pi/coding-agent.js";
 import type { CompactionConfiguration } from "../protocol/types.js";
-import { resolveSettings } from "./settings-resolver.js";
-import { type SettingsSchema } from "./settings-schema.js";
+import { resolveSettings } from "../kernel/settings/settings-resolver.js";
+import { type SettingsSchema } from "../kernel/settings/settings-schema.js";
 import type { Resolution } from "../kernel/settings/tool-contract.js";
 import { clampThinkingLevel, type Model, type ThinkingLevel } from "../kernel/pi/ai.js";
 import { GatewayError } from "../errors.js";

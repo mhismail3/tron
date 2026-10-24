@@ -15,7 +15,7 @@ import ownership  # noqa: E402  (the one module authority)
 
 GATEWAY = "packages/gateway"
 SERVICE = f"{GATEWAY}/src/transport/gateway-service.ts"
-SCHEMA = f"{GATEWAY}/src/admin/settings-schema.ts"
+SCHEMA = f"{GATEWAY}/src/kernel/settings/settings-schema.ts"
 SCHEMA_TYPES = f"{GATEWAY}/src/kernel/settings/tool-contract.ts"
 SCHEMA_COMPOSITION = f"{GATEWAY}/src/main/settings-schema.ts"
 BLOCK = re.compile(r"^<!-- tron docs ([^>]*?) -->\n(.*?)^<!-- /tron docs -->$", re.S | re.M)

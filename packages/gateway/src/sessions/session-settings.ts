@@ -3,7 +3,7 @@ import { getCurrentTools } from "../kernel/pi/ai.js";
 import type { SessionEntry, SessionManager } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { RETIRED_SCOPES, type FixedSetting } from "../kernel/settings/tool-contract.js";
-import { hasSessionSettingsApplier, type SettingsSchema } from "../admin/settings-schema.js";
+import { hasSessionSettingsApplier, type SettingsSchema } from "../kernel/settings/settings-schema.js";
 
 export const SESSION_SETTINGS_ENTRY = "tron.settings.v1";
 

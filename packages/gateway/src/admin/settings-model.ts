@@ -18,8 +18,8 @@ import { observedInstance, projectStores, type ObservedReaders, type ObservedSto
 import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord, TierBasis } from "../kernel/settings/settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "../kernel/settings/settings-approvals.js";
-import { composedBelow, readBinding, resolveSettings, targetLayers } from "./settings-resolver.js";
-import { HOME_PROFILE_SUBJECT, keyDefault, floorFor, hasSessionSettingsApplier, hasRuntimeRequestApplier, keyForHome, timingFor, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
+import { composedBelow, readBinding, resolveSettings, targetLayers } from "../kernel/settings/settings-resolver.js";
+import { HOME_PROFILE_SUBJECT, keyDefault, floorFor, hasSessionSettingsApplier, hasRuntimeRequestApplier, keyForHome, timingFor, type Binding, type KeyDeclaration, type SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { formatProfileValue, profileListItem, type HomeProfileAuthor, type HomeProfileItems, type HomeProfileOp, type HomeProfileSaved, type HomeProfileWrite } from "../modules/home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, maxTier, raiseTier, type FormatContext, type ModelRefValue, type SessionStore, type OptionSources, type SettingsStores, type FloorOverrides } from "../kernel/settings/settings-types.js";

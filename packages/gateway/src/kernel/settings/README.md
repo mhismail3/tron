@@ -2,11 +2,17 @@
 
 ## Purpose
 
-Shared settings vocabulary and durable audit/approval stores. The session context
-and settings change path use one contract and one persisted store format.
+Declared settings schema, precedence and shared vocabulary, with durable
+audit/approval stores. The session context and change path use one contract
+and one persisted store format.
 
 ## Owns
 
+`settings-schema.ts` owns the concrete key table, binding/type declarations,
+code floors and schema indexes. Composition supplies Home tool names, the run
+compaction limit and security validation without upward imports.
+`settings-resolver.ts` owns layer precedence, qualification, composition, clamping
+and state badges; `settings-project-diagnostics.ts` owns bounded Project diagnostics.
 `tool-contract.ts`: layer/tier/qualifier and model-reference/queue role/key vocabulary,
 retired scope-name mapping
 shared by session readers and store migration, and tool request, resolution,
@@ -24,8 +30,9 @@ validation; admin owns the migration transaction, backups and publication.
 ## Contract
 
 `SettingsToolAccess` resolves and changes the current session settings and drains
-its pending outcomes. Concrete precedence, validation and change orchestration stay
-in admin; the session runtime supplies its own identity and appliers. Audit records
+its pending outcomes. Admin loads stores and supplies runtime option/format sources
+to the kernel resolver; change orchestration remains in admin. The session runtime
+supplies its own identity and appliers. Audit records
 are not settings truth, and pending approvals never apply themselves.
 
 ## Invariants
@@ -54,4 +61,5 @@ The real settings and run locks cover consumers of this contract.
 
 ## Not here
 
-Settings precedence, change orchestration and UI metadata: [admin](../../admin/README.md).
+Store loading, dynamic catalogs, change orchestration and UI rendering:
+[admin](../../admin/README.md).

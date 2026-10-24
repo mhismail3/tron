@@ -1,4 +1,4 @@
-import { HOME_PROFILE_SUBJECT, SECTIONS, keyForHome, recordSubject, type SettingsSchema, type EntryGuidance, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, SECTIONS, keyForHome, recordSubject, type SettingsSchema, type EntryGuidance, type KeyDeclaration } from "../kernel/settings/settings-schema.js";
 import type { ResolvedKey, Resolution } from "../kernel/settings/tool-contract.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { formatProfileValue } from "../modules/home/home-profile.js";
