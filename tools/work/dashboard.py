@@ -13,12 +13,11 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import urlencode, quote
 
 import claim as claims
 import start
 import tracking
-from gh import Gh, GhError
+from gh import Gh
 
 # Workflow rule: a claim with no push or comment for this long is flagged.
 STALE_AFTER = timedelta(hours=48)

@@ -7,7 +7,6 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-import claim as claims
 from gh import Gh
 
 _IN_PROGRESS = (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"),

@@ -96,7 +96,7 @@ a clean textual merge is not semantic proof. Never force-push main.
 Optional `scripts/tron work land` enables rerere, fetches main into Git's
 worktree-private `FETCH_HEAD` (empty refmap, no shared tracking-ref update during
 fetch), merges that snapshot into the current committed task branch, and pushes
-HEAD to main. Branch names do not create pull requests or generate PR titles.
+HEAD to main. It does not create pull requests, generate PR titles or promote drafts.
 Linked worktrees share `origin/main`; another worker's fetch must
 not invalidate this worker's snapshot or make its fetch fail on the shared ref.
 Normal push may still refresh its remote-tracking ref; remote acceptance remains
