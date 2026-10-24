@@ -10,10 +10,10 @@ enum ThemeColor: String, CaseIterable, Identifiable, Sendable {
     /// AA ink on the neutral sheet and on low-opacity containers/pills derived
     /// from this same ink. Dark mode lifts the hue rather than using dark pigment.
     var lightHex: String {
-        switch self { case .emerald: "#065F46"; case .burgundy: "#4D1821"; case .oliveGold: "#514B10" }
+        switch self { case .emerald: "#065F46"; case .burgundy: "#57152F"; case .oliveGold: "#514B10" }
     }
     var darkHex: String {
-        switch self { case .emerald: "#6EE7B7"; case .burgundy: "#E5A6B2"; case .oliveGold: "#D9CB75" }
+        switch self { case .emerald: "#6EE7B7"; case .burgundy: "#EA7882"; case .oliveGold: "#D9CB75" }
     }
     var ink: Color { Color(lightHex: lightHex, darkHex: darkHex) }
 }
