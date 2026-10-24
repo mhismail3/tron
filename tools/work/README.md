@@ -47,7 +47,8 @@ coordination without a lifecycle/TTY override or changing files/index/processes.
 It cannot prevent a prior owner from later using plain Git; coordinate in the issue.
 Its exact local/remote publication fences remain: mismatched unpublished candidates
 use `recover` rather than silently replacing a remote head. `recover` publishes an
-exact clean settled-owner descendant as unverified work, not acceptance. None of
+exact clean settled-owner descendant as unverified work, not acceptance. Its audit
+points to handoff for ownership transfer and tests/plain Git for landing. None of
 these helpers is a prerequisite to landing. Destructive deletion belongs only to
 `work cleanup`, with its separate exact-head and unpublished-work safeguards.
 `scripts/test-work-coordination.py`, `test-work-release.py`, `test-work-handoff.py`

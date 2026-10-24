@@ -242,7 +242,7 @@ def recover(gh: Gh, cwd: Path, config: dict, number: int, expected_local: str, e
         body = (f"{marker}\nRecovered unverified candidate for #{number}. Ownership is unchanged.\n\n"
                 f"- Settled owner: `{old}`\n- Recovery actor: `{actor}`\n- Reason: {reason}\n"
                 f"- Expected remote ancestor: `{expected_remote}`\n- Preserved candidate: `{expected_local}`\n\n"
-                "This is candidate publication, not acceptance or completion. Ordinary handoff and full land gates remain required.\n")
+                "This is candidate publication, not acceptance or completion. Use handoff to transfer ownership; test and land with plain Git.\n")
         scrub = config.get("verify", {}).get("scrubCommand")
         if not isinstance(scrub, str) or not scrub.strip() or subprocess.run(
                 ["bash", "-c", scrub], cwd=primary, input=body, capture_output=True, text=True).returncode:
