@@ -31,6 +31,10 @@ approvals, their admission bounds, settlement, expiry and untold outcomes.
 `scope-resolution.ts` owns binding admission from declared Session/Project permissions,
 canonical targets, the public/storage scope mapping and the canonical sorted-qualifier
 instance identity used by resolution badges and outside-change observation.
+`settings-sdk-manager.ts` owns SDK storage admission: declared Project projection,
+validation and locked raw-document merging through the public Pi storage seam.
+It never creates a second settings store; ignored repository fields remain owned
+by their canonical document and survive SDK writes.
 `settings-migration-state.ts` owns shared-store value transformation and digest
 validation; admin owns the migration transaction, backups and publication.
 

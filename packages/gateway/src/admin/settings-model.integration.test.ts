@@ -9,7 +9,7 @@ import { fauxProvider } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "./trust-service.js";
-import { createSettingsManager } from "./settings-sdk-manager.js";
+import { createSettingsManager } from "../kernel/settings/settings-sdk-manager.js";
 import { SettingsStoreAdapter } from "./settings-model.js";
 import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";

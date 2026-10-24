@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { clampThinkingLevel, getSupportedThinkingLevels, type Model, type ThinkingLevel } from "../kernel/pi/ai.js";
 import { SettingsManager, type ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
-import { validateProjectSettings } from "./settings-sdk-manager.js";
+import { validateProjectSettings } from "../kernel/settings/settings-sdk-manager.js";
 import { contextWindowLimits, parseContextModelKey, validateContextWindow } from "../providers/context-window-policy.js";
 import { assertNewModelChoice, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { isVirtualModel } from "../providers/virtual-model.js";

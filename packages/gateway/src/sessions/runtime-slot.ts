@@ -1,7 +1,7 @@
 import * as activityProjection from "../kernel/projection/activity.js";
 import * as sessionPages from "../kernel/projection/session-pages.js";
 import { SnapshotProjection } from "../kernel/projection/snapshot.js";
-import { createSettingsManager } from "../admin/settings-sdk-manager.js";
+import { createSettingsManager } from "../kernel/settings/settings-sdk-manager.js";
 import { applyModelAdmission, compactionAdmission } from "../admin/settings-admission.js";
 import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";

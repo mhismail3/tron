@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
-import { SettingsManager } from "../kernel/pi/coding-agent.js";
-import { type SettingsSchema, type Binding } from "../kernel/settings/settings-schema.js";
-import { GatewayError } from "../errors.js";
+import { SettingsManager } from "../pi/coding-agent.js";
+import { type SettingsSchema, type Binding } from "./settings-schema.js";
+import { GatewayError } from "../../errors.js";
 
 /** Validate declared repository values, not ignored/safety fields. Missing
  * fields inherit; malformed declared fields must not silently become Global. */

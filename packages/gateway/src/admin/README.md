@@ -12,7 +12,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | Area | Files |
 |---|---|
 | Settings declarations and binding admission | [kernel schema](../kernel/settings/settings-schema.ts) (`createSettingsSchema`, `KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
-| SDK scope admission and operational model selection | `settings-sdk-manager.ts`, `settings-admission.ts` |
+| SDK scope admission and operational model selection | [kernel SDK storage admission](../kernel/settings/settings-sdk-manager.ts), `settings-admission.ts` |
 | Store/options adapter and presentation | `settings-model.ts` (`SettingsStoreAdapter`), `settings-presentation.ts`; [kernel resolver and diagnostics](../kernel/settings/README.md) |
 | Risk-provider adapter | `settings-risk.ts`; read/change engine, transaction order and audit/approvals: [kernel settings](../kernel/settings/README.md) |
 | Migration transaction, backups and publication | `settings-migration.ts`, `settings-migration-plan.ts`; shared-store value transforms: [kernel settings](../kernel/settings/README.md) |
@@ -100,7 +100,7 @@ are installed; schema access never evaluates their late-bound service getter.
 - Changing a model or thinking never persists a default. A masked Chat write
   refuses without replacing the stored choice. Operational Project selections
   preserve that inactive choice through cold resume and Project removal.
-- SDK construction filters Project bindings at the public storage seam before
+- Kernel settings SDK construction filters Project bindings at the public storage seam before
   tools/resources are admitted; writes preserve ignored fields in the same
   locked canonical document. Compaction consumes this registry's resolver.
 
