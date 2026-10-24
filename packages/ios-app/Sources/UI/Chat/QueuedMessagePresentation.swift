@@ -630,7 +630,10 @@ struct QueuedMessageEditorSheet: View {
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(isSaving)
         .tint(accent)
-        .tronSettingsVisualTheme(accent: accent)
+        .tronSettingsVisualTheme(
+            accent: accent,
+            surfaceAccent: behavior == .steer ? .tronPrimarySurface : accent
+        )
     }
 
     private var accent: Color { behavior == .steer ? .tronPrimary : .tronPurple }
