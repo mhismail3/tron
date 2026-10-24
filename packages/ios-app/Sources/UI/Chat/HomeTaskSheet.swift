@@ -213,7 +213,7 @@ struct HomeTaskSheet: View {
                 TronSettingsGroup("Result", accent: accent) {
                     TronSettingsRow(icon: Self.taskIcon(task.lifecycle, outcome: terminal.outcome),
                                     title: terminal.outcome.rawValue.capitalized, subtitle: terminal.reason,
-                                    subtitleLineLimit: nil, accent: accent)
+                                    subtitleLineLimit: nil, accent: accent, subtitleFont: TronTypography.subheadline)
                         .tronListMarkers("home-task-result")
                 }
             }
@@ -258,7 +258,7 @@ struct HomeTaskSheet: View {
                     if let checkin = task.checkins?.last {
                         TronSettingsRow(icon: "text.bubble", title: "Latest check-in",
                                         subtitle: HomeTaskPresentation.checkinText(checkin),
-                                        subtitleLineLimit: nil, accent: accent)
+                                        subtitleLineLimit: nil, accent: accent, subtitleFont: TronTypography.subheadline)
                             .accessibilityElement(children: .combine)
                             .accessibilityIdentifier("home-task-checkin")
                             .tronListMarkers("home-task-checkin")
@@ -267,7 +267,8 @@ struct HomeTaskSheet: View {
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                         if index > 0 { TronSettingsDivider(accent: accent) }
                         // Title over value, as every other Home detail row reads.
-                        TronSettingsRow(icon: row.icon, title: row.title, subtitle: row.value, accent: accent)
+                        TronSettingsRow(icon: row.icon, title: row.title, subtitle: row.value,
+                                        subtitleLineLimit: nil, accent: accent, subtitleFont: TronTypography.subheadline)
                             .accessibilityElement(children: .combine)
                             .accessibilityIdentifier(row.id)
                             .tronListMarkers(row.id)
@@ -278,7 +279,7 @@ struct HomeTaskSheet: View {
                             if index > 0 { TronSettingsDivider(accent: accent) }
                             TronSettingsRow(icon: "person.crop.circle.badge.clock", title: run.agent,
                                             subtitle: HomeSheetTime.relative(run.lastActivityAt ?? run.startedAt),
-                                            accent: accent) {
+                                            subtitleLineLimit: nil, accent: accent, subtitleFont: TronTypography.subheadline) {
                                 TronStatusPill(text: run.state.capitalized, accent: accent)
                             }
                         }

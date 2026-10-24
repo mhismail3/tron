@@ -133,11 +133,30 @@ final class TronHomeSheetsUITests: XCTestCase {
         shot("1771-\(name)-task-header")
         app.swipeUp()
         shot("1771-\(name)-task-result-worker")
-        let geometry = ["home-task-model-subtext", "home-task-subagents-subtext", "home-task-spend-subtext", "home-task-checkin-subtext"].map {
+        let geometry = ["home-task-result-subtext", "home-task-model-subtext", "home-task-subagents-subtext", "home-task-spend-subtext", "home-task-checkin-subtext"].map {
             "\($0): \(element(app, $0).frame)"
         }.joined(separator: "\n")
         let measurement = XCTAttachment(string: geometry)
         measurement.name = "1771-\(name)-subtext-geometry"; measurement.lifetime = .keepAlways; add(measurement)
+    }
+
+    @MainActor func testDelegateSubtextReferenceLight() { captureDelegateSubtextReference("light") }
+    @MainActor func testDelegateSubtextReferenceDark() { captureDelegateSubtextReference("dark") }
+
+    @MainActor private func captureDelegateSubtextReference(_ theme: String) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", "delegate", "-polish-\(theme)"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 15))
+        shot("1771-delegate-\(theme)-task-worker")
+        let geometry = ["Project", "Worker session", "Operation", "Model", "Thinking", "Reason"].map {
+            "\($0): \(element(app, "home-tool-row-\($0)-subtext").frame)"
+        }.joined(separator: "\n")
+        let measurement = XCTAttachment(string: geometry)
+        measurement.name = "1771-delegate-\(theme)-geometry"; measurement.lifetime = .keepAlways; add(measurement)
+        app.swipeUp()
+        shot("1771-delegate-\(theme)-subagents")
     }
 
     @MainActor func testCurrentSettingsTaskSubtextLight() { captureCurrentSettingsTaskSubtext("light", arguments: []) }

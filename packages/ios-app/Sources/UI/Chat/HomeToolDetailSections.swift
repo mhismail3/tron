@@ -121,6 +121,7 @@ struct HomeToolDetailSections: View {
                 TronSettingsRow(icon: row.icon, title: row.title, subtitle: row.value, subtitleLineLimit: nil, accent: accent)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("home-tool-row-\(row.title)")
+                    .tronListMarkers("home-tool-row-\(row.title)")
             }
         }
     }

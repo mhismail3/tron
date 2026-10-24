@@ -1623,6 +1623,8 @@ struct TronSettingsRow<Trailing: View>: View {
     let titleFont: Font
     let titleColor: Color
     let subtitleColor: Color
+    /// An explicit semantic reading style for detail values; ordinary metadata stays unchanged.
+    let subtitleFont: Font?
     /// Non-nil makes this a feed row (an inbox entry): a one-line title with
     /// this short value trailing on its line, the subtitle in body type, and
     /// tighter vertical insets.
@@ -1649,6 +1651,7 @@ struct TronSettingsRow<Trailing: View>: View {
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
+        subtitleFont: Font? = nil,
         feedTrailing: String? = nil,
         footnote: String? = nil,
         @ViewBuilder trailing: () -> Trailing
@@ -1663,6 +1666,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.titleFont = titleFont
         self.titleColor = titleColor
         self.subtitleColor = subtitleColor
+        self.subtitleFont = subtitleFont
         self.feedTrailing = feedTrailing
         self.footnote = footnote
         self.trailing = trailing()
@@ -1752,9 +1756,9 @@ struct TronSettingsRow<Trailing: View>: View {
                     Text(subtitleIsMarkdown
                          ? MarkdownPresentation.Inline(source: subtitle).attributedString ?? AttributedString(subtitle)
                          : AttributedString(subtitle))
-                        .font(feedTrailing == nil
+                        .font(subtitleFont ?? (feedTrailing == nil
                             ? TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment)
-                            : TronTypography.body)
+                            : TronTypography.body))
                         .foregroundStyle(subtitleColor)
                         .lineLimit(subtitleLineLimit)
                         .truncationMode(.tail)
@@ -1910,6 +1914,7 @@ extension TronSettingsRow where Trailing == EmptyView {
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
+        subtitleFont: Font? = nil,
         feedTrailing: String? = nil
     ) {
         self.init(
@@ -1923,6 +1928,7 @@ extension TronSettingsRow where Trailing == EmptyView {
             titleFont: titleFont,
             titleColor: titleColor,
             subtitleColor: subtitleColor,
+            subtitleFont: subtitleFont,
             feedTrailing: feedTrailing
         ) { EmptyView() }
     }
