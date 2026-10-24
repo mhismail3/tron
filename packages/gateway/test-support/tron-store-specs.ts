@@ -12,6 +12,7 @@ import { TrustService } from "../src/admin/trust-service.js";
 import { SwiftAppStore } from "../src/modules/apps/swift-app-store.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
 import { HomeOwner } from "../src/modules/home/home-owner.js";
+import { homeTaskPolicy } from "../src/modules/home/home-task-worker-choice.js";
 import { HomeProfileItems, readHomeProfile } from "../src/modules/home/home-profile.js";
 import { HomeTaskStore, taskIntentDigest } from "../src/modules/home/home-task-store.js";
 import { DisplayArtifactStore } from "../src/display/display-artifact-store.js";
@@ -107,7 +108,7 @@ function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
     trust: new TrustService(join(home, "agent")),
     workspace,
     // Designation and status never dispatch a task, so the task namespace is never read.
-    taskSessions: {} as RuntimeRegistry,
+    taskSessions: {} as RuntimeRegistry, taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
     // Designation and status never materialize a successor runtime or watch global resources.
     runtimes: {} as never, agentDir: "/nonexistent-agent-dir",
     sessions: {

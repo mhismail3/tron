@@ -23,6 +23,7 @@ vi.mock("../../util/durable-json.js", async importOriginal => {
 import { TrustService } from "../../admin/trust-service.js";
 import { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { HomeOwner } from "./home-owner.js";
+import { homeTaskPolicy } from "./home-task-worker-choice.js";
 import type { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 
 const roots: string[] = [];
@@ -61,6 +62,7 @@ describe("Home durable publication reconciliation", () => {
         currentSessionModel: () => null,
         retireHomeRuntimes: async () => { retirementStarted(); await retirementBlocked; retired.push("all"); },
       },
+      taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
       memoryModels: async () => [],
       memorySummarizer: () => async () => { throw new Error("unused"); },
     });
@@ -108,6 +110,7 @@ describe("Home durable publication reconciliation", () => {
         currentSessionModel: () => null,
         retireHomeRuntimes: async () => {},
       },
+      taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
       memoryModels: async () => [],
       memorySummarizer: () => async () => { throw new Error("unused"); },
     });

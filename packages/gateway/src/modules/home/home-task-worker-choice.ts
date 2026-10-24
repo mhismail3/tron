@@ -3,8 +3,9 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model, t
 import { GatewayError } from "../../errors.js";
 import { isVirtualModel } from "../../providers/virtual-model.js";
 import { ModelQueueExhausted, type ModelQueueOwner } from "../../providers/model-queue.js";
-import { splitModelRef } from "../../kernel/settings/tool-contract.js";
+import { splitModelRef, type modelQueueKey } from "../../kernel/settings/tool-contract.js";
 import { SUBAGENT_QUEUE_MODEL, type QueueModelState } from "../../providers/model-queue-extension.js";
+import type { TrustService } from "../../admin/trust-service.js";
 import type { SettingsModel } from "../../kernel/settings/settings-model.js";
 import type { SessionSnapshot } from "../../protocol/types.js";
 import type { HomeOwner } from "./home-owner.js";
@@ -28,7 +29,7 @@ export interface HomeTaskWorkerChoice {
  * designation: routing runs on the canonical transcript, which a worker does not own. A
  * registered model without credentials is refused too, since the worker's own model
  * change would be refused only after its session exists. */
-export async function admitTaskWorkerChoice(runtime: ModelRuntime | undefined, choice: HomeTaskWorkerChoice): Promise<HomeTaskWorkerChoice> {
+export async function admitTaskWorkerChoice(runtime: WorkerModelCatalog | undefined, choice: HomeTaskWorkerChoice): Promise<HomeTaskWorkerChoice> {
   if (choice.model === undefined) {
     if (choice.thinking !== undefined) {
       throw refusal("thinking-requires-model", "thinking needs a model: name the model the worker runs with, or omit thinking to keep the Gateway default");
@@ -67,7 +68,7 @@ function refusal(reason: string, message: string, details: Record<string, unknow
 
 /** The models a choice would be accepted for: fixed and usable. The catalog holds
  * far more models than a refusal can name, so the list is a bounded sample. */
-async function validModelReferences(runtime: ModelRuntime): Promise<string> {
+async function validModelReferences(runtime: Pick<ModelRuntime, "getAllAvailable">): Promise<string> {
   const references = (await runtime.getAllAvailable())
     .filter(model => !isVirtualModel(model))
     .slice(0, VALID_MODEL_LIMIT)
@@ -75,7 +76,7 @@ async function validModelReferences(runtime: ModelRuntime): Promise<string> {
   return references.length ? `Valid models: ${references.join(", ")}.` : "No valid model is available.";
 }
 
-/** The generic reads Home's worker choice needs (the registry supplies them). */
+/** Delegate-boundary reads; Home supplies queue policy over the native owners. */
 export interface HomeWorkerChoicePort {
   settings(): Pick<SettingsModel, "resolve"> | undefined;
   homeRuntime(sessionId: string): Promise<Pick<SessionSnapshot, "model" | "thinkingLevel">>;
@@ -147,5 +148,40 @@ export async function dispatchWithWorkerChoice(owner: Pick<HomeOwner, "dispatchT
   return { ...handle, worker, ...(subagentModels ? { subagentModels } : {}) };
 }
 
-/** Admits a delegation's model and thinking level against the Gateway's own model
- * runtime, the one designation validates against. Read-only. */
+type WorkerModelCatalog = Pick<ModelRuntime, "getModel" | "checkAuth" | "getAllAvailable">;
+
+/** Canonical native reads; Home owns the scope/role/choice policy over them. */
+export interface HomeTaskPolicyInputs {
+  settings: HomeWorkerChoicePort["settings"];
+  modelQueueOf(role: Parameters<typeof modelQueueKey>[0], scope: "home"): Promise<string[]>;
+  modelRuntime(): WorkerModelCatalog | undefined;
+}
+
+/** Resolve launch queues in parallel at each call, never retaining a prior recipe. */
+export async function homeTaskModelQueues(read: HomeTaskPolicyInputs["modelQueueOf"]) {
+  const [worker, subagent] = await Promise.all([read("worker", "home"), read("subagent", "home")]);
+  return { worker, subagent };
+}
+
+/** Home task policy is stateless: admission and each turn read the current owners. */
+export function homeTaskPolicy(inputs: HomeTaskPolicyInputs, trust: Pick<TrustService, "inspect">) {
+  return {
+    canonicalTarget: async (target: string) => {
+      const inspection = await trust.inspect(target);
+      if (inspection.effectiveDecision !== true) throw new GatewayError("trust_required", "Home tasks require a trusted project");
+      return inspection.cwd;
+    },
+    budget: async () => {
+      const settings = inputs.settings();
+      if (!settings) return undefined;
+      const resolution = await settings.resolve({ kind: "home" }, undefined, ["permissions.budget.task"], { storeState: false });
+      return resolution.keys.find(key => key.key === "permissions.budget.task")?.value as
+        { inputTokens?: number; outputTokens?: number } | undefined;
+    },
+    modelQueues: () => homeTaskModelQueues(inputs.modelQueueOf),
+    // Keep the admission wrapper's promise adoption around the authenticated read.
+    admitChoice: async (choice: HomeTaskWorkerChoice) => admitTaskWorkerChoice(inputs.modelRuntime(), choice),
+  };
+}
+
+export type HomeTaskPolicy = ReturnType<typeof homeTaskPolicy>;

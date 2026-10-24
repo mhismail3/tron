@@ -90,7 +90,6 @@ import {
 } from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../modules/home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
 import { modelQueueKey } from "../kernel/settings/tool-contract.js";
 import type { HomeKernelPorts } from "../modules/home/home-module.js";
@@ -723,6 +722,7 @@ export class RuntimeRegistry {
   homeKernel(): HomeKernelPorts {
     return {
       createSession: (cwd, profile) => this.create(cwd, profile),
+      acquire: sessionId => this.acquire(sessionId),
       sessions: {
         currentSessionModel: sessionId => this.slots.get(sessionId)?.snapshot().model ?? null,
         sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
@@ -749,17 +749,13 @@ export class RuntimeRegistry {
         canonicalEntries: (sessionId) => this.canonicalEntries(sessionId),
         createRuntimeOver: (sessionId, build) => this.createRuntimeOver(sessionId, build),
       },
-      memoryModels: () => this.modelQueueOf("background", "home"),
+      modelQueueOf: (role, scope) => this.modelQueueOf(role, scope),
+      modelRuntime: () => this.options.gatewayModelRuntime,
       taskSessions: this,
       knowledge: () => this.knowledgeService,
       readSearchCut: sessionId => this.readSearchCut(sessionId),
       settings: () => this.settingsOwners?.model,
       changes: () => this.settingsOwners?.changes,
-      workerChoice: {
-        homeRuntime: async sessionId => (await this.acquire(sessionId)).snapshot(),
-        modelQueues: () => this.homeTaskModelQueues(),
-        model: (provider, id) => this.options.gatewayModelRuntime?.getModel(provider, id),
-      },
     };
   }
 
@@ -2596,22 +2592,6 @@ export class RuntimeRegistry {
     });
   }
 
-  async canonicalTaskTarget(target: string): Promise<string> {
-    const inspection = await this.options.trust.inspect(target);
-    if (inspection.effectiveDecision !== true) throw new GatewayError("trust_required", "Home tasks require a trusted project");
-    return inspection.cwd;
-  }
-
-  /** The Home profile's task budget (settings-model.md 6.1), read through the one
-   * resolver: at task admission (fixed at start) and at each worker turn boundary
-   * (a lowered budget applies live). Undefined is no limit. */
-  async homeTaskBudget(): Promise<{ inputTokens?: number; outputTokens?: number } | undefined> {
-    const settings = this.settingsOwners?.model;
-    if (!settings) return undefined;
-    const resolution = await settings.resolve({ kind: "home" }, undefined, ["permissions.budget.task"], { storeState: false });
-    return resolution.keys.find(key => key.key === "permissions.budget.task")?.value as { inputTokens?: number; outputTokens?: number } | undefined;
-  }
-
   /** A role's model queue, `provider/id` in order, through the one settings
    * resolver (Profile > Mac > built-in). The background queue without a value
    * of its own is the subagent queue. */
@@ -2623,17 +2603,6 @@ export class RuntimeRegistry {
     const value = (key: string) => (resolution.keys.find(row => row.key === key)?.value as string[] | undefined) ?? [];
     const own = value(keys[0]!);
     return own.length > 0 || role !== "background" ? own : value(keys[1]!);
-  }
-
-  /** Explicit Home task launch policy. The dispatcher persists this selection
-   * in the worker’s canonical transcript; ordinary runtimes never read Home. */
-  async homeTaskModelQueues() {
-    const [worker, subagent] = await Promise.all([this.modelQueueOf("worker", "home"), this.modelQueueOf("subagent", "home")]);
-    return { worker, subagent };
-  }
-
-  async admitTaskWorkerChoice(choice: HomeTaskWorkerChoice): Promise<HomeTaskWorkerChoice> {
-    return admitTaskWorkerChoice(this.options.gatewayModelRuntime, choice);
   }
 
   async create(cwdInput: string, profile: string = ORDINARY_SESSION_PROFILE.name, taskWorker?: import("../kernel/delegation/task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {

@@ -5,6 +5,7 @@ import { visitCanonicalSessionEntries } from "../../episodic/episodic-source.js"
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import type { HomeTaskPolicy } from "./home-task-worker-choice.js";
 import { HomeChapterMaterializer } from "./home-chapter-materialization.js";
 import { HomeGlobalResources } from "./home-global-resources.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
@@ -162,6 +163,7 @@ export interface HomeOwnerOptions {
    * refusal: the effective size of a turn and the readiness wait it took. */
   requestDiagnostic?: (record: HomeRequestRecord) => void;
   taskSessions: RuntimeRegistry;
+  taskPolicy: HomeTaskPolicy;
   notifications?: NotificationService;
   machineId?: string;
   taskDiagnostic?: (record: HomeTaskDiagnostic) => void;
@@ -252,7 +254,7 @@ export class HomeOwner {
     this.resources = new HomeGlobalResources({ agentDir: options.agentDir, diagnostic: record => this.options.diagnostic?.(record),
       homeSlot: () => { try { return options.runtimes.runtimeOf(this.routeBinding().physicalSessionId); } catch { return undefined; } } });
     this.materializer = new HomeChapterMaterializer(this, options.runtimes, options.trust, options.diagnostic);
-    this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox);
+    this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox, options.taskPolicy);
   }
 
   /** Delegate authority is sampled for the exact enabled Home, never a fork or

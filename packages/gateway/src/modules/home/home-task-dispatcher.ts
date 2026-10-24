@@ -16,7 +16,7 @@ import { homeTaskPromptTokens, homeTaskSpend, type HomeTaskSpend } from "./home-
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHECKIN_VISIBLE } from "../../kernel/delegation/task-checkin.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, homeTaskOperationSpan, parseHomeTaskReport, type HomeTaskReport } from "../../kernel/delegation/task-report.js";
-import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
+import type { HomeTaskWorkerChoice, HomeTaskPolicy } from "./home-task-worker-choice.js";
 import type { FixedSetting } from "../../kernel/settings/tool-contract.js";
 import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "../../kernel/delegation/task-subagents.js";
 import type { HomeTaskCheckin, HomeTaskCounts, HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../../protocol/types.js";
@@ -154,7 +154,7 @@ export interface HomeTaskWorkerSummary { model: string; thinking: string; modelS
 interface HomeTaskLaunch {
   task: HomeTaskRecord; authority: Awaited<ReturnType<HomeTaskAuthorization["authorize"]>>;
   input: HomeTaskDispatchRequest; title: string | undefined;
-  choice: Awaited<ReturnType<RuntimeRegistry["admitTaskWorkerChoice"]>>; deferredThinking: HomeTaskDispatchRequest["thinking"];
+  choice: HomeTaskWorkerChoice; deferredThinking: HomeTaskDispatchRequest["thinking"];
   /** A settled task continued in place (#929): its predecessor's worker session is rebound, not
    * created or configured, and the maintainer's attachments go with the first prompt. */
   resume?: { sessionId: string; images: ImageContent[]; exceptWorkToken?: string };
@@ -215,7 +215,7 @@ export class HomeTaskDispatcher {
   private recovery: Promise<HomeTaskRecoveryStatus> | undefined;
   constructor(readonly store: HomeTaskStore, readonly authorization: HomeTaskAuthorization,
     private readonly sessions: RuntimeRegistry, private readonly diagnostic: ((record: HomeTaskDiagnostic) => void) | undefined,
-    private readonly inbox: WakeInboxOwner) {
+    private readonly inbox: WakeInboxOwner, private readonly policy: HomeTaskPolicy) {
     this.pressure = new HostPressure(record => this.diagnostic?.(record));
   }
 
@@ -456,7 +456,7 @@ export class HomeTaskDispatcher {
     }
     const instructions = [...carried, ...(text ? [text] : [])];
     const epoch = await this.stage("setup", taskId, signal, () => this.store.restoreEpoch());
-    const budget = await this.stage("budget", taskId, signal, () => this.sessions.homeTaskBudget());
+    const budget = await this.stage("budget", taskId, signal, () => this.policy.budget());
     const entries = await this.sessions.readTaskEvidence(sessionId);
     const brief = resumeBrief(previous, instructions, interruptedQuestion(homeTaskOperationSpan(entries, previous.operationId!).run));
     const task = await this.stage("create", taskId, signal, () => this.store.put({
@@ -493,7 +493,7 @@ export class HomeTaskDispatcher {
     // Refused before any task record, namespace initialization or worker exists.
     const deferredThinking = input.provenance && !input.model ? input.thinking : undefined;
     const taskId = input.taskId;
-    const choice = await this.stage("choice", taskId, signal, () => this.sessions.admitTaskWorkerChoice(deferredThinking === undefined ? input : {}));
+    const choice = await this.stage("choice", taskId, signal, () => this.policy.admitChoice(deferredThinking === undefined ? input : {}));
     const epoch = await this.stage("setup", taskId, signal, () => this.setup.run(async () => {
       const created = await this.store.initialize();
       const current = await this.store.restoreEpoch();
@@ -503,8 +503,8 @@ export class HomeTaskDispatcher {
     if (await this.stage("lookup", taskId, signal, () => this.store.read(taskId))) throw new GatewayError("conflict", "Task already exists; accepted work is never replayed");
     // The Home profile's task budget, fixed at the task's start (settings-model.md 6.1):
     // a later raise never reaches this task; a later lower applies at its next turn.
-    const budget = await this.stage("budget", taskId, signal, () => this.sessions.homeTaskBudget());
-    const target = await this.stage("target", taskId, signal, () => this.sessions.canonicalTaskTarget(input.target));
+    const budget = await this.stage("budget", taskId, signal, () => this.policy.budget());
+    const target = await this.stage("target", taskId, signal, () => this.policy.canonicalTarget(input.target));
     // A record published after its admission was refused is settled, never left pending.
     let task = await this.stage("create", taskId, signal, () => this.store.put({
       version: 1, taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
@@ -564,7 +564,7 @@ export class HomeTaskDispatcher {
         return accepted;
       });
       reports.limitBudget(async entries => {
-        const current = await this.sessions.homeTaskBudget().catch(() => undefined);
+        const current = await this.policy.budget().catch(() => undefined);
         const limit = (field: "inputTokens" | "outputTokens") => Math.min(task.budget?.[field] ?? Infinity, current?.[field] ?? Infinity);
         if (limit("inputTokens") === Infinity && limit("outputTokens") === Infinity) return false;
         const span = homeTaskOperationSpan(entries, operationId);
@@ -588,7 +588,7 @@ export class HomeTaskDispatcher {
       const configured = await this.stage("configure-worker", taskId, signal, async () => {
       // Name the worker before its first prompt; the slot persists the canonical transcript entry.
       if (title) await slot.rename(title);
-      await slot.setHomeTaskModelQueues(input.modelQueues ?? await this.sessions.homeTaskModelQueues());
+      await slot.setHomeTaskModelQueues(input.modelQueues ?? await this.policy.modelQueues());
       // The slot's own configuration owners record the choice in the worker's transcript
       // before its first prompt. An omitted model keeps the session's default.
       const fixedAt = (value: unknown, field: "model" | "thinking"): FixedSetting => ({ value,

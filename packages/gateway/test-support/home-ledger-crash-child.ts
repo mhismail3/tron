@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { HomeOwner } from "../src/modules/home/home-owner.js";
+import { homeTaskPolicy } from "../src/modules/home/home-task-worker-choice.js";
 import { TronWorkspace } from "../src/workspace/tron-workspace.js";
 
 const [tronHome, sessionId, marker] = process.argv.slice(2);
@@ -9,7 +10,7 @@ const owner = new HomeOwner({
   trust: {} as never,
   workspace: new TronWorkspace(tronHome),
   // The crash path only seals a chapter, which never dispatches a task.
-  taskSessions: {} as never,
+  taskSessions: {} as never, taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
   // Sealing never materializes a successor runtime or watches global resources.
   runtimes: {} as never, agentDir: "/nonexistent-agent-dir",
   // The crash path never reaches a learned-profile read, so no Knowledge owner exists.

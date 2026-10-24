@@ -56,6 +56,12 @@ kept for a paused Home. Progress is never success evidence.
 
 ## Dispatch and workers
 
+Home owns task budget resolution, trusted-target admission, launch queue selection and
+model/thinking admission.
+The dispatcher reads this stateless policy at the existing admission/turn cuts; settings,
+the Gateway model runtime and generic queue IO stay with their canonical native owners.
+Home memory selects its background queue over that same native queue reader.
+
 Only the enabled Home's active chapter calls `delegate` with a stable `taskId`, bounded
 `intent`, trusted `target` and optional `title` (≤ 80 characters, the worker session name). The
 dispatcher records pending intent, authorizes the snapshot, creates the worker through
