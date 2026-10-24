@@ -37,6 +37,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 SCHEMA = "tron.triage-report.v1"
@@ -1875,12 +1876,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"warning: no Gateway log directory at {gateway_directory}; "
               f"using the rows the exports carry", file=sys.stderr)
         gateway_directory = None
-    if arguments.out is not None:
-        resolved = arguments.out.resolve()
-        for path in exports:
-            if path.resolve() == resolved:
-                print(f"error: refusing to overwrite the input {path}", file=sys.stderr)
-                return EXIT_INVALID
     try:
         report = triage_reports(exports, gateway_directory, arguments.tolerance_seconds,
                                 arguments.tailscale_window, arguments.tailscale_peer)
@@ -1890,7 +1885,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     text = json.dumps(report, indent=2) + "\n"
     if arguments.out is not None:
         try:
-            arguments.out.write_text(text, encoding="utf-8")
+            resolved = arguments.out.resolve()
+            inputs = report["inputs"]["phoneExports"] + report["inputs"]["gatewayLogs"]["files"]
+            for entry in inputs:
+                path = Path(entry["path"])
+                if path.resolve() == resolved or (arguments.out.exists() and arguments.out.samefile(path)):
+                    print(f"error: refusing to overwrite the input {path}", file=sys.stderr)
+                    return EXIT_INVALID
+            # Replace the directory entry, never follow an output inode if a link
+            # appears after the identity check. Staging stays on the same filesystem.
+            with tempfile.TemporaryDirectory(prefix=".tron-triage-", dir=arguments.out.parent) as staging:
+                temporary = Path(staging) / "report.json"
+                temporary.write_text(text, encoding="utf-8")
+                temporary.replace(arguments.out)
         except OSError as error:
             print(f"error: cannot write {arguments.out}: {error}", file=sys.stderr)
             return EXIT_INVALID

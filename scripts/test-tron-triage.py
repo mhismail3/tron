@@ -506,6 +506,62 @@ class InputContractTests(TriageFixture):
         self.assertIn("no such phone export", completed.stderr)
 
 
+class OutputSafetyTests(TriageFixture):
+    """The real front door must leave every input inode and its bytes alone."""
+
+    def test_output_refuses_phone_and_gateway_input_aliases(self):
+        for source_name in ("phone.jsonl", "logs/gateway.jsonl", "logs/gateway.jsonl.7"):
+            for alias in ("direct", "hardlink", "symlink"):
+                with self.subTest(source=source_name, alias=alias):
+                    directory = self.root / f"{source_name.replace('/', '-')}-{alias}"
+                    (directory / "logs").mkdir(parents=True)
+                    phone = directory / "phone.jsonl"
+                    phone.write_text(json.dumps(attempt(
+                        "2026-09-28T09:40:00.000Z", 38, "success", "connected", "none")) + "\n")
+                    inputs = [phone]
+                    for name in ("gateway.jsonl", "gateway.jsonl.7"):
+                        path = directory / "logs" / name
+                        path.write_text(json.dumps(gateway_record(
+                            "2026-09-28T09:40:00.000Z", "connection.opened", "info", "opened")) + "\n")
+                        inputs.append(path)
+                    source = directory / source_name
+                    output = source if alias == "direct" else directory / "report.json"
+                    if alias == "hardlink":
+                        os.link(source, output)
+                    elif alias == "symlink":
+                        output.symlink_to(source)
+                    before = {p: (p.read_bytes(), p.stat().st_ino, p.stat().st_mtime_ns)
+                              for p in inputs}
+                    completed = subprocess.run(
+                        [str(FRONT_DOOR), str(phone), "--gateway-logs", str(directory / "logs"),
+                         "--json", "--out", str(output)],
+                        capture_output=True, text=True, timeout=120)
+                    after = {p: (p.read_bytes(), p.stat().st_ino, p.stat().st_mtime_ns)
+                             for p in inputs}
+                    self.assertEqual(after, before, completed.stderr)
+                    self.assertEqual(completed.returncode, 2, completed.stderr)
+                    self.assertIn("refusing to overwrite", completed.stderr)
+
+    def test_distinct_output_succeeds_without_modifying_inputs(self):
+        phone = self.write("phone.jsonl", [attempt(
+            "2026-09-28T09:40:00.000Z", 38, "success", "connected", "none")])
+        gateway = self.gateway([gateway_record(
+            "2026-09-28T09:40:00.000Z", "connection.opened", "info", "opened")])
+        before = {p: p.read_bytes() for p in (phone, gateway)}
+        output = self.root / "report.json"
+        for existing in (False, True):
+            with self.subTest(existing=existing):
+                if existing:
+                    output.write_text("old report\n")
+                completed = subprocess.run(
+                    [str(FRONT_DOOR), str(phone), "--gateway-logs", str(self.logs),
+                     "--json", "--out", str(output)],
+                    capture_output=True, text=True, timeout=120)
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(json.loads(output.read_text()), json.loads(completed.stdout))
+                self.assertEqual({p: p.read_bytes() for p in before}, before)
+
+
 class ReviewRegressionTests(TriageFixture):
     """The failure modes an independent review found on the branch.
 
