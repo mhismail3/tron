@@ -88,6 +88,7 @@ async function start(root: string) {
 it("keeps setup, policy fences, redaction and receipts across a loopback Gateway restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-connections-lock-"));
   vi.stubEnv("HOME", root);
+  vi.stubEnv("TMPDIR", root);
   vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
   vi.stubEnv("PI_OFFLINE", "1");
   let gateway: Awaited<ReturnType<typeof start>> | undefined;
@@ -121,7 +122,8 @@ it("keeps setup, policy fences, redaction and receipts across a loopback Gateway
     const updated = await gateway.request("connections.policy.update", {
       commandId: "lock-policy-current", instanceId, expectedSetupRevision: configured.instances[0]!.setupRevision, policy: updatedPolicy,
     });
-    expect(updated.ok).toBe(true);
+    expect(updated).toMatchObject({ ok: true, result: { policy: updatedPolicy } });
+    expect((await gateway.snapshot()).instances.find(instance => instance.id === instanceId)?.policy).toEqual(updatedPolicy);
     const beforeRefusals = await readFile(statePath, "utf8");
     const stale = await gateway.request("connections.policy.update", {
       commandId: "lock-policy-stale", instanceId, expectedSetupRevision: configured.instances[0]!.setupRevision, policy,
@@ -145,7 +147,9 @@ it("keeps setup, policy fences, redaction and receipts across a loopback Gateway
     const beforeRestart = await gateway.snapshot();
     expect(beforeRestart.instances).toHaveLength(1);
     expect(beforeRestart.setupOperations.find(operation => operation.operationId === pending.result.operationId)?.status).toBe("cancelled");
-    expect(beforeRestart.capabilities.filter(capability => capability.connectionId === instanceId).every(capability => capability.availability === "unavailable")).toBe(true);
+    const disconnectedCapabilities = beforeRestart.capabilities.filter(capability => capability.connectionId === instanceId);
+    expect(disconnectedCapabilities.length).toBeGreaterThan(0);
+    expect(disconnectedCapabilities.every(capability => capability.availability === "unavailable")).toBe(true);
     const bytesBeforeRestart = await readFile(statePath, "utf8");
     trace.push(...gateway.exchanges);
     await gateway.close();
