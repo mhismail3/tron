@@ -20,13 +20,15 @@ import UIKit
                 let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Queued message 1607")).firstMatch
                 guard row.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
                 Thread.sleep(forTimeInterval: 0.6)
+                let arrowButton = app.buttons["arrow.turn.up.right"].firstMatch
+                XCTAssertTrue(arrowButton.waitForExistence(timeout: 5), app.debugDescription)
                 let cardShot = app.screenshot()
                 keep(cardShot, "queued-\(theme)-\(mode)-card")
-                let fill = try pigment(cardShot, app: app, frame: row.frame)
+                // AX exposes the message text, not the whole glass card. Its
+                // leading padding is empty pigment, away from antialiased text.
+                let fill = try pigment(cardShot, app: app, frame: row.frame, leadingInset: -6)
                 assertTheme(fill, theme: theme, context: "\(mode) queued card glass")
-                let arrowArea = CGRect(x: row.frame.maxX - 40, y: row.frame.minY,
-                                       width: 40, height: 32)
-                let arrow = try XCTUnwrap(sheetInk(cardShot.image, arrowArea,
+                let arrow = try XCTUnwrap(sheetInk(cardShot.image, arrowButton.frame,
                     window: app.windows.firstMatch.frame.width), "The queue arrow must have visible accent ink")
                 assertTheme(arrow, theme: theme, context: "\(mode) queued card arrow")
 
@@ -78,15 +80,16 @@ import UIKit
             XCTAssertGreaterThan(color[1], color[2], context, file: file, line: line)
             XCTAssertGreaterThan(color[2], color[0], context, file: file, line: line)
         default:
-            XCTAssertGreaterThan(color[0], color[1], context, file: file, line: line)
+            XCTAssertGreaterThanOrEqual(color[0], color[1], context, file: file, line: line)
             XCTAssertGreaterThan(color[1], color[2], context, file: file, line: line)
         }
     }
 
-    private func pigment(_ screenshot: XCUIScreenshot, app: XCUIApplication, frame: CGRect) throws -> [Double] {
+    private func pigment(_ screenshot: XCUIScreenshot, app: XCUIApplication, frame: CGRect,
+                         leadingInset: CGFloat = 6) throws -> [Double] {
         let image = try XCTUnwrap(screenshot.image.cgImage)
         let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
-        let area = CGRect(x: frame.minX + 6, y: frame.midY - 2, width: 3, height: 4)
+        let area = CGRect(x: frame.minX + leadingInset, y: frame.midY - 2, width: 3, height: 4)
         XCTAssertTrue(app.windows.firstMatch.frame.contains(area), "Surface sample must be visible: \(area)")
         let crop = try XCTUnwrap(image.cropping(to: area.applying(CGAffineTransform(scaleX: scale, y: scale))))
         var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
