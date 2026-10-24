@@ -126,4 +126,3 @@ export function unsetPath(document: Record<string, unknown>, path: readonly stri
     if (child && typeof child === "object" && Object.keys(child).length === 0) delete parents[index]![path[index]!];
   }
 }
-

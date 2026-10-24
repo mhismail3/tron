@@ -24,7 +24,7 @@ import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-regi
  *     recorded as Changes and reach the next activation as they now stand;
  *  F12 a stale maintainer edit or undo is refused with the current state;
  *  F13 Home's own profile changes are recorded and undoable by the maintainer.
- *  F14 a failed profile batch leaves earlier writes applied or gives them a successful/grouped audit.
+ *  F14 failure to restore a partial batch or record its ungrouped failed diffs.
  *
  * The retained artifact is `test-results/home-profile/report.json`.
  */
