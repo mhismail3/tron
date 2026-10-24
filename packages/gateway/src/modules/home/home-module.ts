@@ -61,7 +61,7 @@ export interface HomeModuleServices {
 /** The composition's Home inputs: platform owners and log sinks, never the registry. */
 export interface HomeComposition {
   runtime: HomeSessionProfileServices["runtime"];
-  settings(): { model: SettingsModel; changes: SettingsChangePath } | undefined;
+  settings(): Readonly<{ model: SettingsModel; changes: SettingsChangePath }> | undefined;
   knowledge(): KnowledgeService | undefined;
   modelRuntime?: ModelRuntime | undefined;
   tronHome: string;

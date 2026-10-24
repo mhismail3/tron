@@ -528,7 +528,7 @@ export class RuntimeRegistry implements SessionOperations {
   private readonly exports: BlobStore;
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
-  private settingsOwners: { model: import("../kernel/settings/settings-model.js").SettingsModel; changes: import("../kernel/settings/settings-change.js").SettingsChangePath } | undefined;
+  private settingsOwners: Readonly<{ model: import("../kernel/settings/settings-model.js").SettingsModel; changes: import("../kernel/settings/settings-change.js").SettingsChangePath }> | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
