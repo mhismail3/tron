@@ -44,8 +44,8 @@ a visible error. Debug never creates a LaunchAgent.
 Stable passes `--host tailscale` (eligible IPv4 before IPv6, then address and interface order;
 an explicit host wins); the CLI is loopback unless `--tailscale`. Debug pairing appends `(Dev)`.
 Both share `~/.tron/internal/machine-group-id`; everything else is per profile, and credential,
-enrollment, network-cache and marker paths need an explicit `TronGatewayProfile`. Release owns
-only Stable; it observes an authenticated Debug Gateway (exact supervisor and child identities,
+enrollment, network-cache and marker paths need an explicit `TronGatewayProfile`. Launch-management policy evaluates the runtime variant, Gateway profile and isolated-install
+mode: only installed Release may manage Stable, never an isolated install. It observes an authenticated Debug Gateway (exact supervisor and child identities,
 sole 9848 listener, selected manifest, `system.info`) and may show its pairing, never controls it.
 
 ## Supervision and status

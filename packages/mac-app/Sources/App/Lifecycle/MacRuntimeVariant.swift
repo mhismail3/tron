@@ -88,10 +88,6 @@ enum MacRuntimeVariant: Equatable, Sendable {
         self == .installedRelease && bundleIdentifier != Self.releaseBundleIdentifier
     }
 
-    func canManageLaunchAgent(isIsolatedInstallMode: Bool) -> Bool {
-        self == .installedRelease && !isIsolatedInstallMode
-    }
-
     /// Release owns Stable only. Debug can observe Gateways but never manages
     /// registration or process lifecycle.
     func canManageLaunchAgent(
