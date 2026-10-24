@@ -117,7 +117,10 @@ struct HostedSettingsRendererFixture: View {
         NavigationStack {
             if ready {
                 Group {
-                    if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-settings-three-layer-preview"),
+                    if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
+                       ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
+                        HostedSixSmallUIFixture(surface: ProcessInfo.processInfo.arguments[index + 1])
+                    } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-settings-three-layer-preview"),
                        ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
                         HostedSettingsThreeLayerPreview(surface: ProcessInfo.processInfo.arguments[index + 1])
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-controls-review") {
@@ -149,7 +152,8 @@ struct HostedSettingsRendererFixture: View {
                 .safeAreaInset(edge: .bottom) {
                     if !ProcessInfo.processInfo.arguments.contains("-settings-alignment-review")
                         && !ProcessInfo.processInfo.arguments.contains("-settings-controls-review")
-                        && !ProcessInfo.processInfo.arguments.contains("-settings-three-layer-preview") {
+                        && !ProcessInfo.processInfo.arguments.contains("-settings-three-layer-preview")
+                        && !ProcessInfo.processInfo.arguments.contains("-six-ui-surface") {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
                         Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
@@ -295,6 +299,16 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             result = .object(["path": params["path"] ?? .string("/fixture/projects"), "parent": .string("/fixture"), "entries": .array([
                 .object(["name": .string("Example"), "path": .string("/fixture/projects/Example"), "kind": .string("directory"), "hidden": .bool(false)])
             ])])
+        case "session.workspace.inspect" where ProcessInfo.processInfo.arguments.contains("-six-ui-surface"):
+            result = .object(["root": .string("/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"), "revision": .string("preview"),
+                "repository": .object(["root": .string("/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"),
+                    "branch": .null, "head": .string("b8d31a1d12345678"), "detached": .bool(true), "unborn": .bool(false),
+                    "dirty": .bool(false), "changes": .array([])])])
+        case "session.workspace.list":
+            result = .object(["root": .string("/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"),
+                "path": .string(""), "parent": .null, "revision": .string("preview"), "entries": .array([])])
+        case "trust.inspect": result = .object(["requiresDecision": .bool(false), "effectiveDecision": .bool(true)])
+        case "git.inspect": result = .object(["isRepository": .bool(true), "branch": .null, "dirty": .bool(false), "branches": .array([]), "commits": .array([])])
         case "model.recent": result = .object(["models": .array([])])
         case "settings.resolve": result = resolution()
         case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", cursor: params["cursor"]?.stringValue)
@@ -428,6 +442,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 + (ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
                 + [HostedSettingsReviewSchema.key("setup.sessionDir", "setup", "Session folder", .string("/workspace/sessions"), "/workspace/sessions", "readOnly", help: "Where chats are stored. Applies after a restart."),
                    HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
+            if ProcessInfo.processInfo.arguments.contains("-six-ui-surface") {
+                return .object(["keys": .array(rows), "sections": .array(HostedSettingsReviewSchema.sections)])
+            }
             let keys = rows.compactMap { value -> JSONValue? in
                 guard var row = value.objectValue,
                       row["layers"]?.arrayValue?.contains(where: { $0.objectValue?["layer"]?.stringValue == "global" }) == true else { return nil }
