@@ -58,7 +58,7 @@ lists in composition order, because four owners observe session removal today
 | `modelRuntimeInstalled` | sync, owner runtimes only | `openAIModelEligibility.attachRuntime` (`runtime-slot.ts:2243`), Kimi/Jev pricing (`runtime-registry.ts:1827`) | providers |
 | `modelUsed` | sync, off the critical path | `noteModelUsed` (`runtime-slot.ts:4662`) | providers |
 | `sessionRemoval` (observers) | async before delete/rekey; rejection refuses | `beforeSessionDelete/Rekey` (`runtime-registry.ts:682-683`) | automations |
-| `sessionLineage` | sync: `state(sessionId)` (sealed, materializing reserved successor, lineage id, ordinal, attempt, path), `assertWritable(sessionId)`, `publicationUncertain()` | `HomeOwner.chapterStateFor`/`isHomeChapter` reads in acquire, catalog, attention, retain, cold scan and the slot; `assertChapterWritable`; the registry's `homePublicationUncertain` gate | Home |
+| `sessionLineage` | sync: `state(sessionId)` (sealed, materializing reserved successor, lineage id, ordinal, attempt, path), `assertWritable(sessionId)`, `publicationUncertain()`; async read-only `openRefusal(sessionId, path)` before SDK open | `HomeOwner.chapterStateFor`/`isHomeChapter` reads in acquire, catalog, attention, retain, cold scan and the slot; `assertChapterWritable`; the registry's `homePublicationUncertain` gate | Home |
 | `sessionRetired` (observers) | sync, each caught | `retireSession` (`runtime-slot.ts:2775`, `:10879`), `sessionRekeyed/Closed` (`runtime-registry.ts:681`, `:684`), search invalidator (`:1449`, `:1466`, `:3853`) | display, transport, search |
 
 ### 2.2 Session profiles

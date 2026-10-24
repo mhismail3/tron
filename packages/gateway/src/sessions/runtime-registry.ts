@@ -65,7 +65,6 @@ import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
 import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import { scanReservedHomeSession } from "../modules/home/home-session-recovery.js";
 import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
 import { syncDurably } from "../util/durable-json.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
@@ -1061,7 +1060,8 @@ export class RuntimeRegistry {
       const path = candidates[0]!.path;
       let manager: SessionManager;
       try {
-        await this.scanHomeBeforeManager(sessionId, path);
+        const openRefusal = await this.lineage().openRefusal(sessionId, path);
+        if (openRefusal) throw openRefusal;
         manager = SessionManager.open(path);
       }
       catch { continue; }
@@ -1922,7 +1922,8 @@ export class RuntimeRegistry {
     if (!entry || entry.structuralSubagent) return {};
     let manager: SessionManager;
     try {
-      await this.scanHomeBeforeManager(sessionId, entry.path);
+      const openRefusal = await this.lineage().openRefusal(sessionId, entry.path);
+      if (openRefusal) throw openRefusal;
       manager = SessionManager.open(entry.path, this.sessionDirectoryFor(entry.canonicalCwd));
     }
     catch { return {}; }
@@ -2174,7 +2175,8 @@ export class RuntimeRegistry {
     // reader for its canonical leaf/branch. Physical line order is not branch
     // authority when sibling forks are present.
     const entries = parseStrictSessionJSONL(bytes);
-    await this.scanHomeBeforeManager(sessionId, info.path);
+    const openRefusal = await this.lineage().openRefusal(sessionId, info.path);
+    if (openRefusal) throw openRefusal;
     const coldManager = SessionManager.open(info.path);
     const selectedEntries = coldManager.getBranch();
     // Full-file graph validation is an admission gate; retain the SDK-selected
@@ -3084,27 +3086,6 @@ export class RuntimeRegistry {
     return pending.operation;
   }
 
-  private async scanHomeBeforeManager(sessionId: string, path: string): Promise<void> {
-    const chapter = this.lineage().state(sessionId);
-    if (!chapter.lineageId) return;
-    // A sealed chapter opens cold exactly as a warm one does: read-only. The caller's
-    // header read refuses an unstable tail before the SDK can repair it, and the slot's
-    // chapter state refuses every write (`assertChapterWritable`). Only an in-progress
-    // materialization or a path the ledger does not name is refused.
-    if (chapter.materializing || chapter.expectedPath && resolve(chapter.expectedPath) !== resolve(path)) {
-      throw new GatewayError("conflict", "Home chapter cannot be opened as a runtime");
-    }
-    const canonicalPath = resolve(path);
-    // The exact file owns its evidence directory. Re-encoding cwd can select
-    // another folder after alias canonicalization, or encode a directory twice.
-    const scan = await scanReservedHomeSession({
-      directory: dirname(canonicalPath), expectedPath: canonicalPath, sessionId,
-    });
-    if (scan.action !== "adopt" || scan.path !== canonicalPath) {
-      throw new GatewayError("conflict", "Home chapter is blocked by uncertain canonical evidence");
-    }
-  }
-
   private async startAcquiredSlot(
     sessionId: string,
     entry: CatalogAcquisitionEntry,
@@ -3122,7 +3103,8 @@ export class RuntimeRegistry {
       if (resolve(canonicalPath) !== entry.path) {
         throw new GatewayError("conflict", "Tron session identity changed after catalog discovery", true);
       }
-      await this.scanHomeBeforeManager(sessionId, canonicalPath);
+      const openRefusal = await this.lineage().openRefusal(sessionId, canonicalPath);
+      if (openRefusal) throw openRefusal;
       if (await this.projectTrustReloading(entry.canonicalCwd)) {
         throw new GatewayError("busy", "Project trust is being reconfigured", true);
       }

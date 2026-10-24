@@ -19,6 +19,9 @@ export interface SessionLineageState {
  * reserved successors and publication gating, read at each call. */
 export interface SessionLineagePolicy {
   state(sessionId: string): SessionLineageState;
+  /** Read-only evidence for an SDK-open candidate; the kernel throws the exact
+   * refusal, if any. No session construction or publication runs in this read. */
+  openRefusal(sessionId: string, path: string): Promise<Error | undefined>;
   /** Throws the lineage owner's refusal when the session may not be written. */
   assertWritable(sessionId: string): void;
   /** Every lineage member is fenced while its owner reconciles an uncertain publication. */

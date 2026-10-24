@@ -17,6 +17,7 @@ import type { InputAdmissionPolicy } from "../../kernel/host/input-admission.js"
 import type { SessionLineagePolicy } from "../../kernel/host/session-lineage.js";
 import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../../kernel/host/kernel-lifecycle.js";
 import { assertChapterWritable } from "./home-chapter-state.js";
+import { homeOpenRefusal } from "./home-session-recovery.js";
 import { homeInputAdmission } from "./home-input-admission.js";
 import { dispatchWithWorkerChoice, type HomeWorkerChoicePort } from "./home-task-worker-choice.js";
 import type { TrustService } from "../../admin/trust-service.js";
@@ -133,6 +134,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
         const { homeId, ...state } = owner.chapterStateFor(sessionId);
         return homeId === undefined ? state : { ...state, lineageId: homeId };
       },
+      openRefusal: (sessionId, path) => homeOpenRefusal(sessionId, path, owner.chapterStateFor(sessionId)),
       assertWritable: sessionId => assertChapterWritable(owner.chapterStateFor(sessionId)),
       publicationUncertain: () => owner.publicationUncertain,
     },

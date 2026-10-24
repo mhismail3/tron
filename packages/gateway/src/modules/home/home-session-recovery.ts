@@ -1,5 +1,7 @@
 import { lstat, open, readdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { GatewayError } from "../../errors.js";
+import type { HomeChapterState } from "./home-chapter-state.js";
 
 const MAXIMUM_SESSION_FILES = 100_000;
 const MAXIMUM_ADOPTION_BYTES = 200 * 1_024 * 1_024;
@@ -98,6 +100,26 @@ function isCanonicalEntry(record: Record<string, unknown>, previousIds: Set<stri
     case "label": return id(record.targetId) && previousIds.has(record.targetId) && optional(record.label, string);
     case "session_info": return optional(record.name, string);
     default: return false;
+  }
+}
+
+/** Home owns the cold-open evidence decision. Reading a sealed chapter is safe;
+ * only an in-progress materialization, wrong path or uncertain file is refused. */
+export async function homeOpenRefusal(sessionId: string, path: string, chapter: HomeChapterState): Promise<Error | undefined> {
+  if (!chapter.homeId) return;
+  // The caller refuses an unstable header before the SDK can repair it, and the
+  // slot's chapter state refuses every write to a sealed chapter.
+  if (chapter.materializing || chapter.expectedPath && resolve(chapter.expectedPath) !== resolve(path)) {
+    return new GatewayError("conflict", "Home chapter cannot be opened as a runtime");
+  }
+  const canonicalPath = resolve(path);
+  // The exact file owns its evidence directory. Re-encoding cwd can select
+  // another folder after alias canonicalization, or encode a directory twice.
+  const scan = await scanReservedHomeSession({
+    directory: dirname(canonicalPath), expectedPath: canonicalPath, sessionId,
+  });
+  if (scan.action !== "adopt" || scan.path !== canonicalPath) {
+    return new GatewayError("conflict", "Home chapter is blocked by uncertain canonical evidence");
   }
 }
 

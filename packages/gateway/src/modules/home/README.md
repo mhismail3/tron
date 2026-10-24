@@ -47,6 +47,10 @@ unaffected by every rule here.
   publication error fences all Home admissions until reload and slot retirement finish.
   The neutral kernel lineage port owns runtime construction/publication; Home alone
   interprets the write-authority fields. Slots retain a frozen defensive copy.
+- **Cold opens.** Home owns chapter/path/evidence checks and returns a read-only
+  `sessionLineage.openRefusal` fact. Core throws that exact refusal before SDK open
+  at each existing read/recovery cut; sealed chapters remain readable. No Home
+  construction or publication workflow runs through this fact.
 - **Logical route.** `home.open` creates no runtime. `home.prompt` persists its receipt
   (identity, binding revision, chapter) before materialization and replays completed ones.
 
