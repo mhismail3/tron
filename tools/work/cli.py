@@ -119,7 +119,7 @@ def main(argv: list) -> int:
     landing.add_argument("--dry-run", action="store_true", help="fetch and print the git operations without merging or pushing")
     access = commands.add_parser("auth", help="the agents' GitHub token: one-time setup or its status")
     access.add_argument("auth_command", choices=("setup", "status"))
-    tidy = commands.add_parser("cleanup", help="remove this task worktree and its branches once its PR merged")
+    tidy = commands.add_parser("cleanup", help="remove this completed task worktree and branches after preservation checks")
     tidy.add_argument("--all", action="store_true", help="every worktree under the worktree root; list the rest")
     tidy.add_argument("--dry-run", action="store_true", help="report the decisions and change nothing")
     args = parser.parse_args(argv)

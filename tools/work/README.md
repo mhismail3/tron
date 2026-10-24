@@ -115,8 +115,10 @@ scripts/tron work issue close <issue> --reason completed --comment-file <evidenc
 ```
 
 `scripts/tron work cleanup [--dry-run]` recognizes a closed issue whose exact
-worktree head is reachable on origin/main, as well as historical exact-head
-merged PRs. It preserves dirty/untracked files, live processes, branches that
+worktree head is reachable on origin/main, a closed issue with only its unchanged
+claim commit, or historical exact-head merged PRs. Its help and orphan hints defer
+to these completion and local-preservation checks. It preserves dirty/untracked
+files, live processes, branches that
 moved, and unpublished work. An integration merge needs no task-branch PR when
 its ancestry contains the exact task head. A squash with identical files does
 not prove that head landed: unique checkpoints remain preserved, even on a

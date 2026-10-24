@@ -497,8 +497,8 @@ def _paused_epics(issues: Dict[int, dict], open_issues: List[dict], config: dict
     return paused
 
 
-# A claim branch's worktree whose pull request merged at its head is provably done (README.md, `cleanup`).
-_CLEANUP_HINT = "; work cleanup --all removes it once its pull request merged at this head"
+# Completion and local-preservation proofs belong to cleanup (README.md, `cleanup`).
+_CLEANUP_HINT = "; work cleanup --all checks exact-head completion and local preservation before removal"
 
 
 def _absence(number: int, state: str) -> str:
