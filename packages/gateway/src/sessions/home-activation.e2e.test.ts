@@ -1228,13 +1228,13 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     await designateHome(f, "e2e-recorded-path-absent");
     const registry = f.registry as unknown as {
-      sessionDirectoryFor(cwd: string): string;
+      sessionDirectory(cwd: string): string;
     };
     const owner = homeOwnerOf(f.registry) as unknown as { writeLocked(record: HomeRecord): Promise<void> };
     const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     const active = current.chapters[0]!;
     const reservedId = "recorded-path-absent-session";
-    const expectedPath = join(registry.sessionDirectoryFor(homeOwnerOf(f.registry).homeWorkspacePath()), "missing-recorded-path.jsonl");
+    const expectedPath = join(registry.sessionDirectory(homeOwnerOf(f.registry).homeWorkspacePath()), "missing-recorded-path.jsonl");
     await owner.writeLocked({
       ...current,
       chapters: [
