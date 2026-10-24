@@ -1,3 +1,4 @@
+import type { SettingsSchema } from "../admin/settings-schema.js";
 import { HOME_SESSION_PROFILE_NAME } from "../modules/home/home-session-profile.js";
 import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
 import type { LineageRuntimePort, SessionLineagePolicy } from "../kernel/host/session-lineage.js";
@@ -689,6 +690,7 @@ export class RuntimeRegistry {
       machineId?: string;
       notifications?: NotificationService;
       readonly displayArtifacts: DisplayArtifactStore;
+      readonly settingsSchema: SettingsSchema;
       workRegistry?: GatewayWorkRegistry;
       /** A discovery pass that stopped at one of its budgets instead of the end
        * of its roots, with the counts it spent. A directory past the stop is
@@ -1684,6 +1686,7 @@ export class RuntimeRegistry {
       blobs: this.blobs,
       exports: this.exports,
       displayArtifacts: this.options.displayArtifacts,
+      settingsSchema: this.options.settingsSchema,
       workspace: this.workspace,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,

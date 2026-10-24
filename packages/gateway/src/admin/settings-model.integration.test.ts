@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -12,7 +13,8 @@ import { createSettingsManager } from "./settings-sdk-manager.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
-import { KEYS, terminalIdleLimitMs } from "./settings-schema.js";
+import { terminalIdleLimitMs } from "./settings-schema.js";
+const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { Resolution, ResolvedKey, SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
 import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "../kernel/settings/settings-types.js";
@@ -95,7 +97,7 @@ async function fixture() {
   });
   registries.push(registry);
   await registry.initialize();
-  const settingsModel = new SettingsModel({
+  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA,
     agentDir, tronHome, trust, modelRuntime,
     // Production wiring (gateway-main): a chat's live registry, else the scope's.
     toolCatalog: async target => target.kind === "session" ? registry.liveToolCatalog(target.sessionId)
@@ -239,7 +241,7 @@ describe("settings.resolve", () => {
     // Keep raw SDK parity for every other key. Tools cross the production
     // admission boundary: the repository cannot widen the executable ceiling.
     const piTrusted = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: true }), model);
-    const admittedTools = (await createSettingsManager(project, agentDir, true)).getDefaultTools();
+    const admittedTools = (await createSettingsManager(TEST_SETTINGS_SCHEMA, project, agentDir, true)).getDefaultTools();
     piTrusted["tools.active"] = admittedTools;
     for (const [key, expected] of Object.entries(piTrusted)) {
       const qualifiers = key.startsWith("context.compaction.") && key !== "context.compaction.enabled" ? { model: modelKey } : undefined;

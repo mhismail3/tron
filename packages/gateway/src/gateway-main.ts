@@ -14,6 +14,7 @@ import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
 import { macTerminalHostCommand } from "./machine/mac-terminal-host.js";
 import { terminalIdleLimitMs } from "./admin/settings-schema.js";
+import { createGatewaySettingsSchema } from "./main/settings-schema.js";
 import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
 import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
 import { SettingsChangeRecord } from "./kernel/settings/settings-record.js";
@@ -195,7 +196,9 @@ const browserLiveViews = new BrowserLiveViewRegistry();
 const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 // Mac Terminal's store is the Gateway user's own ~/.ssh/authorized_keys.
 const macTerminalKeys = new MacTerminalKeys(join(homedir(), ".ssh"));
+const settingsSchema = createGatewaySettingsSchema();
 const settingsModel = new SettingsModel({
+  schema: settingsSchema,
   macTerminalKeys,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
@@ -208,7 +211,7 @@ const settingsModel = new SettingsModel({
 });
 const settingsRecord = new SettingsChangeRecord(config.tronHome);
 // Outside changes (settings-model.md 5.6): reads compare Global/Project with what Tron last saw.
-const outsideSettings = new OutsideChanges(config.tronHome, config.agentDir, settingsRecord, settingsModel.observedReaders);
+const outsideSettings = new OutsideChanges(settingsSchema, config.tronHome, config.agentDir, settingsRecord, settingsModel.observedReaders);
 settingsModel.observeOutside(outsideSettings);
 const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
@@ -412,6 +415,7 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
   machineId: config.machineId,
   notifications,
   displayArtifacts,
+  settingsSchema,
   workRegistry,
   extensionArtifactWarning: ({ reason, owner }) => logger.log(
     "warning",
@@ -909,7 +913,7 @@ await transport.listen(async () => {
   // The shared settings stores move to the three-layer vocabulary while clients
   // see warming-up, before the owners that read them load (sessions.initialize).
   // Never fatal (#1649): a refusal changes nothing, is logged, and retries next start.
-  await migrateSettings({ tronHome: config.tronHome, agentDir: config.agentDir }).then(
+  await migrateSettings({ schema: settingsSchema, tronHome: config.tronHome, agentDir: config.agentDir }).then(
     ({ inputs, replaced, alreadyComplete }) => logger.log("info", alreadyComplete ? "Settings migration already complete"
       : `Settings migration published ${replaced} of ${inputs} shared settings file(s)`, {
       event: "settings.migration", source: "settings", counts: { inputs, replaced } }),

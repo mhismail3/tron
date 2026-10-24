@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { Socket, createServer } from "node:net";
@@ -152,7 +153,7 @@ async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory:
   registries.push(sessions);
   await sessions.initialize();
   const keys = new MacTerminalKeys(sshDirectory);
-  const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime, macTerminalKeys: keys });
+  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: keys });
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), new SettingsApprovals(tronHome), {
     setTrust: async () => { throw new Error("not used"); },
   }, agentDir);

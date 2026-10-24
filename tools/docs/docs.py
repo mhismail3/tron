@@ -17,6 +17,7 @@ GATEWAY = "packages/gateway"
 SERVICE = f"{GATEWAY}/src/transport/gateway-service.ts"
 SCHEMA = f"{GATEWAY}/src/admin/settings-schema.ts"
 SCHEMA_TYPES = f"{GATEWAY}/src/kernel/settings/tool-contract.ts"
+SCHEMA_COMPOSITION = f"{GATEWAY}/src/main/settings-schema.ts"
 BLOCK = re.compile(r"^<!-- tron docs ([^>]*?) -->\n(.*?)^<!-- /tron docs -->$", re.S | re.M)
 OPENER = re.compile(r"^<!-- tron docs [^>]*-->", re.M)
 FENCE = re.compile(r"^```.*?^```", re.S | re.M)
@@ -156,7 +157,7 @@ def schema() -> dict:
     if node.returncode != 0:
         raise DocsError(f"no pinned Node: {node.stderr.strip()}")
     done = subprocess.run([node.stdout.strip(), "--experimental-transform-types", "--no-warnings",
-                           str(Path(__file__).with_name("settings-keys.mjs")), str(ROOT / SCHEMA), str(ROOT / SCHEMA_TYPES)],
+                           str(Path(__file__).with_name("settings-keys.mjs")), str(ROOT / SCHEMA_COMPOSITION), str(ROOT / SCHEMA_TYPES)],
                           cwd=ROOT / GATEWAY, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
     if done.returncode != 0:
         if not (ROOT / GATEWAY / "node_modules").is_dir():

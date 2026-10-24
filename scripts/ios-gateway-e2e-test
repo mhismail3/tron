@@ -653,11 +653,12 @@ settings_inventory_json() {
   "$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
     const dir = process.argv[1];
-    const schema = await import(pathToFileURL(`${dir}/settings-schema.js`).href);
+    const { createGatewaySettingsSchema } = await import(pathToFileURL(`${dir}/settings-schema.js`).href);
+    const schema = createGatewaySettingsSchema();
     const keys = schema.KEYS.map(key => ({ id: key.id, label: key.label, group: key.group, layers: Object.keys(key.layers),
       qualifier: key.qualifier ?? null }));
     process.stdout.write(JSON.stringify({ keys }));
-  ' "$gateway_dir/dist/admin"
+  ' "$gateway_dir/dist/main"
 }
 
 patch_xctestrun() {

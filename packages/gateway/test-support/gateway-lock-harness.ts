@@ -1,3 +1,4 @@
+import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { createTestRegistry, homeOwnerOf } from "./gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -262,9 +263,9 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } }).sessionCatalog.whenPublished();
 
   // Production settings wiring (gateway-main.ts): every read reconciles outside changes.
-  const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(root, "home", ".ssh")) });
+  const settingsModel = new SettingsModel({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(root, "home", ".ssh")) });
   const settingsRecord = new SettingsChangeRecord(tronHome);
-  const outside = new OutsideChanges(tronHome, agentDir, settingsRecord, settingsModel.observedReaders);
+  const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, settingsRecord, settingsModel.observedReaders);
   settingsModel.observeOutside(outside);
   const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(tronHome), {
     setTrust: async (project, decision) => trust.setAndApply(project, decision,

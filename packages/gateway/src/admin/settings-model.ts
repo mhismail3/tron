@@ -19,7 +19,7 @@ import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord, TierBasis } from "../kernel/settings/settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "../kernel/settings/settings-approvals.js";
 import { composedBelow, readBinding, resolveSettings, targetLayers } from "./settings-resolver.js";
-import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, keyDefault, floorFor, floorInstances, hasSessionSettingsApplier, hasRuntimeRequestApplier, keyForHome, schemaKey, timingFor, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, keyDefault, floorFor, hasSessionSettingsApplier, hasRuntimeRequestApplier, keyForHome, timingFor, type Binding, type KeyDeclaration, type SettingsSchema } from "./settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { formatProfileValue, profileListItem, type HomeProfileAuthor, type HomeProfileItems, type HomeProfileOp, type HomeProfileSaved, type HomeProfileWrite } from "../modules/home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, maxTier, raiseTier, type FormatContext, type ModelRefValue, type SessionStore, type OptionSources, type SettingsStores, type FloorOverrides } from "../kernel/settings/settings-types.js";
@@ -34,6 +34,7 @@ export interface SessionSettingsSource {
 }
 
 export interface SettingsModelDependencies {
+  schema: SettingsSchema;
   agentDir: string;
   tronHome: string;
   trust: Pick<TrustService, "inspect" | "canonicalDirectory">;
@@ -80,6 +81,8 @@ export class SettingsModel {
     };
   }
 
+  get schema(): SettingsSchema { return this.dependencies.schema; }
+
   get modelRuntime(): ModelRuntime { return this.dependencies.modelRuntime; }
 
   get macTerminalKeys(): MacTerminalKeys | undefined { return this.dependencies.macTerminalKeys; }
@@ -101,7 +104,7 @@ export class SettingsModel {
   async resolve(target: SettingsTarget, session?: SessionSettingsSource, keys?: readonly string[], options: { storeState?: boolean } = {}): Promise<Resolution> {
     const stores = await this.stores(target, session, options);
     const runtime = session?.modelRuntime ?? this.dependencies.modelRuntime;
-    return resolveSettings(target, stores, { format: formatContext(runtime), options: optionSources(runtime), ...(keys ? { keys } : {}) });
+    return resolveSettings(this.schema, target, stores, { format: formatContext(runtime), options: optionSources(runtime), ...(keys ? { keys } : {}) });
   }
 
   /** Resolve operational defaults at a request boundary, never by reloading the
@@ -111,14 +114,14 @@ export class SettingsModel {
   async requestSettings(sessionId: string, session: SessionSettingsSource, previousPins: Record<string, FixedSetting>): Promise<{
     settings: ReturnType<SettingsManager["getSettings"]>; requestPins: Record<string, FixedSetting>; admission: Resolution["keys"];
   }> {
-    const keys = KEYS.filter(hasRuntimeRequestApplier);
+    const keys = this.schema.KEYS.filter(hasRuntimeRequestApplier);
     // The provider-request boundary reads values only: outside comparison and git
     // state belong to settings reads and file events, not to every model request.
     const resolved = await this.resolve({ kind: "session", sessionId }, session, [...keys.map(key => key.id), "model.ref[role=chat]", "model.thinking[role=chat]"], { storeState: false });
     const settings: Record<string, unknown> = {};
     const requestPins = structuredClone(previousPins);
     for (const row of resolved.keys) {
-      const key = schemaKey(row.key);
+      const key = this.schema.schemaKey(row.key);
       const binding = key.layers.session;
       if (binding?.store !== "session-settings") continue;
       let value = row.value;
@@ -136,7 +139,7 @@ export class SettingsModel {
 
   /** `settings.options` (docs/settings-model.md 7.5): the choices a key's control offers. */
   async options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest): Promise<SettingsOptionsResult> {
-    const key = KEYS.find(candidate => candidate.id === request.key);
+    const key = this.schema.KEYS.find(candidate => candidate.id === request.key);
     if (!key) throw new GatewayError("invalid_request", `Unknown setting ${request.key}`);
     if (!key.optionsSource) {
       if (!key.type.options) throw new GatewayError("invalid_request", `${key.label} has no options to choose from`);
@@ -155,7 +158,7 @@ export class SettingsModel {
         const supported = model ? getSupportedThinkingLevels(model) : [];
         // pi reports only "off" for a model without reasoning: there is no level to offer.
         const levels = supported.length === 1 && supported[0] === "off" ? [] : supported;
-        const declared = new Map(schemaKey("model.thinking[role=chat]").type.options!.map(option => [option.value, option]));
+        const declared = new Map(this.schema.schemaKey("model.thinking[role=chat]").type.options!.map(option => [option.value, option]));
         return { ...base, options: levels.map(level => ({ value: level, label: declared.get(level)?.label ?? level,
           ...(declared.get(level)?.detail ? { detail: declared.get(level)!.detail } : {}) })) };
       }
@@ -244,7 +247,7 @@ export class SettingsModel {
         ...(storeState ? { git: await stage("settings.store.project-git-state", () => projectGitState(inspection.projectDir, head ?? null)) } : {}),
       };
     }
-    if (project?.applied) await validateProjectSettings(project.document);
+    if (project?.applied) await validateProjectSettings(this.schema, project.document);
     const outside = this.outside && storeState ? {
       global: {
         ...await stage("settings.store.global-outside-marks", () => this.outside!.marks({ kind: "global" })),
@@ -279,7 +282,7 @@ export class SettingsModel {
 
   /** A Tron-owned store's declared fields, each admitted by its key's type. */
   private async validatedStore(document: Record<string, unknown>, layer: "home" | "global", label: string): Promise<Record<string, unknown>> {
-    for (const key of KEYS) {
+    for (const key of this.schema.KEYS) {
       const binding = key.layers[layer];
       if (binding?.store !== (layer === "home" ? "home" : "gateway") || !("path" in binding)) continue;
       const value = readPath(document, binding.path);
@@ -745,7 +748,7 @@ export class SettingsChangePath {
     // A pending entry's outcome is its latest decision fact.
     const status = entry.status === "pending" ? [...found.facts].reverse().find(fact => DECIDED.has(fact.status))?.status ?? "pending" : entry.status;
     if (status !== "applied" && status !== "approved") throw new GatewayError("conflict", "Only an applied change can be undone");
-    const key = schemaKey(entry.key);
+    const key = this.model.schema.schemaKey(entry.key);
     const stores = await this.model.stores(entry.target, session);
     const store = storeForScope(entry.layer, stores.layers);
     const binding = key.layers[store];
@@ -790,7 +793,7 @@ export class SettingsChangePath {
         && (!input.layer || entry.layer === input.layer)
         // The permanent record may name a key this Gateway no longer declares.
         // It stays in Everything/key history, but has no current section.
-        && (!input.section || auditSubject(entry.key)?.group === input.section),
+        && (!input.section || this.model.schema.auditSubject(entry.key)?.group === input.section),
     });
   }
 
@@ -881,7 +884,7 @@ export class SettingsChangePath {
     return announce({
       actor: context.actor, ...(context.reason ? { reason: context.reason } : {}), ...(context.approved ? { approved: true as const } : {}),
       changes: chat.map(change => {
-        const key = schemaKey(change.key);
+        const key = this.model.schema.schemaKey(change.key);
         const shown = (value: unknown) => value === null || value === undefined ? "the default" : formatStoredSetting(key.type, value);
         return { changeId: change.changeId, label: key.label, effect: key.effect,
           ...(change.redacted ? {} : { before: shown(change.before), after: shown(change.after) }) };
@@ -897,7 +900,7 @@ export class SettingsChangePath {
     await this.expireDue();
     const taken = await this.approvals.takeOutcomes(sessionId);
     return taken.flatMap(request => request.changes.map(change => {
-      const what = `${schemaKey(change.key).label} (${change.key}) at the ${LAYER_LABELS[change.layer]} layer`;
+      const what = `${this.model.schema.schemaKey(change.key).label} (${change.key}) at the ${LAYER_LABELS[change.layer]} layer`;
       const outcome = request.status === "declined" ? "was declined by the maintainer"
         : request.status === "expired" ? "expired after 24 hours without a decision"
           : request.status === "superseded" ? `was superseded${request.failure ? ` (${request.failure})` : " by a newer request"}`
@@ -1013,7 +1016,7 @@ export class SettingsChangePath {
       const path = (plan.binding as Extract<Binding, { store: "home" }>).path;
       if (plan.after === undefined) unsetPath(profile, path); else setPath(profile, path, plan.after);
     }
-    const resolution = resolveSettings(sessionTarget, { ...sessionStores, home: profile },
+    const resolution = resolveSettings(this.model.schema, sessionTarget, { ...sessionStores, home: profile },
       { format: formatContext(runtime), options: optionSources(runtime), keys: relevant.map(plan => plan.key.id) });
     const adoptions: Planned[] = [];
     // Model first: a model change can clamp thinking, which is then adopted.
@@ -1070,7 +1073,7 @@ export class SettingsChangePath {
   }
 
   private async plan(target: SettingsTarget, stores: SettingsStores, request: ChangeRequest, context: ChangeContext, runtime: ModelRuntime): Promise<Planned> {
-    const key = keyForHome(schemaKey(request.key), stores.layers.includes("home"));
+    const key = keyForHome(this.model.schema.schemaKey(request.key), stores.layers.includes("home"));
     // The retained repository applier is reachable only through verified Undo,
     // never through a new agent/UI request or Apply again.
     if (request.layer === "project" && !context.undoOf) {
@@ -1101,7 +1104,7 @@ export class SettingsChangePath {
     if (key.qualifier === "project" && qualifiers.project !== stores.project?.root) {
       qualifiers.project = await this.model.projectRoot(qualifiers.project!).catch(() => qualifiers.project!);
     }
-    if (key.qualifier === "key" && !floorInstances().some(instance => instance.key === qualifiers.key && instance.direction === qualifiers.direction)) {
+    if (key.qualifier === "key" && !this.model.schema.floorInstances().some(instance => instance.key === qualifiers.key && instance.direction === qualifiers.direction)) {
       throw new GatewayError("invalid_request", `${key.label} names a setting and, when its floor differs by direction, that direction`);
     }
     if (bindingNeedsModel(binding) && !qualifiers.model) {
@@ -1150,7 +1153,7 @@ export class SettingsChangePath {
       if (binding.store === "session") delete chat[binding.field];
       else unsetPath(chat.settings, binding.path);
       if (chat.fixed) delete chat.fixed[key.id];
-      const resolution = resolveSettings(target, { ...stores, session: chat }, { format: formatContext(runtime), options: optionSources(runtime), keys: [key.id] });
+      const resolution = resolveSettings(this.model.schema, target, { ...stores, session: chat }, { format: formatContext(runtime), options: optionSources(runtime), keys: [key.id] });
       const row = resolution.keys.find(row => row.key === key.id);
       after = row?.value;
       if (after === undefined && binding.store === "session" && binding.field === "contextWindow" && qualifiers.model) {
