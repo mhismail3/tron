@@ -101,7 +101,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   External; Commands and Subagents preview a body whose View All opens the shared reader), Session
   History (`session-history-pages.v1`), Subagent History; Session Settings (Repository Overrides last);
   Terminal and Export as HTML/JSON. Manage Session, Manage Home and every sheet they open take
-  the selected primary sheet theme (semantic colors aside). The plain context usage bar,
+  the selected primary sheet theme (semantic colors aside). Session's usage, Model, workspace/history
+  and settings containers share one primary ink/`tronPrimarySurface` theme scope; Terminal/export stay
+  outside it with their slate treatment. The plain context usage bar,
   attributed Tools/Rules/Skills source capsules, and history prompt/response icons and Current
   pill resolve `tronPrimary` in their shared owners; source capsule fill and Current pill
   fill/border derive from the same ink. Other history kinds retain semantic colors.

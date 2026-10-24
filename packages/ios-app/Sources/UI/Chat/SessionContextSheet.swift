@@ -233,11 +233,15 @@ struct SessionContextSheet: View {
                         }
                         // Manage Session is this chat's live state and its few direct
                         // controls. Settings (the gear) owns every scope's settings.
-                        SessionContextUsageCard(snapshot: snapshot, action: compactButton(snapshot))
-                            .settingsApprovals(.session(sessionID))
-                        ManageModelConfigurationCard(sessionID: sessionID)
-                        sessionSection(snapshot)
-                        settingsSection(snapshot)
+                        Group {
+                            SessionContextUsageCard(snapshot: snapshot, action: compactButton(snapshot))
+                                .settingsApprovals(.session(sessionID))
+                            ManageModelConfigurationCard(sessionID: sessionID)
+                            sessionSection(snapshot)
+                            settingsSection(snapshot)
+                        }
+                        .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
+                        // Terminal/export keep their own neutral slate treatment.
                         exportSection
                     } else {
                         TronSheetLoadingState(label: "Loading session…", accent: .tronPrimary)
