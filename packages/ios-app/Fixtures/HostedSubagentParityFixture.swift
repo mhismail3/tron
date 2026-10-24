@@ -99,6 +99,9 @@ struct HostedSubagentParityFixture: View {
         }
         if arguments.contains("-activity-preview-recent") {
             snapshot.processActivities = [Self.historyProcesses(sequence: 1, stage: 6)[0]]
+            snapshot.processOverview = try! JSONDecoder.gateway.decode(SessionProcessOverview.self, from: Data("""
+                {"version":1,"revision":1,"asOf":"\(startedAt)","activeCount":0,"recentCount":1,"problemCount":0,"visibility":"recent"}
+                """.utf8))
         }
         self.snapshot = snapshot
     }

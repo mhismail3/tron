@@ -6,7 +6,8 @@ import XCTest
         for mode in ["light", "dark"] {
             for state in ["active", "recent"] {
                 let app = XCUIApplication()
-                app.launchArguments = ["-tron-subagent-parity-fixture", "-themeColor", "burgundy", "-\(mode)"]
+                app.launchArguments = ["-tron-subagent-parity-fixture", "-themeColor", "burgundy", "-\(mode)",
+                    "-subagentRecentFinishedRetentionMinutes.v1", "5"]
                     + (state == "recent" ? ["-activity-preview-recent"] : [])
                 app.launch()
                 guard app.buttons["Subagents"].firstMatch.waitForExistence(timeout: 15) else {
