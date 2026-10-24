@@ -166,7 +166,10 @@ step required to close an issue. Claim metadata is never a check receipt.
   not a landing lock.
 - `work project add|set`: Project membership/status.
 - `work bootstrap [--apply [--prune]]`: labels and Project vocabulary only; no
-  repository protection or required checks are installed.
+  repository protection or required checks are installed. With `--apply --prune`,
+  labels used by open issues and options used by Project items stay. Undeclared
+  custom fields and their values are removed; a separate non-pruning plan reports
+  the value counts.
 - `work review-export --output <new-path> [--base REF]`: optional immutable Git
   patch for an explicitly requested review. It grants no landing authority.
 - `work auth setup|status`: the dedicated agent GitHub token in the Mac Keychain.

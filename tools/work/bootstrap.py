@@ -1,8 +1,10 @@
 """Converge a repository's labels and tracking Project to its work.json.
 
-`--apply` adds and updates. Anything on GitHub that the declaration lacks is drift: it is
-always reported, and deleted only with `--apply --prune` when no open issue or Project
-item still uses it. A Project is never deleted (README.md).
+`--apply` adds and updates. Undeclared labels, options and custom fields are
+always reported as drift, and deleted only with `--apply --prune`. Labels used
+by open issues and options used by Project items are retained. Undeclared custom
+fields are deleted with their values; a separate non-pruning plan reports the
+value counts. A Project is never deleted (README.md).
 """
 from __future__ import annotations
 
