@@ -167,7 +167,15 @@ these goals. Ranked: a lower-ranked metric never justifies regressing a higher o
 ### M3. Size
 - Hand-written lines by category (production, tests, tooling, docs),
   **reported** per milestone, with net lines per milestone as a signal. There
-  is no size target, line quota or per-slice net-lines expectation.
+  is no size target, line quota, per-slice net-lines expectation or net-negative
+  phase/E8 exit gate. Temporary plumbing is acceptable while coherent ownership
+  emerges; positive growth alone never blocks a transfer or justifies abstraction.
+- Acceptance is one canonical owner, narrow explicit dependencies, removal of old
+  parallel/forwarding paths once consumers move, and relevant behavioral locks.
+  Actual-consumer bridges name that consumer, removal condition and follow-up
+  issue/checkpoint in the existing phase issue’s short simplification ledger.
+  Delete safe dead code immediately; E8 exit states remaining debt and its concrete
+  consolidation path, not an unachieved size goal.
 - Each slice lists the **concepts** it deleted: types, ports, bindings, flags,
   duplicate paths (Appendix D).
 - Golden and fixture data is tracked separately, so adding locks does not
