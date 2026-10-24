@@ -727,15 +727,6 @@ export class RuntimeRegistry {
       sessions: {
         createHomeSession: async (cwd) => (await this.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
         currentSessionModel: sessionId => this.slots.get(sessionId)?.snapshot().model ?? null,
-        homeModel: async () => (await this.settingsOwners?.model.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"], { storeState: false }))
-          ?.keys[0]?.value as { provider: string; id: string } | undefined,
-        chooseHomeModel: async (sessionId, model) => {
-          // A host without a settings owner has only the session's own choice.
-          if (!this.settingsOwners) return void await this.slots.get(sessionId)?.setModel(model.provider, model.id);
-          const slot = this.slots.get(sessionId);
-          await this.settingsOwners.changes.change({ kind: "home" }, [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: model }],
-            { actor: { kind: "ui", id: "home-designation" }, commandId: randomUUID(), ...(slot?.usesHomeSettings ? { homeChapter: slot.homeSettingsChapter() } : {}) });
-        },
         sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
         homeChaptersChanged: () => {
           // The dashboard's Home rule depends on the record's chapter set, so a
@@ -794,10 +785,10 @@ export class RuntimeRegistry {
       taskSessions: this,
       knowledge: () => this.knowledgeService,
       readSearchCut: sessionId => this.readSearchCut(sessionId),
+      settings: () => this.settingsOwners?.model,
       changes: () => this.settingsOwners?.changes,
       workerChoice: {
         homeRuntime: async sessionId => (await this.acquire(sessionId)).snapshot(),
-        settings: () => this.settingsOwners?.model,
         modelQueues: () => this.homeTaskModelQueues(),
         model: (provider, id) => this.options.gatewayModelRuntime?.getModel(provider, id),
       },

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { GatewayError } from "../../errors.js";
 import { createQueueSummarizer } from "../../episodic/episodic-compactor.js";
 import type { ModelQueueOwner } from "../../providers/model-queue.js";
@@ -8,6 +9,7 @@ import { homeResearchTools, type HomeResearchTransport } from "./home-research-t
 import type { HomeMemoryToolAccess } from "./home-memory.js";
 import { HomeProfileItems, type HomeProfileChangeAccess } from "./home-profile.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
+import type { SettingsModel } from "../../kernel/settings/settings-model.js";
 import { HomeOwner, type HomeOwnerOptions } from "./home-owner.js";
 import { homeAppendGuardHook, type HomeAppendGuardServices } from "./home-append-guard.js";
 import type { HomeDiagnostic } from "./home-diagnostic.js";
@@ -73,10 +75,12 @@ export interface HomeComposition {
 }
 
 /** The registry's generic operations and reads Home is built over (k0-kernel.md §5). */
-export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "sessions" | "runtimes" | "taskSessions" | "memoryModels" | "knowledge"> {
+export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "runtimes" | "taskSessions" | "memoryModels" | "knowledge"> {
+  sessions: Omit<HomeOwnerOptions["sessions"], "homeModel" | "chooseHomeModel">;
   readSearchCut: Pick<RuntimeRegistry, "readSearchCut">["readSearchCut"];
+  settings(): SettingsModel | undefined;
   changes(): SettingsChangePath | undefined;
-  workerChoice: Omit<HomeWorkerChoicePort, "availability">;
+  workerChoice: Omit<HomeWorkerChoicePort, "availability" | "settings">;
 }
 
 /** Home's one owner, built on first use over the composition and the registry's ports. */
@@ -88,7 +92,19 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
     const ports = kernel();
     owner = new HomeOwner({
       tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
-      sessions: ports.sessions, runtimes: ports.runtimes,
+      sessions: {
+        ...ports.sessions,
+        homeModel: async () => (await ports.settings()?.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"], { storeState: false }))
+          ?.keys[0]?.value as { provider: string; id: string } | undefined,
+        chooseHomeModel: async (sessionId, model) => {
+          const changes = ports.changes();
+          // A host without a settings owner has only the session's own choice.
+          if (!changes) return void await ports.runtimes.runtimeOf(sessionId)?.setModel(model.provider, model.id);
+          const slot = ports.runtimes.runtimeOf(sessionId);
+          await changes.change({ kind: "home" }, [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: model }],
+            { actor: { kind: "ui", id: "home-designation" }, commandId: randomUUID(), ...(slot?.usesHomeSettings ? { homeChapter: slot.homeSettingsChapter() } : {}) });
+        },
+      }, runtimes: ports.runtimes,
       ...(composition.homeDiagnostic ? { diagnostic: composition.homeDiagnostic } : {}),
       workspace, memoryModels: ports.memoryModels,
       memorySummarizer: composition.homeMemorySummarizer ?? (() => {
@@ -111,7 +127,7 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
 
 /** Home owns its extension closures; the registry supplies only generic operations. */
 export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, ports: HomeKernelPorts): Omit<HomeModuleServices, "search"> {
-  const workerChoice: HomeWorkerChoicePort = { ...ports.workerChoice,
+  const workerChoice: HomeWorkerChoicePort = { ...ports.workerChoice, settings: ports.settings,
     availability: (role, signal, queue) => platform.modelQueue?.availability(role, signal, queue),
   };
   return {

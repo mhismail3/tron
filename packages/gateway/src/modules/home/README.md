@@ -31,6 +31,10 @@ unaffected by every rule here.
   on missing-session replacement), `policyRevision`, `enabled`, `memory` (pause), timestamps;
   Home's model lives only in its saved settings. Missing = undesignated. A malformed or unknown
   record is kept and reported unavailable; only the startup settings migration rewrites it.
+- **Model choice.** Home's owner factory reads its saved model recipe and owns
+  explicit chapter choices, including their K6 scope, actor and chapter fence.
+  Native ports supply the late settings owners and current runtime; a host with
+  no settings owner retains its existing SDK-only choice behavior.
 - **Workspace.** `<tronHome>/gateway/home/workspace` (`0700`, empty) is recorded **untrusted**.
   Global skills and prompt templates feed the composer only (the model sees one when inserted);
   `home-global-resources.ts` reloads them live as their agent-directory inputs change.
