@@ -122,6 +122,110 @@ class VerifyCase(unittest.TestCase):
         self.temp.cleanup()
 
 
+class ExternalVerificationTests(VerifyCase):
+    def external(self, name: str, body: str | None = None) -> str:
+        r = self.repo
+        path = f"scripts/test-{name}.py"
+        r.write(path, body if body is not None else
+                f"from pathlib import Path\np=Path('test-results/{name}')\np.parent.mkdir(exist_ok=True)\n"
+                "with p.open('a') as stream: stream.write('executed\\n')\n")
+        tooling = json.loads((r.path / "tooling.module.json").read_text())
+        tooling["owns"].append(path)
+        r.write("tooling.module.json", json.dumps(tooling))
+        return f"scripts/tron test tooling {path}"
+
+    def declare(self, module: str, commands: list[str], **fields) -> None:
+        path = f"mods/{module}/{module}.module.json"
+        data = json.loads((self.repo.path / path).read_text())
+        self.repo.write(path, json.dumps({**data, "verify": commands, **fields}))
+
+    def test_external_consumers_execute_once_for_changed_module_and_all(self) -> None:
+        r = self.repo
+        direct, dependent = self.external("direct"), self.external("dependent")
+        self.declare("alpha", [direct])
+        self.declare("beta", [direct, dependent], dependsOn=["repo/alpha"])
+        r.commit("external consumers")
+        r.git("branch", "-f", "base")
+        r.write("mods/alpha/alpha.py", "VALUE = 'changed'\n")
+        r.commit("producer changes")
+        for mode in (("--changed",), ("--module", "repo/alpha")):
+            with self.subTest(mode=mode):
+                for name in ("direct", "dependent"):
+                    (r.path / "test-results" / name).unlink(missing_ok=True)
+                result = r.verify(*mode)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                for name in ("direct", "dependent"):
+                    witness = r.path / "test-results" / name
+                    self.assertTrue(witness.exists(), f"declared {name} process never ran: {result.stdout}")
+                    self.assertEqual(witness.read_text().splitlines(), ["executed"], "duplicate declarations ran twice")
+                self.assertEqual(r.report()["passingTests"], 3)
+        # --all's declaration selection is checked without its milestone Gateway/iOS builds.
+        planned = r.verify("--all", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        selection = json.loads(planned.stdout[planned.stdout.index("{"):])["selection"]["tests"]
+        self.assertEqual(selection, ["scripts/test-dependent.py", "scripts/test-direct.py"])
+        # A Markdown-only or test-only change must not run unrelated declarations.
+        for relative, content in (("mods/alpha/README.md", "# Alpha\n"), ("mods/alpha/test-alpha.py", PASSING + "# Test-only edit.\n")):
+            r.git("branch", "-f", "base")
+            r.write(relative, content)
+            r.commit("narrow change")
+            for name in ("direct", "dependent"):
+                (r.path / "test-results" / name).unlink(missing_ok=True)
+            result = r.verify("--changed")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse((r.path / "test-results/direct").exists())
+            self.assertFalse((r.path / "test-results/dependent").exists())
+
+    def test_declared_ios_class_uses_existing_lane_and_explicit_skip(self) -> None:
+        r = self.repo
+        path = "packages/ios-app/UITests/ExternalUITests.swift"
+        r.write(path, "class ExternalUITests: XCTestCase {}\n")
+        r.write("packages/ios-app/UITests/external.module.json", json.dumps({"layer": "L4", "owns": ["**"]}))
+        self.declare("alpha", ["scripts/tron test ios run --only-testing TronMobileUITests/ExternalUITests"])
+        r.commit("declared UI consumer")
+        result = r.verify("--module", "repo/alpha", "--skip", "ios")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = r.report()
+        self.assertIn(path, report["selection"]["tests"])
+        self.assertEqual(report["passingTests"], 1)
+        self.assertEqual(next(step for step in report["steps"] if step["name"] == "tests: ios")["status"], "skipped")
+        self.assertNotIn("ios build", [step["name"] for step in report["steps"]])
+        # A harness-only declaration must remain incomplete unless explicitly skipped.
+        r.write("packages/ios-app/UITests/RealGatewayPairAndChatUITests.swift",
+                "class RealGatewayPairAndChatUITests: XCTestCase {}\n")
+        self.declare("alpha", ["scripts/tron test ios run --only-testing TronMobileUITests/RealGatewayPairAndChatUITests"])
+        r.commit("harness-only consumer")
+        incomplete = r.verify("--module", "repo/alpha")
+        self.assertEqual(incomplete.returncode, 1, incomplete.stdout + incomplete.stderr)
+        self.assertEqual(r.report()["verdict"], "incomplete")
+        skipped = r.verify("--module", "repo/alpha", "--skip", "ios")
+        self.assertEqual(skipped.returncode, 0, skipped.stdout + skipped.stderr)
+        self.assertEqual(r.report()["groups"]["ios-lanes"], ["packages/ios-app/UITests/RealGatewayPairAndChatUITests.swift"])
+
+    def test_external_failure_empty_and_unsupported_commands_cannot_pass(self) -> None:
+        r = self.repo
+        command = self.external("external", "raise SystemExit(7)\n")
+        self.declare("alpha", [command])
+        r.commit("external failure")
+        failed = r.verify("--module", "repo/alpha")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertIn("tests: python FAILED", failed.stdout)
+        r.write("scripts/test-external.py", "import unittest\nunittest.main()\n")
+        r.commit("external empty suite")
+        empty = r.verify("--module", "repo/alpha")
+        self.assertEqual(empty.returncode, 1, empty.stdout + empty.stderr)
+        self.assertIn("zero passing tests", empty.stdout)
+        for command in ("scripts/tron verify --all", "scripts/tron test tooling scripts/absent.py",
+                        "scripts/tron test tooling scripts/test-external.py ; touch forbidden",
+                        "scripts/tron test ios build",
+                        "scripts/tron test ios run --only-testing TronMobileUITests/UnknownUITests"):
+            self.declare("alpha", [command])
+            r.commit("unsupported declaration")
+            result = r.verify("--module", "repo/alpha")
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertFalse((r.path / "forbidden").exists())
+
+
 class SelectionTests(VerifyCase):
     def test_one_module_change_runs_only_its_tests_and_a_failure_fails_loudly(self) -> None:
         r = self.repo

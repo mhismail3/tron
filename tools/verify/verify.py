@@ -155,18 +155,50 @@ def ios_failures(output: str) -> list[str]:
 
 # ---------------------------------------------------------------------------- selection
 
+def declared_files(command: str, tracked: list[str]) -> set[str]:
+    """Manifest commands select tracked inputs to existing runners, never a shell command."""
+    try:
+        words = shlex.split(command)
+    except ValueError as error:
+        raise VerifyError(f"invalid verify declaration {command!r}: {error}") from error
+    prefix, arguments = words[:3], words[3:]
+    files: set[str] = set()
+    if prefix == ["scripts/tron", "test", "tooling"] and arguments:
+        if all(path.startswith(("scripts/test-", "scripts/verify-")) and path.endswith(".py") for path in arguments):
+            files = set(arguments)
+    elif prefix == ["scripts/tron", "test", "gateway"] and arguments:
+        if all(path.endswith((".test.ts", ".test.mjs")) for path in arguments):
+            files = {f"{GATEWAY}/{path}" for path in arguments}
+    elif prefix == ["scripts/tron", "test", "ios"] and arguments[:1] == ["run"]:
+        pairs = arguments[1:]
+        if pairs and len(pairs) % 2 == 0 and all(flag == "--only-testing" for flag in pairs[::2]):
+            for selector in pairs[1::2]:
+                matching = {path for path in tracked if path.startswith(f"{IOS}/") and is_test(path)
+                            and path.split("/")[2] in IOS_TARGETS
+                            and (name := ios_class(path)) is not None
+                            and selector == f"{IOS_TARGETS[path.split('/')[2]]}/{name}"}
+                if not matching:
+                    raise VerifyError(f"unknown UI test class in verify declaration: {selector!r}")
+                files |= matching
+    if not files or not files <= set(tracked):
+        raise VerifyError(f"unsupported verify declaration or untracked test input: {command!r}; see tools/verify/README.md")
+    return files
+
+
 def select(mode: str, target: str | None, base: str, modules: dict, tracked: list, paths: list | None = None) -> dict:
     """The tests a run selects; `paths` stands in for the changed paths (the mutation sampler's one file)."""
     owner = {path: key for key, module in modules.items() for path in module["owned"]}
     tests = [path for path in tracked if is_test(path)]
     locks = sorted(path for path in tests if is_lock(path))
     reasons: list[str] = []
+    declared: set[str] = set()
     selected: set[str] = set()
     narrow: set[str] = set()
     if mode == "all":
         selected |= set(locks)
         reasons.append(f"--all: every lock ({len(locks)} files)")
         touched, chosen = ["(all)"], set()
+        declared = set(modules)
     elif mode in ("module", "update-locks"):
         if target not in modules:
             raise VerifyError(f"no module {target!r}; see scripts/tron ownership --modules")
@@ -235,6 +267,15 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             selected |= set(locks)
             why = ", ".join([f"{key} ({modules[key]['layer']})" for key in widening] + [f"unowned {path}" for path in unowned][:5])
             reasons.append(f"widened to every lock ({len(locks)} files): {why}")
+            declared = set(modules)
+        declared |= chosen - narrow
+    for key in sorted(declared):
+        external = set()
+        for command in modules[key].get("verify", []):
+            external |= declared_files(command, tracked)
+        if external:
+            selected |= external
+            reasons.append(f"{key}: declared verification ({len(external)} test file(s))")
     docs_only = mode == "changed" and all(is_doc(path) for path in touched)
     # Generated doc blocks are built from Markdown, manifests and Gateway sources (tools/docs/README.md).
     doc_inputs = mode == "all" or any(is_doc(path) or path.endswith(".module.json") for path in touched)
@@ -310,6 +351,8 @@ def python_count(output: str) -> int:
     total = 0
     for segment in output.split(FILE_MARKER)[1:]:
         ran = re.findall(r"^Ran (\d+) tests?", segment, re.M)
+        if "0" in ran:
+            return 0  # an empty declared/owned suite is not hidden by a passing neighbour
         total += sum(int(n) for n in ran) if ran else 1
     return total
 

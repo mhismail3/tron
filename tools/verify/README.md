@@ -96,6 +96,33 @@ are selected, the run is `incomplete` (exit 1) unless `--skip` names them
 dependencies. A selection that runs zero passing tests fails: an empty run is not
 evidence.
 
+## Manifest `verify` declarations
+
+Modules may declare extra consumer verification using explicit tracked inputs:
+
+```json
+"verify": [
+  "scripts/tron test tooling scripts/test-consumer.py scripts/verify-contract.py",
+  "scripts/tron test gateway src/transport/example.integration.test.ts",
+  "scripts/tron test ios run --only-testing TronMobileUITests/ExampleUITests"
+]
+```
+
+These strings select files for the existing runners; verify never executes them
+as shell commands. Tooling accepts only `scripts/test-*.py` / `scripts/verify-*.py`;
+Gateway accepts Gateway-relative `*.test.ts` / `*.test.mjs`. iOS accepts one or
+more `--only-testing Target/Class` pairs, resolved to tracked UIValidation test
+files; method selectors, broad runs, build flags, unknown classes/paths and
+other command forms fail selection (exit 2). Harnessed classes retain their
+`ios-lanes` classification. There is no implicit install or alternate runner.
+
+Changed/module selection includes declarations of selected modules and their
+reverse dependency closure; widening and `--all` include every declaration.
+Markdown/test-only narrowing and lock-only `--update-locks` remain unchanged.
+Files are deduplicated across ownership and declarations, then use normal
+counts, explicit skips and incomplete verdicts. A zero-test Python suite fails
+even beside another passing suite. `--plan` shows selection, not test evidence.
+
 ## iOS lane
 
 `--all`, a selection with `ios` tests, or a `--changed` change owned by an
