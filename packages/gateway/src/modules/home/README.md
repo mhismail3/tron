@@ -120,9 +120,11 @@ changes keep its store, cursors and spend.
 
 ### Tools and profile
 
-- **Research tools** (read-only): `web_search`, `web_fetch` (SSRF-checked), `session_search`,
+- **Research tools** (read-only): the shared `web_search` search/read/content contract
+  ([public-web owner](../../knowledge/README.md#shared-public-web-research)), `session_search`,
   `session_read` (never Home chapters), read-only `knowledge`, `read_file` (explicitly trusted
-  projects). Results are capped and bannered untrusted; delegation is not gated on them.
+  projects). Web schema, backend and quota owner are identical to ordinary workers and native
+  research children. Results are capped untrusted data; delegation is not gated on them.
 - **Settings tool:** Home changes settings through the one change path as `home`; fetched
   content raises the tier one step. With `taskId` it reads or changes a worker's session.
 - **Learned profile:** personal Knowledge notes labelled `home-profile` plus one `kind-<kind>`

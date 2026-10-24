@@ -534,6 +534,14 @@ export interface PublicUrlFetch {
   disposition?: "inaccessible" | "failed";
 }
 
+/** Validate a public destination before disclosing it to a remote reader. Uses
+ * the same credential and DNS policy as every-hop direct source capture. */
+export async function validatePublicSourceUrl(url: string, options: Pick<SourceCaptureOptions, "resolveHost" | "signal"> = {}): Promise<string> {
+  const parsed = assertSafeUrl(url);
+  await assertPublicDestination(parsed, options.resolveHost ?? defaultResolveHost, options.signal);
+  return parsed.href;
+}
+
 /**
  * One bounded fetch of a public http(s) URL through capture's own transport:
  * credential-bearing URLs refused, every redirect hop DNS-resolved and refused

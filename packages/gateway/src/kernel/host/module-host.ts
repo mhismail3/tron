@@ -82,6 +82,9 @@ export interface SessionContext {
   modelRuntime: ModelRuntime;
   fixedSettings(): Readonly<Record<string, FixedSetting>>;
   delegatedWorker(): boolean;
+  /** Host-owned native-child capabilities; absent for profiles that cannot delegate. */
+  requireChildExtensions?(sessionId: string, extensions: readonly { id: string; path: string }[]): Promise<{ dispose(): void }>;
+
   profile(): SessionProfile;
   /** The chat's title as notifications show it. */
   title(): string;

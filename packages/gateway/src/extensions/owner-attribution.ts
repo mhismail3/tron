@@ -33,6 +33,7 @@ const RESERVED_FIRST_PARTY_TOOLS: ReadonlyArray<readonly [string, string]> = [
   ["display", "tron-display"],
   ["native_capture", "tron-native-capture"],
   ["computer", "tron-computer"],
+  ["web_search", "tron-web-research"],
 ];
 export interface InvocationExecutionContext {
   invocationId: string;

@@ -5,7 +5,7 @@ import type { RuntimeSlot } from "../../sessions/runtime-slot.js";
  * tool defaults cannot grant or remove Home's curated capabilities. */
 export const HOME_TOOL_NAMES: readonly string[] = [
   "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
-  "web_search", "web_fetch", "session_search", "session_read", "knowledge", "read_file", "settings",
+  "web_search", "session_search", "session_read", "knowledge", "read_file", "settings",
 ];
 
 /** Select descriptions from the first native lineage member, never loading a

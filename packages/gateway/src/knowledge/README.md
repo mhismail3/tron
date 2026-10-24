@@ -87,6 +87,49 @@ connector details: [contract](contract.md).
   price, explicit approval and a reservation; unknown pricing never permits a call
   ([connectors](contract.md#connectors)).
 
+## Shared public web research
+
+`web-research*.ts` owns disposable public-web results, not Knowledge records.
+`web_search` has one contract: `op:search` (one query), `op:read` (one public
+URL) and `op:content` (scoped stored bytes/find). Home, workers and native
+research children receive the same definition. Only keyless Firecrawl REST runs:
+no account/key, second provider, model-written answer, curator or paid fallback.
+The calling agent assesses cited sources itself.
+
+- One Gateway owner admits at most two network requests at a time and ten
+  Firecrawl requests per rolling minute; admission fails fast rather than
+  accumulating a queue. Provider429 starts an explicit Retry-After cooldown.
+  Ten/minute is conservative local policy, not a claimed keyless allowance.
+  Shared-IP exhaustion is `rate_limited`, never empty evidence.
+- Search/read deadlines are2s (`fast`),6s (default) or12s (`deep` search).
+  Completed evidence survives failed expansions. Empty means a recognized
+  zero-result response; all-failed and invalid calls set `isError:true`.
+  `blocked`, `parse_error`, `http_error`, quota and timeout remain distinct;
+  provider HTTP status and scraped-source status are separate facts.
+- Public URLs retain capture's credential/DNS/every-hop redirect guard before
+  renderer disclosure; provider-returned URLs are checked too. API success is
+  insufficient: source metadata status, nonempty payload and corroborated short
+  challenge/login/error pages are checked. No consent, login or denial bypass.
+- Search transport is capped at256KiB, read at1MiB; oversized provider envelopes
+  fail explicitly. Model-visible JSON (citations/diagnostics included) is bounded
+  at8KiB,16KiB only for explicit deep search. Truncation is UTF-8 safe; reads
+  report byte ranges, full content hashes and completeness.
+- Canonical URL and nonempty content-hash dedupe preserves semantic query
+  parameters. The scoped in-memory LRU is capped at128MiB, search handles expire
+  after15min, read handles after24h. It is not Knowledge, a global query cache,
+  or a persistent corpus. Fresh reads request provider `maxAge:0`; requested
+  freshness does not certify that an index or upstream cache is current.
+- PDF/video analysis and repository cloning are not implicit web operations.
+  Known PDF/video inputs return `unsupported`; public GitHub pages are ordinary
+  reads. Use separately authorized general capabilities for specialized work.
+  No retired tool-name alias is registered; installed package/settings/history
+  are not deleted.
+
+Runtime oracles: the shared-web cases in
+`../sessions/home-research-tools.integration.test.ts`,
+`web-research-child.integration.test.ts` (pinned roles/real Pi children), and
+`web-research.integration.test.ts` (real sockets, dispatch/body/redirect/TTL).
+
 ## Invariants
 
 - Native note and correction mutations carry an explicit confirmation bit;
@@ -110,6 +153,7 @@ first-party `knowledge` tool), `jev-extension.ts` (the `jev` tool). The editable
 
 | Signal | Level | Meaning |
 |---|---|---|
+| `web_search` result `details.status` / `details.reason` | tool outcome | One-step failure signal: `blocked`, `parse_error`, provider/source `http_error`, `rate_limited`, timeout or expired handle; inspect bounded provider/source statuses, not an empty source list as evidence of absence (`web-research.ts`) |
 | `knowledge.model-failed` | warning | A summary job failed because the model errored or broke its contract (`knowledge-curation.ts`): `code`, bounded `reason` naming the model, stop reason and reply shape; never reply or source text |
 | `knowledge.upgrade-failed` | warning | `knowledgeStore.upgradeStorage()` rejected after an update: `error`; Knowledge stays unavailable, chat is unaffected |
 | `Connector credential tests require an explicit keychain path` | test-runner failure | `MacKeychainConnectorCredentialStore` refuses construction in Vitest or `NODE_ENV=test` without an injected keychain path; no `security` process starts (`connector-credentials.integration.test.ts`) |

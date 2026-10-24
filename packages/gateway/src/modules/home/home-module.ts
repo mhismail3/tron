@@ -7,7 +7,8 @@ import type { ModelQueueOwner } from "../../providers/model-queue.js";
 import { HOME_SESSION_PROFILE_NAME, homeSessionProfile, type HomeSessionProfileServices } from "./home-session-profile.js";
 import type { GatewayHost, ModuleDescriptor, RunSettledPolicy, SessionContext } from "../../kernel/host/module-host.js";
 import { createTronHomeExtension } from "./tron-home-extension.js";
-import { homeResearchTools, type HomeResearchTransport } from "./home-research-tools.js";
+import { homeResearchTools } from "./home-research-tools.js";
+import type { WebResearchTransport } from "../../knowledge/web-research.js";
 import type { HomeMemoryToolAccess } from "./home-memory.js";
 import { HomeProfileItems, type HomeProfileChangeAccess } from "./home-profile.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
@@ -55,7 +56,6 @@ export interface HomeModuleServices {
   search(): ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
   read: HomeSessionReader;
   explicitlyTrustedDirectory(path: string): Promise<boolean>;
-  transport?: HomeResearchTransport;
 }
 
 /** The composition's Home inputs: platform owners and log sinks, never the registry. */
@@ -77,7 +77,7 @@ export interface HomeComposition {
   /** Home memory's compactor calls; production omits it and uses the background model queue. */
   homeMemorySummarizer?: (() => EpisodicSummarizer) | undefined;
   /** Transport injection for Home's web research tools; production uses the pinned DNS-safe transport. */
-  homeWebTransport?: HomeResearchTransport | undefined;
+  homeWebTransport?: WebResearchTransport | undefined;
 }
 
 /** Actual native owners, not callbacks forwarding into a second session facade. */
@@ -249,7 +249,6 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
     explicitlyTrustedDirectory: async path => {
       try { return (await platform.trust.inspect(path)).savedDecision === true; } catch { return false; }
     },
-    ...(platform.homeWebTransport ? { transport: platform.homeWebTransport } : {}),
   };
 }
 
@@ -307,15 +306,14 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
 function createHomeResearchModule(services: () => HomeModuleServices): ModuleDescriptor {
   return {
     name: "tron-home-research",
-    purpose: "Adds Home's read-only research tools: web search and fetch, session search and cited-entry reading, Knowledge lookup and trusted-project file reading.",
-    tools: ["web_search", "web_fetch", "session_search", "session_read", "knowledge", "read_file"], commands: [],
+    purpose: "Adds Home's read-only session search, cited-entry reading, Knowledge lookup and trusted-project file reading.",
+    tools: ["session_search", "session_read", "knowledge", "read_file"], commands: [],
     start: () => ({ extension: () => {
       const owners = services();
       return pi => {
         const tools = homeResearchTools({
           knowledge: () => owners.knowledge, sessionSearch: owners.search, sessionRead: owners.read,
           explicitlyTrustedDirectory: owners.explicitlyTrustedDirectory,
-          ...(owners.transport ? { transport: owners.transport } : {}),
         });
         for (const tool of tools) pi.registerTool(tool);
       };

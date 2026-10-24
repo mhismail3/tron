@@ -1,3 +1,4 @@
+import { createWebResearchModule } from "../workspace/web-research-module.js";
 import { ModuleHost, type GatewayHost } from "../kernel/host/module-host.js";
 import { settlementModule } from "../kernel/host/settlement-module.js";
 import { createContextWindowModule } from "../providers/context-window-policy.js";
@@ -47,6 +48,7 @@ export function gatewayModules(owners: () => ModuleOwners) {
     providers,
     compactionPolicyModule,
     createCoreModule(() => ({ knowledge: registry().knowledge, connections: owners().connections })),
+    createWebResearchModule(() => owners().home.homeWebTransport),
     settingsModule,
     askUserModule,
     createDisplayModule(() => owners().display),

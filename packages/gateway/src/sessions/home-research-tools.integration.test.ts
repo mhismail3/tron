@@ -31,14 +31,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type SessionManager } from "@earendil-works/pi-coding-agent";
 import {
-  fauxAssistantMessage, fauxProvider, fauxToolCall,
+  fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentTools,
   type FauxProviderHandle, type ToolCall, type Message,
 } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { HomeRequestRecord } from "../modules/home/home-request-policy.js";
-import type { HomeResearchToolDetails, HomeResearchTransport } from "../modules/home/home-research-tools.js";
+import type { HomeResearchToolDetails } from "../modules/home/home-research-tools.js";
+import type { WebResearchTransport } from "../knowledge/web-research.js";
 import { legacyEntriesDigest, seedLegacyChronicle } from "../../test-support/legacy-chronicle.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
@@ -151,7 +152,7 @@ async function fixture(
   label: string,
   seedCanonical?: (agentDir: string, project: string) => Promise<void>,
   seedIndex?: (registry: RuntimeRegistry, path: string) => Promise<void>,
-  transport?: HomeResearchTransport,
+  transport?: WebResearchTransport,
 ): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-research-${label}-`));
   roots.push(root);
@@ -263,6 +264,141 @@ function refusals(f: Fixture): HomeRequestRecord[] {
 // ---- the cases ------------------------------------------------------------------
 
 describe("Tron Home research tools", () => {
+  async function sharedFixture(label: string, seedCanonical?: (agentDir: string, project: string) => Promise<void>) {
+    const calls: Array<{ path: string; body: Record<string, any> }> = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", chunk => chunks.push(chunk));
+      request.on("end", () => {
+        const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+        calls.push({ path: request.url!, body });
+        if (request.url === "/origin") { response.writeHead(200, { "content-type": "text/html" }); response.end(PAGE_HTML); return; }
+        response.setHeader("content-type", "application/json");
+        if (body.query === "quota") { response.writeHead(429, { "retry-after": "120" }); response.end("{}"); return; }
+        if (request.url === "/v2/search") {
+          if (body.query === "malformed") { response.end("{bad json"); return; }
+          const paths = body.query === "empty" ? [] : body.query === "partial" ? ["good", "missing"] : body.query === "deadline" ? ["good", "hung"] : ["good?utm_source=x", "good#anchor", "duplicate-body"];
+          response.end(JSON.stringify({ success: true, data: { web: paths.map((path, index) => ({ url: `https://example.org/${path}`, title: `Document ${index}`, description: path.includes("good") || path === "duplicate-body" ? "Known fixture passage." : "Another fixture source." })) } })); return;
+        }
+        const url = String(body.url ?? "");
+        if (url.endsWith("/hung")) { const timer = setTimeout(() => response.end("{}"), 30000); response.on("close", () => clearTimeout(timer)); return; }
+        response.end(JSON.stringify({ success: true, data: { markdown: url.endsWith("/missing") ? "# Not Found\nThis document does not exist." : url.endsWith("/blocked") ? "Verify you are human to continue." : url.endsWith("/captcha-article") ? "# CAPTCHA\nDiscussing CAPTCHA design is ordinary article evidence, not a request to solve a challenge." : `Known fixture passage. ${"資料🙂".repeat(5000)}`,
+          metadata: { sourceURL: url, title: url.endsWith("/blocked") ? "Just a moment" : url.endsWith("/captcha-article") ? "CAPTCHA" : "Fixture article", statusCode: url.endsWith("/missing") ? 404 : 200 } } }));
+      });
+    });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const f = await fixture(label, seedCanonical, undefined, {
+      resolveHost: async () => [PUBLIC_ADDRESS],
+      fetcher: (_input, init) => fetch(`${endpoint}/origin`, init),
+      providerFetcher: (input, init) => fetch(`${endpoint}${new URL(String(input)).pathname}`, init),
+    });
+    return { f, calls };
+  }
+
+  it("shared web accepts an article discussing CAPTCHA and rejects empty or invalid inputs", async () => {
+    const { f, calls } = await sharedFixture("shared-content-validation");
+    const [article, blank, invalid] = await toolAnswers(f, "distinguish an article from unavailable evidence", [
+      { name: "web_search", args: { op: "read", url: "https://example.org/captcha-article" } },
+      { name: "web_search", args: { op: "search", query: " " } },
+      { name: "web_search", args: { op: "read", urls: [] } },
+    ]);
+    expect(article!.isError).toBe(false); expect(article!.text).toContain("Discussing CAPTCHA design");
+    expect(blank!.isError).toBe(true); expect(JSON.parse(blank!.text).reason).toBe("invalid_input");
+    expect(invalid!.isError).toBe(true); expect(calls).toHaveLength(2);
+    recordCase("shared-content-and-input-validation", { article: JSON.parse(article!.text), blank: blank!.isError, invalid: invalid!.isError });
+  }, 120_000);
+
+  it("shared web excludes the retired package before code execution without changing canonical settings", async () => {
+    let settings = ""; let marker = "";
+    const { f } = await sharedFixture("shared-retirement", async agentDir => {
+      settings = JSON.stringify({ defaultProvider: PROVIDER, defaultModel: MODEL_ID, packages: ["npm:pi-web-access@0.22.0"] });
+      await writeFile(join(agentDir, "settings.json"), settings);
+      const npm = join(agentDir, "npm"); const pkg = join(npm, "node_modules", "pi-web-access");
+      await mkdir(pkg, { recursive: true }); marker = join(agentDir, "legacy-provider-executed");
+      await writeFile(join(npm, "package.json"), JSON.stringify({ dependencies: { "pi-web-access": "0.22.0" } }));
+      await writeFile(join(pkg, "package.json"), JSON.stringify({ name: "pi-web-access", version: "0.22.0", pi: { extensions: ["index.mjs"] } }));
+      await writeFile(join(pkg, "index.mjs"), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'executed'); export default () => {};`);
+    });
+    const ordinary = await f.registry.create(f.project); await ordinary.setModel(PROVIDER, MODEL_ID);
+    const [answer] = await toolAnswers({ ...f, slot: ordinary }, "use the admitted web capability", [{ name: "web_search", args: { op: "search", query: "dedupe" } }]);
+    expect(answer!.isError).toBe(false);
+    await ordinary.reload(true, true, true);
+    expect(await readFile(marker, "utf8").then(() => true, () => false)).toBe(false);
+    expect(await readFile(join(f.agentDir, "settings.json"), "utf8")).toBe(settings);
+    recordCase("shared-retired-package", { executed: false, canonicalSettingsPreserved: true });
+  }, 120_000);
+
+  it("shared web schema and scoped source reads are identical in Home and an ordinary worker", async () => {
+    const { f } = await sharedFixture("shared-parity");
+    const ordinary = await f.registry.create(f.project); await ordinary.setModel(PROVIDER, MODEL_ID);
+    const schemas: unknown[] = [];
+    for (const [index, slot] of [f.slot, ordinary].entries()) {
+      f.faux.setResponses([context => {
+        schemas.push(getCurrentTools(context.messages).find(tool => tool.name === "web_search"));
+        return fauxAssistantMessage("schema captured");
+      }]);
+      await slot.prompt("inspect registered research capability");
+      await waitFor(() => schemas.length === index + 1 || undefined, "schema reached model", { boundMs: 30_000 });
+      await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "schema activation settled", { boundMs: 30_000 });
+    }
+    expect(schemas).toHaveLength(2); expect(schemas[0]).toBeDefined(); expect(schemas[1]).toEqual(schemas[0]);
+    const [search] = await toolAnswers(f, "search shared fixtures", [{ name: "web_search", args: { op: "search", query: "dedupe" } }]);
+    expect(search!.isError).toBe(false);
+    const found = JSON.parse(search!.text);
+    expect(found.status).toBe("ok"); expect(found.sources).toHaveLength(1);
+    expect(found.sources[0].url).toBe("https://example.org/good");
+    const [read] = await toolAnswers(f, "read that citation", [{ name: "web_search", args: { op: "read", url: found.sources[0].url, freshness: "fresh" } }]);
+    const page = JSON.parse(read!.text);
+    expect(page.sources[0].content).toContain("Known fixture passage.");
+    expect(Buffer.byteLength(read!.text)).toBeLessThanOrEqual(8192);
+    const request = { op: "content", resultId: page.resultId, sourceId: page.sources[0].sourceId, find: "Known fixture passage" };
+    const [own] = await toolAnswers(f, "open stored passage", [{ name: "web_search", args: request }]);
+    expect(own!.isError).toBe(false); expect(own!.text).toContain("Known fixture passage.");
+    const [foreign] = await toolAnswers({ ...f, slot: ordinary }, "try unrelated session handle", [{ name: "web_search", args: request }]);
+    expect(foreign!.isError).toBe(true); expect(JSON.parse(foreign!.text).reason).toBe("expired");
+    recordCase("shared-schema-scoped-content", { schemaEqual: true, searchBytes: Buffer.byteLength(search!.text), readBytes: Buffer.byteLength(read!.text) });
+  }, 120_000);
+
+  it("shared web reports source404, blocked, malformed, empty and partial outcomes truthfully", async () => {
+    const { f } = await sharedFixture("shared-status");
+    const answers = await toolAnswers(f, "exercise public fixture outcomes", [
+      { name: "web_search", args: { op: "read", url: "https://example.org/missing" } },
+      { name: "web_search", args: { op: "read", url: "https://example.org/blocked" } },
+      { name: "web_search", args: { op: "search", query: "malformed" } },
+      { name: "web_search", args: { op: "search", query: "empty" } },
+      { name: "web_search", args: { op: "search", query: "partial", fetch: "top3" } },
+    ]);
+    expect(answers.map(answer => answer.isError)).toEqual([true, true, true, false, false]);
+    const parsed = answers.map(answer => JSON.parse(answer.text));
+    expect(parsed.map(value => value.status)).toEqual(["error", "error", "error", "empty", "partial"]);
+    expect(parsed.slice(0, 3).map(value => value.reason)).toEqual(["http_error", "blocked", "parse_error"]);
+    expect(parsed[0].providers).toContainEqual(expect.objectContaining({ sourceStatus: 404 }));
+    expect(parsed[4].sources.some((source: { snippet: string }) => source.snippet.includes("Known fixture passage."))).toBe(true);
+    for (const answer of answers) expect(Buffer.byteLength(answer.text)).toBeLessThanOrEqual(8192);
+    recordCase("shared-source-failure-matrix", { outcomes: parsed });
+  }, 120_000);
+
+  it("shared web returns completed evidence by its deadline and discloses quota without redispatch", async () => {
+    const { f, calls } = await sharedFixture("shared-deadline-quota");
+    const start = Date.now();
+    const [partial] = await toolAnswers(f, "bounded read expansion", [{ name: "web_search", args: { op: "search", query: "deadline", depth: "fast", fetch: "top3" } }]);
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(4000);
+    const bounded = JSON.parse(partial!.text);
+    expect(bounded.status).toBe("partial"); expect(bounded.reason).toBe("timeout"); expect(partial!.isError).toBe(false);
+    expect(bounded.sources.some((source: { freshness: string }) => source.freshness === "provider-cache-allowed")).toBe(true);
+    const [quota, cooldown] = await toolAnswers(f, "report provider quota honestly", [
+      { name: "web_search", args: { op: "search", query: "quota" } },
+      { name: "web_search", args: { op: "search", query: "after-quota" } },
+    ]);
+    for (const result of [quota!, cooldown!]) { expect(result.isError).toBe(true); expect(JSON.parse(result.text).reason).toBe("rate_limited"); }
+    expect(calls.filter(call => call.body.query === "quota")).toHaveLength(1);
+    expect(calls.filter(call => call.body.query === "after-quota")).toHaveLength(0);
+    recordCase("shared-deadline-quota", { elapsed, quota: JSON.parse(quota!.text), cooldown: JSON.parse(cooldown!.text) });
+  }, 120_000);
+
   it("does not report HTTP 200 error pages as successful searches or readable articles", async () => {
     let requests = 0;
     const server = createServer((_request, response) => {
@@ -278,12 +414,13 @@ describe("Tron Home research tools", () => {
       // owned local socket, never to a provider or private destination.
       resolveHost: async () => [PUBLIC_ADDRESS],
       fetcher: (_input, init) => fetch(endpoint, init),
+      providerFetcher: (_input, init) => fetch(endpoint, init),
     });
     const answers = await toolAnswers(f, "read the public fixture", [
-      { name: "web_search", args: { query: "public fixture" } },
-      { name: "web_fetch", args: { url: "https://example.org/article" } },
+      { name: "web_search", args: { op: "search", query: "public fixture" } },
+      { name: "web_search", args: { op: "read", url: "https://example.org/article" } },
     ]);
-    expect(requests).toBe(2);
+    expect(requests).toBe(3);
     expect(refusals(f)).toEqual([]);
     recordCase("http-200-soft-error", { requests, answers });
     for (const answer of answers) {

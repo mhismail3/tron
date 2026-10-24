@@ -35,13 +35,14 @@ export function isUserSubagentsPackage(pkg: PackageSource): boolean {
  * the pre-trust and final passes. Keep that loader's view read-only for packages,
  * while reload/trust and all other settings remain owned by the canonical manager. */
 export function managedProviderSettingsView(settings: SettingsManager): SettingsManager {
+  const admitted = (pkg: PackageSource) => !isUserSubagentsPackage(pkg) && !/^npm:pi-web-access(?:@|$)/u.test(typeof pkg === "string" ? pkg : pkg.source);
   const filter = (value: Settings): Settings => ({ ...value,
-    ...(value.packages ? { packages: value.packages.filter(pkg => !isUserSubagentsPackage(pkg)) } : {}),
+    ...(value.packages ? { packages: value.packages.filter(admitted) } : {}),
   });
   const refuse = (): never => { throw new GatewayError("conflict", "Managed provider settings view is read-only for packages"); };
   return new Proxy(settings, {
     get(target, key) {
-      if (key === "getPackages") return () => target.getPackages().filter(pkg => !isUserSubagentsPackage(pkg));
+      if (key === "getPackages") return () => target.getPackages().filter(admitted);
       if (key === "getSettings" || key === "getGlobalSettings" || key === "getProjectSettings") return () => filter(target[key]());
       if (key === "setPackages" || key === "setProjectPackages") return refuse;
       if (key === "applyOverrides") return (value: Partial<Settings>) => {
@@ -337,9 +338,23 @@ export class ManagedSubagents {
     this.requiredChildApi ??= this.loadModule(join(root, "src", "api", "required-child-extensions.ts")) as Promise<RequiredChildApi>;
     const api = await this.requiredChildApi;
     if (typeof api.registerRequiredChildExtensions !== "function") throw new GatewayError("conflict", "managed pi-subagents has no required child extension API");
-    return api.registerRequiredChildExtensions({ sessionId, extensions });
+    let entry = this.childExtensions.get(sessionId);
+    if (!entry) { entry = { groups: new Map() }; this.childExtensions.set(sessionId, entry); }
+    const key = Symbol();
+    const publish = () => {
+      entry!.registration?.dispose();
+      const all = [...entry!.groups.values()].flat();
+      entry!.registration = all.length ? api.registerRequiredChildExtensions!({ sessionId, extensions: all }) : undefined;
+      if (!all.length) this.childExtensions.delete(sessionId);
+    };
+    const ids = new Set([...entry.groups.values()].flat().map(item => item.id));
+    if (extensions.some(item => ids.has(item.id))) throw new GatewayError("conflict", "Duplicate required child extension identity");
+    entry.groups.set(key, [...extensions]);
+    try { publish(); } catch (error) { entry.groups.delete(key); publish(); throw error; }
+    return { dispose: () => { if (entry!.groups.delete(key)) publish(); } };
   }
   private requiredChildApi: Promise<RequiredChildApi> | undefined;
+  private readonly childExtensions = new Map<string, { groups: Map<symbol, Array<{ id: string; path: string }>>; registration?: { dispose(): void } | undefined }>();
 
   /** Use the closure's declared TypeScript loader with exact host peer aliases.
    * No user package tree or copied SDK participates in factory execution. */

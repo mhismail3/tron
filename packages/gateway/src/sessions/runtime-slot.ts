@@ -3,7 +3,7 @@ import * as sessionPages from "../kernel/projection/session-pages.js";
 import { SnapshotProjection } from "../kernel/projection/snapshot.js";
 import { createSettingsManager } from "../kernel/settings/settings-sdk-manager.js";
 import { applyModelAdmission, compactionAdmission } from "../admin/settings-admission.js";
-import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
+import { managedProviderSettingsView, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
 import { boundedSummaryText } from "./summary-text.js";
@@ -1576,6 +1576,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         modelRuntime, profile: () => this.liveProfile(),
         fixedSettings: () => readSessionFixedSettings(this.sessionManager.getBranch()),
         delegatedWorker: () => Boolean(this.taskWorker),
+        ...(profile.managedSubagents && this.dependencies.managedSubagents ? {
+          requireChildExtensions: this.dependencies.managedSubagents.requireChildExtensions.bind(this.dependencies.managedSubagents),
+        } : {}),
         title: () => this.notificationTitle(),
         // Notify samples automatic alerts' foreground lease at its own admission.
         presented: () => this.dependencies.isSessionPresented(this.id),
@@ -1628,7 +1631,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
             }) }] : []),
           ];
       const services = await createAgentSessionServices({
-        settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager,
+        settingsManager: managedLoaderOptions?.settingsManager ?? managedProviderSettingsView(settingsManager),
         cwd: trust.cwd,
         projectDir: trust.projectDir,
         agentDir: this.dependencies.agentDir,

@@ -17,7 +17,7 @@ export interface HomeSessionProfileServices {
 export function homeSessionProfile(services: () => HomeSessionProfileServices): SessionProfile {
   return {
     name: HOME_SESSION_PROFILE_NAME,
-    extensions: [...HOME_MODULE_NAMES, "tron-home", "tron-home-research"],
+    extensions: [...HOME_MODULE_NAMES, "tron-home", "tron-home-research", "tron-web-research"],
     resources: {
       noExtensions: true, noContextFiles: true,
       // The composer may offer user-invocable skills/templates, but no skill is

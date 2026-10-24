@@ -12,7 +12,8 @@ workspace is, and how delegated children receive those facts.
 `workspace-module.ts` (the module descriptor whose contract is the Gateway's one
 `TronWorkspace`; peers read it through `dependsOn`, and the session registry drives its
 initialize/dispose order around Home), `core-module.ts` (core descriptor, per-runtime Jev)
-and `tron-core-extension.ts`. The workspace layout, recovery, display and managed-state
+and `tron-core-extension.ts`. `web-research-module.ts` composes the shared public-web
+owner for all runtime profiles and its explicit scoped native-child socket bridge. The workspace layout, recovery, display and managed-state
 contract is [internal-workspace.md](../../docs/internal-workspace.md); installed Swift
 apps under `state/apps/` are [swift-apps.md](../../docs/swift-apps.md).
 
@@ -36,6 +37,16 @@ apps under `state/apps/` are [swift-apps.md](../../docs/swift-apps.md).
   directory for CLI children ([MCP](../../docs/mcp.md)). Tron therefore never
   rewrites Pi settings, agent definitions or workflow scripts to force `tron-core`.
   External CLI/job runners get the facts only as task text.
+- **Shared web capability.** `tron-web-research` registers one definition from
+  [the public-web owner](../knowledge/README.md#shared-public-web-research).
+  Native children load it through required-child extensions, not ambient discovery.
+  Scope-bound0600 modules under `gateway/web-research-children/` are disposable
+  runtime projections: a reopened parent recreates the same path so retained child
+  launches can resume against the current service. The private Unix socket and
+  grants are joined and removed on shutdown; no provider credentials enter prompts
+  or child settings. Children with a conflicting legacy provider fail explicitly;
+  research builtins select an empty ambient-extension list. External CLI/job runners
+  do not receive a secretly different web backend.
 - Model guidance: write a workflow script to a git-ignored file under the request cwd
   and pass its relative path (absolute paths such as `/tmp` fail); never
   `workflow: true`. Native tasks above 8,000 UTF-16 units use the launcher's private

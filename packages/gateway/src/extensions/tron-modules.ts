@@ -9,6 +9,7 @@ export const ORDINARY_MODULE_NAMES: readonly string[] = [
   "tron-context-window",
   "tron-compaction-policy",
   "tron-core",
+  "tron-web-research",
   "tron-settings",
   "tron-ask-user",
   "tron-display",
