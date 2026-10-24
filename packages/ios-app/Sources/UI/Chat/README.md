@@ -176,6 +176,10 @@ metrics and retained search/selection, workspace path/status separation at stand
 sizes, and check-in receipt content. `TronSixSmallUIPreviewTests` captures native light/dark design
 review views and both workspace layout candidates (capture only, not acceptance).
 
+`TronHomeSummaryTypographyUITests` renders the production Home summary beside an independent
+`SessionSummaryTypography.usageValue` reference, comparing glyph/line metrics and Dynamic Type growth
+with distinct reading/code families through `HostedHomeSummaryTypographyFixture`.
+
 Classes under `TronMobileUITests/`: `TronHomeControlsUITests`, `TronHomeDashboardUITests`, `TronHomeSheetsUITests`,
 `TronConsolidatedUIRegressionTests` (Memory/canonical navigation, metadata, usage loading,
 Workspace cover/uncover, Manage model writes and scoped Settings routes),
