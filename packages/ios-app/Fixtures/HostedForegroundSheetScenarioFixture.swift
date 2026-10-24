@@ -10,7 +10,8 @@ struct HostedForegroundSheetScenario {
     var queuedItems: [SessionSnapshot.QueuedMessage] {
         guard queueEnabled else { return [] }
         if connections > 1, ProcessInfo.processInfo.arguments.contains("-foreground-queued-removed") { return [] }
-        return [.init(id: "foreground-queued-message", behavior: .followUp,
+        return [.init(id: "foreground-queued-message",
+                      behavior: ProcessInfo.processInfo.arguments.contains("-foreground-queued-steer") ? .steer : .followUp,
                       text: "Queued message 1607", attachmentCount: 0)]
     }
 

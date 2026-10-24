@@ -2,6 +2,24 @@ import XCTest
 
 /// Navigation-only native captures for visual approval, not regression acceptance.
 @MainActor final class TronThemeColorPreviewUITests: XCTestCase {
+    func testQueuedSteerThemes() {
+        for theme in ["burgundy", "emerald"] {
+            for mode in ["light", "dark"] {
+                let app = launch(["-tron-home-dashboard-fixture", "-home-shell-ready",
+                                  "-foreground-queued-editor", "-foreground-queued-steer"]
+                                 + (mode == "dark" ? ["-home-dark"] : []), theme)
+                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
+                app.buttons["home-pinned-row"].tap()
+                let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Queued message 1607")).firstMatch
+                XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
+                shot("\(theme)-\(mode)-card")
+                row.tap()
+                XCTAssertTrue(app.textViews["Queued message"].waitForExistence(timeout: 8))
+                shot("\(theme)-\(mode)-sheet")
+                app.terminate()
+            }
+        }
+    }
     func testEmeraldHome() { home("emerald") }
     func testBurgundyHome() { home("burgundy") }
     func testOliveGoldHome() { home("oliveGold") }
