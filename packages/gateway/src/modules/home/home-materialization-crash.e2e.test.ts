@@ -33,6 +33,7 @@ vi.mock("../../util/durable-json.js", async importOriginal => {
 import { TrustService } from "../../admin/trust-service.js";
 import { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { HomeOwner, type HomeSessionPort } from "./home-owner.js";
+import { homeTaskPolicy } from "./home-task-worker-choice.js";
 import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../../sessions/runtime-registry.js";
 import { durableAtomicWriteJson } from "../../util/durable-json.js";
 
@@ -124,7 +125,7 @@ async function fixture() {
     replaceRuntimeForProfile: async (_id, commit) => commit(),
     retireHomeRuntimes: async () => {},
   };
-  const owner = new HomeOwner({ tronHome, trust, workspace, sessions, taskSessions: {} as RuntimeRegistry, runtimes: {} as never, agentDir: "/nonexistent-agent-dir", memoryModels: async () => [], memorySummarizer: () => async () => { throw new Error("unused"); } });
+  const owner = new HomeOwner({ tronHome, trust, workspace, sessions, taskSessions: {} as RuntimeRegistry, taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }), runtimes: {} as never, agentDir: "/nonexistent-agent-dir", memoryModels: async () => [], memorySummarizer: () => async () => { throw new Error("unused"); } });
   await owner.initialize();
   const flushConversation = () => {
     manager.appendThinkingLevelChange("off");

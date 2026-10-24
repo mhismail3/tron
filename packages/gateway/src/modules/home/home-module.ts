@@ -23,7 +23,7 @@ import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../../kernel/hos
 import { assertChapterWritable } from "./home-chapter-state.js";
 import { coldHomeChapterMetrics, homeOpenRefusal } from "./home-session-recovery.js";
 import { homeInputAdmission } from "./home-input-admission.js";
-import { dispatchWithWorkerChoice, type HomeWorkerChoicePort } from "./home-task-worker-choice.js";
+import { dispatchWithWorkerChoice, homeTaskPolicy, homeTaskModelQueues, type HomeTaskPolicyInputs, type HomeWorkerChoicePort } from "./home-task-worker-choice.js";
 import type { TrustService } from "../../admin/trust-service.js";
 import type { HomeTaskDiagnostic, HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
 import { readHomeSessionEntry, type HomeSessionReader } from "./home-session-read.js";
@@ -77,13 +77,13 @@ export interface HomeComposition {
 }
 
 /** The registry's generic operations and reads Home is built over (k0-kernel.md §5). */
-export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "runtimes" | "taskSessions" | "memoryModels" | "knowledge"> {
+export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "runtimes" | "taskSessions" | "knowledge">, HomeTaskPolicyInputs {
   sessions: Omit<HomeOwnerOptions["sessions"], "createHomeSession" | "homeModel" | "chooseHomeModel" | "chapterMetrics" | "hasConversation">;
   createSession(cwd: string, profile: string): Promise<{ readonly id: string }>;
+  acquire(sessionId: string): ReturnType<RuntimeRegistry["acquire"]>;
   readSearchCut: Pick<RuntimeRegistry, "readSearchCut">["readSearchCut"];
   settings(): SettingsModel | undefined;
   changes(): SettingsChangePath | undefined;
-  workerChoice: Omit<HomeWorkerChoicePort, "availability" | "settings">;
 }
 
 /** Home's one owner, built on first use over the composition and the registry's ports. */
@@ -93,6 +93,7 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
     if (owner) return owner;
     const composition = inputs();
     const ports = kernel();
+    const memoryModels = () => ports.modelQueueOf("background", "home");
     owner = new HomeOwner({
       tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
       sessions: {
@@ -140,12 +141,12 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
         },
       }, runtimes: ports.runtimes,
       ...(composition.homeDiagnostic ? { diagnostic: composition.homeDiagnostic } : {}),
-      workspace, memoryModels: ports.memoryModels,
+      workspace, memoryModels, taskPolicy: homeTaskPolicy(ports, composition.trust),
       memorySummarizer: composition.homeMemorySummarizer ?? (() => {
         const queue = composition.modelQueue;
         if (!queue) throw new GatewayError("unsupported", "Home memory needs the Gateway model runtime");
         return createQueueSummarizer({ complete: async (role, request, signal) =>
-          queue.complete(role, request, signal, await ports.memoryModels()) });
+          queue.complete(role, request, signal, await memoryModels()) });
       }),
       ...(composition.homeMemoryDiagnostic ? { memoryDiagnostic: composition.homeMemoryDiagnostic } : {}),
       ...(composition.homeRequestDiagnostic ? { requestDiagnostic: composition.homeRequestDiagnostic } : {}),
@@ -161,7 +162,10 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
 
 /** Home owns its extension closures; the registry supplies only generic operations. */
 export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, ports: HomeKernelPorts): Omit<HomeModuleServices, "search"> {
-  const workerChoice: HomeWorkerChoicePort = { ...ports.workerChoice, settings: ports.settings,
+  const workerChoice: HomeWorkerChoicePort = { settings: ports.settings,
+    homeRuntime: async sessionId => (await ports.acquire(sessionId)).snapshot(),
+    model: (provider, id) => ports.modelRuntime()?.getModel(provider, id),
+    modelQueues: () => homeTaskModelQueues(ports.modelQueueOf),
     availability: (role, signal, queue) => platform.modelQueue?.availability(role, signal, queue),
   };
   return {
