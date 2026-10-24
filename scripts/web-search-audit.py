@@ -7,14 +7,15 @@ listed separately because lexical matches are not dispatched web-tool invocation
 import argparse, datetime, json, pathlib, re, collections
 P=argparse.ArgumentParser();P.add_argument('--root',type=pathlib.Path,required=True);P.add_argument('--output',type=pathlib.Path,required=True);A=P.parse_args()
 START='2026-10-21T19:41:52';END='2026-10-24T19:41:52'
-NAMES={'web_search','web_fetch','fetch_content','source_check','get_search_content'}
+NAMES={'web_search','web_fetch','fetch_content','source_check','get_search_content','agent_browser'}
 def clean(x):
  s=str(x)
  s=re.sub(r'(?i)(bearer\s+|(?:api[_-]?key|token|authorization|password)\s*[=:]\s*)[^\s,\"\'}]+',r'\1[REDACTED]',s)
  s=re.sub(r'\b(?:sk-|fc-|tvly-|ghp_|github_pat_)[A-Za-z0-9_-]{12,}','[REDACTED]',s)
  s=re.sub(r'([?&](?:key|token|api_key|access_token)=)[^&\s]+',r'\1[REDACTED]',s,flags=re.I)
+ s=re.sub(r'wss?://[^\s\"<>]+','[LOCAL_BROWSER_ENDPOINT]',s)
  return s
-rows=[];files=0;bad=0;seen=set();equiv=[]
+rows=[];browser=[];files=0;bad=0;seen=set();equiv=[]
 paths=list((A.root/'agent'/'sessions').rglob('*.jsonl'))+list((A.root/'internal'/'subagents').rglob('*.jsonl'))
 # Native sessions first; exported transcripts repeat tool IDs and omit duration/model.
 paths.sort(key=lambda p: ('transcript' in p.name, str(p)))
@@ -77,7 +78,7 @@ for p in paths:
     nxt=[{k:v for k,v in c.items() if k in ['type','name','arguments','text','thinking']} for c in nxt]
     row['nextAction']=clean(json.dumps(nxt,ensure_ascii=False))[:1600]
    else:row['flags']=['missing_result']
-   rows.append(row)
+   (browser if row['tool']=='agent_browser' else rows).append(row)
  except (OSError,UnicodeError):continue
-out={'window':[START,END],'filesWithCalls':files,'malformedLines':bad,'calls':rows,'equivalentCandidates':equiv,'counts':dict(collections.Counter(f for r in rows if not r['fixture'] for f in r['flags']))}
-A.output.parent.mkdir(parents=True,exist_ok=True);A.output.write_text(json.dumps(out,indent=2,ensure_ascii=False));print(json.dumps({'calls':len(rows),'productionCalls':sum(not r['fixture'] for r in rows),'counts':out['counts'],'filesWithCalls':files,'equivalentCandidates':len(equiv)}))
+out={'window':[START,END],'filesWithCandidateCalls':files,'canonicalCallFiles':len({r['path'] for r in rows}),'malformedLines':bad,'calls':rows,'browserCalls':browser,'equivalentCandidates':equiv,'counts':dict(collections.Counter(f for r in rows if not r['fixture'] for f in r['flags']))}
+A.output.parent.mkdir(parents=True,exist_ok=True);A.output.write_text(json.dumps(out,indent=2,ensure_ascii=False));print(json.dumps({'calls':len(rows),'productionCalls':sum(not r['fixture'] for r in rows),'counts':out['counts'],'filesWithCandidateCalls':files,'canonicalCallFiles':len({r['path'] for r in rows}),'browserCalls':len(browser),'equivalentCandidates':len(equiv)}))
