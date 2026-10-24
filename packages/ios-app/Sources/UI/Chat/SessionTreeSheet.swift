@@ -75,10 +75,10 @@ struct SessionHistoryRowPresentation: Identifiable {
         date = GatewayTimestamp.parse(node.timestamp)
     }
 
-    /// One distinct icon and colour per kind; the card itself stays uniform.
-    var icon: (String, Color) {
-        if node.role == .user { return ("person", .tronEmerald) }
-        if node.role == .assistant { return ("text.bubble", .tronTeal) }
+    /// Conversation entries share primary ink; other kinds retain their semantic colour.
+    @MainActor var icon: (String, Color) {
+        if node.role == .user { return ("person", .tronPrimary) }
+        if node.role == .assistant { return ("text.bubble", .tronPrimary) }
         if node.role == .toolResult { return ("arrow.uturn.left", .tronSlate) }
         return switch node.kind {
         case "branchSummary": ("arrow.triangle.branch", .tronPurple)
@@ -98,11 +98,11 @@ struct SessionHistoryRowPresentation: Identifiable {
         date?.formatted(date: .abbreviated, time: .shortened) ?? node.timestamp
     }
 
-    func content(current: Bool, now: Date = .now) -> TronListRowContent {
+    @MainActor func content(current: Bool, now: Date = .now) -> TronListRowContent {
         var tags = [TronListTag(text: kindLabel)]
         if node.childCount > 1 { tags.append(TronListTag(text: "\(node.childCount) branches")) }
         if node.label != nil { tags.append(TronListTag(text: "Bookmarked")) }
-        let status: TronListStatus? = current ? TronListStatus(text: "Current", tone: .tronEmerald)
+        let status: TronListStatus? = current ? TronListStatus(text: "Current", tone: .tronPrimary)
             : !node.isCurrentPath ? TronListStatus(text: "Other branch", tone: .tronSlate) : nil
         return TronListRowContent(leading: .icon(icon.0, icon.1), title: title, preview: true, status: status,
                                   subtext: node.label.map { "Bookmark: \($0)" }, tags: tags,

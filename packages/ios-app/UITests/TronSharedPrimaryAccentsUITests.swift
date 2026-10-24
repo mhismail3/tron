@@ -33,8 +33,12 @@ import UIKit
         let response = element(session, "history-row-h-6731-leading")
         XCTAssertTrue(current.waitForExistence(timeout: 8), session.debugDescription)
         XCTAssertTrue(response.exists, session.debugDescription)
-        verify(session, areas: [element(session, "history-row-h-6732-leading").frame, current.frame, response.frame],
+        verify(session, areas: [current.frame, response.frame],
             title: "Session History", name: "\(theme)-\(mode)-history")
+        let prompt = element(session, "history-row-h-6727-leading")
+        for _ in 0..<6 where !prompt.isHittable { session.swipeUp() }
+        XCTAssertTrue(prompt.isHittable, session.debugDescription)
+        verify(session, areas: [prompt.frame], title: "Session History", name: "\(theme)-\(mode)-history-prompt")
         session.terminate()
 
         let instructions = XCUIApplication()
@@ -112,7 +116,9 @@ import UIKit
         for i in stride(from: 0, to: pixels.count, by: 4) {
             let rgb = [Double(pixels[i]), Double(pixels[i + 1]), Double(pixels[i + 2])]
             let low = rgb.min()!, range = rgb.max()! - low
-            guard range >= 28 else { continue }
+            // Foreground ink has at least 60 channel levels of chroma in
+            // every shipped palette; dark Emerald's teal glass must not vote.
+            guard range >= 60 else { continue }
             for c in 0..<3 { sum[c] += (rgb[c] - low) / range }
             count += 1
         }
