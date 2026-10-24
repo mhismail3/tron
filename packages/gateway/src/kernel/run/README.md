@@ -93,12 +93,14 @@ Independently owned wake turns retain ordinary completion stamping.
 `task-lifecycle.reference-model.ts` states quiescent task laws independently of
 the run implementation. Its normal-lane `task-lifecycle.conformance.integration.test.ts`
 drives real Registry/Pi sessions, durable task/marker stores and a faux provider:
-start, Stop, report, same-session resume, terminal Stop and observation. Seeded
+start, steering, tool-interrupt without executing tools, Stop, report, same-session
+resume, terminal Stop and observation. Seeded
 fast-check commands check each step; a controlled late notice delays the second
 real completion stamp until after invocation settlement. The model checks terminal
 run release, immutable predecessor result identity and one distinct durable result
 wake per operation. It does not prove child-process joining, wake delivery, arbitrary
-interleavings, trust, or queue FIFO. Replay generated traces with `TRON_MODEL_SEED`;
+interleavings, trust, or queue FIFO. Replay generated traces with `TRON_MODEL_SEED`
+and the reported `TRON_MODEL_PATH`;
 artifacts are written to `packages/gateway/test-results/proof-spike/lifecycle.json`.
 
 ## Entry points

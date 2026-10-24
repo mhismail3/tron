@@ -57,6 +57,9 @@ async function assertConforms(model: TaskLifecycleModel, real: Real): Promise<vo
     expect(slot.hasActiveAgentRun).toBe(false);
     expect(slot.snapshot().operation).toBeUndefined();
     expect(slot.snapshot().processActivities?.filter(row => row.visibility === "active") ?? []).toEqual([]);
+  } else if (model.state === "active") {
+    const slot = await real.fixture.registry.acquire(real.runs.at(-1)!.sessionId);
+    expect(slot.hasActiveAgentRun).toBe(true);
   }
 }
 
@@ -111,6 +114,12 @@ class TaskCommand implements fc.AsyncCommand<TaskLifecycleModel, Real> {
         }
       }
       await current!.completion;
+    } else if (this.action === "steer") {
+      await owner.maintainTask({ taskId: current!.taskId, operationId: current!.operationId, text: "Retain this operation and report its evidence." });
+    } else if (this.action === "interrupt") {
+      // The provider is held, with no executing tools. Interrupt must not Stop
+      // the model run or mint a successor just because no tool needs abortion.
+      expect(await owner.interruptTask({ taskId: current!.taskId, operationId: current!.operationId })).toEqual({ interrupted: [] });
     } else if (this.action === "terminal-stop") {
       await expect(owner.stopTask({ taskId: current!.taskId, operationId: current!.operationId })).rejects.toThrow();
     }
@@ -170,7 +179,7 @@ async function scenario(commands: Iterable<fc.AsyncCommand<TaskLifecycleModel, R
 }
 
 it("conforms after Stop, repeated terminal control, report-only reminder and same-session resume", async () => {
-  await scenario(["start", "stop", "terminal-stop", "resume", "report", "observe", "resume", "stop"].map(action => new TaskCommand(action as TaskAction)));
+  await scenario(["start", "steer", "interrupt", "stop", "terminal-stop", "resume", "report", "observe", "resume", "stop"].map(action => new TaskCommand(action as TaskAction)));
 }, 60_000);
 
 it("conforms when a late child notice and report settle before a delayed reply stamp (#1730)", async () => {
@@ -178,8 +187,9 @@ it("conforms when a late child notice and report settle before a delayed reply s
 }, 60_000);
 
 it("conforms step by step for replayable generated task command sequences", async () => {
-  const commands = fc.commands([fc.constantFrom<TaskAction>("start", "stop", "report", "resume", "observe", "terminal-stop").map(action => new TaskCommand(action))], { maxCommands: 12 });
+  const commands = fc.commands([fc.constantFrom<TaskAction>("start", "steer", "interrupt", "stop", "report", "resume", "observe", "terminal-stop").map(action => new TaskCommand(action))], { maxCommands: 12 });
   await fc.assert(fc.asyncProperty(commands, async trace => { await scenario([new TaskCommand("start"), ...trace]); }), {
     seed: Number(process.env.TRON_MODEL_SEED ?? 1890), numRuns: 40,
+    ...(process.env.TRON_MODEL_PATH ? { path: process.env.TRON_MODEL_PATH } : {}),
   });
 }, 120_000);

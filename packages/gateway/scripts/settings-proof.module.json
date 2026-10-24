@@ -1,0 +1,5 @@
+{
+  "layer": "L5",
+  "owns": ["settings-proof.module.json", "settings-proof-lint.mjs"],
+  "riskClass": ["kernel"]
+}
