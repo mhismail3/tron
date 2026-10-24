@@ -11,6 +11,7 @@ import type { ChangeEntry, SettingsChangeRecord } from "../kernel/settings/setti
 import { type GitResult, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
 import type { OutsideMark, FloorOverrides } from "../kernel/settings/settings-types.js";
 import { KEYS, keyDefault, floorFor, recordSubject, schemaKey, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { instanceId } from "../kernel/settings/scope-resolution.js";
 import { formatStoredSetting } from "../kernel/settings/settings-types.js";
 /**
  * Outside changes (docs/settings-model.md 5.6, foundation F2).
@@ -98,10 +99,6 @@ function observedFile(store: ObservedStore, agentDir: string): string {
   }
 }
 
-export function instanceId(key: string, qualifiers: Qualifiers | undefined): string {
-  const sorted = Object.fromEntries(Object.entries(qualifiers ?? {}).sort(([left], [right]) => left.localeCompare(right)));
-  return `${key}\u0000${JSON.stringify(sorted)}`;
-}
 
 /** The observed store and instance a change to `binding` at `layer` writes, or
  * undefined for stores Tron owns exclusively (Chat, Profile, floors, Home memory). */
