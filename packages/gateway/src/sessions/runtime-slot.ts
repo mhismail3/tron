@@ -63,7 +63,6 @@ import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice
 import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
 import type { Actor } from "../kernel/settings/settings-record.js";
-import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
 import type {
@@ -617,8 +616,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
    * runtime that did not load it. */
   private readonly runtimeProfiles = new WeakMap<AgentSession, SessionProfile>();
 
-  protected get virtualModelAPI(): string { return VIRTUAL_MODEL_API; }
-
   private constructor(
     public sessionManager: SessionManager,
     public readonly dependencies: RuntimeSlotDependencies,
@@ -1083,7 +1080,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     if (JSON.stringify(previousPins) !== JSON.stringify(requestPins)) {
       await this.persistSessionSettings({ settings: explicitSettings, requestPins });
     }
-    await applyModelAdmission(session, admission, Boolean(this.taskWorker) || this.liveProfile().physicalModelsOnly === true);
+    await applyModelAdmission(session, admission, Boolean(this.taskWorker) || this.liveProfile().modelSelection?.physicalOnly === true);
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during model admission");
     session.settingsManager.applyOverrides(settings);
     // These SDK controls are copied when Agent is created, not read from its

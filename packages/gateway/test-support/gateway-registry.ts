@@ -7,7 +7,8 @@ import type { RecentModelStore } from "../src/providers/recent-models.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import type { ModelRuntime } from "../src/kernel/pi/coding-agent.js";
 import { createProviderModelRuntime } from "../src/providers/provider-runtime.js";
-import { OpenAIModelEligibility } from "../src/providers/openai-model-eligibility.js";
+import { OpenAIModelEligibility, sessionRuntimeView } from "../src/providers/openai-model-eligibility.js";
+import { applyHomeCacheRetention } from "../src/modules/home/home-request-policy.js";
 import { startGatewayModules, type ModuleOwners } from "../src/main/modules.js";
 import type { SessionSearchService } from "../src/sessions/session-search-service.js";
 import type { HomeComposition } from "../src/modules/home/home-module.js";
@@ -15,7 +16,7 @@ import type { HomeOwner } from "../src/modules/home/home-owner.js";
 
 type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "displayArtifacts" | "settingsSchema">;
 /** Home's composition inputs a test may supply; the rest are the registry's own. */
-type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "notifications" | "machineId" | "homeTaskDiagnostic" | "modelQueue">;
+type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "notifications" | "machineId" | "homeTaskDiagnostic" | "modelQueue" | "runtime">;
 
 const homes = new WeakMap<RuntimeRegistry, () => HomeOwner>();
 const recents = new WeakMap<RuntimeRegistry, RecentModelStore>();
@@ -59,6 +60,10 @@ export async function createTestRegistry(options: RegistryOptions & HomeTestOpti
   const display = { artifacts: new DisplayArtifactStore(options.tronHome), liveViews: browserLiveViews };
   const home: HomeComposition = {
     modelQueue,
+    runtime: async () => ({
+      runtime: applyHomeCacheRetention(sessionRuntimeView(registryOptions.gatewayModelRuntime ?? await createProviderModelRuntime(options.agentDir, modelRuntimeFactory))),
+      ownership: registryOptions.gatewayModelRuntime ? "borrowed" : "owned",
+    }),
     tronHome: options.tronHome, agentDir: options.agentDir, trust: options.trust, notifications: options.notifications, machineId: options.machineId,
     homeTaskDiagnostic: options.homeTaskDiagnostic, homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport,
   };

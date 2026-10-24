@@ -54,6 +54,7 @@ export interface HomeModuleServices {
 
 /** The composition's Home inputs: platform owners and log sinks, never the registry. */
 export interface HomeComposition {
+  runtime: HomeSessionProfileServices["runtime"];
   tronHome: string;
   agentDir: string;
   trust: TrustService;
@@ -73,7 +74,6 @@ export interface HomeComposition {
 /** The registry's generic operations and reads Home is built over (k0-kernel.md §5). */
 export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "sessions" | "runtimes" | "taskSessions" | "memoryModels" | "knowledge"> {
   readSearchCut: Pick<RuntimeRegistry, "readSearchCut">["readSearchCut"];
-  runtime: HomeSessionProfileServices["runtime"];
   changes(): SettingsChangePath | undefined;
   workerChoice: Omit<HomeWorkerChoicePort, "availability">;
 }
@@ -137,7 +137,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
       publicationUncertain: () => owner.publicationUncertain,
     },
     profile: {
-      decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), runtime: ports.runtime,
+      decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), runtime: platform.runtime,
     },
     appendGuard: {
       state: sessionId => owner.chapterStateFor(sessionId),

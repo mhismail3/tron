@@ -135,7 +135,6 @@ export abstract class RunRuntime<FixedAt> {
   abstract readonly directBashProcesses: DirectBashProcessOwner | undefined;
   abstract readonly activityHeartbeat: unknown;
   protected abstract readonly bashMetadata: Map<string, ToolProjectionMetadata>;
-  protected abstract readonly virtualModelAPI: string;
   protected abstract assertChapterWritable(): void;
   abstract liveProfile(): SessionProfile;
   protected abstract changeHomeRecipe(key: string, value: unknown, work?: string): Promise<number>;

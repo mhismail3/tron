@@ -38,6 +38,8 @@ import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { logHomeDiagnostic } from "./modules/home/home-diagnostic.js";
 import type { HomeComposition } from "./modules/home/home-module.js";
+import { applyHomeCacheRetention } from "./modules/home/home-request-policy.js";
+import { sessionRuntimeView } from "./providers/openai-model-eligibility.js";
 import type { HomeTaskDiagnostic } from "./modules/home/home-task-dispatcher.js";
 import { homeWorkspaceDirectory } from "./modules/home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
@@ -252,6 +254,10 @@ const modelQueue = new ModelQueueOwner({
 });
 const homeComposition: HomeComposition = {
   modelQueue,
+  runtime: async () => ({
+    runtime: applyHomeCacheRetention(sessionRuntimeView(modelRuntime)),
+    ownership: "borrowed",
+  }),
   tronHome: config.tronHome, agentDir: config.agentDir, trust, notifications, machineId: config.machineId,
   homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
   homeMemoryDiagnostic: (record) => {

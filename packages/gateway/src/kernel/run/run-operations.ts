@@ -83,12 +83,10 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
     if (expectation) this.assertConfigurationExpectation(expectation);
     const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
     if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
-    // Home must stay on a fixed physical model: a virtual model routes on the
-    // canonical transcript, which Home's profile does not own. The live
-    // runtime's profile decides, so an ordinary session keeps the choice.
-    if (this.liveProfile().physicalModelsOnly && model.api === this.virtualModelAPI) {
-      throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
-    }
+    // The live runtime’s profile admits the choice, not a later designation
+    // record. Ordinary sessions carry no extra model constraint and retain
+    // their existing choice.
+    this.liveProfile().modelSelection?.assertAllowed(model);
     const previousThinking = this.runtime.session.thinkingLevel;
     await this.runtime.session.setModel(model as Model<never>);
     await this.recordFixedSetting("model.ref[role=chat]", { provider, id: modelId }, fixedAt);

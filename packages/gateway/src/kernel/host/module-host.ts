@@ -226,6 +226,7 @@ export class ModuleHost {
         if (profiles.has(profile.name)) throw new Error(`Profile ${profile.name} is already registered`);
         profiles.add(profile.name);
         Object.freeze(profile.resources);
+        if (profile.modelSelection) Object.freeze(profile.modelSelection);
         if (profile.tools) Object.freeze(profile.tools);
         if (Array.isArray(profile.extensions)) Object.freeze(profile.extensions);
         Object.freeze(profile);

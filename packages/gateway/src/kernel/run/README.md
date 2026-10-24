@@ -60,7 +60,9 @@ Gateway-owned execution primitives layered on Pi's session loop.
 binding DTO or forwarded run algorithm. Peer owners read that authority directly;
 there are no per-owner context interfaces, accessor/callback bundles or binding factories.
 The native frame supplies SDK resources, physical publication and full Home policy/
-identity effects. No run state is copied into it. Per-attempt observer registration
+identity effects. Explicit model changes ask the live profile’s constraint before SDK
+publication; native admission reads its physical-selection metadata. No provider API marker
+or Home-specific model refusal lives in the run engine. No run state is copied into it. Per-attempt observer registration
 retains its raw promises and one live queue-decision callback, never a rebuilt context.
 `RuntimeSlot` installs bounded tool cancellation on its Pi session and owns one
 `DirectBashProcessOwner`. The process owner exposes the existing bash definition,

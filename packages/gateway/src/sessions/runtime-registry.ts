@@ -20,7 +20,6 @@ import {
   SettingsManager,
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
-import { sessionRuntimeView } from "../providers/openai-model-eligibility.js";
 import type {
   AdministrativeDrainBlockerCategory,
   AdministrativeDrainBlockerSummary,
@@ -99,7 +98,6 @@ import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../modules/hom
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
 import { modelQueueKey } from "../kernel/settings/tool-contract.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
-import { applyHomeCacheRetention } from "../modules/home/home-request-policy.js";
 import type { HomeKernelPorts } from "../modules/home/home-module.js";
 import {
   CatalogDiscovery,
@@ -827,10 +825,6 @@ export class RuntimeRegistry {
       taskSessions: this,
       knowledge: () => this.knowledgeService,
       readSearchCut: sessionId => this.readSearchCut(sessionId),
-      runtime: async () => ({
-        runtime: applyHomeCacheRetention(sessionRuntimeView(this.options.gatewayModelRuntime ?? await this.dependencies().createModelRuntime())),
-        ownership: this.options.gatewayModelRuntime ? "borrowed" as const : "owned" as const,
-      }),
       changes: () => this.settingsOwners?.changes,
       workerChoice: {
         homeRuntime: async sessionId => (await this.acquire(sessionId)).snapshot(),

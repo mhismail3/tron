@@ -44,7 +44,9 @@ construction/publication with an opaque issuer-interpreted authority object.
   `summaries(names)` reads those same descriptors' metadata.
 - **Profiles (D7).** Started instances own named recipes; `profile(name)` reads
   those definitions, not a second store. `ordinary` and `unrecorded` are reserved.
-  Admission freezes recipe metadata. `profileDecision` reads the owner at each
+  Admission freezes recipe metadata, including model-selection metadata and its admission
+  operation. Concrete profiles own model constraints; the host knows no provider API marker.
+  `profileDecision` reads the owner at each
   runtime build and canonical append; only `unrecorded` uses a same-id one-shot
   creation recipe, consumed after selection. The runtime retains its selected
   object. Its request-policy selector resolves the live K3 hook at the original cut.
