@@ -31,6 +31,10 @@ unaffected by every rule here.
   on missing-session replacement), `policyRevision`, `enabled`, `memory` (pause), timestamps;
   Home's model lives only in its saved settings. Missing = undesignated. A malformed or unknown
   record is kept and reported unavailable; only the startup settings migration rewrites it.
+- **Profile creation and catalog.** Home chooses its isolated profile when creating a
+  chapter over native session creation. Its tool catalog keeps the curated names and
+  describes them from the first non-disposed lineage member in native map order;
+  the unloaded view never starts a runtime or enumerates every chapter's tools.
 - **Model choice.** Home's owner factory reads its saved model recipe and owns
   explicit chapter choices, including their K6 scope, actor and chapter fence.
   Native ports supply the late settings owners and current runtime; a host with

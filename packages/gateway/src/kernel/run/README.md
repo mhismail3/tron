@@ -56,6 +56,10 @@ Gateway-owned execution primitives layered on Pi's session loop.
 
 ## Contract
 
+The native registry retains runtime membership. `runtimeEntries()` supplies a disposable,
+insertion-ordered read snapshot; domain catalogs select and format that view outside the
+registry. It is not a second runtime owner or membership cache.
+
 `RuntimeSlot` extends the kernel's `RunOperations`: one actual runtime object, not a
 binding DTO or forwarded run algorithm. Peer owners read that authority directly;
 there are no per-owner context interfaces, accessor/callback bundles or binding factories.

@@ -7,7 +7,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ToolCall } from 
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
-import { HOME_TOOL_NAMES } from "../modules/home/home-runtime-policy.js";
+import { HOME_TOOL_NAMES, homeToolCatalog } from "../modules/home/home-runtime-policy.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "./trust-service.js";
 import { APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
@@ -116,7 +116,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   let clock = Date.parse("2026-10-11T12:00:00.000Z");
   const { settingsModel, settingsChanges } = settingsDependencies({
     agentDir, tronHome, trust, modelRuntime, sessions: registry, home: () => homeOwnerOf(registry), registry, now: () => new Date(clock),
-    toolCatalog: async target => target.kind === "home" ? registry.homeToolCatalog() : target.kind === "session" ? registry.liveToolCatalog(target.sessionId) : [],
+    toolCatalog: async target => target.kind === "home" ? homeToolCatalog(registry.runtimeEntries(), id => registry.isLineageMember(id)) : target.kind === "session" ? registry.liveToolCatalog(target.sessionId) : [],
   });
   const pushes: Array<{ kind: string; title?: string; message: string; sessionId: string; category?: string }> = [];
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];

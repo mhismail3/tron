@@ -4,7 +4,7 @@ import { readCanonicalSession } from "../../episodic/episodic-source.js";
 import { GatewayError } from "../../errors.js";
 import { createQueueSummarizer } from "../../episodic/episodic-compactor.js";
 import type { ModelQueueOwner } from "../../providers/model-queue.js";
-import { homeSessionProfile, type HomeSessionProfileServices } from "./home-session-profile.js";
+import { HOME_SESSION_PROFILE_NAME, homeSessionProfile, type HomeSessionProfileServices } from "./home-session-profile.js";
 import type { GatewayHost, ModuleDescriptor, RunSettledPolicy, SessionContext } from "../../kernel/host/module-host.js";
 import { createTronHomeExtension } from "./tron-home-extension.js";
 import { homeResearchTools, type HomeResearchTransport } from "./home-research-tools.js";
@@ -78,7 +78,8 @@ export interface HomeComposition {
 
 /** The registry's generic operations and reads Home is built over (k0-kernel.md §5). */
 export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "runtimes" | "taskSessions" | "memoryModels" | "knowledge"> {
-  sessions: Omit<HomeOwnerOptions["sessions"], "homeModel" | "chooseHomeModel" | "chapterMetrics" | "hasConversation">;
+  sessions: Omit<HomeOwnerOptions["sessions"], "createHomeSession" | "homeModel" | "chooseHomeModel" | "chapterMetrics" | "hasConversation">;
+  createSession(cwd: string, profile: string): Promise<{ readonly id: string }>;
   readSearchCut: Pick<RuntimeRegistry, "readSearchCut">["readSearchCut"];
   settings(): SettingsModel | undefined;
   changes(): SettingsChangePath | undefined;
@@ -96,6 +97,7 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
       tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
       sessions: {
         ...ports.sessions,
+        createHomeSession: async (cwd) => (await ports.createSession(cwd, HOME_SESSION_PROFILE_NAME)).id,
         chapterMetrics: async (sessionId) => {
           const slot = ports.runtimes.runtimeOf(sessionId);
           if (!slot) return coldHomeChapterMetrics(ports.sessions.sessionFile(sessionId));

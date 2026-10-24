@@ -37,6 +37,7 @@ import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { logHomeDiagnostic } from "./modules/home/home-diagnostic.js";
+import { homeToolCatalog } from "./modules/home/home-runtime-policy.js";
 import type { HomeComposition } from "./modules/home/home-module.js";
 import { applyHomeCacheRetention } from "./modules/home/home-request-policy.js";
 import { sessionRuntimeView } from "./providers/openai-model-eligibility.js";
@@ -212,7 +213,7 @@ const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   modelRuntime,
   toolCatalog: async (target) => target.kind === "session"
     ? sessions.liveToolCatalog(target.sessionId)
-    : target.kind === "home" ? sessions.homeToolCatalog()
+    : target.kind === "home" ? homeToolCatalog(sessions.runtimeEntries(), id => sessions.isLineageMember(id))
     : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
 }));
 const settingsRecord = new SettingsChangeRecord(config.tronHome);

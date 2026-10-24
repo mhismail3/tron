@@ -1,9 +1,7 @@
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
-import { HOME_SESSION_PROFILE_NAME } from "../modules/home/home-session-profile.js";
 import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
 import type { LineageRuntimePort, SessionLineagePolicy } from "../kernel/host/session-lineage.js";
 import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../kernel/host/kernel-lifecycle.js";
-import { HOME_TOOL_NAMES } from "../modules/home/home-runtime-policy.js";
 import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
@@ -724,8 +722,8 @@ export class RuntimeRegistry {
    * (k0-kernel.md §5); Home's module constructs the owner. */
   homeKernel(): HomeKernelPorts {
     return {
+      createSession: (cwd, profile) => this.create(cwd, profile),
       sessions: {
-        createHomeSession: async (cwd) => (await this.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
         currentSessionModel: sessionId => this.slots.get(sessionId)?.snapshot().model ?? null,
         sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
         homeChaptersChanged: () => {
@@ -2909,18 +2907,8 @@ export class RuntimeRegistry {
     return slot.settingsToolCatalog();
   }
 
-  /** Home's selectable tools (`HOME_TOOL_NAMES`), each described by the
-   * definition a live Home chapter registered: the descriptions Home's model is
-   * given. With no chapter loaded the names are still offered, undescribed; the
-   * catalog never loads a runtime just to describe them. */
-  homeToolCatalog(): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
-    const chapter = [...this.slots].find(([id, slot]) => !slot.isDisposed && this.lineage().state(id).lineageId !== undefined)?.[1];
-    const described = new Map((chapter?.settingsToolCatalog() ?? []).map(tool => [tool.name, tool.description]));
-    return HOME_TOOL_NAMES.map(name => {
-      const description = described.get(name);
-      return { name, ...(description ? { description } : {}), resource: {} };
-    });
-  }
+  /** A disposable insertion-ordered view; membership stays owned by the registry. */
+  runtimeEntries(): ReadonlyArray<readonly [string, RuntimeSlot]> { return [...this.slots]; }
 
   async acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {
     this.assertSlotAdmissionOpen();
