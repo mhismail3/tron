@@ -6,7 +6,7 @@ import {createServer} from 'node:http';
 const {homeResearchTools}=await import(pathToFileURL(process.argv[2]).href);
 const host={sessionRead:{},knowledge:()=>undefined,sessionSearch:()=>undefined,explicitlyTrustedDirectory:async()=>false};
 const tools=homeResearchTools(host), rows=[];
-for(const [name,args] of (process.argv.includes('--fixture-only')?[]:[['web_search',{query:'Quint informal systems'}],['web_fetch',{url:'https://html.duckduckgo.com/html/?q=slimkey'}],['web_fetch',{url:'https://www.bing.com/search?q=%22slimkey%22'}]])){ 
+for(const [name,args] of (process.argv.includes('--fixture-only')?[]:[['web_search',{query:'Quint informal systems'}],['web_fetch',{url:'https://html.duckduckgo.com/html/?q=slimkey'}],['web_fetch',{url:'https://www.bing.com/search?q=%22slimkey%22'}]])){
  const start=performance.now();const result=await tools.find(t=>t.name===name).execute('diagnosis-only',args);
  rows.push({name,args,ms:Math.round(performance.now()-start),details:result.details,text:result.content.map(c=>c.text||'').join('\n')});
 }
