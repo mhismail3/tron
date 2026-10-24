@@ -1766,7 +1766,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
               // children/queued input retain their own continuation and Stop wins.
               if (!decision && turn.message.stopReason === "stop" && !signal?.aborted
                 && !created.session.agent.hasQueuedMessages() && !this.hasDetachedDashboardWork()
-                && taskWorker.takeReportReminder()) {
+                && false /* SPIKE #1890: pre-#1292 no-report terminal behavior */) {
                 await created.session.sendCustomMessage({ customType: "tron.home-task-report-reminder.v1",
                   content: "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report.",
                   display: false }, { triggerTurn: true });
