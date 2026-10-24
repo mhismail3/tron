@@ -23,6 +23,19 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
         return identity.id
     }
 
+    private func next(_ stream: GatewayEventStream) async -> GatewayEventDelivery? {
+        let completed = expectation(description: "socket delivery completes")
+        let read = Task { @MainActor in
+            var iterator = stream.makeAsyncIterator()
+            let value = await iterator.next()
+            completed.fulfill()
+            return value
+        }
+        await fulfillment(of: [completed], timeout: 3)
+        read.cancel()
+        return await read.value
+    }
+
     private func fence(_ client: GatewayClient, peer: EventLockPeer, frames: [Data]) async throws {
         await peer.enqueue(frames)
         // This response follows the frames on the same receive port. Its
@@ -57,10 +70,9 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             XCTAssertEqual(rejection.overflowCount, 3)
             let active = await client.activeConnectionID()
             XCTAssertNil(active)
-            var iterator = client.events.makeAsyncIterator()
             var disconnect: GatewayEventDelivery?
             for _ in 0...3 {
-                let delivery = await iterator.next()
+                let delivery = await self.next(client.events)
                 if delivery?.event.topic == "transport.disconnected" { disconnect = delivery; break }
             }
             XCTAssertEqual(disconnect?.event.payload.objectValue?["reason"]?.stringValue, "event_overflow")
@@ -123,9 +135,8 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
                 try self.frame("session.listChanged", value: "old"),
                 try self.frame("lock.other"),
                 try self.frame("session.listChanged", value: "latest")])
-            var iterator = client.events.makeAsyncIterator()
-            let first = await iterator.next()
-            let second = await iterator.next()
+            let first = await self.next(client.events)
+            let second = await self.next(client.events)
             XCTAssertEqual(first?.event.topic, "session.listChanged")
             XCTAssertEqual(first?.event.payload.objectValue?["value"]?.stringValue, "latest")
             XCTAssertEqual(second?.event.topic, "lock.other")
@@ -152,15 +163,14 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             try await fence(client, peer: successor, frames: [try frame("lock.successor")])
             // Observe before releasing close: admission, not old reset, must
             // already have removed the predecessor's queued delivery.
-            var iterator = client.events.makeAsyncIterator()
-            let delivery = await iterator.next()
+            let delivery = await next(client.events)
             XCTAssertEqual(delivery?.connectionID, newID)
             XCTAssertEqual(delivery?.event.topic, "lock.successor")
             await predecessor.enqueue([try frame("lock.late-predecessor")])
             try await fence(client, peer: successor, frames: [try frame("lock.after-retirement")])
             await predecessor.releaseClose()
             await retirement?.value
-            let after = await iterator.next()
+            let after = await next(client.events)
             XCTAssertEqual(after?.connectionID, newID)
             XCTAssertEqual(after?.event.topic, "lock.after-retirement")
             await client.close()
@@ -193,9 +203,8 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             try await fence(client, peer: successor, frames: [try frame("lock.new-first"), try frame("lock.new-second")])
             await gate.release()
             await fulfillment(of: [admitted], timeout: 3)
-            var iterator = client.events.makeAsyncIterator()
-            let first = await iterator.next()
-            let second = await iterator.next()
+            let first = await next(client.events)
+            let second = await next(client.events)
             XCTAssertEqual(first?.connectionID, newID)
             XCTAssertEqual(second?.connectionID, newID)
             let unexpected = expectation(description: "no queued predecessor after completed admission")
@@ -235,20 +244,40 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             ended.fulfill()
             return value
         }
-        await fulfillment(of: [entered], timeout: 3)
-        // A real RPC round trip gives the consumer's queued next() operation a
-        // causal receive-loop boundary before cancellation, not an arbitrary delay.
-        try await fence(client!, peer: peer, frames: [])
-        consumer.cancel()
-        await fulfillment(of: [ended], timeout: 3)
-        try await fence(client!, peer: peer, frames: [try frame("lock.after-cancel")])
-        var iterator = stream.makeAsyncIterator()
-        let next = await iterator.next()
-        XCTAssertEqual(next?.event.topic, "lock.after-cancel")
-        await client!.close()
-        client = nil
-        let cancelled = await consumer.value
-        XCTAssertNil(cancelled)
+        var following: Task<GatewayEventDelivery?, Never>?
+        do {
+            await fulfillment(of: [entered], timeout: 3)
+            // A real RPC round trip gives the consumer's queued next() operation a
+            // causal receive-loop boundary before cancellation, not an arbitrary delay.
+            try await fence(client!, peer: peer, frames: [])
+            consumer.cancel()
+            await fulfillment(of: [ended], timeout: 3)
+            try await fence(client!, peer: peer, frames: [try frame("lock.after-cancel")])
+            let delivered = expectation(description: "next consumer receives the unclaimed frame")
+            following = Task {
+                var iterator = stream.makeAsyncIterator()
+                let value = await iterator.next()
+                if value != nil { delivered.fulfill() }
+                return value
+            }
+            await fulfillment(of: [delivered], timeout: 3)
+            // Finish before joining: even a broken cancellation control must
+            // leave neither this case's waiter nor its follow-up consumer alive.
+            await client!.close()
+            client = nil
+            let cancelled = await consumer.value
+            let next = await following!.value
+            XCTAssertNil(cancelled)
+            XCTAssertEqual(next?.event.topic, "lock.after-cancel")
+        } catch {
+            consumer.cancel()
+            following?.cancel()
+            await client!.close()
+            client = nil
+            _ = await consumer.value
+            _ = await following?.value
+            throw error
+        }
     }
 
     func testClientLifetimeFinishesWaitingStream() async throws {
@@ -265,14 +294,22 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             ended.fulfill()
             return value
         }
-        await fulfillment(of: [entered], timeout: 3)
-        try await fence(client!, peer: peer, frames: [])
-        await client!.close()
-        client = nil
-        await fulfillment(of: [ended], timeout: 3)
-        consumer.cancel() // also settles a known-bad missing-finish control
-        let terminal = await consumer.value
-        XCTAssertNil(terminal)
+        do {
+            await fulfillment(of: [entered], timeout: 3)
+            try await fence(client!, peer: peer, frames: [])
+            await client!.close()
+            client = nil
+            await fulfillment(of: [ended], timeout: 3)
+            consumer.cancel() // also settles a known-bad missing-finish control
+            let terminal = await consumer.value
+            XCTAssertNil(terminal)
+        } catch {
+            consumer.cancel()
+            await client?.close()
+            client = nil
+            _ = await consumer.value
+            throw error
+        }
     }
 }
 
