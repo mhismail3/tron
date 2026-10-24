@@ -22,6 +22,8 @@ import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-regi
  * The retained artifact is `test-results/home-research-tools/report.json`.
  */
 import { createHash } from "node:crypto";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
@@ -36,7 +38,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { HomeRequestRecord } from "../modules/home/home-request-policy.js";
-import type { HomeResearchToolDetails } from "../modules/home/home-research-tools.js";
+import type { HomeResearchToolDetails, HomeResearchTransport } from "../modules/home/home-research-tools.js";
 import { legacyEntriesDigest, seedLegacyChronicle } from "../../test-support/legacy-chronicle.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
@@ -61,10 +63,15 @@ const report: { generatedAt: string; cases: Array<Record<string, unknown>> } = {
 const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 const indexes: SessionSearchIndex[] = [];
+const servers: Server[] = [];
 
 afterEach(async () => {
   await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
   for (const index of indexes.splice(0)) index.close();
+  await Promise.all(servers.splice(0).map(server => new Promise<void>((resolve, reject) => {
+    server.close(error => error ? reject(error) : resolve());
+    server.closeAllConnections();
+  })));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -144,6 +151,7 @@ async function fixture(
   label: string,
   seedCanonical?: (agentDir: string, project: string) => Promise<void>,
   seedIndex?: (registry: RuntimeRegistry, path: string) => Promise<void>,
+  transport?: HomeResearchTransport,
 ): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-research-${label}-`));
   roots.push(root);
@@ -173,7 +181,7 @@ async function fixture(
     sessionListChanged: () => {},
     homeMemorySummarizer: () => async () => fauxAssistantMessage("HOME-RESEARCH-LINE"),
     homeRequestDiagnostic: (record) => requestRecords.push(record),
-    homeWebTransport: web.transport,
+    homeWebTransport: transport ?? web.transport,
   });
   registries.push(registry);
   await registry.initialize();
@@ -255,6 +263,35 @@ function refusals(f: Fixture): HomeRequestRecord[] {
 // ---- the cases ------------------------------------------------------------------
 
 describe("Tron Home research tools", () => {
+  it("does not report HTTP 200 error pages as successful searches or readable articles", async () => {
+    let requests = 0;
+    const server = createServer((_request, response) => {
+      requests += 1;
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end("<html><head><title>Search temporarily unavailable</title></head><body><h1>Search temporarily unavailable</h1><p>Please try again later.</p></body></html>");
+    });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+    const f = await fixture("soft-error", undefined, undefined, {
+      // Keep the public-destination guard live; route only the transport to the
+      // owned local socket, never to a provider or private destination.
+      resolveHost: async () => [PUBLIC_ADDRESS],
+      fetcher: (_input, init) => fetch(endpoint, init),
+    });
+    const answers = await toolAnswers(f, "read the public fixture", [
+      { name: "web_search", args: { query: "public fixture" } },
+      { name: "web_fetch", args: { url: "https://example.org/article" } },
+    ]);
+    expect(requests).toBe(2);
+    expect(refusals(f)).toEqual([]);
+    recordCase("http-200-soft-error", { requests, answers });
+    for (const answer of answers) {
+      expect.soft(answer.isError, `${answer.toolName} must not convert upstream failure to absence or evidence`).toBe(true);
+      expect.soft(answer.details?.status).not.toBe("ok");
+    }
+  }, 120_000);
+
   it("runs web, search, Knowledge and trusted-file tools inside Home activations with zero seam refusals", async () => {
     const f = await fixture("all-tools");
 
