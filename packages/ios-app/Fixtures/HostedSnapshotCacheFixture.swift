@@ -134,7 +134,7 @@ private final class SnapshotCacheFixtureDriver {
         let url = file(first.id)
         if mode == "corrupt" { try Data("{invalid-json".utf8).write(to: url); return }
         var document = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
-        if mode == "v3" { document["version"] = 3 }
+        if mode == "v3" { document["version"] = 3; document["archivedCount"] = nil }
         if mode == "future" { document["version"] = 99 }
         if mode == "oversized" {
             document["padding"] = ""
@@ -210,6 +210,9 @@ private final class SnapshotCacheFixtureDriver {
         lifecycleJob = nil
         await model.enteredBackground().value
         await client.close()
+        // Independently fence real I/O even when the exercised background-join
+        // control is deliberately broken; cleanup must not race its last write.
+        _ = await cache.load(profileID: first.id)
         // A relaunch deliberately retains the UUID root; this explicit final
         // action owns only that fixture root, never ordinary application data.
         try? FileManager.default.removeItem(at: root)
