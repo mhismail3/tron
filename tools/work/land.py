@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 from pathlib import Path
 from typing import List, Optional
@@ -63,13 +62,6 @@ def delete_branch(root: Path, remote: str, branch: str, head: str) -> str:
         detail = (deleted.stderr.strip().splitlines() or ["no detail"])[-1]
         return f"kept: the delete with a lease on {head[:12]} was refused ({detail})"
     return "deleted"
-
-
-def default_title(branch: str) -> str:
-    """`<type>: <slug words>` from `<type>/<issue>-<slug>`, for a pull request opened without --title."""
-    kind, _, rest = branch.partition("/")
-    words = rest.split("-", 1)[1] if "-" in rest and rest.split("-", 1)[0].isdigit() else rest
-    return f"{kind}: {words.replace('-', ' ')}"
 
 
 def _current_branch(root: Path, base: str) -> str:
