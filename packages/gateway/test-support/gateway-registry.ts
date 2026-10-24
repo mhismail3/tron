@@ -17,7 +17,7 @@ import type { HomeOwner } from "../src/modules/home/home-owner.js";
 
 type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "settingsSchema">;
 /** Home's composition inputs a test may supply; the rest are the registry's own. */
-type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "notifications" | "machineId" | "homeTaskDiagnostic" | "modelQueue" | "runtime">;
+type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "notifications" | "machineId" | "homeTaskDiagnostic" | "modelQueue" | "runtime" | "settings" | "knowledge" | "modelRuntime">;
 
 const homes = new WeakMap<RuntimeRegistry, () => HomeOwner>();
 const recents = new WeakMap<RuntimeRegistry, RecentModelStore>();
@@ -66,7 +66,9 @@ export async function createTestRegistry(options: RegistryOptions & HomeTestOpti
   }) : undefined;
   const display = new DisplayOwner(new DisplayArtifactStore(options.tronHome), browserLiveViews, () => registry);
   const home: HomeComposition = {
-    modelQueue,
+    modelQueue, modelRuntime: registryOptions.gatewayModelRuntime,
+    settings: () => registry.settings,
+    knowledge: () => registry.knowledge,
     runtime: async () => ({
       runtime: applyHomeCacheRetention(sessionRuntimeView(registryOptions.gatewayModelRuntime ?? await createProviderModelRuntime(options.agentDir, modelRuntimeFactory))),
       ownership: registryOptions.gatewayModelRuntime ? "borrowed" : "owned",

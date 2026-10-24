@@ -92,7 +92,6 @@ import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-bound
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
 import { modelQueueKey } from "../kernel/settings/tool-contract.js";
-import type { HomeKernelPorts } from "../modules/home/home-module.js";
 import {
   CatalogDiscovery,
   DEFAULT_CATALOG_DISCOVERY_LIMITS,
@@ -460,7 +459,28 @@ interface IdleEviction {
   completion?: Promise<boolean>;
 }
 
-export class RuntimeRegistry {
+/** Native session operations: every method executes on the canonical registry.
+ * Profile modules receive this view, never an adapter with a second lifecycle. */
+export interface SessionOperations extends LineageRuntimePort<RuntimeSlot> {
+  create(cwd: string, profile?: string): Promise<RuntimeSlot>;
+  acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot>;
+  runtimeEntries(): ReadonlyArray<readonly [string, RuntimeSlot]>;
+  retireIdleRuntime(input: {
+    sessionId: string;
+    slot: RuntimeSlot;
+    reason: Extract<RuntimeEvictionReason, "idle" | "capacity" | "bytes" | "heap" | "publication-uncertain">;
+    eligible: () => boolean;
+  }): Promise<boolean>;
+  sessionFile(sessionId: string): Promise<string | undefined>;
+  sessionPresent(sessionId: string): Promise<boolean>;
+  serializeSessionMutation<T>(sessionId: string, operation: () => Promise<T>): Promise<T>;
+  replaceRuntimeForProfile(sessionId: string, commit: () => Promise<void>): Promise<void>;
+  noteSessionListChanged(): void;
+  readSearchCut: RuntimeRegistry["readSearchCut"];
+  modelQueueOf(role: Parameters<typeof modelQueueKey>[0], scope?: "global" | "home"): Promise<string[]>;
+}
+
+export class RuntimeRegistry implements SessionOperations {
   private readonly slots = new Map<string, RuntimeSlot>();
   /** Live-only generated sessions are bound to the exact Automation operation
    * until Pi persists their first user or assistant message. Weak ownership cannot outlive
@@ -475,7 +495,7 @@ export class RuntimeRegistry {
   /** Registry session ordering precedes the existing registry/slot/attention
    * lanes; seal takes HomeOwner's recordMutex last, never in reverse. SDK work
    * keeps its own slot lane. Only this boundary creates/retires queue entries. */
-  private async serializeSessionMutation<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+  async serializeSessionMutation<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.sessionMutations.get(sessionId) ?? Promise.resolve();
     const result = previous.then(operation, operation);
     const tail = result.then(() => {}, () => {});
@@ -717,47 +737,13 @@ export class RuntimeRegistry {
   get moduleHost(): ModuleHost { return this.options.modules; }
   get knowledge(): KnowledgeService | undefined { return this.knowledgeService; }
   notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
-  /** The generic K1/K5 operations and reads Home's owner and module are built over
-   * (k0-kernel.md §5); Home's module constructs the owner. */
-  homeKernel(): HomeKernelPorts {
-    return {
-      createSession: (cwd, profile) => this.create(cwd, profile),
-      acquire: sessionId => this.acquire(sessionId),
-      runtimeEntries: () => this.runtimeEntries(),
-      retireIdleRuntime: input => this.retireIdleRuntime(input),
-      sessions: {
-        currentSessionModel: sessionId => this.slots.get(sessionId)?.snapshot().model ?? null,
-        sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
-        homeChaptersChanged: () => {
-          // The dashboard's Home rule depends on the record's chapter set, so a
-          // change of that set is a list change for every connected client.
-          this.revision += 1;
-          this.options.sessionListChanged();
-        },
-        sessionFile: (sessionId) => this.homeSessionFile(sessionId),
-        hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
-        waitingForUser: (sessionId) => this.slots.get(sessionId)?.catalogWaitingForUser ?? false,
+  /** The installed K6 owner, read late by session and composition consumers. */
+  get settings() { return this.settingsOwners; }
 
-        replaceRuntimeForProfile: (sessionId, commit) => this.replaceHomeRuntimeForProfile(sessionId, commit),
-        serializeSessionMutation: (sessionId, commit) => this.serializeSessionMutation(sessionId, commit),
-        wakeHome: async (sessionId) => (await this.acquire(sessionId)).admitHomeWake(),
-      },
-      runtimes: {
-        materializeRuntime: (sessionId, construct) => this.materializeRuntime(sessionId, construct),
-        runtimeOf: (sessionId) => this.slots.get(sessionId),
-        liveRuntime: (sessionId) => this.mutex.run(() => this.slots.get(sessionId)),
-        sessionDirectory: (cwd) => this.sessionDirectoryFor(cwd),
-        canonicalEntries: (sessionId) => this.canonicalEntries(sessionId),
-        createRuntimeOver: (sessionId, build) => this.createRuntimeOver(sessionId, build),
-      },
-      modelQueueOf: (role, scope) => this.modelQueueOf(role, scope),
-      modelRuntime: () => this.options.gatewayModelRuntime,
-      taskSessions: this,
-      knowledge: () => this.knowledgeService,
-      readSearchCut: sessionId => this.readSearchCut(sessionId),
-      settings: () => this.settingsOwners?.model,
-      changes: () => this.settingsOwners?.changes,
-    };
+  /** Publish a change to session-list membership without creating another index. */
+  noteSessionListChanged(): void {
+    this.revision += 1;
+    this.options.sessionListChanged();
   }
 
   setSearchInvalidator(invalidator: (sessionID: string, nextSessionID?: string) => void): void {
@@ -783,7 +769,7 @@ export class RuntimeRegistry {
 
   /** One construction flight per session (K1): a live runtime is returned as
    * `existing`, a running flight is joined, otherwise `construct` runs once. */
-  private async materializeRuntime(sessionId: string, construct: () => Promise<RuntimeSlot>): Promise<{ slot: RuntimeSlot; existing: boolean }> {
+  async materializeRuntime(sessionId: string, construct: () => Promise<RuntimeSlot>): Promise<{ slot: RuntimeSlot; existing: boolean }> {
     let existingSlot: RuntimeSlot | undefined;
     let selected!: Promise<RuntimeSlot>;
     await this.mutex.run(() => {
@@ -807,14 +793,14 @@ export class RuntimeRegistry {
   }
 
   /** A session's canonical entries: its live runtime's branch, else the durable file's cut. */
-  private async canonicalEntries(sessionId: string): Promise<{ entries: readonly FileEntry[] | null; live: boolean }> {
+  async canonicalEntries(sessionId: string): Promise<{ entries: readonly FileEntry[] | null; live: boolean }> {
     const live = this.slots.get(sessionId);
     if (live !== undefined && !live.isDisposed) return { entries: live.canonicalSessionEntries(), live: true };
     return { entries: await this.canonicalSessionEvidenceCut(sessionId), live: false };
   }
 
   /** Builds and publishes a runtime over a caller-prepared manager inside one slot admission (K1). */
-  private async createRuntimeOver(sessionId: string, build: Parameters<LineageRuntimePort<RuntimeSlot>["createRuntimeOver"]>[1]): Promise<RuntimeSlot> {
+  async createRuntimeOver(sessionId: string, build: Parameters<LineageRuntimePort<RuntimeSlot>["createRuntimeOver"]>[1]): Promise<RuntimeSlot> {
     return this.startRuntime<RuntimeSlot>({
       reason: "create", failed: build.failed, manager: build.prepare, admitted: build.admitted, published: build.published,
       create: manager => {
@@ -896,7 +882,7 @@ export class RuntimeRegistry {
   /** Join the existing writer construction owner before changing its profile.
    * With no owner, commit under construction selection so a new start cannot
    * latch the old ledger. Never hold that mutex while joining a constructor. */
-  private async replaceHomeRuntimeForProfile(sessionId: string, commit: () => Promise<void>): Promise<void> {
+  async replaceRuntimeForProfile(sessionId: string, commit: () => Promise<void>): Promise<void> {
     const selected = await this.mutex.run(async () => {
       const flight = this.homeMaterializations.get(sessionId) ?? this.pendingSlotStarts.get(sessionId)?.operation;
       if (flight) return { flight };
@@ -909,7 +895,7 @@ export class RuntimeRegistry {
       // Construction failure has already retired its candidate. Re-read the
       // published owner even on failure; a durable profile change still applies.
       await selected.flight.catch(() => {});
-      await this.replaceHomeRuntimeForProfile(sessionId, commit);
+      await this.replaceRuntimeForProfile(sessionId, commit);
     } else if (selected.slot) {
       await selected.slot.replaceRuntimeForProfile(commit);
     }
@@ -1627,7 +1613,7 @@ export class RuntimeRegistry {
     return this.configuredSessionDir;
   }
 
-  private sessionDirectoryFor(cwd: string): string {
+  sessionDirectory(cwd: string): string {
     const configured = this.configuredSessionDirectory();
     if (configured) return configured;
     const safePath = `--${resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
@@ -1880,7 +1866,7 @@ export class RuntimeRegistry {
     try {
       const openRefusal = await this.lineage().openRefusal(sessionId, entry.path);
       if (openRefusal) throw openRefusal;
-      manager = SessionManager.open(entry.path, this.sessionDirectoryFor(entry.canonicalCwd));
+      manager = SessionManager.open(entry.path, this.sessionDirectory(entry.canonicalCwd));
     }
     catch { return {}; }
     const marker = (await this.markers.evidenceFor(sessionId)).find((candidate) => candidate.operationId === operationId);
@@ -2576,7 +2562,7 @@ export class RuntimeRegistry {
         }
         return { slot: current, release: current.retainLease() };
       },
-      manager: () => SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd), { id: sessionId }),
+      manager: () => SessionManager.create(trust.cwd, this.sessionDirectory(trust.cwd), { id: sessionId }),
       create: manager => stage("automation.session.runtime", () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false)),
       publish: slot => {
         this.assertSlotAdmissionOpen();
@@ -2617,7 +2603,7 @@ export class RuntimeRegistry {
         }
         return undefined;
       },
-      manager: () => SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd)),
+      manager: () => SessionManager.create(trust.cwd, this.sessionDirectory(trust.cwd)),
       create: manager => stage("session.create.runtime",
         () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, this.options.modules.profile(profile), undefined, taskWorker)),
       publish: (_slot, manager) => {
@@ -3043,7 +3029,7 @@ export class RuntimeRegistry {
       try {
         manager = await stage(
           "session.open.manager",
-          async () => SessionManager.open(canonicalPath, this.sessionDirectoryFor(entry.canonicalCwd)),
+          async () => SessionManager.open(canonicalPath, this.sessionDirectory(entry.canonicalCwd)),
         );
       } catch {
         throw new GatewayError("conflict", "Tron session is not a valid canonical session");
@@ -3134,7 +3120,7 @@ export class RuntimeRegistry {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
-        const sessionDirectory = this.sessionDirectoryFor(trust.cwd);
+        const sessionDirectory = this.sessionDirectory(trust.cwd);
         // Generic imports preserve caller-path provenance and reach source
         // construction only after capacity admission; Home scans own opens/searches.
         const manager = SessionManager.forkFrom(path, trust.cwd, sessionDirectory);
@@ -3934,7 +3920,7 @@ export class RuntimeRegistry {
    * acquisition here made every row O(catalog) and timed out `home.taskList`
    * for the work owner check (#905). An ambiguous ID yields no file; a read
    * before the first cut joins it, and refuses retryably if none arrives. */
-  private async homeSessionFile(sessionId: string): Promise<string | undefined> {
+  async sessionFile(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId)?.sessionFile;
     if (live) return live;
     // No cut is not "no file": every Home caller reads undefined as a chapter whose
@@ -4033,7 +4019,7 @@ export class RuntimeRegistry {
   async taskWorkerName(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId);
     if (live) return live.displayName;
-    const path = await this.homeSessionFile(sessionId);
+    const path = await this.sessionFile(sessionId);
     return path ? this.sessionCatalog.row(path)?.name : undefined;
   }
 
@@ -4054,7 +4040,7 @@ export class RuntimeRegistry {
   private async taskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
     const live = this.slots.get(sessionId);
     if (live) return live.canonicalSessionEntries();
-    if (await this.homeSessionFile(sessionId)) return await this.canonicalSessionEvidenceCut(sessionId) ?? [];
+    if (await this.sessionFile(sessionId)) return await this.canonicalSessionEvidenceCut(sessionId) ?? [];
     return [];
   }
 
@@ -4088,7 +4074,7 @@ export class RuntimeRegistry {
     // Task settlement and Home carry-forward publish durable results. A stale
     // catalog cut or a not-yet-ready projection cannot decide source presence.
     await this.sessionCatalog.whenReconciled();
-    const path = await this.homeSessionFile(sessionId);
+    const path = await this.sessionFile(sessionId);
     if (!path) throw new GatewayError("conflict", "Canonical session is missing");
     const before = await lstat(path).catch(error => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
@@ -4123,7 +4109,7 @@ export class RuntimeRegistry {
    * canonical session the catalog still holds. A catalog read that cannot
    * complete is not proof of absence, so the recorded session is kept rather
    * than replaced. */
-  private async homeSessionPresent(sessionId: string): Promise<boolean> {
+  async sessionPresent(sessionId: string): Promise<boolean> {
     if (this.slots.has(sessionId)) return true;
     try {
       return (await this.catalogMembership(sessionId)).entry !== undefined;
@@ -4446,6 +4432,7 @@ export class RuntimeRegistry {
 
   /** Native live ownership without acquiring or constructing a runtime. */
   liveRuntime(sessionID: string): RuntimeSlot | undefined { return this.slots.get(sessionID); }
+  orderedRuntime(sessionID: string): Promise<RuntimeSlot | undefined> { return this.mutex.run(() => this.slots.get(sessionID)); }
 
   isDeletingSession(sessionID: string): boolean { return this.deletingSessionIds.has(sessionID); }
 }

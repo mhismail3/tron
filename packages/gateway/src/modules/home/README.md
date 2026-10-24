@@ -26,6 +26,12 @@ unaffected by every rule here.
 
 ### Designation and chapters
 
+Home receives the canonical native `SessionOperations` implementation, not a
+Registry-produced Home adapter. Home assembles its domain session recipe; native
+operations retain maps, mutation/construction mutexes, catalog cuts and retirement.
+Composition supplies the same late K6 settings, Knowledge and raw model owners.
+The worker API still comes from Registry until actual K5 delegation takes it over.
+
 - **Record.** `<tronHome>/gateway/home/home.json` (`0600`, atomic durable publish): `version`
   `2`, `homeId`, ordered `chapters` (`{ sessionId, ordinal, state: active | sealed | reserved
   | materializing, createdAt, activationStarted, … }`), `bindingRevision`, `generation`
@@ -41,7 +47,7 @@ unaffected by every rule here.
   frames retain membership/profile selection, mutation ordering and physical guards.
 - **Model choice.** Home's owner factory reads its saved model recipe and owns
   explicit chapter choices, including their K6 scope, actor and chapter fence.
-  Native ports supply the late settings owners and current runtime; a host with
+  Composition supplies the late settings owner; native operations supply the current runtime. A host with
   no settings owner retains its existing SDK-only choice behavior.
 - **Uncertain publication.** Home selects its native runtime projections and owns
   ordered settle/retire eligibility and refusal policy. Native retirement retains the

@@ -12,7 +12,7 @@ import type { HomeMemoryToolAccess } from "./home-memory.js";
 import { HomeProfileItems, type HomeProfileChangeAccess } from "./home-profile.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
 import type { SettingsModel } from "../../kernel/settings/settings-model.js";
-import { HomeOwner, type HomeOwnerOptions } from "./home-owner.js";
+import { HomeOwner } from "./home-owner.js";
 import { homeAppendGuardHook, type HomeAppendGuardServices } from "./home-append-guard.js";
 import type { HomeDiagnostic } from "./home-diagnostic.js";
 import { HomeRequestPolicyError } from "./home-request-policy.js";
@@ -31,7 +31,8 @@ import type { HomeMemoryDiagnostic } from "./home-memory.js";
 import type { HomeRequestRecord } from "./home-request-policy.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
-import type { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import type { RuntimeRegistry, SessionOperations } from "../../sessions/runtime-registry.js";
+import type { ModelRuntime } from "../../kernel/pi/coding-agent.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
@@ -60,6 +61,9 @@ export interface HomeModuleServices {
 /** The composition's Home inputs: platform owners and log sinks, never the registry. */
 export interface HomeComposition {
   runtime: HomeSessionProfileServices["runtime"];
+  settings(): { model: SettingsModel; changes: SettingsChangePath } | undefined;
+  knowledge(): KnowledgeService | undefined;
+  modelRuntime?: ModelRuntime | undefined;
   tronHome: string;
   agentDir: string;
   trust: TrustService;
@@ -76,52 +80,61 @@ export interface HomeComposition {
   homeWebTransport?: HomeResearchTransport | undefined;
 }
 
-/** The registry's generic operations and reads Home is built over (k0-kernel.md §5). */
-export interface HomeKernelPorts extends Pick<HomeOwnerOptions, "runtimes" | "taskSessions" | "knowledge">,
-  HomeTaskPolicyInputs, Pick<RuntimeRegistry, "runtimeEntries" | "retireIdleRuntime"> {
-  sessions: Omit<HomeOwnerOptions["sessions"], "createHomeSession" | "homeModel" | "chooseHomeModel" | "chapterMetrics" | "hasConversation" | "retireHomeRuntimes">;
-  createSession(cwd: string, profile: string): Promise<{ readonly id: string }>;
-  acquire(sessionId: string): ReturnType<RuntimeRegistry["acquire"]>;
-  readSearchCut: Pick<RuntimeRegistry, "readSearchCut">["readSearchCut"];
-  settings(): SettingsModel | undefined;
-  changes(): SettingsChangePath | undefined;
+/** Actual native owners, not callbacks forwarding into a second session facade. */
+export interface HomeNativeOwners {
+  sessions: SessionOperations;
+  /** HomeTaskDispatcher consumes the native worker API until K5 owns delegation. */
+  workers: RuntimeRegistry;
 }
 
 /** Home's one owner, built on first use over the composition and the registry's ports. */
-export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeComposition, kernel: () => HomeKernelPorts): () => HomeOwner {
+export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeComposition, native: () => HomeNativeOwners): () => HomeOwner {
   let owner: HomeOwner | undefined;
   return () => {
     if (owner) return owner;
     const composition = inputs();
-    const ports = kernel();
-    const memoryModels = () => ports.modelQueueOf("background", "home");
+    const { sessions, workers } = native();
+    const taskInputs: HomeTaskPolicyInputs = {
+      settings: () => composition.settings()?.model,
+      modelRuntime: () => composition.modelRuntime,
+      modelQueueOf: (role, scope) => sessions.modelQueueOf(role, scope),
+    };
+    const memoryModels = () => sessions.modelQueueOf("background", "home");
     owner = new HomeOwner({
       tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
       sessions: {
-        ...ports.sessions,
-        createHomeSession: async (cwd) => (await ports.createSession(cwd, HOME_SESSION_PROFILE_NAME)).id,
+        currentSessionModel: sessionId => sessions.liveRuntime(sessionId)?.snapshot().model ?? null,
+        sessionPresent: sessionId => sessions.sessionPresent(sessionId),
+        homeChaptersChanged: () => sessions.noteSessionListChanged(),
+        sessionFile: sessionId => sessions.sessionFile(sessionId),
+        hasLiveRuntime: sessionId => sessions.liveRuntime(sessionId) !== undefined,
+        waitingForUser: sessionId => sessions.liveRuntime(sessionId)?.catalogWaitingForUser ?? false,
+        replaceRuntimeForProfile: (sessionId, commit) => sessions.replaceRuntimeForProfile(sessionId, commit),
+        serializeSessionMutation: (sessionId, commit) => sessions.serializeSessionMutation(sessionId, commit),
+        wakeHome: async sessionId => (await sessions.acquire(sessionId)).admitHomeWake(),
+        createHomeSession: async (cwd) => (await sessions.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
         retireHomeRuntimes: async () => {
           // Publication recovery runs after construction of the canonical owner.
           // Keep native map keys/order and re-read authority after every await.
-          const homes = ports.runtimeEntries().filter(([sessionId]) => owner!.chapterStateFor(sessionId).homeId);
+          const homes = sessions.runtimeEntries().filter(([sessionId]) => owner!.chapterStateFor(sessionId).homeId);
           for (const [sessionId, slot] of homes) {
             await slot.retireAfterSettled();
-            const retired = await ports.retireIdleRuntime({
+            const retired = await sessions.retireIdleRuntime({
               sessionId,
               slot,
               reason: "publication-uncertain",
               eligible: () => owner!.publicationUncertain
-                && ports.runtimes.runtimeOf(sessionId) === slot
+                && sessions.liveRuntime(sessionId) === slot
                 && !slot.isBusy,
             });
-            if (!retired && ports.runtimes.runtimeOf(sessionId) === slot && !slot.isDisposed) {
+            if (!retired && sessions.liveRuntime(sessionId) === slot && !slot.isDisposed) {
               throw new GatewayError("conflict", "A stale Home runtime could not be retired after ledger publication uncertainty", true);
             }
           }
         },
         chapterMetrics: async (sessionId) => {
-          const slot = ports.runtimes.runtimeOf(sessionId);
-          if (!slot) return coldHomeChapterMetrics(ports.sessions.sessionFile(sessionId));
+          const slot = sessions.liveRuntime(sessionId);
+          if (!slot) return coldHomeChapterMetrics(sessions.sessionFile(sessionId));
           const path = slot.sessionFile;
           const bytes = path ? await stat(path).then(info => info.size).catch(error => {
             if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
@@ -130,7 +143,7 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
           return { bytes, entries: slot.canonicalEntryCount, quiescent: !slot.isBusy };
         },
         hasConversation: async (sessionId, expectedPath) => {
-          const slot = ports.runtimes.runtimeOf(sessionId);
+          const slot = sessions.liveRuntime(sessionId);
           if (!slot || slot.sessionFile !== expectedPath || slot.isDisposed) return false;
           let fileInfo;
           try { fileInfo = await lstat(expectedPath); }
@@ -149,19 +162,19 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
           });
           return cut.tornBytes === 0 && hasConversation;
         },
-        homeModel: async () => (await ports.settings()?.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"], { storeState: false }))
+        homeModel: async () => (await composition.settings()?.model?.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"], { storeState: false }))
           ?.keys[0]?.value as { provider: string; id: string } | undefined,
         chooseHomeModel: async (sessionId, model) => {
-          const changes = ports.changes();
+          const changes = composition.settings()?.changes;
           // A host without a settings owner has only the session's own choice.
-          if (!changes) return void await ports.runtimes.runtimeOf(sessionId)?.setModel(model.provider, model.id);
-          const slot = ports.runtimes.runtimeOf(sessionId);
+          if (!changes) return void await sessions.liveRuntime(sessionId)?.setModel(model.provider, model.id);
+          const slot = sessions.liveRuntime(sessionId);
           await changes.change({ kind: "home" }, [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: model }],
             { actor: { kind: "ui", id: "home-designation" }, commandId: randomUUID(), ...(slot?.usesHomeSettings ? { homeChapter: slot.homeSettingsChapter() } : {}) });
         },
-      }, runtimes: ports.runtimes,
+      }, runtimes: sessions,
       ...(composition.homeDiagnostic ? { diagnostic: composition.homeDiagnostic } : {}),
-      workspace, memoryModels, taskPolicy: homeTaskPolicy(ports, composition.trust),
+      workspace, memoryModels, taskPolicy: homeTaskPolicy(taskInputs, composition.trust),
       memorySummarizer: composition.homeMemorySummarizer ?? (() => {
         const queue = composition.modelQueue;
         if (!queue) throw new GatewayError("unsupported", "Home memory needs the Gateway model runtime");
@@ -170,26 +183,26 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
       }),
       ...(composition.homeMemoryDiagnostic ? { memoryDiagnostic: composition.homeMemoryDiagnostic } : {}),
       ...(composition.homeRequestDiagnostic ? { requestDiagnostic: composition.homeRequestDiagnostic } : {}),
-      taskSessions: ports.taskSessions,
+      taskSessions: workers,
       ...(composition.notifications ? { notifications: composition.notifications } : {}),
       ...(composition.machineId ? { machineId: composition.machineId } : {}),
       ...(composition.homeTaskDiagnostic ? { taskDiagnostic: composition.homeTaskDiagnostic } : {}),
-      knowledge: ports.knowledge,
+      knowledge: composition.knowledge,
     });
     return owner;
   };
 }
 
 /** Home owns its extension closures; the registry supplies only generic operations. */
-export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, ports: HomeKernelPorts): Omit<HomeModuleServices, "search"> {
-  const workerChoice: HomeWorkerChoicePort = { settings: ports.settings,
-    homeRuntime: async sessionId => (await ports.acquire(sessionId)).snapshot(),
-    model: (provider, id) => ports.modelRuntime()?.getModel(provider, id),
-    modelQueues: () => homeTaskModelQueues(ports.modelQueueOf),
+export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, sessions: SessionOperations): Omit<HomeModuleServices, "search"> {
+  const workerChoice: HomeWorkerChoicePort = { settings: () => platform.settings()?.model,
+    homeRuntime: async sessionId => (await sessions.acquire(sessionId)).snapshot(),
+    model: (provider, id) => platform.modelRuntime?.getModel(provider, id),
+    modelQueues: () => homeTaskModelQueues((role, scope) => sessions.modelQueueOf(role, scope)),
     availability: (role, signal, queue) => platform.modelQueue?.availability(role, signal, queue),
   };
   return {
-    knowledge: ports.knowledge(), read: (request, signal) => readHomeSessionEntry(ports, owner, request, signal),
+    knowledge: platform.knowledge(), read: (request, signal) => readHomeSessionEntry(sessions, owner, request, signal),
     delegate: (sessionId, request, signal) => dispatchWithWorkerChoice(owner, workerChoice, sessionId, request, signal),
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
     lifecycle: {
@@ -232,7 +245,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
     },
     memory: sessionId => owner.memoryToolsFor(sessionId),
     task: (sessionId, request) => owner.taskTool(sessionId, request),
-    profileChanges: session => homeProfileChanges(session, ports.changes(), ports.knowledge),
+    profileChanges: session => homeProfileChanges(session, platform.settings()?.changes, platform.knowledge),
     explicitlyTrustedDirectory: async path => {
       try { return (await platform.trust.inspect(path)).savedDecision === true; } catch { return false; }
     },
@@ -241,7 +254,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
 }
 
 /** Home's profile tool resolves the current change path and actor on each call. */
-export function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined, knowledge: HomeKernelPorts["knowledge"]): HomeProfileChangeAccess | undefined {
+export function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined, knowledge: () => KnowledgeService | undefined): HomeProfileChangeAccess | undefined {
   if (!changes || !session.profile().profileChanges) return undefined;
   return { change: (ops, input) => new HomeProfileItems(knowledge).change(changes, ops, {
     actor: { kind: "home", id: session.sessionId(), sessionId: session.sessionId(), toolCallId: input.toolCallId },
@@ -251,9 +264,8 @@ export function homeProfileChanges(session: SessionContext, changes: SettingsCha
 
 /** What Home's two modules read per runtime: the composition's inputs, the
  * registry's generic ports and the search owner, resolved at each call. */
-export interface HomeModuleOwners {
+export interface HomeModuleOwners extends HomeNativeOwners {
   composition: HomeComposition;
-  kernel(): HomeKernelPorts;
   search: HomeModuleServices["search"];
 }
 
@@ -267,10 +279,10 @@ export function createHomeModules(owners: () => HomeModuleOwners): { home: Modul
   };
   const services = (): HomeModuleServices => {
     const current = owners();
-    return { ...homeModuleServices(homeOwner(), current.composition, current.kernel()), search: current.search };
+    return { ...homeModuleServices(homeOwner(), current.composition, current.sessions), search: current.search };
   };
   return { owner: homeOwner, research: createHomeResearchModule(services), home: createHomeModule(services, host => {
-    owner = homeOwnerFactory(host.contract(workspaceModule), () => owners().composition, () => owners().kernel());
+    owner = homeOwnerFactory(host.contract(workspaceModule), () => owners().composition, owners);
   }) };
 }
 

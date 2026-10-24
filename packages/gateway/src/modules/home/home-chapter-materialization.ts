@@ -43,7 +43,7 @@ export class HomeChapterMaterializer {
   }
 
   async assertAttempt(sessionId: string): Promise<void> {
-    const slot = await this.runtimes.liveRuntime(sessionId);
+    const slot = await this.runtimes.orderedRuntime(sessionId);
     if (!slot || slot.isDisposed || !slot.sessionFile) throw new GatewayError("conflict", "No live Home reservation runtime exists", true);
     const chapter = this.owner.reservedChapter(sessionId);
     if (chapter?.state === "materializing" && chapter.attemptId && chapter.expectedPath) {

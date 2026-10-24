@@ -4,6 +4,12 @@
 
 Gateway-owned execution primitives layered on Pi's session loop.
 
+The legacy native Registry implements `SessionOperations` directly: one canonical
+map/construction/mutation authority, shared synchronous `liveRuntime` read and
+mutex-ordered `orderedRuntime` read. Profile modules supply domain recipes over
+those operations; no Registry-produced Home provider exists. Registry/Slot's
+physical relocation and worker binding/control transfer remain separate work.
+
 ## Owns
 
 - `run-operations.ts`: shared run state, peer lifetimes, public admission/queue/Stop/

@@ -23,7 +23,7 @@ import type { SessionSearchService } from "../sessions/session-search-service.js
 /** The owners modules read per runtime: the registry's own services and the
  * composition's, which never pass through the registry. */
 export interface ModuleOwners extends RecentModelSignals {
-  registry: Pick<RuntimeRegistry, "knowledge" | "notifyModuleServices" | "homeKernel">;
+  registry: RuntimeRegistry;
   home: HomeComposition;
   display: DisplayOwner;
   openAIModelEligibility: OpenAIModelEligibility;
@@ -36,7 +36,7 @@ export interface ModuleOwners extends RecentModelSignals {
  * registry: start only captures them; extension assembly resolves the live owner. */
 export function gatewayModules(owners: () => ModuleOwners) {
   const registry = () => owners().registry;
-  const home = createHomeModules(() => ({ composition: owners().home, kernel: () => registry().homeKernel(), search: () => {
+  const home = createHomeModules(() => ({ composition: owners().home, sessions: registry(), workers: registry(), search: () => {
     const owner = owners().sessionSearch;
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));

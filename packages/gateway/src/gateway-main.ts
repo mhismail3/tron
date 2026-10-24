@@ -256,7 +256,9 @@ const modelQueue = new ModelQueueOwner({
   },
 });
 const homeComposition: HomeComposition = {
-  modelQueue,
+  modelQueue, modelRuntime,
+  settings: () => sessions.settings,
+  knowledge: () => sessions.knowledge,
   runtime: async () => ({
     runtime: applyHomeCacheRetention(sessionRuntimeView(modelRuntime)),
     ownership: "borrowed",

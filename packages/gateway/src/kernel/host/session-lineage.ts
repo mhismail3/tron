@@ -39,9 +39,9 @@ export interface LineageRuntimePort<Runtime> {
    * `existing`; a running flight is joined; otherwise `construct` runs once. */
   materializeRuntime(sessionId: string, construct: () => Promise<Runtime>): Promise<{ slot: Runtime; existing: boolean }>;
   /** The live runtime now, without the registry mutex. */
-  runtimeOf(sessionId: string): Runtime | undefined;
+  liveRuntime(sessionId: string): Runtime | undefined;
   /** The live runtime as the registry mutex orders it. */
-  liveRuntime(sessionId: string): Promise<Runtime | undefined>;
+  orderedRuntime(sessionId: string): Promise<Runtime | undefined>;
   sessionDirectory(cwd: string): string;
   /** A session's canonical entries: from its live runtime, else the durable file. */
   canonicalEntries(sessionId: string): Promise<{ entries: readonly FileEntry[] | null; live: boolean }>;

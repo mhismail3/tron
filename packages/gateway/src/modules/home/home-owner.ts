@@ -252,7 +252,7 @@ export class HomeOwner {
       wake: () => this.requestWake(),
     });
     this.resources = new HomeGlobalResources({ agentDir: options.agentDir, diagnostic: record => this.options.diagnostic?.(record),
-      homeSlot: () => { try { return options.runtimes.runtimeOf(this.routeBinding().physicalSessionId); } catch { return undefined; } } });
+      homeSlot: () => { try { return options.runtimes.liveRuntime(this.routeBinding().physicalSessionId); } catch { return undefined; } } });
     this.materializer = new HomeChapterMaterializer(this, options.runtimes, options.trust, options.diagnostic);
     this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox, options.taskPolicy);
   }
