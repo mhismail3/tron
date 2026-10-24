@@ -165,6 +165,9 @@ final class SnapshotCachePersistenceContractTests: XCTestCase {
         try tap(app, "cache.switch")
         _ = try require(app, "cache.save", label: "held")
         _ = try require(app, "cache.completion", label: "pending")
+        // A successor cache.load also waits behind this actor's held save.
+        // Pending alone cannot prove the lifecycle retirement joined the write.
+        _ = try require(app, "cache.profile", label: firstID)
         try tap(app, "cache.release")
         _ = try require(app, "cache.completion", label: "done")
         _ = try require(app, "cache.profile", label: secondID)
