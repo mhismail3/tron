@@ -8,7 +8,7 @@ writes a receipt or gates a landing.
 
 ```bash
 scripts/tron verify --changed [--base <ref>]   # a slice: the change since merge-base(<ref>, HEAD)
-scripts/tron verify --module <id>               # one module's owned tests
+scripts/tron verify --module <id>               # its owned tests and transitive consumers' locks
 scripts/tron verify --all                       # every lock (milestones, kernel changes)
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
@@ -53,8 +53,12 @@ base). Each module contributes its owned tests:
 - `test-*.py` and `test-*.sh`;
 - Swift `*Tests.swift` under test targets.
 
-Recorders under `test-fixtures/` are never run. Modules whose `dependsOn` or
-`dynamicEdges` reach a selected module add their locks, transitively.
+Recorders under `test-fixtures/` are never run. For `--changed` and `--module`,
+modules whose `dependsOn` or `dynamicEdges` reach a selected module add their
+locks, transitively. A source-only module baseline can therefore run its existing
+hosted consumer locks without owning a second test list or selecting the consumers'
+ordinary journeys. `--module` does not widen to unrelated kernel locks;
+`--update-locks` remains confined to the named owner's locks.
 
 Small changes run only what can catch a regression in them:
 - **Markdown** selects no module: no test reads it, so the documentation

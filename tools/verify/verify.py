@@ -162,6 +162,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
     locks = sorted(path for path in tests if is_lock(path))
     reasons: list[str] = []
     selected: set[str] = set()
+    narrow: set[str] = set()
     if mode == "all":
         selected |= set(locks)
         reasons.append(f"--all: every lock ({len(locks)} files)")
@@ -216,6 +217,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             else:
                 reasons.append(f"{key}: owns a changed path; its {len(owned)} owned test file(s)")
             selected |= set(owned)
+    if mode in ("changed", "module"):
         # Reverse closure: modules that declare a dependency or a dynamic edge on a selected one.
         reached = frontier = chosen - narrow
         while frontier:
@@ -229,7 +231,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         chosen |= reached
         widening = sorted(key for key in reached if key in modules
                           and (modules[key]["layer"] in WIDENING_LAYERS or key in WIDENING_MODULES))
-        if widening or unowned:
+        if mode == "changed" and (widening or unowned):
             selected |= set(locks)
             why = ", ".join([f"{key} ({modules[key]['layer']})" for key in widening] + [f"unowned {path}" for path in unowned][:5])
             reasons.append(f"widened to every lock ({len(locks)} files): {why}")
