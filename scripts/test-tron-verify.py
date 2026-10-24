@@ -364,6 +364,35 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(calls.read_text().splitlines(), [
             "run --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests"])
 
+    def test_source_module_baseline_reaches_transitive_consumers_locks_without_widening(self) -> None:
+        r = self.repo
+        calls = self.ios_fixture()
+        ios = "packages/ios-app"
+        r.write(f"{ios}/Sources/State/state.module.json", json.dumps({"layer": "L2", "owns": ["**"]}))
+        r.write(f"{ios}/Sources/State/SessionState.swift", "struct SessionState {}\n")
+        r.write(f"{ios}/Sources/UI/Chat/chat.module.json", json.dumps({
+            "layer": "L4", "owns": ["**"], "dependsOn": ["ios-app/state"]}))
+        r.commit("source-only kernel module consumed by hosted chat")
+
+        baseline = r.verify("--module", "ios-app/state")
+        self.assertEqual(baseline.returncode, 0, baseline.stdout + baseline.stderr)
+        report = r.report()
+        self.assertEqual(report["selection"]["tests"], [f"{ios}/UITests/Locks/FixtureLockTests.swift"])
+        self.assertEqual(report["passingTests"], 1)
+        self.assertEqual(calls.read_text().splitlines(), [
+            "build", "run --only-testing TronMobileUITests/FixtureLockTests"])
+        # Module baselines add consumer locks, not their journeys or unrelated kernel locks.
+        self.assertNotIn("widened to every lock", baseline.stdout)
+        # Recording remains confined to the explicitly named owner's locks.
+        recording = r.verify("--update-locks", "ios-app/state", "--plan")
+        self.assertEqual(recording.returncode, 0, recording.stderr)
+        self.assertIn('"tests": []', recording.stdout)
+        # An actual runner failure must fail the same source-only module command.
+        r.env["FIXTURE_IOS_FAIL"] = "TronMobileUITests/FixtureLockTests/testChat()"
+        failed = r.verify("--module", "ios-app/state")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertIn("failed: TronMobileUITests/FixtureLockTests/testChat(): a11y differs", failed.stdout)
+
     def test_an_extension_file_runs_as_the_class_it_extends(self) -> None:
         """#1522: a file that extends another file's XCTestCase class runs as that class, in that class's lane."""
         r = self.repo
