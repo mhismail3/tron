@@ -58,7 +58,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   pills use a flat tinted fill with identical type and geometry. Tones are `Sendable` semantic
   values resolved to colors only at the view boundary.
 - **Role palette.** User input emerald, commands indigo, tools emerald, attributed extension
-  context violet, informational notifications blue, unknown context slate, warnings amber,
+  context violet, informational notifications primary-themed, unknown context slate, warnings amber,
   failures red. Producer and category stay in text so color is never the only signal.
 
 ## Sheets and chrome
@@ -118,7 +118,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - Destructive, security, text-entry and ambiguous decisions are modal. In-app notices
   (`InAppNoticeCenter`, owned by State) are informational only: no buttons, tap actions,
   navigation or recovery commands. They render in a per-scene pass-through window above sheets
-  (`InAppNoticeHost`), one card at a time, with shared 24-point corners and type.
+  (`InAppNoticeHost`), one card at a time, with shared 24-point corners and type. Success, progress
+  and information use the active `tronPrimary` icon and accent; warning/error roles stay semantic.
 
 ## Settings conventions
 
@@ -129,7 +130,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   custom section labels omit a lone heading by default, retaining explanatory detail; standalone
   captions do not count as sections. Presentation surfaces reset this scope for child sheets.
   `TronValueRow`, `TronNumberSettingRow` and `TronTextSettingRow` delegate geometry to
-  `TronSettingsRow`. Sub-destinations disclose as progressively stacked sheets, not pushes.
+  `TronSettingsRow`. `TronCatalogOptionRow` also composes that row: facts use standard subtext,
+  identifier footnotes use the shared code family at the same size, and applying uses the fixed icon slot.
+  Sub-destinations disclose as progressively stacked sheets, not pushes.
 - **Geometry.** `tronSettingsLayout`: 14-point leading inset, 22-point centered icon column,
   common icon-to-text gap; the decorative glyph is capped at `.large` Dynamic Type so it never
   spills from its column while labels keep full Dynamic Type. Section-owned rows add no second

@@ -152,8 +152,7 @@ private struct InAppNoticeCard: View {
         switch notice.role {
         case .error: .tronError
         case .warning: .tronAmber
-        case .success, .progress: .tronEmerald
-        case .info: .tronCyan
+        case .success, .progress, .info: .tronPrimary
         }
     }
     private var symbol: String {

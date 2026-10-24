@@ -13,7 +13,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   `ChatSessionPresentation`, `ChatTranscriptScrollView`, `ChatTranscriptOrientation`,
   `ChatScrollCoordinator`, `ChatComposerView`, `ChatTranscriptPresentationStore`,
   `ChatTranscriptProjectionKernel`, `ChatCommittedLedger`, `TranscriptRow`, `TronMarkdownView`.
-- Details: `ToolDetailSheet` and tool presentations, `ToolChangesSheet`, extension interaction,
+- Details: `ToolDetailSheet`, `CheckinToolDetailPresentation` and tool presentations, `ToolChangesSheet`, extension interaction,
   form and widget sheets, `SessionProcessSheets`, attachment previews and camera capture.
 - Manage Session and Home: `SessionContextSheet`, `WorkspaceInspectorSheet`,
   `AgentInstructionsSheet`, `SessionTreeSheet`, `HomeManageSheet` and the `Home*Sheet(s)` files.
@@ -79,7 +79,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   Changes sheet; `ToolDiffCountChip` counts belong to that diff. Codemode shows Script, Result
   and Calls; Home's tools use `HomeToolDetailPresentation`; [display artifacts](../../../docs/display-artifacts.md)
   owns display, memory-bounded photo previews and honest load-failure fallback. Technical details hold JSON. `TaskToolDetailPresentation` shows catalog rows/counts,
-  status, paged reports and receipts; unknown shapes stay generic. Reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
+  status, paged reports and receipts; unknown shapes stay generic. Check-ins lead with the step/summary,
+  then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
 - **Thinking and context.** Thinking shows at most four measured lines, opening the full trace on
   tap. Compaction, branch, configuration and extension status share one notification-pill language;
   command pills never show arguments. `custom_message` is right-aligned context; worker results
@@ -100,7 +101,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   container: Workspace (`workspace-inspector.v1`), Instructions, Resources (tags Global, Project or
   External; Commands and Subagents preview a body whose View All opens the shared reader), Session
   History (`session-history-pages.v1`), Subagent History; Session Settings (Repository Overrides last);
-  Terminal and Export as HTML/JSON. Manage Session, Manage Home and every sheet they open take
+  Terminal and Export as HTML/JSON. Workspace gives its middle-truncated path a full line above a
+  horizontally scrolling status-pill row; status content stays clipped to that row. Manage Session, Manage Home and every sheet they open take
   the selected primary sheet theme (semantic colors aside). Session's usage, Model, workspace/history
   and settings containers share one primary ink/`tronPrimarySurface` theme scope; Terminal/export stay
   outside it with their slate treatment. The plain context usage bar,
@@ -166,6 +168,11 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 | `opening.failed` | warning | The conversation layout did not settle and the open failed (`ChatView.swift`); settlement reasons in `details`. Chat's trace records: [Core](../../../Core/README.md#signals) |
 
 ## Verify
+
+`TronSixSmallUIRegressionTests` exercises scoped row ordering, primary toast ink, model ID/type
+metrics and retained search/selection, workspace path/status separation at standard/narrow/accessibility
+sizes, and check-in receipt content. `TronSixSmallUIPreviewTests` captures native light/dark design
+review views and both workspace layout candidates (capture only, not acceptance).
 
 Classes under `TronMobileUITests/`: `TronHomeControlsUITests`, `TronHomeDashboardUITests`, `TronHomeSheetsUITests`,
 `TronConsolidatedUIRegressionTests` (Memory/canonical navigation, metadata, usage loading,

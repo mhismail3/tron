@@ -60,7 +60,8 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   (User, Project) tags; Project takes precedence and the tags are mutually exclusive.
 - `InAppNoticeHost` renders the State-owned notice center in one non-key, pass-through window per
   scene above sheets: one card, 24-point corners, 240 ms transitions (180 ms fade under Reduce
-  Motion), swipe or accessibility dismissal, no buttons.
+  Motion), swipe or accessibility dismissal, no buttons. Success, progress and information icons/glass
+  accents follow `tronPrimary`; warnings and errors retain semantic amber/red.
 - `ThinkingLevelPresentation` renders `xhigh` and its variants as **Extra High** everywhere without
   rewriting wire values.
 

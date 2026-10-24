@@ -1612,6 +1612,7 @@ struct TronSettingsGroup<Content: View>: View {
 struct TronSettingsRow<Trailing: View>: View {
     /// Nil for dense lists whose rows share one kind and gain nothing from a glyph.
     let icon: String?
+    let iconIsLoading: Bool
     let title: String
     let subtitle: String?
     let subtitleLineLimit: Int?
@@ -1632,6 +1633,7 @@ struct TronSettingsRow<Trailing: View>: View {
     /// One muted line under the subtitle naming where the row comes from;
     /// a path shortens in the middle.
     let footnote: String?
+    let footnoteIsIdentifier: Bool
     let trailing: Trailing
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
@@ -1654,6 +1656,8 @@ struct TronSettingsRow<Trailing: View>: View {
         subtitleFont: Font? = nil,
         feedTrailing: String? = nil,
         footnote: String? = nil,
+        footnoteIsIdentifier: Bool = false,
+        iconIsLoading: Bool = false,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
@@ -1669,6 +1673,8 @@ struct TronSettingsRow<Trailing: View>: View {
         self.subtitleFont = subtitleFont
         self.feedTrailing = feedTrailing
         self.footnote = footnote
+        self.footnoteIsIdentifier = footnoteIsIdentifier
+        self.iconIsLoading = iconIsLoading
         self.trailing = trailing()
     }
 
@@ -1699,7 +1705,13 @@ struct TronSettingsRow<Trailing: View>: View {
     private var rowLabels: some View {
         HStack(alignment: .center, spacing: TronSpacing.xl) {
             if let icon {
-                Image(systemName: icon)
+                Group {
+                    if iconIsLoading {
+                        TronPulseLoadingIndicator(accent: settingsTheme?.accent ?? accent, size: 14)
+                    } else {
+                        Image(systemName: icon)
+                    }
+                }
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     // This hidden, decorative glyph owns a fixed 22pt column.
                     // Scale the meaningful labels/controls, not ink beyond it.
@@ -1768,10 +1780,13 @@ struct TronSettingsRow<Trailing: View>: View {
                 }
                 if let footnote {
                     Text(footnote)
-                        .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
+                        .font(footnoteIsIdentifier
+                            ? TronTypography.code(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment)
+                            : TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
                         .foregroundStyle(Color.tronTextMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .tronListMarker(.metadata)
                 }
             }
 

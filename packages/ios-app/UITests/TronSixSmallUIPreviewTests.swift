@@ -13,6 +13,9 @@ import XCTest
     func testWorkspaceAccessibility() { capture("workspace", extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]) }
     func testWorkspaceWrapAccessibility() { capture("workspace", extra: ["-six-ui-wrap", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]) }
 
+    func testWorkspaceNarrow() { capture("workspace", extra: ["-six-ui-narrow"]) }
+    func testWorkspaceWrapNarrow() { capture("workspace", extra: ["-six-ui-wrap", "-six-ui-narrow"]) }
+
     private func capture(_ surface: String, extra: [String] = []) {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
