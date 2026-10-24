@@ -8,12 +8,12 @@ enum ThemeColor: String, CaseIterable, Identifiable, Sendable {
         switch self { case .emerald: "Emerald"; case .burgundy: "Deep Burgundy"; case .oliveGold: "Olive Gold" }
     }
     /// Light ink targets small-text AA. Dark Burgundy deliberately uses deeper
-    /// wine-red ink with a 3:1 floor and an explicit small-text AA exception.
+    /// wine-burgundy ink with a 3:1 floor and an explicit small-text AA exception.
     var lightHex: String {
         switch self { case .emerald: "#065F46"; case .burgundy: "#57152F"; case .oliveGold: "#514B10" }
     }
     var darkHex: String {
-        switch self { case .emerald: "#6EE7B7"; case .burgundy: "#C34356"; case .oliveGold: "#D9CB75" }
+        switch self { case .emerald: "#6EE7B7"; case .burgundy: "#BE4377"; case .oliveGold: "#D9CB75" }
     }
     var ink: Color { Color(lightHex: lightHex, darkHex: darkHex) }
 
