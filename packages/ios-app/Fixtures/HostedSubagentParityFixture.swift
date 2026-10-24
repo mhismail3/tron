@@ -97,6 +97,9 @@ struct HostedSubagentParityFixture: View {
             snapshot.processActivities = arguments.contains("-history-empty") || arguments.contains("-history-long") ? [] : Self.historyProcesses(sequence: 1,
                 stage: arguments.contains("-history-lifecycle") ? 0 : 1)
         }
+        if arguments.contains("-activity-preview-recent") {
+            snapshot.processActivities = [Self.historyProcesses(sequence: 1, stage: 6)[0]]
+        }
         self.snapshot = snapshot
     }
 

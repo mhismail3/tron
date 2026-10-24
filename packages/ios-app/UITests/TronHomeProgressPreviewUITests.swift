@@ -2,6 +2,27 @@ import XCTest
 
 /// Screenshot-only native previews for approval; not regression acceptance.
 @MainActor final class TronHomeProgressPreviewUITests: XCTestCase {
+    func testComposerOrbPreviews() throws {
+        for mode in ["light", "dark"] {
+            for state in ["active", "recent"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-subagent-parity-fixture", "-themeColor", "burgundy", "-\(mode)"]
+                    + (state == "recent" ? ["-activity-preview-recent"] : [])
+                app.launch()
+                guard app.buttons["Subagents"].firstMatch.waitForExistence(timeout: 15) else {
+                    app.terminate()
+                    throw NSError(domain: "ComposerOrbPreview", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Composer activity button missing for \(state) \(mode)"])
+                }
+                let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                attachment.name = "composer-\(state)-burgundy-\(mode)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                app.terminate()
+            }
+        }
+    }
+
     func testWorkingIndicatorPreviews() throws {
         for theme in ["emerald", "burgundy"] {
             for mode in ["light", "dark"] {
