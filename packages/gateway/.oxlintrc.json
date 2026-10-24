@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript"],
+  "jsPlugins": ["./scripts/settings-proof-lint.mjs"],
   "categories": {
     "correctness": "off",
     "suspicious": "off",
@@ -11,6 +12,7 @@
     "nursery": "off"
   },
   "rules": {
+    "settings-proof/no-forged-plan": "error",
     "eslint/no-dupe-keys": "error",
     "typescript/no-non-null-asserted-optional-chain": "error"
   }

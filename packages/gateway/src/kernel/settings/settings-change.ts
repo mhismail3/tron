@@ -125,7 +125,12 @@ function riskReason(reason: string | undefined): string {
 
 const DECIDED = new Set<ChangeStatus>(["approved", "declined", "expired", "superseded", "failed"]);
 
+/** Erased provenance: only this owner admits plans after scope/trust/value checks.
+ * This is not a linear grant or a runtime security boundary. Existing admission,
+ * approval, historical undo and rollback checks remain authoritative. */
+declare const settingsAdmission: unique symbol;
 export interface Planned {
+  readonly [settingsAdmission]: true;
   request: ChangeRequest;
   key: KeyDeclaration;
   binding: Binding;
@@ -718,7 +723,7 @@ export class SettingsChangePath {
       request, key, binding, qualifiers, before, after,
       tier: raiseTier(floor, web ? 1 : 0), basis,
       changeId: randomUUID(), ...(fixedAt ? { fixedAt } : {}),
-    };
+    } as Planned;
   }
 
   private async assessRisk(plans: Planned[], context: ChangeContext): Promise<void> {
