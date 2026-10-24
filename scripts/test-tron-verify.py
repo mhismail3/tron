@@ -247,6 +247,12 @@ class ExternalVerificationTests(VerifyCase):
             result = r.verify("--module", "repo/alpha")
             self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
             self.assertFalse((r.path / "forbidden").exists())
+        self.declare("alpha", [None])
+        r.commit("malformed declaration")
+        malformed = r.verify("--module", "repo/alpha")
+        self.assertEqual(malformed.returncode, 1, malformed.stdout + malformed.stderr)
+        self.assertIn("ownership FAILED", malformed.stdout)
+        self.assertNotIn("Traceback", malformed.stderr)
 
 
 class SelectionTests(VerifyCase):

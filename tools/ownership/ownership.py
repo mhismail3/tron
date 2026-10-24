@@ -253,7 +253,7 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
         return value if isinstance(value, list) else []
 
     summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "owned": m["owned"],
-                         "verify": listed(m, "verify"),
+                         "verify": [c for c in listed(m, "verify") if isinstance(c, str)],
                          "dependsOn": [d for d in listed(m, "dependsOn") if isinstance(d, str)],
                          "dynamicTargets": [e["to"] for e in listed(m, "dynamicEdges")
                                             if isinstance(e, dict) and isinstance(e.get("to"), str)]}
