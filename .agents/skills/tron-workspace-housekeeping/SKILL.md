@@ -19,16 +19,17 @@ Worktrees under the `claim.worktreeRoot` of `.github/work.json` belong to the
 work tooling. Do not audit or remove them by hand:
 
 - The owner runs `scripts/tron work cleanup` from its task worktree after
-  `work land`.
+  landing and closing the issue.
 - `scripts/tron work cleanup --all --dry-run` reports, for every worktree under
   the root, whether it is provably done or the exact reason it is kept; drop
   `--dry-run` to remove the provably done ones.
 
-It removes a worktree and its local and remote branches only when GitHub
-reports the branch's pull request merged at the local head, the tree is clean,
-every ignored file is regenerable, and no process works inside. It first runs
-the release commands configured in `.github/work.json` from inside the
-worktree. [`tools/work/README.md`](../../../tools/work/README.md#other-helpers) owns
+It removes a worktree and its branches only after completion and preservation
+checks pass. A merged PR at the local head is one completion proof; a closed
+issue with exact-main ancestry or only its unchanged claim commit are others.
+The tree must be clean, every ignored file regenerable, and no process working
+inside. It first runs the release commands configured in `.github/work.json`
+from inside the worktree. [`tools/work/README.md`](../../../tools/work/README.md#other-helpers) owns
 the contract. A worktree it keeps stays with its owner: resolve the reason it
 names, never delete around it.
 
@@ -173,9 +174,9 @@ Simulator lifetime is the test tooling's, not housekeeping's. A command of
 ends - success, failure, timeout or signal - and every provisioning command
 first sweeps: orphaned owned lanes are shut down, and lanes unused for 7 days or
 whose creating worktree was deleted (never the default lane) are removed. The runner's sweep also prunes runs beyond the retention windows and
-the products of worktrees that no longer exist. A boot is admitted on the Mac's
-free memory and swap as well, so no lane can push the shared Mac into swap. Use
-those commands instead of `xcrun simctl`, `rm`, or process signals:
+the products of worktrees that no longer exist. Memory and swap are status
+diagnostics, not boot admission gates. Use those commands instead of
+`xcrun simctl`, `rm`, or process signals:
 
 - `scripts/tron-ios-test status --all` - read-only view of everything holding
   the Mac's memory: every lane with its worktree, lease holder, uptime and disk,
