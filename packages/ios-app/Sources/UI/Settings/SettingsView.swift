@@ -366,7 +366,7 @@ struct SessionSettingsView: View {
                 // Global Settings' layout: titled group cards of drill-in rows (#1651).
                 TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                     TronSettingsCaption(homeProfileID == nil
-                        ? "Choices for this session. Revert an override to use Global settings."
+                        ? "Known-bad visible caption probe."
                         : "Home's overrides of Global settings. Worker launch choices apply to new workers.").containerValue(\.tronSettingsSection, false)
                     if project == nil, let notice = model.settingsSnapshot(for: target)?.resolution.projectNotice {
                         SettingsProjectNoticeGroup(notice: notice)

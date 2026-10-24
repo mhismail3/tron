@@ -26,7 +26,7 @@ struct HostedSessionConfigurationFixture: View {
         try! profiles.save(profile, token: "fixture-token")
         snapshot = SessionSnapshot(
             sessionId: "configuration-fixture", runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
-            phase: .running, configurationBlocker: .running, name: "Known-bad configuration", cwd: "/workspace",
+            phase: .running, configurationBlocker: .running, name: "Configuration fixture", cwd: "/workspace",
             parentSessionId: nil, model: ModelRef(provider: "fixture", id: "model"),
             thinkingLevel: "off", availableThinkingLevels: ["off", "high"], contextUsage: HostedManageSessionReview.contextUsage,
             stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
