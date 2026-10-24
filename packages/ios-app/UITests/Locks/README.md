@@ -4,7 +4,9 @@ UI locks pin what the user sees in hosted-fixture screen states, so a
 restructure slice can prove it changed nothing visible
 ([plan §6.6](../../../../docs/restructure/plan.md)). Each journey in
 `TronUILockTests` only navigates to a state and calls `assertUILock(app, name)`.
-Behavioral assertions stay in the feature journeys.
+Behavioral assertions stay in the feature journeys. The stopped-session lock
+waits for the Session Settings title; model controls live in Manage Session, so
+this screen has no Models section.
 
 ## What a lock compares
 
