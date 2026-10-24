@@ -167,7 +167,7 @@ def declared_files(command: str, tracked: list[str]) -> set[str]:
         if all(path.startswith(("scripts/test-", "scripts/verify-")) and path.endswith(".py") for path in arguments):
             files = set(arguments)
     elif prefix == ["scripts/tron", "test", "gateway"] and arguments:
-        if all(path.endswith((".test.ts", ".test.mjs")) for path in arguments):
+        if all(path.endswith(".test.mjs") or (path.startswith("src/") and path.endswith(".test.ts")) for path in arguments):
             files = {f"{GATEWAY}/{path}" for path in arguments}
     elif prefix == ["scripts/tron", "test", "ios"] and arguments[:1] == ["run"]:
         pairs = arguments[1:]

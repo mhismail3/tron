@@ -176,6 +176,29 @@ class ExternalVerificationTests(VerifyCase):
             self.assertFalse((r.path / "test-results/direct").exists())
             self.assertFalse((r.path / "test-results/dependent").exists())
 
+    def test_gateway_declarations_keep_existing_runner_classification(self) -> None:
+        r = self.repo
+        files = ["src/main.integration.test.ts", "src/nested.integration.test.ts", "src/mac.integration.test.ts",
+                 "scripts/contract.test.mjs"]
+        for path in files + ["scripts/outside.test.ts"]:
+            r.write(f"packages/gateway/{path}", "// Selection-only fixture: never executed as a Gateway test.\n")
+        r.write("packages/gateway/consumer.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write("packages/gateway/vitest.nested.config.ts", 'const nestedTestFiles = ["src/nested.integration.test.ts"];\n')
+        r.write("packages/gateway/vitest.mac-terminal.config.ts", 'const macTerminalTestFiles = ["src/mac.integration.test.ts"];\n')
+        self.declare("alpha", ["scripts/tron test gateway " + " ".join(files)])
+        r.commit("Gateway consumer declarations")
+        # Plan-only: classify inputs without running Gateway checks or installing dependencies.
+        planned = r.verify("--module", "repo/alpha", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        groups = json.loads(planned.stdout[planned.stdout.index("{"):])["groups"]
+        for group, path in zip(("gateway", "gateway-nested", "mac", "node-gateway"), files):
+            self.assertEqual(groups[group], [f"packages/gateway/{path}"])
+        self.declare("alpha", ["scripts/tron test gateway scripts/outside.test.ts"])
+        r.commit("unsupported Gateway input")
+        refused = r.verify("--module", "repo/alpha", "--plan")
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn("unsupported verify declaration", refused.stderr)
+
     def test_declared_ios_class_uses_existing_lane_and_explicit_skip(self) -> None:
         r = self.repo
         path = "packages/ios-app/UITests/ExternalUITests.swift"

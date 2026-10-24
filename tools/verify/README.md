@@ -110,7 +110,7 @@ Modules may declare extra consumer verification using explicit tracked inputs:
 
 These strings select files for the existing runners; verify never executes them
 as shell commands. Tooling accepts only `scripts/test-*.py` / `scripts/verify-*.py`;
-Gateway accepts Gateway-relative `*.test.ts` / `*.test.mjs`. iOS accepts one or
+Gateway accepts `src/**/*.test.ts` and Gateway-relative `*.test.mjs`. iOS accepts one or
 more `--only-testing Target/Class` pairs, resolved to tracked UIValidation test
 files; method selectors, broad runs, build flags, unknown classes/paths and
 other command forms fail selection (exit 2). Harnessed classes retain their
