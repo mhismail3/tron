@@ -42,6 +42,7 @@ export interface ToolCatalogEntry { name: string; description?: string; resource
  * Reading an untrusted project's `.pi/settings.json` is pure JSON parsing.
  */
 export class SettingsStoreAdapter {
+  readonly admitModelChoice = assertNewModelChoice;
   private outside: OutsideChanges | undefined;
 
   constructor(private readonly dependencies: SettingsModelDependencies) {}

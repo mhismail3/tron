@@ -39,6 +39,8 @@ export interface SettingsOptionsResult {
 export interface SettingsReadOwner {
   readonly schema: SettingsSchema;
   readonly modelRuntime: ModelRuntime;
+  /** Admission uses the active SDK runtime, not the adapter’s catalog runtime. */
+  readonly admitModelChoice: (runtime: ModelRuntime, provider: string, id: string) => Promise<void>;
   stores(target: SettingsTarget, session?: SessionSettingsSource, options?: { storeState?: boolean }): Promise<SettingsStores>;
   resolveOptions(runtime: ModelRuntime): Pick<ResolveOptions, "format" | "options">;
   options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest, resolve: (keys: readonly string[]) => Promise<Resolution>): Promise<SettingsOptionsResult>;

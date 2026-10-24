@@ -1074,7 +1074,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     if (JSON.stringify(previousPins) !== JSON.stringify(requestPins)) {
       await this.persistSessionSettings({ settings: explicitSettings, requestPins });
     }
-    await applyModelAdmission(session, admission, Boolean(this.taskWorker) || this.liveProfile().modelSelection?.physicalOnly === true);
+    await applyModelAdmission(session, admission, Boolean(this.taskWorker) || this.liveProfile().modelSelection?.physicalOnly === true,
+      owners.model.owner.admitModelChoice);
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during model admission");
     session.settingsManager.applyOverrides(settings);
     // These SDK controls are copied when Agent is created, not read from its

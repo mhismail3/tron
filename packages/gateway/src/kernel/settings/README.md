@@ -17,6 +17,9 @@ and state badges; `settings-project-diagnostics.ts` owns bounded Project diagnos
 `settings-change.ts` owns planning, tiers, approvals, ordered application/reverse
 rollback, outside-write brackets, Home recipe companion effects and target stripes.
 Store reads/catalogs, provider admission and binding I/O enter through its owner ports.
+`SettingsReadOwner.admitModelChoice` supplies actual provider I/O keyed by the
+active SDK runtime, including borrowed views; it does not depend on optional
+module-policy availability or capture an eligibility snapshot.
 Home supplies learned-profile operations and typed result projection; `auditSubject`
 keeps their validation, restoration, grouped audit and awaited observer/projection
 under the same Home stripe, without moving Knowledge DTOs into the kernel.

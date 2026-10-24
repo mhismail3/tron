@@ -5,7 +5,7 @@ import { type SettingsSchema } from "../kernel/settings/settings-schema.js";
 import type { Resolution } from "../kernel/settings/tool-contract.js";
 import { clampThinkingLevel, type Model, type ThinkingLevel } from "../kernel/pi/ai.js";
 import { GatewayError } from "../errors.js";
-import { assertNewModelChoice } from "../providers/openai-model-eligibility.js";
+import type { SettingsReadOwner } from "../kernel/settings/settings-model.js";
 
 /** The compaction owner supplies its boundary snapshot; settings owns all
  * precedence/qualification, including the operation's model instance. */
@@ -37,7 +37,8 @@ export function compactionAdmission(schema: SettingsSchema, settings: SettingsMa
 /** An admitted effective selection is not an edit to the stored override. The
  * SDK records the operational model; canonical fixed choice evidence continues
  * to own the inactive Session/delegated choice while Project masks it. */
-export async function applyModelAdmission(session: AgentSession, rows: Resolution["keys"], physical: boolean): Promise<void> {
+export async function applyModelAdmission(session: AgentSession, rows: Resolution["keys"], physical: boolean,
+  admitModelChoice: SettingsReadOwner["admitModelChoice"]): Promise<void> {
   const row = rows.find(row => row.key === "model.ref[role=chat]");
   const ref = row?.value as { provider: string; id: string } | undefined;
   const model = ref && (physical ? session.modelRuntime.getPhysicalModel(ref.provider, ref.id) : session.modelRuntime.getModel(ref.provider, ref.id));
@@ -48,7 +49,7 @@ export async function applyModelAdmission(session: AgentSession, rows: Resolutio
   }
   if (ref && model) {
     if (row?.layer === "project") {
-      await assertNewModelChoice(session.modelRuntime, ref.provider, ref.id);
+      await admitModelChoice(session.modelRuntime, ref.provider, ref.id);
       if (!(await session.modelRuntime.getAvailable()).some(candidate => candidate.provider === ref.provider && candidate.id === ref.id)) {
         throw new GatewayError("conflict", `Project model ${ref.provider}/${ref.id} is not available for this account`);
       }
