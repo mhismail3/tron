@@ -16,7 +16,8 @@ ordered queue summaries, Pi-compatible tool-selection composition and neutral re
 segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
 approvals, their admission bounds, settlement, expiry and untold outcomes.
 `scope-resolution.ts` owns binding admission from declared Session/Project permissions,
-canonical targets and the public/storage scope mapping.
+canonical targets, the public/storage scope mapping and the canonical sorted-qualifier
+instance identity used by resolution badges and outside-change observation.
 `settings-migration-state.ts` owns shared-store value transformation and digest
 validation; admin owns the migration transaction, backups and publication.
 

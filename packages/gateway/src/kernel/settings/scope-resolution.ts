@@ -1,4 +1,4 @@
-import type { LayerId, SettingsTarget } from "./tool-contract.js";
+import type { LayerId, SettingsTarget, Qualifiers } from "./tool-contract.js";
 import type { StoreLayer } from "./settings-types.js";
 
 /** Storage paths remain available to the SDK and historical undo. Grants are
@@ -17,4 +17,9 @@ export function storeForScope(scope: LayerId, layers: readonly StoreLayer[]): Ex
 
 export function canonicalSettingsTarget(target: SettingsTarget, home: boolean): SettingsTarget {
   return home && target.kind === "session" ? { kind: "home" } : target;
+}
+
+export function instanceId(key: string, qualifiers: Qualifiers | undefined): string {
+  const sorted = Object.fromEntries(Object.entries(qualifiers ?? {}).sort(([left], [right]) => left.localeCompare(right)));
+  return `${key}\u0000${JSON.stringify(sorted)}`;
 }
