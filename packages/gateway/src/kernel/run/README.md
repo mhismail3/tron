@@ -14,6 +14,9 @@ Its control identity and shared diagnostics are K5 contracts (`worker-contract.t
 not dependencies on a module's dispatcher. K5's `WorkerSettlement` owns task-end waiters
 and bounded joins; native activity/canonical publications wake that same owner. Provider
 control execution is K5-owned; native admission and canonical receipt ordering remain here.
+K5 owns resumed-worker lease/bind/failure-release orchestration. Native
+`bindTaskWorker` remains the actual lane-protected validation/rebuild/publication
+backend; Registry has no worker-resume wrapper.
 Worker steering packets and Stop/Interrupt identity fences are K5-owned as well; the
 former Slot-specific control methods are absent. Generic per-tool interruption stays Run-owned.
 Ordinary extension registration reads the composition-configured order on the

@@ -21,6 +21,10 @@ Steering still enters native prompt admission; interruption still uses K2's per-
 cancellation. HomeTaskDispatcher temporarily binds those native primitives after the
 K5 fence; DelegationOperations replaces that consumer binding when it owns acquisition.
 
+Worker resume acquires the canonical native lease here, invokes the native lane/
+rebuild operation, and releases that same lease on failure. Registry supplies only
+its actual persisted-session acquisition; it has no resume forwarding route.
+
 ## Session subagent activity
 
 - `process-activity.v1` projects only structured synchronous and asynchronous subagents with

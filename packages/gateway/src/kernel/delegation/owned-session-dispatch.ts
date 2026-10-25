@@ -4,13 +4,16 @@ import type { HomeTaskReportOwner } from "./task-report.js";
 export const OWNED_OPERATION_DEADLINE_MS = 24 * 60 * 60 * 1_000;
 
 type OwnedLease<Session> = { slot: Session; release: () => void };
-/** What the dispatch needs of a leased session itself: its lease. */
-type OwnedSession = { retainLease(): () => void };
+/** Native session authority: retain its lease and rebind its worker under the
+ * existing lane/rebuild operation, never through a second runtime or state copy. */
+type OwnedSession = {
+  retainLease(): () => void;
+  bindTaskWorker(report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<void>;
+};
 /** The session runtime's owned-session operations (RuntimeRegistry implements them). The
  * run owner imports delegation, so the session handle and recovery evidence stay its types. */
 export interface OwnedSessions<Session extends OwnedSession, Evidence> {
   create(cwd: string, profile: "ordinary", report: HomeTaskReportOwner): Promise<Session>;
-  resumeTaskWorker(sessionId: string, report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<OwnedLease<Session>>;
   acquireOwnedSessionLease(sessionId: string): Promise<OwnedLease<Session>>;
   ownedOperationRecoveryEvidence(sessionId: string, operationId: string): Promise<Evidence>;
   clearOwnedOperationMarker(sessionId: string, operationId: string): Promise<void>;
@@ -36,8 +39,12 @@ export class OwnedSessionDispatch<Session extends OwnedSession, Evidence> {
   }
 
   /** Rebinds an existing worker session to a resumed task's report owner (#929). */
-  resumeWorker(sessionId: string, report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<OwnedLease<Session>> {
-    return this.sessions.resumeTaskWorker(sessionId, report, exceptWorkToken);
+  async resumeWorker(sessionId: string, report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<OwnedLease<Session>> {
+    const lease = await this.sessions.acquireOwnedSessionLease(sessionId);
+    try {
+      await lease.slot.bindTaskWorker(report, exceptWorkToken);
+      return lease;
+    } catch (error) { lease.release(); throw error; }
   }
 
   lease(sessionId: string): Promise<OwnedLease<Session>> {
