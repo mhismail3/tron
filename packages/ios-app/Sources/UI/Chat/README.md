@@ -98,7 +98,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   capability-gated stop (`process-transcript-abort.v1`).
 - **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing), then the
   shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Effort and
-  Context Window); the existing settings renderer owns reads, writes, pending approvals and Revert. Session
+  Context Window); the existing settings renderer owns reads, writes, pending approvals and Revert.
+  Tool selection uses its `SettingsToolsEditor` with the shared `AvailableToolsList`. Session
   container: Workspace (`workspace-inspector.v1`), Instructions, Resources (tags Global, Project or
   External; Commands and Subagents preview a body whose View All opens the shared reader), Session
   History (`session-history-pages.v1`), Subagent History; Session Settings (Repository Overrides last);
