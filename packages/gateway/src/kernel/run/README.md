@@ -62,6 +62,10 @@ actual K3 host; native frames do not select product modules or keep another list
   Their before-agent-start hook never reselects the same trigger before Pi appends it.
   Ordinary outcome acknowledgement requires the bounded canonical reader's durable
   file-and-directory proof; failed proof defers without refusing the prompt.
+  Root supplies its actual settings instances directly to Home and installs the
+  same owners in Registry; there is no public Registry settings read detour.
+  Root starts expiry after initialization/observer setup. Registry disposal joins
+  that installed engine before releasing shared stores or Home's workspace.
 - `run-markers.ts`: durable per-operation crash/interruption evidence.
 - `run-persistence.ts`: sole pending-receipt join and durable-write fence, bounded
   retry/retention, conflicts and actual SDK stop/diagnostic cuts through the native frame.

@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type AssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { disposeFixtures, fixture as homeTaskFixture } from "../../test-support/home-task-fixture.js";
 import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
@@ -27,11 +27,7 @@ import { SETTINGS_OUTCOME_MESSAGE, type SettingsOutcomeMessage } from "../kernel
  */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-approval-outcomes.json");
 const transcript: Array<{ case: string; steps: Array<Record<string, unknown>> }> = [];
-const approvalOwners: Array<{ dispose(): Promise<void> }> = [];
-afterEach(async () => {
-  await Promise.all(approvalOwners.splice(0).map(owner => owner.dispose()));
-  await disposeFixtures();
-});
+afterEach(disposeFixtures);
 afterAll(async () => {
   await mkdir(dirname(ARTIFACT), { recursive: true });
   await writeFile(ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
@@ -48,14 +44,13 @@ const textOf = (message: { content: unknown }) => typeof message.content === "st
 const RETRIES = (value: number) => ({ key: "run.retry.maxRetries", layer: "global", op: "set", value });
 
 async function gateway() {
-  const f = await homeTaskFixture();
   let clock = Date.now();
   const scheduled: Array<{ run: () => void; ms: number; cancelled: boolean }> = [];
-  const { settingsModel, settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway,
-    sessions: f.registry, home: () => homeOwnerOf(f.registry), registry: f.registry, now: () => new Date(clock),
-    schedule: (run, ms) => { const timer = { run, ms, cancelled: false }; scheduled.push(timer); return { cancel: () => { timer.cancelled = true; } }; } });
-  approvalOwners.push(settingsChanges);
-  await settingsChanges.start();
+  const f = await homeTaskFixture(false, false, undefined, false, undefined, {
+    settingsNow: () => new Date(clock),
+    settingsSchedule: (run, ms) => { const timer = { run, ms, cancelled: false }; scheduled.push(timer); return { cancel: () => { timer.cancelled = true; } }; },
+  });
+  const { settingsModel, settingsChanges } = f.settings;
   await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
   const service = new GatewayService({ display: displayOwnerOf(f.registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },

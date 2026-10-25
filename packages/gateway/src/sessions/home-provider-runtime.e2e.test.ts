@@ -75,7 +75,9 @@ async function fixture(options: { shareGatewayRuntime: boolean }) {
   // The Gateway-wide runtime: built-ins plus the user's package provider.
   const gateway = await create();
   gateway.registerNativeProvider(packaged.provider);
+  let settings: ReturnType<typeof settingsDependencies> | undefined;
   const registry = await createTestRegistry({
+    settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
     agentDir, tronHome, idleRuntimeMs: 60_000,
     modelRuntimeFactory: create,
     ...(options.shareGatewayRuntime ? { gatewayModelRuntime: gateway } : {}),
@@ -88,9 +90,10 @@ async function fixture(options: { shareGatewayRuntime: boolean }) {
     config: { tronHome } as unknown as GatewayConfig, modelRuntime: gateway, sessions: registry, home: homeOwnerOf(registry),
     receipts: new CommandReceiptStore(join(tronHome, "receipts")),
     broadcast: () => {},
-    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: gateway, sessions: registry, home: () => homeOwnerOf(registry), registry }),
+    ...(settings = settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: gateway, sessions: registry, home: () => homeOwnerOf(registry), registry })),
     trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
+  await settings.settingsChanges.start();
   await registry.initialize();
   return { root, gateway, packaged, registry, service };
 }
