@@ -8,7 +8,12 @@
     "session-search-service.ts",
     "session-search-text.ts",
     "session-search.module.json",
-    "session-search.store.lock.integration.test.ts"
+    "session-search.store.lock.integration.test.ts",
+    "session-search.privacy.lock.integration.test.ts",
+    "session-search.md"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/sessions/home-research-tools.integration.test.ts src/sessions/legacy-chronicle.integration.test.ts"
   ],
   "dependsOn": [
     "gateway/pi"
