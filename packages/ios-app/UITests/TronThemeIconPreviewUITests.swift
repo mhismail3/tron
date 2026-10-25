@@ -10,7 +10,7 @@ import XCTest
                 dashboard.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready",
                     "-dashboard-view-home", "-themeColor", theme] + (mode == "dark" ? ["-home-dark"] : [])
                 dashboard.launch()
-                XCTAssertTrue(dashboard.buttons["home-pinned-row"].waitForExistence(timeout: 15))
+                XCTAssertTrue(dashboard.buttons["dashboard.menu"].waitForExistence(timeout: 15))
                 capture("\(theme)-\(mode)-dashboard")
                 dashboard.terminate()
 
