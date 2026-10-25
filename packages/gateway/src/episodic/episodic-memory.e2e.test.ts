@@ -12,10 +12,8 @@ import {
 } from "@earendil-works/pi-ai";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import {
-  EpisodicMemoryError, resolveLimits,
-  type EpisodicLimits, type EpisodicMemoryStatus, type EpisodicSummarizer,
-} from "./episodic-contract.js";
+import { EpisodicMemoryError } from "../errors.js";
+import { resolveLimits, type EpisodicLimits, type EpisodicMemoryStatus, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicMemory } from "./episodic-memory.js";
 import { waitFor } from "../../test-support/wait-for.js";
 

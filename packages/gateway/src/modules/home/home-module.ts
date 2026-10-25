@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { lstat, stat } from "node:fs/promises";
-import { readCanonicalSession } from "../../episodic/episodic-source.js";
+import { readCanonicalSession } from "../../kernel/session/canonical-reader.js";
 import { GatewayError } from "../../errors.js";
 import { createQueueSummarizer } from "../../episodic/episodic-compactor.js";
 import type { ModelQueueOwner } from "../../providers/model-queue.js";

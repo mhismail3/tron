@@ -11,7 +11,10 @@ caller: one memory keyed by `homeId` across chapters
 ## Owns
 
 `episodic-memory.ts`, `episodic-store.ts`, `episodic-tree.ts`, `episodic-compactor.ts`,
-`episodic-source.ts`, `episodic-contract.ts`, `cache-layout.ts`, `home-source.ts`.
+`episodic-projection.ts`, `episodic-contract.ts`, `cache-layout.ts`, `home-source.ts`.
+Canonical filesystem readers and digests live in [K1](../kernel/session/README.md);
+the shared refusal class lives in `errors.ts`. Projection and cursor orchestration
+remain here, and source limits derive from K4's actual prompt producer bounds.
 State: `state/episodic/<sourceSessionId>/` (`initialized.json`, `catalog.jsonl`,
 `nodes.jsonl`, `state.json`, `checkpoint.current.json`, `checkpoint-*/`) and the
 workspace record `gateway/workspace-state/episodic-initialized.json`.

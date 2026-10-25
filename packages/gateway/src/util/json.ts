@@ -109,3 +109,7 @@ export async function updateJsonLocked<T>(
 export async function removeIfExists(path: string): Promise<void> {
   await rm(path, { force: true });
 }
+
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}

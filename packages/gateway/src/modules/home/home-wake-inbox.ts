@@ -5,7 +5,7 @@ import { makeContextDeliveryReceipt } from "../../kernel/run/context-delivery-re
 import { parseHomeTaskReport } from "../../kernel/delegation/task-report.js";
 import { HOME_TASK_RESULT_MESSAGE, INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/run/invocation-receipts.js";
 import { GatewayError } from "../../errors.js";
-import { EpisodicMemoryError } from "../../episodic/episodic-contract.js";
+import { EpisodicMemoryError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import type { HomeTaskRecord, HomeTaskStore } from "./home-task-store.js";
 import type { HomeTaskCheckin } from "../../protocol/types.js";

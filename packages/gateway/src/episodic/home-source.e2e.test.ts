@@ -10,7 +10,7 @@ import { EpisodicMemory } from "./episodic-memory.js";
 import { resolveLimits, type EpisodicLimits, type EpisodicDiagnostic, type EpisodicSessionSource, type EpisodicSourceCursor, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicStore } from "./episodic-store.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "./home-source.js";
-import type { EpisodicSourceDelta } from "./episodic-source.js";
+import type { EpisodicSourceDelta } from "./episodic-projection.js";
 
 const roots: string[] = [];
 const memories: EpisodicMemory[] = [];

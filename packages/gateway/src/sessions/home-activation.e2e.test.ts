@@ -78,7 +78,8 @@ import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../modules/home/home-
 import type { HomeContextProjection, HomeMemoryStatus, HomeStatus, HomeMemoryView, HomeMemoryEvidencePage } from "../protocol/types.js";
 import { DEFAULT_MAX_UPLOAD_BYTES, type GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { INLINE_IMAGE_BASE64_LIMIT_BYTES, UploadStore } from "../machine/upload-store.js";
+import { INLINE_IMAGE_BASE64_LIMIT_BYTES } from "../kernel/resources/prompt-bounds.js";
+import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";

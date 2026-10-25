@@ -1,0 +1,38 @@
+{
+  "layer": "L2",
+  "owns": [
+    "sessions/agent-runtime-lock.ts",
+    "sessions/blob-store.ts",
+    "sessions/blob-store.lock.integration.test.ts",
+    "sessions/locks/blob-store-paths.golden.json",
+    "sessions/browser-fork-receipts.integration.test.ts",
+    "sessions/catalog.md",
+    "sessions/catalog-discovery.ts",
+    "sessions/catalog-jsonl.integration.test.ts",
+    "sessions/catalog-jsonl.ts",
+    "sessions/catalog-metadata-index.ts",
+    "sessions/catalog-metadata-index.lock.integration.test.ts",
+    "sessions/locks/catalog-metadata-index-paths.golden.json",
+    "sessions/session-settings.ts",
+    "sessions/fork-boundary.ts",
+    "sessions/legacy-chronicle.integration.test.ts",
+    "sessions/locks/store-session-archive-attention.golden.json",
+    "sessions/project-root.lock.integration.test.ts",
+    "sessions/locks/project-root-trust.golden.json",
+    "sessions/project-root-resources.lock.integration.test.ts",
+    "sessions/locks/project-root-resources.golden.json",
+    "sessions/session-archive-store.ts",
+    "sessions/session-archive.lock.integration.test.ts",
+    "sessions/locks/session-archive-paths.golden.json",
+    "sessions/session-branch.ts",
+    "session-catalog.module.json",
+    "sessions/session-catalog.store.lock.integration.test.ts",
+    "sessions/session-catalog.ts",
+    "sessions/session-export.ts",
+    "kernel/session/**"
+  ],
+  "dependsOn": [
+    "gateway/pi",
+    "gateway/settings"
+  ]
+}

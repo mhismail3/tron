@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
-import {
-  EpisodicMemoryError, EPISODIC_SEARCH_QUERY_CHARS,
-  type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicSessionSource, type EpisodicSummarizer,
-} from "../../episodic/episodic-contract.js";
+import { EpisodicMemoryError } from "../../errors.js";
+import { EPISODIC_SEARCH_QUERY_CHARS, type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicSessionSource, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import { EpisodicMemory, readEpisodicState } from "../../episodic/episodic-memory.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { homeMemoryRevisionChanged, homeMemorySourceUnavailable } from "./home-memory-browser.js";

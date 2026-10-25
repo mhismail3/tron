@@ -1,5 +1,5 @@
 import type { EpisodicSessionSource } from "../src/episodic/episodic-contract.js";
-import { episodicDigest } from "../src/episodic/episodic-source.js";
+import { episodicDigest } from "../src/kernel/session/canonical-reader.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "../src/episodic/home-source.js";
 
 /**

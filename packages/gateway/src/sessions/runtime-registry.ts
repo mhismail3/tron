@@ -61,9 +61,9 @@ import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } fro
 import type { ResourceRoot } from "../kernel/resources/resource-root.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
 import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import { readCanonicalSessionFile } from "../episodic/episodic-source.js";
+import { readCanonicalSessionFile } from "../kernel/session/canonical-reader.js";
 import { syncDurably } from "../util/durable-json.js";
-import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
+import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../kernel/resources/prompt-bounds.js";
 import {
   invocationProjection,
   invocationReceipts,
@@ -4086,7 +4086,7 @@ export class RuntimeRegistry implements SessionOperations {
       const handle = await open(durablePath, "r");
       try { await syncDurably(handle); } finally { await handle.close(); }
     }
-    const entries = await readCanonicalSessionFile({ path, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes });
+    const entries = await readCanonicalSessionFile({ path, sessionId, maxLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES });
     const after = await lstat(path);
     if (after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
       || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new GatewayError("conflict", "Canonical session changed during inspection");

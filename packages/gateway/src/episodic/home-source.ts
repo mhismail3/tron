@@ -3,13 +3,10 @@ import type { HomeMemoryEvidence } from "../protocol/types.js";
 import { constants, type Stats } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { abortableRead } from "../util/abortable-read.js";
-import {
-  EpisodicMemoryError, type EpisodicChapterSourceCursor, type EpisodicLimits, type EpisodicSourceCursor,
-} from "./episodic-contract.js";
-import {
-  COMPLETE_PREFIX_SEED, EpisodicSourceChangedError, episodicDigest, extendPrefixDigest, parseEntry, prefixLineDigest, projectBranch, sameSnapshot,
-  type EpisodicCanonicalEntry, type EpisodicProjectedMessage, type EpisodicSourceDelta,
-} from "./episodic-source.js";
+import { EpisodicMemoryError } from "../errors.js";
+import { type EpisodicChapterSourceCursor, type EpisodicLimits, type EpisodicSourceCursor } from "./episodic-contract.js";
+import { COMPLETE_PREFIX_SEED, EpisodicSourceChangedError, episodicDigest, extendPrefixDigest, parseEntry, prefixLineDigest, sameSnapshot, type EpisodicCanonicalEntry } from "../kernel/session/canonical-reader.js";
+import { projectBranch, type EpisodicProjectedMessage, type EpisodicSourceDelta } from "./episodic-projection.js";
 
 export interface HomeSourceChapter { sessionId: string; path: string; sealed: boolean }
 export interface HomeSourceSnapshot { homeId: string; ledgerRevision: number; chapters: readonly HomeSourceChapter[] }

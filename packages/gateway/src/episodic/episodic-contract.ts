@@ -1,7 +1,6 @@
+import { EpisodicMemoryError } from "../errors.js";
+import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../kernel/resources/prompt-bounds.js";
 import { HOME_MAX_CHAPTERS } from "../modules/home/home-chapter-state.js";
-import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
-import { maximumPromptLineBytes } from "../machine/upload-store.js";
-import { PROMPT_TEXT_MAX_BYTES } from "../sessions/resource-invocation.js";
 import type { AssistantMessage } from "../kernel/pi/ai.js";
 /*
  * The episodic memory is the projected-summary tree of the OptChat recipe: a
@@ -64,7 +63,7 @@ export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
   // visible state with an operator resume, so a call that is simply gone has to
   // become a block instead of an unbounded wait.
   compactorTimeoutMs: 120_000,
-  maxSourceLineBytes: maximumPromptLineBytes(DEFAULT_MAX_UPLOAD_BYTES, PROMPT_TEXT_MAX_BYTES),
+  maxSourceLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES,
   maxStoreLineBytes: 1_024 * 1_024,
 };
 
@@ -115,26 +114,6 @@ export type EpisodicBlockedReason =
 export interface EpisodicBlocked {
   reason: EpisodicBlockedReason;
   detail?: string;
-}
-
-type EpisodicErrorKind =
-  | "paused"
-  | "blocked"
-  | "closed"
-  | "invalid-store"
-  | "unsafe-store"
-  | "source"
-  | "invalid-request"
-  | "already-open";
-
-/** One error type for every refusal this module makes, so a caller can tell a
- * visible refusal (invalid store, unsafe directory, a second opener) from a
- * blocked memory. */
-export class EpisodicMemoryError extends Error {
-  constructor(readonly kind: EpisodicErrorKind, message: string) {
-    super(message);
-    this.name = "EpisodicMemoryError";
-  }
 }
 
 /**
@@ -314,7 +293,7 @@ export interface EpisodicDiagnostic {
 
 /** Delta ingestion and frozen historical lookup are deliberately distinct. */
 export interface EpisodicSessionSource {
-  read(cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<import("./episodic-source.js").EpisodicSourceDelta>;
+  read(cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<import("./episodic-projection.js").EpisodicSourceDelta>;
   branchAtCursor(cursor: EpisodicSourceCursor, limits: EpisodicLimits): AsyncIterable<{ id: string; sourceSessionId: string }>;
 }
 

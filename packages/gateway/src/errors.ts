@@ -83,3 +83,22 @@ export function publicError(error: unknown): {
   const message = error instanceof Error ? error.message : "Unexpected gateway failure";
   return { code: "internal", message, retryable: false };
 }
+
+type EpisodicErrorKind =
+  | "paused"
+  | "blocked"
+  | "closed"
+  | "invalid-store"
+  | "unsafe-store"
+  | "source"
+  | "invalid-request"
+  | "already-open";
+
+/** Shared refusal identity for canonical source readers and Episodic consumers:
+ * callers distinguish visible source/store refusals from blocked memory. */
+export class EpisodicMemoryError extends Error {
+  constructor(readonly kind: EpisodicErrorKind, message: string) {
+    super(message);
+    this.name = "EpisodicMemoryError";
+  }
+}

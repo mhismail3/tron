@@ -1,6 +1,6 @@
 import { GatewayError } from "../../errors.js";
 import { basename } from "node:path";
-import type { EpisodicCanonicalEntry } from "../../episodic/episodic-source.js";
+import type { EpisodicCanonicalEntry } from "../../kernel/session/canonical-reader.js";
 import { redactCredentials } from "../../util/credential-redaction.js";
 import type { EpisodicMessageRecord, EpisodicNodeRecord } from "../../episodic/episodic-contract.js";
 import type { EpisodicViewPart } from "../../episodic/episodic-tree.js";

@@ -15,6 +15,10 @@ including inherited decisions, standalone directories, worktree propagation and
 compensating runtime application/commit rollback. Admin supplies binding I/O;
 the canonical resource owner supplies the trust decision used by sessions.
 
+`prompt-bounds.ts` owns the prompt text/attachment limits and canonical line-bound
+calculation. Native evidence reads and Episodic defaults consume its one derived
+default budget; the upload producer consumes the same attachment limits.
+
 ## Contract
 
 `projectRoot(cwd)` returns the real worktree root, or the caller’s cwd when Git

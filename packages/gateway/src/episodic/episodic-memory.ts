@@ -4,20 +4,14 @@ import type { HomeMemoryEvidence, HomeMemoryView } from "../protocol/types.js";
 import { HOME_MEMORY_PAGE_BYTES, HOME_MEMORY_DISPLAY_BYTES, encodeHomeMemoryCursor, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "../modules/home/home-memory-browser.js";
 import type { AssistantMessage } from "../kernel/pi/ai.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import {
-  EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT,
-  EPISODIC_PLACEHOLDER, EPISODIC_SEARCH_HITS, EPISODIC_SEARCH_QUERY_CHARS, EPISODIC_SEARCH_SNIPPET_CHARS,
-  EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, EPISODIC_TRIES, resolveLimits,
-  type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic,
-  type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus,
-  type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicStoreState,
-  type EpisodicSummarizer, type EpisodicUsage, type EpisodicViewPartStatus,
-} from "./episodic-contract.js";
+import { EpisodicMemoryError } from "../errors.js";
+import { EPISODIC_DEFAULTS, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT, EPISODIC_PLACEHOLDER, EPISODIC_SEARCH_HITS, EPISODIC_SEARCH_QUERY_CHARS, EPISODIC_SEARCH_SNIPPET_CHARS, EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, EPISODIC_TRIES, resolveLimits, type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic, type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus, type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicStoreState, type EpisodicSummarizer, type EpisodicUsage, type EpisodicViewPartStatus } from "./episodic-contract.js";
 import {
   EPISODIC_COMPACT_PROMPT, boundedSummary, classifyReply, classifyThrown, compactorRequest, contextBlock,
   emptyReplyDetail, leafStep, mergeStep, sizeFeedback, summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
-import { EpisodicSourceChangedError, episodicDigest, type EpisodicSourceDelta } from "./episodic-source.js";
+import { EpisodicSourceChangedError, episodicDigest } from "../kernel/session/canonical-reader.js";
+import { type EpisodicSourceDelta } from "./episodic-projection.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
 import {
   EPISODIC_MAX_LEVEL, decodeContextRuns, encodeNodeCode, foldViewSliced, freeNodeText, mergedFreeText, nodeAddress, rebalanceView,

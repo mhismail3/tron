@@ -1,3 +1,4 @@
+import { PROMPT_TEXT_MAX_BYTES } from "../kernel/resources/prompt-bounds.js";
 import { readFileSync } from "node:fs";
 import { stripFrontmatter } from "../kernel/pi/coding-agent.js";
 import type { ResourceInvocation } from "../protocol/types.js";
@@ -124,9 +125,6 @@ export function canonicalResourceName(source: ResourceInvocation["source"], name
   }
   return name;
 }
-
-/** The UTF-8 bytes one prompt's text may carry. Home's source bound is derived from it. */
-export const PROMPT_TEXT_MAX_BYTES = 192 * 1_024;
 
 export function admitPromptText(value: string, maximumBytes = PROMPT_TEXT_MAX_BYTES): string {
   return admittedText(value, "text", maximumBytes);
