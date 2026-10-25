@@ -99,6 +99,12 @@ durable reopen and explicit successor. Behavior locks:
 `automations.store.lock.integration.test.ts` and `automations.owned-run.lock.integration.test.ts`
 (a session and a workspace prompt run now through the owned-session boundary on the real
 Gateway: provider requests, JSONL, frames, records and command receipts).
+`tests/automation-rpc.lock.integration.test.ts` adds real-socket schedule preview,
+list and timeline admission: connection/window/revision-scoped cursors, stale-write
+refusal, actual wall-clock lease expiry and restart invalidation with persisted
+records. It waits the real 60-second lease, using unrelated status reads to keep
+the socket live without renewing that lease; no clock or timer is mocked.
+Its disposable trace is `test-results/automation-rpc/trace.json`.
 
 ## Not here
 
