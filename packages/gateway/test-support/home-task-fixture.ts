@@ -232,7 +232,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     await bringUpToReadiness(owned.registry);
     return owned.registry;
   };
-  return { root, registry, settings, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, queueDiagnostics, agentDir, trust, restartToReadiness,
+  return { root, registry, get settings() { return settings!; }, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, queueDiagnostics, agentDir, trust, restartToReadiness,
     restart: async () => {
       const cold = await restartToReadiness();
       await homeOwnerOf(cold).recoverTasks();
