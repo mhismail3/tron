@@ -8,6 +8,7 @@ struct HostedChatErrorsFixture: View {
     var previewSurface: String? = nil
     @State private var selected: String?
     @State private var expanded: Set<Int> = [0]
+    @Environment(\.dismiss) private var dismiss
     private let accent = ChatNotificationTone.error.surfaceColor
     private let overload = """
     {"type":"error","error":{"details":null,"type":"overloaded_error","message":"Overloaded"},"request_id":"req_preview_01"}
@@ -37,6 +38,13 @@ struct HostedChatErrorsFixture: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: surface == "pills" ? "Home" : title(surface), accent: accent)
+                }
+                if surface != "pills" {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
+                        }.accessibilityLabel("Done")
+                    }
                 }
             }
         }
@@ -99,7 +107,7 @@ struct HostedChatErrorsFixture: View {
         let grouped = kind == "grouped" || kind == "mixed"
         if grouped {
             TronListRow(.init(title: kind == "mixed" ? "3 errors · 2 distinct errors" : "4 errors · 1 distinct error",
-                              subtext: "First 10:42:01 · Last 10:42:18"))
+                              subtext: "First 10:42:\(kind == "mixed" ? "08" : "03") · Last 10:42:18"))
             caption("Breakdown")
             VStack(spacing: 0) {
                 TronListRow(.init(leading: .icon("exclamationmark.triangle.fill", accent),
