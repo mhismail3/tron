@@ -2,7 +2,8 @@
 
 How delegated subagent work and extension runs are attributed, projected and read back.
 Owners: `gateway/delegation` (`delegated-provider.ts`, `child-session-admission.ts`,
-`managed-subagents.ts`, `task-subagents.ts` for canonical task settlement receipts
+`managed-subagents.ts`, `managed-producer.ts` for message-local provenance and API binding,
+`task-subagents.ts` for canonical task settlement receipts
 and bounded cold artifact proof), `gateway/extension-activity` and `gateway/projection`
 (`process-activity.ts`); RuntimeSlot keeps the exact process-to-child bindings.
 
@@ -118,6 +119,11 @@ releases its claims.
   (`managed-attribution.integration.test.ts`, `runtime-registry.integration.test.ts`).
 
 ## Extension registration ownership
+
+K3 `extension-registration.ts` owns generic callback and registration metadata;
+producer kind is supplied by its actual owner. Product reservations and identity
+classification stay in `extensions/owner-attribution.ts`, supplied to native loads
+through `extensionAdmission`. No Host-to-Delegation classification import is needed.
 
 Callbacks are wrapped through `DefaultResourceLoaderOptions.extensionsOverride` on every load,
 and admission reads the extension's own registration maps, so late `registerTool` and friends

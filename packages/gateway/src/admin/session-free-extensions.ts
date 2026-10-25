@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { DefaultResourceLoader, SettingsManager, type Extension } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
-import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
+import { piBuiltinExtensions } from "../kernel/host/pi-builtins.js";
 
 /** One session-free extension load: the extensions a scope would load, and the
  * modules that failed to load. */

@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { AuthInteraction } from "../kernel/pi/ai.js";
+import type { AuthInteraction } from "../pi/ai.js";
 import { dirname, join } from "node:path";
-import type { Extension, ExtensionContext, ExtensionUIContext, ToolDefinition } from "../kernel/pi/coding-agent.js";
-import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../protocol/types.js";
-import { EXTENSION_FORM_MAX_INTERACTION_BYTES } from "../kernel/host/semantic-form.js";
-import type { FormCapableUI, FormRequest } from "../kernel/host/extension-adapter-contract.js";
-import { TRON_FORM_CAPABILITY } from "../kernel/host/extension-adapter-contract.js";
+import type { Extension, ExtensionContext, ExtensionUIContext, ToolDefinition } from "../pi/coding-agent.js";
+import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../../protocol/types.js";
+import { EXTENSION_FORM_MAX_INTERACTION_BYTES } from "./semantic-form.js";
+import type { FormCapableUI, FormRequest } from "./extension-adapter-contract.js";
+import { TRON_FORM_CAPABILITY } from "./extension-adapter-contract.js";
 
 const ASK_USER_MARKER = "\0XYZ_ASK_USER";
 const mcpAuthContext = new AsyncLocalStorage<{

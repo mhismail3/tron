@@ -361,7 +361,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     // custom-message turn here; NEW retains its typed, hidden normal-input wake.
     const api = globals.parityPi!;
     const sender = old ? api : await (async () => {
-      const { managedProducerAPI } = await import("../../extensions/managed-producer.js");
+      const { managedProducerAPI } = await import("./managed-producer.js");
       const owner = { id: "parity-managed-owner", source: managedSource!, title: "Subagents", kind: "subagent" as const };
       return managedProducerAPI(api, owner, (...args) => slot.admitSubagentWake(...args));
     })();

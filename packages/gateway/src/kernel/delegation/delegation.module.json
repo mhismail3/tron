@@ -12,6 +12,7 @@
     "home-managed-provider.integration.test.ts",
     "locks/delegation-*.golden.json",
     "managed-attribution.integration.test.ts",
+    "managed-producer.ts",
     "managed-subagents.install.integration.test.ts",
     "managed-subagents.integration.test.ts",
     "managed-subagents.invalid-entry.integration.test.ts",

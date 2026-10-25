@@ -9,9 +9,9 @@ import { piExtensionAliases } from "../pi/packages.js";
 import type { GatewayLogger } from "../../transport/logger.js";
 import { GatewayError } from "../../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
-import { managedProducerAPI, type ManagedInternalWake } from "../../extensions/managed-producer.js";
+import { managedProducerAPI, type ManagedInternalWake } from "./managed-producer.js";
 import { loadSubagentCatalog } from "./subagent-catalog.js";
-import { producerIdentity } from "../../extensions/owner-attribution.js";
+import { producerIdentity } from "../host/extension-registration.js";
 import { withExtensionOwner } from "../host/extension-execution-context.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -318,7 +318,7 @@ export class ManagedSubagents {
         factory: async (pi) => {
           this.requireBoundArtifactRoot(this.tronHome);
           this.verify();
-          const owner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, path, "Subagents");
+          const owner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, path, "Subagents", "subagent");
           await withExtensionOwner(owner, async () => {
             const factory = await this.loadFactory(path);
             await factory(managedProducerAPI(pi, owner, internalWake));

@@ -69,7 +69,9 @@ connector details: [contract](contract.md).
   ([contract](contract.md#library-rows-and-previews)).
 - Curation (`knowledge.source.curate`, `knowledge-curation.v1`) is one receipted
   mutation per item; summary and tag jobs are owned background work observed through
-  `knowledge.curation.jobs` ([contract](contract.md#curation)).
+  `knowledge.curation.jobs` ([contract](contract.md#curation)). Shutdown cancellation
+  reports `code: cancelled`, not a provider failure; the work token remains owned
+  until generation physically retires (`knowledge-summary-retirement.integration.test.ts`).
 - `knowledge.object.read` needs the exact owning record ID and committed revision,
   rechecks privacy and exclusion after byte I/O, returns 512,000-byte base64 chunks
   with offsets (callers verify the final hash) and never scans by hash.

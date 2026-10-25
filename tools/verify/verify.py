@@ -49,6 +49,23 @@ def git(*args: str) -> str:
     return done.stdout
 
 
+def require_gateway_compiler() -> None:
+    """npm must resolve this checkout's pinned compiler, never a global tsc."""
+    gateway = ROOT / GATEWAY
+    hint = f"prepare this worktree with: scripts/tron-node exec npm --prefix {GATEWAY} ci --include=dev"
+    try:
+        pinned = json.loads((gateway / "package.json").read_text())["devDependencies"]["typescript"]
+        installed = json.loads((gateway / "node_modules/typescript/package.json").read_text())["version"]
+    except (OSError, ValueError, KeyError) as error:
+        raise VerifyError(f"Gateway TypeScript dependency is missing or unreadable; {hint}") from error
+    if installed != pinned:
+        raise VerifyError(f"Gateway TypeScript is stale (installed {installed}, pinned {pinned}); {hint}")
+    compiler = gateway / "node_modules/typescript/bin/tsc"
+    executable = gateway / "node_modules/.bin/tsc"
+    if not compiler.is_file() or not os.access(executable, os.X_OK) or executable.resolve() != compiler.resolve():
+        raise VerifyError(f"Gateway TypeScript local executable is missing or does not resolve to the pinned package; {hint}")
+
+
 def is_lock(path: str) -> bool:
     return path.endswith(".lock.integration.test.ts") or path in NAMED_LOCKS or (
         path.startswith("packages/ios-app/UITests/Locks/") and path.endswith("Tests.swift"))
@@ -420,6 +437,15 @@ def main(argv: list[str]) -> int:
     if args.plan:
         print(json.dumps({"selection": selection, "groups": groups, "steps": plan_steps}, indent=2))
         return 0
+
+    # Worktree creation deliberately does not install dependencies. Refuse before
+    # any checks (including generated docs) can use an absent/stale install or PATH tsc.
+    if gateway_touched:
+        try:
+            require_gateway_compiler()
+        except VerifyError as error:
+            print(f"verify: {error}", file=sys.stderr)
+            return 2
 
     run = Run(sha, len(plan_steps))
     report_path = ROOT / "test-results" / "verify" / f"{sha}.json"

@@ -6,7 +6,7 @@ import type { Extension, ToolDefinition } from "../pi/coding-agent.js";
 import { piHostPackageRoot } from "../pi/packages.js";
 import type { ExtensionToolOrigin } from "../../protocol/types.js";
 import { isManagedSubagentExtension, MANAGED_SUBAGENTS_VERSION } from "./managed-subagents.js";
-import { attributedToolOwner } from "../../extensions/owner-attribution.js";
+import { attributedToolOwner } from "../host/extension-registration.js";
 
 /**
  * The delegated-work provider boundary.
