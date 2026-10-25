@@ -499,9 +499,10 @@ than inventing a parallel framework:
 
 ### 6.2 `scripts/tron verify` (V2): the one command
 ```text
-scripts/tron verify --changed [--base <ref>]   # what a slice runs
-scripts/tron verify --module <id>               # one module's full set
-scripts/tron verify --all                       # milestone / kernel changes
+scripts/tron verify --plan                     # mechanical none/partial/full tier and exact commands
+scripts/tron verify [--base <ref>]             # affected checks for a slice
+scripts/tron verify --module <id>               # scoped baseline with consumer locks
+scripts/tron verify --batch                     # explicit broad coverage after landing
 scripts/tron verify --update-locks <module>     # lock / approved-migration slices only
 ```
 1. **Static checks, always:**
@@ -517,8 +518,9 @@ scripts/tron verify --update-locks <module>     # lock / approved-migration slic
 2. **Selection:** changed paths (old and new names) map to owning manifests,
    then to their `verify` sets, then to the locks of every module whose
    `dependsOn` reaches them.
-   - Kernel, contracts, platform, toolchain, test-support or unowned paths
-     select **all** locks.
+   - High-risk kernel/contracts/platform/toolchain/test-support, graph or unknown
+     inputs require **full batch** coverage; affected owner/consumer checks run now.
+     The [verify owner](../../tools/verify/README.md#mechanical-tier-rule) defines file-kind and risk boundaries.
    - `dynamicEdges` are part of the closure.
    - The run prints *why* each set was selected.
 3. **Run** the selected sets with existing runners (`scripts/tron test gateway`,
@@ -532,8 +534,9 @@ scripts/tron verify --update-locks <module>     # lock / approved-migration slic
      the closing comment cites that base run and files the failure as its own
      issue.
 
-It is local and worker-owned. It never queues, waits on another worker, caches
-a pass or writes a receipt.
+Affected checks are local and worker-owned. Explicit Mac batches record exact
+coverage since local last green and attribute/file failures without gating unrelated
+work. Neither path queues, waits on workers, caches a test pass or writes a landing receipt.
 
 ### 6.3 Capability catalog
 Each manifest lists its user-visible capabilities. The union is the catalog,
@@ -794,7 +797,7 @@ No Stable handoff is needed, because there is no runtime change.
 - If you touch behavior without a lock, stop: the next slice is the lock slice.
 
 ### 8.3 Verify and land
-1. `scripts/tron verify --changed`. Goldens must be unchanged.
+1. `scripts/tron verify --plan`, then `scripts/tron verify`. Goldens must be unchanged.
 2. Every `move` commit needs a clean moved-lines report.
 3. Every deletion needs its surviving oracle plus known-bad evidence.
 4. List the concepts deleted (§3 M3, Appendix D); `scripts/tron measure <base>`
@@ -802,7 +805,7 @@ No Stable handoff is needed, because there is no runtime change.
 5. Review if the slice needs it (§8.4).
 6. `git fetch && git rebase origin/main`. Rerun **only** verify sets
    invalidated by the integrated diff. Kernel or contract changes from others
-   mean `verify --all`.
+   require full coverage in the next explicit `verify --batch`, not another per-slice all-lock run.
 7. `git push origin HEAD:main`. Never force.
 8. Close with the evidence template (Appendix D).
 
