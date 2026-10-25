@@ -11,7 +11,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
   `SettingsChoiceSlider`, `SettingsNumberSlider`, `SettingsAutosave`.
 - Audit and approvals: `SettingsChangesView`, `SettingsChangeRow`, `SettingsApprovalsSection`.
-- Agent configuration: `AgentConfigurationControls`, `ConfigurationSlider(Surface)`,
+- Agent configuration: `ConfigurationSlider(Surface)`,
   `CustomModelsSettingsView` with `CustomModelDraftTransformation`, `DefaultToolsSettingsSection`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
   (`IntegrationSheetRoutes`), `MCPServersSettingsView`, `ConnectionSettingsView`,
