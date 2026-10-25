@@ -898,7 +898,7 @@ private actor HostedHomeShellGateway {
             return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
         case "settings.resolve":
             if sheetState == "delayed-status", !configuredModels.isEmpty { try? await Task.sleep(for: .seconds(4)) }
-            return (foreground.settings(homeSettingsResolution()), nil)
+            return (homeSettingsResolution(), nil)
         case "settings.options":
             return (try homeSettingsOptions(params), nil)
         case "settings.approvals":

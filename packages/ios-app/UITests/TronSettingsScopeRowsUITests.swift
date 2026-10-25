@@ -74,14 +74,8 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         shot("1651-session-tools-\(dark ? "dark" : "light")")
         assertOverriddenRow(app, "settings-row-tools.active", title: "Tools", value: "^27 of 52 tools$")
         app.navigationBars.containing(.staticText, identifier: "Tools").buttons["Done"].firstMatch.tap()
-        let modelsLink = app.buttons["settings-section-model-open"]
-        XCTAssertTrue(modelsLink.waitForExistence(timeout: 5), app.debugDescription)
-        _ = waitFor(modelsLink, "hittable == true", timeout: 5)
-        modelsLink.tap()
-        expandSheet(app, title: "Models")
-        shot("1651-session-models-\(dark ? "dark" : "light")")
-        app.navigationBars.containing(.staticText, identifier: "Models").buttons["Done"].firstMatch.tap()
-        _ = waitFor(modelsLink, "hittable == true", timeout: 5)
+        XCTAssertFalse(app.buttons["settings-section-model-open"].exists,
+                       "The direct model/thinking card belongs to Manage Session; this fixture has no delegation overrides")
         // The project's read-only section ends Session Settings (#1655).
         let projectSection = element(app, "session-project-settings")
         XCTAssertTrue(projectSection.waitForExistence(timeout: 8), app.debugDescription)
