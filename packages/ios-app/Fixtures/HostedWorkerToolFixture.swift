@@ -53,7 +53,7 @@ struct HostedWorkerToolFixture: View {
         return tool("report", request: .object(request), details: report.details!, content: report.content)
     }
 
-    static let identityTools = ["report", "checkin", "subagent", "settings", "knowledge", "mcp__wordcraft__preview_document", "extension_preview_document", "previewDocument"].map { tool($0) }
+    static let identityTools = [report, tool("checkin", request: HostedSixSmallUIFixture.checkin(blocked: true).request!, details: HostedSixSmallUIFixture.checkin(blocked: true).details!)] + ["subagent", "settings", "knowledge", "mcp__wordcraft__preview_document", "extension_preview_document", "previewDocument"].map { tool($0) }
 
     static let report = tool("report", request: .object([
         "resultId": .string("worker-result"), "outcome": .string("final"),

@@ -10,7 +10,7 @@ import XCTest
             XCTAssertTrue(app.staticTexts["Report result"].firstMatch.waitForExistence(timeout: 8), app.debugDescription)
             let outcome = app.descendants(matching: .any)["home-tool-outcome"].firstMatch
             XCTAssertTrue(outcome.waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertEqual(outcome.label, readable)
+            XCTAssertEqual(outcome.label, "Report result, " + readable)
             let summary = app.descendants(matching: .any)["home-tool-text-report"].firstMatch
             let evidence = app.descendants(matching: .any)["home-tool-text-evidence"].firstMatch
             XCTAssertTrue(summary.exists, "Report body must use the custom shared Markdown section")
@@ -29,7 +29,7 @@ import XCTest
         let app = launch("worker-checkin", dark: true)
         XCTAssertTrue(app.staticTexts["Check in"].firstMatch.waitForExistence(timeout: 8), app.debugDescription)
         let outcome = app.descendants(matching: .any)["home-tool-outcome"].firstMatch
-        XCTAssertEqual(outcome.label, "Needs attention")
+        XCTAssertEqual(outcome.label, "Landed with explicit validation deferral, Needs attention")
         for (title, value) in [("Attention", "Requested"), ("Blocker", "Visual approval is needed before testing and landing."),
                                ("Next", "Review the previews, then run focused UI regressions after approval.")] {
             let row = app.descendants(matching: .any)["home-tool-row-\(title)"].firstMatch
@@ -56,16 +56,16 @@ import XCTest
         continueAfterFailure = false
         let app = launch("worker-identities")
         let expected = [("previewDocument", "Preview Document"), ("extension_preview_document", "Extension preview document"),
-                        ("mcp__wordcraft__preview_document", "Wordcraft / preview document"), ("knowledge", "Knowledge"),
+                        ("mcp__wordcraft__preview_document", "Wordcraft / Preview document"), ("knowledge", "Knowledge"),
                         ("settings", "Settings"), ("subagent", "Subagents"), ("checkin", "Check in"), ("report", "Report result")]
         for (raw, friendly) in expected {
-            let row = app.buttons["tool-run-summary-worker-review-\(raw)"].firstMatch
+            let row = app.descendants(matching: .any)["tool-run-summary-worker-review-\(raw)"].firstMatch
             for _ in 0..<5 where !row.isHittable { app.scrollViews.firstMatch.swipeUp() }
             XCTAssertTrue(row.exists, app.debugDescription)
             XCTAssertTrue(row.label.hasPrefix(friendly + ","), "Expected \(friendly), got \(row.label)")
         }
         // Open the actual aggregate row: friendly identity must survive navigation.
-        app.buttons["tool-run-summary-worker-review-report"].tap()
+        app.descendants(matching: .any)["tool-run-summary-worker-review-report"].firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-tool-text-evidence"].firstMatch.waitForExistence(timeout: 8), app.debugDescription)
         attach(app, "aggregate-report-navigation")
         app.terminate()
