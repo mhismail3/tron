@@ -1,0 +1,59 @@
+#if HOSTED_TEST
+import SwiftUI
+import TronMobileCore
+
+/// Scripted bytes only; the chat chips, display route, loader, Markdown and
+/// document navigation are the production owners.
+enum HostedDisplayDocumentThemeFixture {
+    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-theme") }
+    static var home: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-home") }
+    static var authoredHTML: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-html") }
+    static let markdown = """
+    # Home audit report
+
+    A representative report rendered by Tron's shared Markdown reader.
+
+    [Navigation evidence](https://example.test/evidence)
+
+    ## Summary
+    Typography, spacing and body text stay unchanged.
+
+    - [Document details](https://example.test/details)
+    - A second observation with **emphasis**.
+
+    > An explanatory note remains secondary text.
+
+    | Source | Evidence |
+    | --- | --- |
+    | Report | [Source link](https://example.test/source) |
+    """
+    static let html = """
+    <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>body{font:18px system-ui;padding:24px;background:#fff;color:#222}
+    a{color:#00a0c0}.warning{color:#b04000}.error{color:#c00030}</style></head>
+    <body><h1>Authored document</h1><a href="#details">Authored cyan link</a>
+    <p class="warning">Semantic warning</p><p class="error">Semantic error</p>
+    <p id="details">This HTML owns its styling; a local artifact is not a Tron theme contract.</p></body></html>
+    """
+    static var payload: ChatMediaPayload {
+        ChatMediaPayload(data: Data((authoredHTML ? html : markdown).utf8),
+                         mimeType: authoredHTML ? "text/html" : "text/markdown")
+    }
+    static var transcript: [TranscriptItem] {
+        var rows = try! JSONSerialization.jsonObject(with: HostedChatDisplayFixture.imageTranscriptData) as! [[String: Any]]
+        var display = rows[1]["display"] as! [String: Any]
+        let kind = authoredHTML ? "html" : "markdown"
+        display["kind"] = kind
+        display["title"] = home ? "Home audit report" : "Session summary"
+        display["altText"] = "Displayed report"
+        display["eligibleSurfaces"] = ["sheet"]
+        display["presentation"] = ["requestedSurface": "sheet", "inlineTapAction": "sheet"]
+        display["artifact"] = ["id": "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc40",
+                               "name": authoredHTML ? "report.html" : "report.md",
+                               "mimeType": authoredHTML ? "text/html" : "text/markdown",
+                               "size": payload.data.count, "kind": kind]
+        rows[1]["display"] = display
+        return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
+    }
+}
+#endif

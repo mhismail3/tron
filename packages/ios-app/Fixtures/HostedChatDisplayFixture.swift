@@ -99,7 +99,10 @@ struct HostedChatDisplayFixture: View {
             client: GatewayClient(socketFactory: GatewaySocketFactory { _ in socket }),
             profiles: GatewayProfileStore(defaults: defaults),
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "chat-display-fixture")),
-            chatMediaFetch: { _ in ChatMediaPayload(data: image, mimeType: "image/png") }
+            chatMediaFetch: { _ in
+                HostedDisplayDocumentThemeFixture.enabled ? HostedDisplayDocumentThemeFixture.payload
+                    : ChatMediaPayload(data: image, mimeType: "image/png")
+            }
         ))
         var snapshot = SessionSnapshot(
             sessionId: "display-fixture", runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
@@ -123,7 +126,9 @@ struct HostedChatDisplayFixture: View {
              "type": "text", "text": index == 0 ? "Oldest loaded history" : "History row \(index). A bounded fixture paragraph for the reader."]]] as [String: Any]
         }
         snapshot.transcript = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: history))
-        if Self.inlineGroup {
+        if HostedDisplayDocumentThemeFixture.enabled {
+            snapshot.transcript = HostedDisplayDocumentThemeFixture.transcript
+        } else if Self.inlineGroup {
             if !Self.inlineGroupLive { snapshot.transcript += Self.items([Self.inlineGroupCall()] + Self.inlineGroupResults()) }
         } else {
             let fixtureTranscript = ProcessInfo.processInfo.arguments.contains("-chat-display-grouped") ? Self.groupedDisplayTranscriptData
@@ -138,7 +143,9 @@ struct HostedChatDisplayFixture: View {
     var body: some View {
         NavigationStack {
             if ready {
-                ChatView(sessionID: snapshot.sessionId, hostedProbe: probe)
+                ChatView(sessionID: snapshot.sessionId,
+                         isHomeRoute: HostedDisplayDocumentThemeFixture.enabled && HostedDisplayDocumentThemeFixture.home,
+                         hostedProbe: probe)
             } else if let error { Text(error) }
         }
         .environment(model)
