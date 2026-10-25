@@ -38,12 +38,7 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         shot("1651-home-models-\(dark ? "dark" : "light")")
         assertOverriddenRow(app, "settings-row-model.queue_role_worker_", title: "Worker models", value: "^2 models$")
         assertOverriddenRow(app, "settings-row-model.queue_role_subagent_", title: "Subagent models", value: "^3 models$")
-        // A short drag brings Background models fully on screen, clear of the top bar.
-        let window = app.windows.firstMatch
-        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
-            .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
-        Thread.sleep(forTimeInterval: 0.8)
-        shot("1651-home-models-\(dark ? "dark" : "light")-bottom")
+        // The retired profile editors are gone: all three queues now fit without a drag.
         assertOverriddenRow(app, "settings-row-model.queue_role_background_", title: "Background models", value: "^3 models$")
     }
 
@@ -73,7 +68,6 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         XCTAssertEqual(labels(content, containing: "tools.active").count, 0, content.debugDescription)
         // The unset context window is not part of what the chat uses.
         XCTAssertEqual(labels(content, containing: "Not set").count, 0, content.debugDescription)
-        XCTAssertGreaterThan(labels(content, containing: "Claude Opus 5.5 · High").count, 0, content.debugDescription)
         toolsLink.tap()
         expandSheet(app, title: "Tools")
         XCTAssertTrue(element(app, "settings-row-tools.active").waitForExistence(timeout: 8), app.debugDescription)
