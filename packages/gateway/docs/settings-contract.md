@@ -170,12 +170,20 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   only the maintainer's client decides; the push carries `settings-approval` only to a relay
   advertising it ([push relay](../../push-relay/README.md#notification-categories)). A
   context `request` holds a change at any tier (`tierBasis.requested`). A timer expires a
-  request at its 24-hour deadline. The requester hears every outcome once (approved and
-  applied, declined, failed, superseded, expired) as one `tron.settings-outcome.v1` message
-  whose `details.requests[]` carry status, requester, reason, failure and display
-  `before`/`after`; the approvals store's `told` flag is the only outbox. Selection
-  is non-destructive; request IDs observed in canonical chat entries acknowledge delivery,
-  so refused admission or a crash before append leaves outcomes available.
+  request at its 24-hour deadline; a transient expiry failure keeps later known deadlines
+  armed without immediately retrying a persistently bad store. Every outcome (approved and
+  applied, declined, failed, superseded, expired) stays queued as `tron.settings-outcome.v1`;
+  `details.requests[]` carry status, requester, reason, failure and display `before`/`after`.
+  The approvals store is the sole outbox: at most 400 accepted requests reserve capacity
+  until delivery, and further admission is `busy`, never eviction of an untold outcome.
+  Selection is non-destructive. Exact request IDs from a successfully completed durable
+  canonical read acknowledge delivery; refusal or a pre-append crash retains the request.
+  Home owns selection for both user inputs and autonomous wakes, using the existing
+  token/byte/entry envelope and activation cancellation signal to choose a fitting ordered
+  prefix. Task recovery refusal does not disable the independent settings subscription.
+  Home's chapter ledger supplies original requester identities after rollover; the current
+  chapter proves and acknowledges its delivered IDs before sealing, without rewriting old
+  chapters or scanning all historical canonical files.
 - **Approval actions** (`registerAction`, `requestAction`): an owner's maintainer-gated
   operation that is not a stored value shares the store, digest, expiry, decision, record
   (`action: true`, key = subject, never undoable) and outcomes; `plan` binds an exact preview,

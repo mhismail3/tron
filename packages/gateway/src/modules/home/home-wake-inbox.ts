@@ -1,4 +1,4 @@
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, type InputEnvelope, type InputDelivery } from "../../kernel/host/input-admission.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, type InputEnvelope, type InputDelivery, type InputMessage } from "../../kernel/host/input-admission.js";
 import { estimateTokens } from "../../kernel/pi/coding-agent.js";
 import { createHash } from "node:crypto";
 import { makeContextDeliveryReceipt } from "../../kernel/run/context-delivery-receipts.js";
@@ -471,7 +471,7 @@ function wakeOrder(a: { createdAt: string; eventId: string }, b: { createdAt: st
 
 /** Upper-bound the two SDK entries (message + attribution), including their
  * canonical identity framing. Home chapter/session IDs are bounded to 200. */
-function canonicalMessageBytes(message: HomeWakeMessage): number {
+export function canonicalMessageBytes(message: InputMessage): number {
   const identity = "x".repeat(200);
   const framing = { id: identity, parentId: identity, timestamp: new Date().toISOString() };
   return Buffer.byteLength(JSON.stringify({ ...framing, type: "custom_message", ...message })) + 1

@@ -33,10 +33,15 @@ segments and bounded history pages; `settings-approvals.ts` owns pending exact-d
 approvals (settings changes and registered approval actions), their admission bounds,
 settlement, expiry and untold outcomes; composition calls `settings-change.ts`'s `start()`
 to arm one timer for the earliest pending deadline and `onOutcome` nudges Home when an
-outcome settles. Constructing an inspection-only owner starts no background work.
+outcome settles. Known later deadlines are armed before expiry I/O, so a transient failure
+cannot disarm them and a persistently bad store is not retried immediately.
+Constructing an inspection-only owner starts no background work.
 Expiry shares each target's decision stripe. `dispose()` cancels/fences arming and joins
 accepted expiry work before composition releases the stores. Outcome selection does not
-consume requests; canonical custom-entry request IDs acknowledge delivery. Approval
+consume requests; canonical custom-entry request IDs acknowledge delivery within an
+explicit requester-ID scope. Home supplies its chapter ledger and fitting-prefix predicate;
+ordinary runtimes supply their singleton identity. Admission reserves at most 400 outcome
+slots (pending and settled together), refusing new requests rather than evicting old ones. Approval
 actions claim execution durably before effects; interrupted executions fail with uncertain
 effects instead of replaying.
 `scope-resolution.ts` owns binding admission from declared Session/Project permissions,
@@ -73,6 +78,8 @@ are not settings truth, and pending approvals never apply themselves.
 ## Signals
 
 Callers own persistence failure diagnostics; these stores propagate write failures.
+`TRON_SETTINGS_EXPIRY_FAILED` means a background expiry attempt failed; retained requests
+are revisited at the next known deadline or foreground admission, not in a tight retry loop.
 
 ## Verify
 
