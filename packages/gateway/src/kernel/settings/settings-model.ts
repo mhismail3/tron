@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { ModelRuntime, SettingsManager } from "../pi/coding-agent.js";
 import type { FixedSetting, Resolution, SettingsTarget, Qualifiers } from "./tool-contract.js";
 import { resolveSettings } from "./settings-resolver.js";
-import { hasRuntimeRequestApplier, timingFor, type SettingsSchema, type Binding } from "./settings-schema.js";
+import { GatewayError } from "../../errors.js";
+import { hasRuntimeRequestApplier, timingFor, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
 import type { SessionStore, SettingsStores, ResolveOptions } from "./settings-types.js";
 
 /** What a session target contributes: its Session scope and whether it is Home's chat. */
@@ -51,6 +52,7 @@ export class SettingsModel<Owner extends SettingsReadOwner = SettingsReadOwner> 
   get schema(): SettingsSchema { return this.owner.schema; }
 
   async resolve(target: SettingsTarget, session?: SessionSettingsSource, keys?: readonly string[], options: { storeState?: boolean } = {}): Promise<Resolution> {
+    for (const id of keys ?? []) declaredKey(this.schema, id);
     const stores = await this.owner.stores(target, session, options);
     const runtime = session?.modelRuntime ?? this.owner.modelRuntime;
     return resolveSettings(this.schema, target, stores, { ...this.owner.resolveOptions(runtime), ...(keys ? { keys } : {}) });
@@ -89,6 +91,18 @@ export class SettingsModel<Owner extends SettingsReadOwner = SettingsReadOwner> 
   options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest): Promise<SettingsOptionsResult> {
     return this.owner.options(target, session, request, keys => this.resolve(target, session, keys));
   }
+}
+
+/**
+ * One id rule for resolve, dry run and change: the declared id, exactly as resolve
+ * returns it. A plain id whose instances carry a fixed qualifier is refused with
+ * those ids named, never guessed (#1642).
+ */
+export function declaredKey(schema: SettingsSchema, id: string): KeyDeclaration {
+  const key = schema.KEYS.find(candidate => candidate.id === id);
+  if (key) return key;
+  const instances = schema.KEYS.filter(candidate => candidate.id.startsWith(`${id}[`)).map(candidate => candidate.id);
+  throw new GatewayError("invalid_request", instances.length ? `Unknown setting ${id}; use ${instances.join(" or ")}` : `Unknown setting ${id}`);
 }
 
 export const deepEqual = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);

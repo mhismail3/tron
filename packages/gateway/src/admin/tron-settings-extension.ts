@@ -1,4 +1,4 @@
-import { type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
+import { settingsOutcomeRequestIds, type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
 import { StringEnum, Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory, ToolInfo } from "../kernel/pi/coding-agent.js";
 
@@ -20,7 +20,6 @@ import type { ExtensionFactory, ToolInfo } from "../kernel/pi/coding-agent.js";
  * answer): content a tool returned stays in context for the rest of it.
  */
 
-export const SETTINGS_OUTCOME_MESSAGE = "tron.settings-outcome.v1";
 
 
 
@@ -85,10 +84,10 @@ function admitSettingsCall(input: { action: "resolve" | "change"; keys?: string[
     }
     return { action: "resolve", ...(input.keys ? { keys: input.keys } : {}), ...(input.taskId ? { taskId: input.taskId } : {}) };
   }
-  if (input.keys !== undefined) throw new Error("settings change: \"keys\" is used only by resolve; change takes changes, reason, dryRun? and taskId?");
-  if (!input.changes?.length) throw new Error("settings change: \"changes\" is required (1 to 50 changes)");
-  if (!input.reason?.trim()) throw new Error("settings change: \"reason\" is required, written for the maintainer");
-  return { action: "change", changes: input.changes as ChangeRequest[], reason: input.reason,
+  if (input.keys !== undefined) throw new Error(`settings ${input.action}: "keys" is used only by resolve; ${input.action} takes changes, reason, dryRun? and taskId?`);
+  if (!input.changes?.length) throw new Error(`settings ${input.action}: "changes" is required (1 to 50 changes)`);
+  if (!input.reason?.trim()) throw new Error(`settings ${input.action}: "reason" is required, written for the maintainer`);
+  return { action: input.action, changes: input.changes as ChangeRequest[], reason: input.reason,
     ...(input.dryRun ? { dryRun: true } : {}), ...(input.taskId ? { taskId: input.taskId } : {}) };
 }
 
@@ -111,10 +110,9 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
       if (marked) return;
       marked = marksTurn(pi.getAllTools().find(tool => tool.name === event.toolName));
     });
-    pi.on("before_agent_start", async () => {
-      const lines = await access()?.takeOutcomes();
-      if (!lines?.length) return undefined;
-      return { message: { customType: SETTINGS_OUTCOME_MESSAGE, content: lines.join("\n"), display: true } };
+    pi.on("before_agent_start", async (_event, context) => {
+      const message = await access()?.takeOutcomes(settingsOutcomeRequestIds(context.sessionManager.getEntries()));
+      return message ? { message } : undefined;
     });
     pi.registerTool({
       name: "settings",
@@ -143,8 +141,8 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
         const result = await owner.change(input.changes, {
           reason: input.reason, ...(input.dryRun ? { dryRun: true } : {}), toolCallId, web: marked, ...(input.taskId ? { taskId: input.taskId } : {}),
         });
-        const text = result.status === "pending"
-          ? `Pending the maintainer's approval (request ${result.approval!.requestId}, expires ${result.approval!.expiresAt}). Nothing changed yet${result.worker ? "; the worker keeps its current settings and is told only if it is approved" : ""}.`
+        const text = result.status === "pending" && !result.dryRun
+          ? `Pending the maintainer's approval (request ${result.approval!.requestId}, expires ${result.approval!.expiresAt}). Nothing changed yet${result.worker ? "; the worker keeps its current settings and is told only if it is approved" : ""}. You hear the outcome when he decides or it expires.`
           : result.dryRun ? `Dry run: tier ${result.tier}.` : `Applied at tier ${result.tier}.${signalText(result)}`;
         return { content: [{ type: "text", text: `${text}\n${JSON.stringify(result)}` }], details: result };
       },

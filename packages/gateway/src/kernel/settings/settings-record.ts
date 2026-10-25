@@ -35,6 +35,8 @@ export interface TierBasis {
   web: boolean;
   risk: Tier | null;
   riskEvaluation?: { status: "assessed" | "failed" | "timeout"; rationale: string };
+  /** The requester asked for the maintainer's approval below this key's approve tier. */
+  requested?: true;
 }
 
 
@@ -70,6 +72,8 @@ export interface ChangeEntry {
   /** The approval request a pending entry belongs to, and on a decision fact who decided. */
   requestId?: string;
   decidedBy?: Actor;
+  /** An approval action fact (#1985): `key` names its subject, `after` its preview. Never undoable. */
+  action?: true;
   /** Entries one change wrote together and undo reverts together: both notes of a
    * profile supersede, or every item of a Confirm all (doc 6.4). */
   group?: { id: string; size: number };

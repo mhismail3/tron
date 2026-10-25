@@ -12,7 +12,7 @@ import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
 import type { ChangeEntry } from "../kernel/settings/settings-record.js";
-import { SETTINGS_OUTCOME_MESSAGE } from "./tron-settings-extension.js";
+import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/settings/tool-contract.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
@@ -159,7 +159,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
     const first = requests[0]!;
     const turn = first.slice(first.findLastIndex(message => message.role === "assistant") + 1);
-    const outcomes = turn.filter(message => message.role === "user" && text(message).startsWith("Settings change ")).map(text);
+    const outcomes = turn.filter(message => message.role === "user" && text(message).startsWith("Settings request ")).map(text);
     return { results, outcomes };
   }
   const settle = (results: Array<{ tool: string; details?: Record<string, unknown> }>) => results.find(result => result.tool === "settings")!.details!;
@@ -1112,7 +1112,8 @@ describe("settings risk gate", () => {
         if (homeCall && last.toolName === homeCall.name) homeResults.set(homeCall.prompt, { isError: last.isError === true, text: textOf(last), details: last.details });
         return fauxAssistantMessage("Done.");
       }
-      if (homeCall && users.at(-1) === homeCall.prompt) return fauxAssistantMessage([fauxToolCall(homeCall.name, homeCall.args)], { stopReason: "toolUse" });
+      // The prompt may carry a settings outcome after it (Home hears the approval it asked for, #1642).
+      if (homeCall && users.slice(-2).includes(homeCall.prompt)) return fauxAssistantMessage([fauxToolCall(homeCall.name, homeCall.args)], { stopReason: "toolUse" });
       return fauxAssistantMessage("Noted.");
     };
     f.faux.setResponses(Array.from({ length: 40 }, () => respond as never));

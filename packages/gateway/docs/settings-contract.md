@@ -166,9 +166,26 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   never lower, within 1.5 s, seeing only key, layer, actor kind, floor, web mark, a redacted
   reason and a lossy diff.
 - **Approvals** (`settings.approvals`, `settings.decide`) bind a digest of target and
-  `before`/`after`; a newer request supersedes; the push carries `settings-approval` only to a
-  relay advertising it ([push relay](../../push-relay/README.md#notification-categories)); the
-  requester hears each declined, expired or superseded change once (`tron.settings-outcome.v1`).
+  `before`/`after` (the decision's whole fence: no client fence); a newer request supersedes;
+  only the maintainer's client decides; the push carries `settings-approval` only to a relay
+  advertising it ([push relay](../../push-relay/README.md#notification-categories)). A
+  context `request` holds a change at any tier (`tierBasis.requested`). A timer expires a
+  request at its 24-hour deadline. The requester hears every outcome once (approved and
+  applied, declined, failed, superseded, expired) as one `tron.settings-outcome.v1` message
+  whose `details.requests[]` carry status, requester, reason, failure and display
+  `before`/`after`; the approvals store's `told` flag is the only outbox. Selection
+  is non-destructive; request IDs observed in canonical chat entries acknowledge delivery,
+  so refused admission or a crash before append leaves outcomes available.
+- **Approval actions** (`registerAction`, `requestAction`): an owner's maintainer-gated
+  operation that is not a stored value shares the store, digest, expiry, decision, record
+  (`action: true`, key = subject, never undoable) and outcomes; `plan` binds an exact preview,
+  re-checked at decide (a moved state supersedes). A durable execution claim precedes
+  `apply`; an interrupted execution is reported failed with possibly completed effects,
+  never replayed. Action failures instruct inspection before retry rather than promising
+  that no effects occurred. Expiry and decision admission share the target stripe.
+- **One key id rule:** resolve, dry run and change take the declared id
+  (`model.thinking[role=chat]`); a plain id with fixed instances is refused naming them, and a
+  qualifier contradicting a fixed one is refused.
 - **A running Home task worker** can be changed by Home (`taskId`) or the maintainer: model,
   thinking and Run keys apply from its next request with one fenced `Settings changed` steer
   (`signal`: `queued`, `not-running`, `failed`); context window and tools are `busy` until it
