@@ -48,7 +48,6 @@
     "sessions/runtime-slot.ts",
     "sessions/runtime-terminal-notifications.integration.test.ts",
     "sessions/runtime-tool-loadout.integration.test.ts",
-    "sessions/semantic-ui-broker.ts",
     "sessions/session-heap.lock.integration.test.ts",
     "sessions/session-lifecycle.lock.integration.test.ts",
     "sessions/summary-text.ts",

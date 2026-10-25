@@ -3,8 +3,8 @@ import {
   type ExtensionUIContext,
   type ThemeColor,
   type WorkingIndicatorOptions,
-} from "../kernel/pi/coding-agent.js";
-import { GatewayError } from "../errors.js";
+} from "../pi/coding-agent.js";
+import { GatewayError } from "../../errors.js";
 import type {
   ExtensionFormAnswer,
   ExtensionFormDescriptor,
@@ -13,14 +13,14 @@ import type {
   ExtensionOwner,
   ExtensionSemanticState,
   ExtensionWidget,
-} from "../protocol/types.js";
+} from "../../protocol/types.js";
 import { TRON_FORM_CAPABILITY } from "./extension-adapter-contract.js";
 import type { FormCapableUI, FormRequest } from "./extension-adapter-contract.js";
 import {
   canonicalExtensionFormAnswer,
   EXTENSION_FORM_MAX_ANSWER_BYTES,
   normalizeExtensionForm,
-} from "../extensions/semantic-form.js";
+} from "./semantic-form.js";
 import {
   EXTENSION_MAX_INTERACTIONS as MAX_PENDING_INTERACTIONS,
   EXTENSION_MAX_SELECT_OPTIONS as MAX_SELECT_OPTIONS,
@@ -29,9 +29,9 @@ import {
   EXTENSION_MAX_WIDGET_LINES as MAX_WIDGET_LINES,
   EXTENSION_MAX_WIDGETS as MAX_WIDGETS,
   ExtensionPresentationStore,
-} from "../extensions/host/extension-presentation-store.js";
-import { stripTerminalControls } from "../extensions/host/terminal-sanitizer.js";
-import { currentExtensionOwner, currentInvocationContext } from "../kernel/host/extension-execution-context.js";
+} from "./presentation/extension-presentation-store.js";
+import { stripTerminalControls } from "./presentation/terminal-sanitizer.js";
+import { currentExtensionOwner, currentInvocationContext } from "./extension-execution-context.js";
 
 export interface ExtensionNotificationInput {
   message: string;

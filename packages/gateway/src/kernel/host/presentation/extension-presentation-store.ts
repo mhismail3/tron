@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { visibleWidth } from "../../kernel/pi/tui.js";
-import { GatewayError } from "../../errors.js";
+import { visibleWidth } from "../../pi/tui.js";
+import { GatewayError } from "../../../errors.js";
 import type {
   ExtensionInputLease,
   ExtensionInteraction,
@@ -10,7 +10,7 @@ import type {
   ExtensionSemanticState,
   ExtensionSurface,
   JsonValue,
-} from "../../protocol/types.js";
+} from "../../../protocol/types.js";
 import {
   EXTENSION_FRAME_MAX_BYTES,
   EXTENSION_FRAME_MAX_COLUMNS,

@@ -4,9 +4,9 @@ import type { AuthInteraction } from "../kernel/pi/ai.js";
 import { dirname, join } from "node:path";
 import type { Extension, ExtensionContext, ExtensionUIContext, ToolDefinition } from "../kernel/pi/coding-agent.js";
 import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../protocol/types.js";
-import { EXTENSION_FORM_MAX_INTERACTION_BYTES } from "./semantic-form.js";
-import type { FormCapableUI, FormRequest } from "../sessions/extension-adapter-contract.js";
-import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js";
+import { EXTENSION_FORM_MAX_INTERACTION_BYTES } from "../kernel/host/semantic-form.js";
+import type { FormCapableUI, FormRequest } from "../kernel/host/extension-adapter-contract.js";
+import { TRON_FORM_CAPABILITY } from "../kernel/host/extension-adapter-contract.js";
 
 const ASK_USER_MARKER = "\0XYZ_ASK_USER";
 const mcpAuthContext = new AsyncLocalStorage<{

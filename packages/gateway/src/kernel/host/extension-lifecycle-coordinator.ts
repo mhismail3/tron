@@ -1,4 +1,4 @@
-import type { ExtensionHostActivity } from "../extensions/host/extension-presentation-store.js";
+import type { ExtensionHostActivity } from "./presentation/extension-presentation-store.js";
 
 /** Tracks host-observable extension work without interpreting extension-owned state. */
 export class ExtensionLifecycleCoordinator {

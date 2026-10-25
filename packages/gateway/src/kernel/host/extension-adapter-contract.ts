@@ -1,4 +1,4 @@
-import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../protocol/types.js";
+import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../../protocol/types.js";
 
 /**
  * Public Tron extension-host capability: one atomic multi-question form.

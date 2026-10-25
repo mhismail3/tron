@@ -7,7 +7,6 @@
     "two-way gateway/delegation <-> gateway/extensions",
     "two-way gateway/display <-> gateway/protocol",
     "two-way gateway/episodic <-> gateway/home",
-    "two-way gateway/extension-activity <-> gateway/extensions",
     "two-way gateway/extension-activity <-> gateway/projection",
     "two-way gateway/extension-activity <-> gateway/run",
     "two-way gateway/foundation <-> gateway/util",

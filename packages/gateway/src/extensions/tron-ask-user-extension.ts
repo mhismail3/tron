@@ -6,8 +6,8 @@ import type {
   ExtensionFormDescriptor,
   JsonValue,
 } from "../protocol/types.js";
-import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js";
-import type { FormCapableUI } from "../sessions/extension-adapter-contract.js";
+import { TRON_FORM_CAPABILITY } from "../kernel/host/extension-adapter-contract.js";
+import type { FormCapableUI } from "../kernel/host/extension-adapter-contract.js";
 
 import { TRON_ASK_USER_INTERRUPTED } from "./tron-ask-user-contract.js";
 

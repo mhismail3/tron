@@ -2,7 +2,7 @@ import {
   TuiMainScreen,
   type Terminal,
   type TuiMainScreenRenderState,
-} from "../../kernel/pi/tui.js";
+} from "../../pi/tui.js";
 import type { ComponentDiagnostic } from "./recording-component.js";
 import { boundedDisplayError } from "./terminal-sanitizer.js";
 

@@ -3,7 +3,7 @@ import { HOME_TASK_MARKER, HOME_TASK_REPORT } from "../delegation/task-report.js
 import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, JsonValue } from "../../protocol/types.js";
 import type { InputTrigger } from "../host/input-admission.js";
 import type { TrustService } from "../resources/trust-service.js";
-import type { ExtensionLifecycleCoordinator } from "../../sessions/extension-lifecycle-coordinator.js";
+import type { ExtensionLifecycleCoordinator } from "../host/extension-lifecycle-coordinator.js";
 import type { CanonicalAppendContext } from "../host/canonical-append.js";
 import type { ResourceExpansionCatalog } from "../../sessions/resource-invocation.js";
 import type { CanonicalAssistantCompletion } from "./completion-facts.js";

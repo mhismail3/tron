@@ -4,14 +4,13 @@
 
 How Pi extensions run inside the Gateway: Pi's built-in extension composition, Tron's
 first-party module list, the compatibility inventory of Pi's extension API, extension
-ownership attribution, semantic forms and the remote extension UI host.
+registration attribution and adapters. K3 owns the [generic extension UI host](../kernel/host/README.md).
 
 ## Owns
 
 `pi-builtins.ts`, `tron-modules.ts` (ordered profile identities), `compatibility-manifest.ts`,
 `owner-attribution.ts`, `managed-producer.ts`, `extension-adapters.ts`,
-`semantic-form.ts`, the `tron-ask-user` extension and `host/` (remote extension host,
-component registry, presentation store, terminal sanitizer).
+and the `tron-ask-user` extension.
 
 ## Contract
 
@@ -55,7 +54,7 @@ component registry, presentation store, terminal sanitizer).
 ## Entry points
 
 `piBuiltinExtensions`, composition-configured ordinary and profile recipes via
-`ModuleHost.registrations`, the remote host in `host/`.
+`ModuleHost.registrations`; the remote host lives in `kernel/host/presentation/`.
 
 ## Signals
 

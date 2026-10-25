@@ -95,10 +95,10 @@ import {
   writeSessionProjectionCut,
   type CanonicalSessionFileCut,
 } from "./session-export.js";
-import { SemanticUIBroker, type ExtensionNotificationInput } from "./semantic-ui-broker.js";
-import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
-import { ExtensionLifecycleCoordinator } from "./extension-lifecycle-coordinator.js";
-import { RemotePiExtensionHost } from "../extensions/host/remote-pi-extension-host.js";
+import { SemanticUIBroker, type ExtensionNotificationInput } from "../kernel/host/semantic-ui-broker.js";
+import { ExtensionPresentationStore } from "../kernel/host/presentation/extension-presentation-store.js";
+import { ExtensionLifecycleCoordinator } from "../kernel/host/extension-lifecycle-coordinator.js";
+import { RemotePiExtensionHost } from "../kernel/host/presentation/remote-pi-extension-host.js";
 import {
   admitCommandCatalog,
   boundCommandContent,

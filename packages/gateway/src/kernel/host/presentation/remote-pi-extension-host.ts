@@ -1,5 +1,5 @@
-import type { ExtensionUIContext, KeybindingsManager as PiKeybindingsManager } from "../../kernel/pi/coding-agent.js";
-import { Theme } from "../../kernel/pi/coding-agent.js";
+import type { ExtensionUIContext, KeybindingsManager as PiKeybindingsManager } from "../../pi/coding-agent.js";
+import { Theme } from "../../pi/coding-agent.js";
 import {
   KeybindingsManager as TuiKeybindingsManager,
   TUI_KEYBINDINGS,
@@ -7,8 +7,8 @@ import {
   type OverlayHandle,
   type OverlayOptions,
   type TUI,
-} from "../../kernel/pi/tui.js";
-import type { ExtensionFrame, ExtensionOwner, ExtensionSurface } from "../../protocol/types.js";
+} from "../../pi/tui.js";
+import type { ExtensionFrame, ExtensionOwner, ExtensionSurface } from "../../../protocol/types.js";
 import { CapturingTuiMainScreen } from "./capturing-tui-main-screen.js";
 import { ComponentRegistry, type ComponentRecord, type RemoteComponentFactory } from "./component-registry.js";
 import { ExtensionPresentationStore } from "./extension-presentation-store.js";
@@ -16,7 +16,7 @@ import { boundedExtensionFrame, parseExtensionFrame } from "./frame-parser.js";
 import { InMemoryTerminal } from "./in-memory-terminal.js";
 import { type ComponentDiagnostic } from "./recording-component.js";
 import { boundedDisplayError, stripTerminalControls } from "./terminal-sanitizer.js";
-import { currentExtensionOwner } from "../../kernel/host/extension-execution-context.js";
+import { currentExtensionOwner } from "../extension-execution-context.js";
 
 export interface RemotePiExtensionHostOptions {
   columns?: number;

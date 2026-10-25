@@ -1,11 +1,11 @@
-import { GatewayError } from "../errors.js";
+import { GatewayError } from "../../errors.js";
 import type {
   ExtensionFormAnswer,
   ExtensionFormDescriptor,
   ExtensionFormOption,
   ExtensionFormQuestion,
-} from "../protocol/types.js";
-import { stripTerminalControls } from "./host/terminal-sanitizer.js";
+} from "../../protocol/types.js";
+import { stripTerminalControls } from "./presentation/terminal-sanitizer.js";
 
 const EXTENSION_FORM_VERSION = 1 as const;
 const EXTENSION_FORM_MAX_QUESTIONS = 4;

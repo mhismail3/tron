@@ -28,6 +28,11 @@ identity refusal; native frames keep lineage selection and physical replacement 
 
 `extension-execution-context.ts` owns the single call-time extension-owner and
 invocation context stores shared by host callbacks and their consumers.
+`semantic-ui-broker.ts`, `semantic-form.ts` and `extension-adapter-contract.ts` own
+semantic interactions and the versioned form capability. `presentation/` owns the
+remote Pi host, component generations, bounded terminal capture and the single
+presentation epoch. `extension-lifecycle-coordinator.ts` derives quiescence from
+that epoch; the runtime replaces its activity source when rotating the host.
 
 ## Contract
 
