@@ -17,7 +17,7 @@ import type { HomeOwner } from "../src/modules/home/home-owner.js";
 
 type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "settingsSchema">;
 /** Home's composition inputs a test may supply; the rest are the registry's own. */
-type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "notifications" | "machineId" | "homeTaskDiagnostic" | "modelQueue" | "runtime" | "settings" | "knowledge" | "modelRuntime">;
+type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "machineId" | "homeTaskDiagnostic" | "modelQueue" | "runtime" | "settings" | "knowledge" | "modelRuntime">;
 
 const homes = new WeakMap<RuntimeRegistry, () => HomeOwner>();
 const recents = new WeakMap<RuntimeRegistry, RecentModelStore>();
@@ -56,7 +56,7 @@ export function homeOwnerOf(registry: RuntimeRegistry): HomeOwner {
 /** One real registry fixture: the production composition, then the real registry.
  * Options remain the boundary's own inputs; no production overrides or test hooks. */
 export async function createTestRegistry(options: RegistryOptions & HomeTestOptions & Omit<ModuleOwners, "registry" | "sessionSearch" | "home" | "openAIModelEligibility" | "display"> & { browserLiveViews?: BrowserLiveViewRegistry; providerUsage?: ModelQueueOptions["usage"]; modelQueueDiagnostic?: ModelQueueOptions["log"]; modelRuntimeFactory?: () => Promise<ModelRuntime>; openAIModelEligibility?: OpenAIModelEligibility; knowledge?: HomeComposition["knowledge"]; sessionSearch?: () => SessionSearchService | undefined }): Promise<RuntimeRegistry> {
-  const { knowledge = () => undefined, browserLiveViews, providerUsage, modelQueueDiagnostic, connections, scheduleToolOperations, sessionSearch, recentModelsChanged, modelRuntimeFactory, openAIModelEligibility = new OpenAIModelEligibility(), homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport, ...registryOptions } = options;
+  const { notifications, knowledge = () => undefined, browserLiveViews, providerUsage, modelQueueDiagnostic, connections, scheduleToolOperations, sessionSearch, recentModelsChanged, modelRuntimeFactory, openAIModelEligibility = new OpenAIModelEligibility(), homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport, ...registryOptions } = options;
   const modelQueue = options.gatewayModelRuntime ? new ModelQueueOwner({
     runtime: options.gatewayModelRuntime,
     usage: providerUsage ?? new ProviderUsageOwner(),
@@ -73,7 +73,7 @@ export async function createTestRegistry(options: RegistryOptions & HomeTestOpti
       runtime: applyHomeCacheRetention(sessionRuntimeView(registryOptions.gatewayModelRuntime ?? await createProviderModelRuntime(options.agentDir, modelRuntimeFactory))),
       ownership: registryOptions.gatewayModelRuntime ? "borrowed" : "owned",
     }),
-    tronHome: options.tronHome, agentDir: options.agentDir, trust: options.trust, notifications: options.notifications, machineId: options.machineId,
+    tronHome: options.tronHome, agentDir: options.agentDir, trust: options.trust, notifications, machineId: options.machineId,
     homeTaskDiagnostic: options.homeTaskDiagnostic, homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport,
   };
   const { modules, home: owner, recentModels } = await startGatewayModules({ tronHome: options.tronHome, log: { log: () => {} } },

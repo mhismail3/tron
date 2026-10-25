@@ -64,7 +64,8 @@ deliveries retired as failed with one `schema_upgrade` signal).
   captured IDs are retried on write failure. An explicit `notify` from a chat the user
   is viewing is delivered with its row already read. A migrated identity takes its
   rows; a fork or new session does not. Removing delivered iOS notifications is native
-  work, not proven by an inbox read.
+  work, not proven by an inbox read. The K3 `sessionNotifications` policy returns
+  the existing service for these two kernel calls; it adds no persistence or retry owner.
 - **Registration.** `push.registration.upsert|remove|status`. Upsert derives `deviceId`
   from the connection and takes an installation ID, endpoint-scoped grant ID/secret,
   the issuing relay origin and preview/policy booleans (preview defaults off); an

@@ -23,6 +23,12 @@ export interface RunTerminalInput {
   waitingEpisode: boolean;
 }
 
+/** Module-owned persistence at the kernel's identity and visibility cuts. */
+export interface SessionNotificationOperations {
+  rekeySession(previousId: string, nextId: string): Promise<boolean>;
+  markSessionInboxRead(sessionId: string): Promise<void>;
+}
+
 export interface InteractionRequiredInput {
   sessionId: string;
   interactionId: string;
@@ -124,6 +130,7 @@ export const KERNEL_HOOKS = {
   taskLedger: "policy",
   runTerminal: "policy",
   interactionRequired: "policy",
+  sessionNotifications: "policy",
   toolResultProjection: "policy",
   modelRuntimeInstalled: "policy",
   modelUsed: "policy",
@@ -135,7 +142,7 @@ export const KERNEL_HOOKS = {
 export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
-export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision" | "sessionLineage" | "taskLedger" | "kernelLifecycle" | "modelRuntimeInstalled" | "modelUsed" | "sessionRetired">]: (...args: never[]) => unknown } & {
+export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "runTerminal" | "interactionRequired" | "sessionNotifications" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision" | "sessionLineage" | "taskLedger" | "kernelLifecycle" | "modelRuntimeInstalled" | "modelUsed" | "sessionRetired">]: (...args: never[]) => unknown } & {
   modelRuntimeInstalled(): ModelRuntimePolicy;
   modelUsed(sessionId: string, model: { provider: string; id: string }): void;
   sessionRetired(sessionId: string): void;
@@ -151,6 +158,7 @@ export type KernelHooks = { [K in Exclude<HookName, "toolResultProjection" | "ru
   /** Resolve optional availability before sampling run-owned facts. */
   runTerminal(): ((input: RunTerminalInput) => Promise<void>) | undefined;
   interactionRequired(): ((input: InteractionRequiredInput) => Promise<void>) | undefined;
+  sessionNotifications(): SessionNotificationOperations | undefined;
 };
 
 export interface ModuleInstance<C = void> {

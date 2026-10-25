@@ -74,6 +74,8 @@ that epoch; the runtime replaces its activity source when rotating the host.
   call, never a copy taken at start. Notification hooks resolve optional owner
   availability before the run samples terminal or interaction facts; notifications
   admits the alert, while the run owns presence and waiting-episode state.
+  `sessionNotifications` supplies that same owner for awaited migrated-identity
+  persistence and detached visibility-admitted inbox reads, at the kernel's existing cuts.
   Home owns `runSettled`: the run awaits `quiescent` before changing to idle,
   then notifies `idle` synchronously only for a user activation or delivered wake.
   Home schedules pending wakes before its resource-idle callback; neither is cached.

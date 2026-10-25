@@ -10,6 +10,7 @@ export function createNotifyModule(services: () => NotifyModuleServices): Module
     tools: ["notify"], commands: [],
     start: () => ({
       hooks: {
+        sessionNotifications: () => services().notifications,
         runTerminal: () => {
           const { notifications, machineId } = services();
           if (!notifications) return undefined;

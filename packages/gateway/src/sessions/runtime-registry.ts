@@ -58,7 +58,6 @@ import { completionOwnedByMarker, type CanonicalAssistantCompletion, type Sessio
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { ProcessActivityRecency } from "../kernel/projection/process-activity-recency.js";
 import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
-import type { NotificationService } from "../notifications/notification-service.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
@@ -671,7 +670,6 @@ export class RuntimeRegistry implements SessionOperations {
        * inventory. */
       resources?: ResourceRecorder;
       machineId?: string;
-      notifications?: NotificationService;
       readonly settingsSchema: SettingsSchema;
       workRegistry?: GatewayWorkRegistry;
       /** A discovery pass that stopped at one of its budgets instead of the end
@@ -733,7 +731,6 @@ export class RuntimeRegistry implements SessionOperations {
   /** The composition's one workspace (`workspaceModule`), shared by capability stores. */
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
   get moduleHost(): ModuleHost { return this.options.modules; }
-  notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
   /** The installed K6 owner, read late by session and composition consumers. */
   get settings() { return this.settingsOwners; }
 
@@ -1127,7 +1124,7 @@ export class RuntimeRegistry implements SessionOperations {
           await this.archive.rekey(previousId, nextId);
           // Inbox rows carry the canonical session identity they belong to, so a
           // migrated identity takes its alerts with it instead of orphaning them.
-          await this.options.notifications?.rekeySession(previousId, nextId);
+          await this.options.modules.policy("sessionNotifications")?.()?.rekeySession(previousId, nextId);
         } else if (disposition === "discard") {
           await this.attention.remove(previousId);
           await this.archive.remove(previousId);
@@ -3780,7 +3777,7 @@ export class RuntimeRegistry implements SessionOperations {
       // Transport has resolved aliases and admitted the exact mobile token.
       // Notification persistence must not block chat or die with its socket;
       // the notification owner retains captured IDs for its background drain.
-      void this.options.notifications?.markSessionInboxRead(input.sessionId).catch(() => {});
+      void this.options.modules.policy("sessionNotifications")?.()?.markSessionInboxRead(input.sessionId).catch(() => {});
     });
   }
 

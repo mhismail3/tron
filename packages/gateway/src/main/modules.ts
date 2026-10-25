@@ -57,7 +57,7 @@ export function gatewayModules(owners: () => ModuleOwners) {
     createNativeCaptureModule(() => owners().display),
     computerModule,
     createScheduleModule(() => owners().scheduleToolOperations),
-    createNotifyModule(() => registry().notifyModuleServices()),
+    createNotifyModule(() => ({ notifications: owners().home.notifications, machineId: owners().home.machineId })),
     home.home,
     home.research,
   ] };

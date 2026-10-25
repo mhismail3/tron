@@ -429,7 +429,6 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
   ),
   homeTaskDiagnostic,
   machineId: config.machineId,
-  notifications,
   settingsSchema,
   workRegistry,
   extensionArtifactWarning: ({ reason, owner }) => logger.log(
