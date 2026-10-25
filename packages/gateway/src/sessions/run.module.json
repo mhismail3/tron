@@ -19,6 +19,7 @@
     "home-memory-browser-scale.e2e.test.ts",
     "home-memory-tools.e2e.test.ts",
     "home-profile.integration.test.ts",
+    "home-profile-scopes.integration.test.ts",
     "home-provider-runtime.e2e.test.ts",
     "home-request-seam.integration.test.ts",
     "home-research-tools.integration.test.ts",
@@ -80,12 +81,6 @@
     },
     {
       "path": "home-memory-tools.e2e.test.ts",
-      "budget": "lines",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Split by cohesive operation in this module's restructure slices"
-    },
-    {
-      "path": "home-profile.integration.test.ts",
       "budget": "lines",
       "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"

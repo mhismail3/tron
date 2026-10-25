@@ -2,7 +2,7 @@ import type { ModuleDescriptor, SessionContext } from "../kernel/host/module-hos
 import { createTronHomeExtension } from "./tron-home-extension.js";
 import { homeResearchTools, type HomeResearchTransport } from "./home-research-tools.js";
 import type { HomeMemoryToolAccess } from "./home-memory.js";
-import type { HomeProfileChangeAccess } from "./home-profile.js";
+import type { HomeProfileChangeAccess } from "./home-profile-tool.js";
 import type { SettingsChangePath } from "../admin/settings-model.js";
 import type { HomeOwner } from "./home-owner.js";
 import type { TrustService } from "../admin/trust-service.js";

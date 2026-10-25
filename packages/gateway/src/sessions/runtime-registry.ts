@@ -105,11 +105,10 @@ import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-bound
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { HomeOwner } from "../home/home-owner.js";
 import { HomeGlobalResources } from "../home/home-global-resources.js";
-import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
+import { admitTaskWorkerChoice, homeSubagentQueueBrief, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
 import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
-import { readHomeProfile } from "../home/home-profile.js";
-import { renderProfileFiles } from "../home/home-profile-files.js";
+import { homeDelegationProfile } from "../home/home-profile.js";
 import { readHomeSessionEntry } from "../home/home-session-read.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic } from "../home/home-memory.js";
@@ -2941,11 +2940,8 @@ export class RuntimeRegistry {
     return { worker, subagent };
   }
 
-  /** Home resolves its typed worker profile at the delegate boundary: the first
-   * available model of the worker queue (settings-model.md 6.3), else Home's own
-   * model when the queue is empty. The selected values are copied into this task
-   * only; later Home/profile changes cannot retarget it. The worker queue's and
-   * subagent queue's availability is returned to Home and written into the brief. */
+  /** Resolve choice and profile files at admission; the canonical brief freezes both
+   * for this task. Later Home/profile edits cannot retarget accepted work. */
   private async dispatchHomeTask(sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) {
     if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
       throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
@@ -2989,10 +2985,8 @@ export class RuntimeRegistry {
       : typeof profileThinking === "string" ? "Home profile" : "same as Home";
     const choiceNotes = [clampNote].filter(Boolean).join("; ");
     const subagentModels = subagentQueue?.models.length ? subagentQueue.models : undefined;
-    const subagentLine = subagentModels
-      ? `\n\nSubagent models, in fallback order: ${subagentModels.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ")}. Explicit eligible subagent model choices in this brief take precedence over the default queue: pass the chosen provider/model to the subagent launch. Otherwise, launch subagents with model ${SUBAGENT_QUEUE_MODEL.provider}/${SUBAGENT_QUEUE_MODEL.id}: it runs the first available one and moves along this queue on a usage-limit error. If an explicit choice is unavailable or hits a usage limit, disclose the reason and the chosen fallback; do not silently substitute the queue default.`
-      : "";
-    const profile = this.knowledgeService ? renderProfileFiles(await readHomeProfile(this.knowledgeService), request.scopes ?? []) : undefined;
+    const subagentLine = homeSubagentQueueBrief(subagentModels, SUBAGENT_QUEUE_MODEL);
+    const profile = this.knowledgeService ? await homeDelegationProfile(this.knowledgeService, request.scopes ?? []) : undefined;
     const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.${subagentLine}\n\n${profile?.text ?? "Profile diagnostic: Knowledge is unavailable; preferences could not be applied."}`;
     const { model: _model, thinking: _thinking, scopes: _scopes, ...input } = request;
     const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}),

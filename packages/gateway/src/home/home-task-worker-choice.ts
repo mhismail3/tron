@@ -9,6 +9,13 @@ export const HOME_TASK_THINKING_LEVELS: readonly ModelThinkingLevel[] = ["off", 
 /** A refusal lists at most this many valid models, so the Home tool error stays bounded. */
 const VALID_MODEL_LIMIT = 20;
 
+/** One canonical availability paragraph shared by resolved task briefs. */
+export function homeSubagentQueueBrief(subagentModels: readonly { model: string; available: boolean; reason?: string }[] | undefined, queueModel: { provider: string; id: string }): string {
+  return subagentModels
+      ? `\n\nSubagent models, in fallback order: ${subagentModels.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ")}. Explicit eligible subagent model choices in this brief take precedence over the default queue: pass the chosen provider/model to the subagent launch. Otherwise, launch subagents with model ${queueModel.provider}/${queueModel.id}: it runs the first available one and moves along this queue on a usage-limit error. If an explicit choice is unavailable or hits a usage limit, disclose the reason and the chosen fallback; do not silently substitute the queue default.`
+      : "";
+}
+
 /** The model and thinking level a delegation chooses for its worker. Both are optional;
  * an omitted model keeps the worker session's default, and a thinking level needs a model. */
 export interface HomeTaskWorkerChoice {

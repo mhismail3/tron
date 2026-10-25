@@ -1066,13 +1066,9 @@ export const HOME_PROFILE_LIST_CAPABILITY = "home-profile-list.v1";
  * Profile sheet read-only. */
 export const HOME_PROFILE_EDIT_CAPABILITY = "home-profile-edit.v1";
 
-/** One learned-profile item as `home.profileList` answers it: the Knowledge note's
- * identity, its kind label, its one-line text and whether the maintainer confirmed it.
- * `status` is derived the way Home's instructions derive it: only `active` applies. */
+/** A scoped Knowledge profile item with rationale/confirmation metadata; only active items apply. */
 export interface HomeProfileListItem {
-  file: string;
-  why: string;
-  lastConfirmedDate: string | null;
+  file: string; why: string; lastConfirmedDate: string | null;
   id: string;
   revisionId: string;
   kind: "preference" | "standing-decision" | "delegation-default" | "fact";

@@ -3862,14 +3862,10 @@ export class RuntimeSlot {
     }
   }
 
-  /** Owner diagnostics share the canonical session event stream, not prompt-only text. */
-  publishDiagnostic(code: string, message: string): void {
-    this.emit("session.diagnostic", { code, message: message.slice(0, 2_048) });
-  }
-
-  private emitPersistenceDiagnostic(code: string): void {
+  /** Owner diagnostics share observability and the canonical session event stream. */
+  publishDiagnostic(code: string, message = "Canonical ownership persistence requires attention"): void {
     this.dependencies.persistenceDiagnostic?.(this.id, code);
-    this.emit("session.diagnostic", { code, message: "Canonical ownership persistence requires attention" });
+    this.emit("session.diagnostic", { code, message: message.slice(0, 2_048) });
   }
 
   private retryDurableWrite(key: string, operation: () => Promise<void>): Promise<void> {
@@ -3898,7 +3894,7 @@ export class RuntimeSlot {
             || error instanceof SealedChapterMutationError
             || isUncertainOutcome(error)) throw error;
           attempt += 1;
-          if (attempt === 1) this.emitPersistenceDiagnostic("canonical-ownership-persistence-retrying");
+          if (attempt === 1) this.publishDiagnostic("canonical-ownership-persistence-retrying");
           await new Promise<void>(resolve => setTimeout(resolve, Math.min(1_000, 25 * attempt, Math.max(0, deadline - performance.now()))));
           if (owner.blocked) throw uncertainOutcome("Canonical ownership persistence remains unresolved");
         }
@@ -3929,7 +3925,7 @@ export class RuntimeSlot {
         void session.abort().catch(() => {});
         void this.directBashProcesses?.abortAll().catch(() => {});
       }
-      this.emitPersistenceDiagnostic("canonical-ownership-persistence-blocked");
+      this.publishDiagnostic("canonical-ownership-persistence-blocked");
       throw asUncertainOutcome(error, "Canonical ownership persistence could not be proven");
     }).finally(() => { if (timer) clearTimeout(timer); });
     this.durableWrites.set(key, owner);

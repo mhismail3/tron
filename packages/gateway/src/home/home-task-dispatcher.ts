@@ -66,8 +66,7 @@ export type HomeTaskDiagnostic =
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
 /** `title` names the worker session; it is never persisted with the task record. */
 export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice {
-  scopes?: string[];
-  taskId: string; intent: string; target: string; title?: string; reason?: string;
+  taskId: string; intent: string; target: string; title?: string; reason?: string; scopes?: string[];
   /** Internal Home boundary metadata, never accepted by the delegate tool schema. */
   provenance?: { model: Pick<FixedSetting, "via" | "reason">; thinking: Pick<FixedSetting, "via" | "reason"> };
   modelQueues?: import("../providers/model-queue.js").TaskModelQueues;
@@ -129,8 +128,7 @@ function interruptedQuestion(run: readonly FileEntry[]): InterruptedQuestion | u
     ? { title: data.title, questions: data.questions } : undefined;
 }
 
-/** The resumed operation's brief. The authorized intent is this exact text. `instructions` are
- * oldest first: those of earlier resumes refused before they started (#959), then this one's. */
+/** Authorized resume brief; instructions run oldest-first, including previously refused resumes (#959). */
 function resumeBrief(previous: HomeTaskRecord, instructions: readonly string[], pending: InterruptedQuestion | undefined): string {
   const parts = [`Continue Home task ${previous.taskId} in place. It stopped (${previous.terminalEvidence?.outcome ?? "unknown"}: ${previous.terminalEvidence?.reason ?? "unknown"}); this is the same worker session, so its worktree, branch and work claim are still yours. Pick up exactly where it stopped: re-check the state you were in before acting.`];
   if (instructions.length === 1) parts.push(`Instruction:\n${instructions[0]}`);
@@ -144,8 +142,7 @@ function resumeBrief(previous: HomeTaskRecord, instructions: readonly string[], 
 }
 /** A started task names its worker and operation. */
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord>;
-  preferencesApplied?: string[];
-  profileDiagnostics?: string[];
+  preferencesApplied?: string[]; profileDiagnostics?: string[];
   /** The worker choice the delegate boundary resolved, as the brief states it; the `delegate` tool's details carry it. */
   worker?: HomeTaskWorkerSummary;
   /** The subagent queue's availability at delegation, in fallback order. */

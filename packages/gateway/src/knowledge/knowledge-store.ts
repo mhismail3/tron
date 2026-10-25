@@ -1,3 +1,4 @@
+import { carryNoteMarks, storedNoteContent, readProfileRecords, organizeProfileRecords, type ProfileAssignment } from "./knowledge-profile.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
@@ -14,7 +15,7 @@ import {
   type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgePreviewBatchRequest,
   type KnowledgePreviewBatchResponse, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
-  type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit, type NoteContent,
+  type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
   type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse, type KnowledgeSourceTakeRequest, type SourceFreshness,
   type SourceAdmission, type SourceContent,
   type KnowledgeCurationItem, type KnowledgeCurationOperation, type KnowledgeCurationStored,
@@ -170,23 +171,6 @@ function mergeSourceAttribution(existing: KnowledgeRecord & { kind: "source" }, 
   return { kind: "source", id: existing.id, createdAt: existing.createdAt, scope: existing.scope, provenance: existing.provenance, relations: existing.relations, ...(existing.temporal ? { temporal: existing.temporal } : {}), content: { ...existing.content, ...(origins.length ? { origins } : {}), ...(annotations.length ? { annotations } : {}) } };
 }
 function invalid(message: string): GatewayError { return new GatewayError("invalid_request", message); }
-/** A note's labels and retirement are owner state that a native client's typed draft
- * does not model. An edit that omits them keeps the current revision's, so a confirmation
- * or edit cannot silently remove a note from the owner's role; an edit that names them
- * replaces them. `retired: false` clears retirement and is never stored. */
-function carryNoteMarks(current: KnowledgeRecord, content: NoteContent): NoteContent {
-  if (current.kind !== "note") return storedNoteContent(content);
-  const tags = content.tags ?? current.content.tags;
-  const retired = content.retired ?? current.content.retired;
-  const { retired: _named, ...rest } = content;
-  return { ...rest, ...(tags ? { tags } : {}), ...(retired ? { retired: true } : {}) };
-}
-/** A stored note revision holds `retired: true` or nothing. */
-function storedNoteContent(content: NoteContent): NoteContent {
-  if (content.retired !== false) return content;
-  const { retired: _cleared, ...rest } = content;
-  return rest;
-}
 function requestHash(operation: string, request: unknown): string { return createHash("sha256").update(operation).update("\0").update(JSON.stringify(request)).digest("hex"); }
 function now(): string { return new Date().toISOString(); }
 function revisionId(): string { return randomUUID(); }
@@ -1810,60 +1794,15 @@ export class KnowledgeStore {
       return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, preview: request.preview } }, request.expectedRevision);
     }, undefined, signal);
   }
-  /** One forward profile organization transaction. Text, provenance and prior revisions
-   * remain with Knowledge; only owner labels change. Backup is durable before any head moves. */
-  async readProfileNotes(): Promise<{ notes: Array<KnowledgeRecord & { kind: "note" }>; diagnostics: string[] }> {
-    return this.readState(async (state, paths) => {
-      const notes: Array<KnowledgeRecord & { kind: "note" }> = [];
-      const diagnostics: string[] = [];
-      for (const [id, head] of state.records.entries()) {
-        if (head.kind !== "note" || head.scope !== "personal") continue;
-        try {
-          const note = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
-          if (!note || this.recordHardErased(state, note) || this.recordExcluded(state, note)) continue;
-          if (note.kind === "note" && note.content.tags?.includes("home-profile")) notes.push(note);
-        } catch {
-          // A damaged immutable body must not suppress unrelated accepted rules.
-          diagnostics.push(`Profile diagnostic: Knowledge file records/${id}/${head.latestRevisionId}.json is missing or corrupt; other profile files remain loaded.`);
-        }
-      }
-      return { notes, diagnostics };
-    });
+  async readProfileNotes() {
+    return this.readState((state, paths) => readProfileRecords(state.records.entries(),
+      (id, revision) => this.readRecordOrRemoved(paths, state, id, revision), record => !this.recordHardErased(state, record) && !this.recordExcluded(state, record)));
   }
-
-  async organizeProfile(commandId: string, assignments: ReadonlyArray<{ id: string; expectedRevision: string; file: string }>): Promise<{ records: KnowledgeRecord[]; backup: string | null }> {
-    return this.mutate("knowledge.profile.organize", commandId, assignments, async (state, paths) => {
-      if (!assignments.length || assignments.length > 500 || new Set(assignments.map(item => item.id)).size !== assignments.length) throw invalid("Profile migration requires distinct assignments for 1..500 notes");
-      const notes: KnowledgeRecord[] = [];
-      for (const [id, head] of state.records.entries()) {
-        if (head.kind !== "note" || head.scope !== "personal") continue;
-        const note = await this.currentRecord(state, paths, id);
-        if (note?.kind === "note" && note.content.tags?.includes("home-profile")) notes.push(note);
-      }
-      if (notes.length !== assignments.length || notes.some(note => !assignments.some(item => item.id === note.id))) throw conflict("Profile changed: migration must assign every profile note exactly once");
-      for (const item of assignments) {
-        const note = notes.find(note => note.id === item.id)!;
-        if (note.revisionId !== item.expectedRevision) throw conflict("Profile revision is stale");
-        if (!/^(core|home|scopes\/[a-z][a-z0-9-]{0,47})$/.test(item.file)) throw invalid("Invalid profile file");
-      }
-      const changed = assignments.filter(item => {
-        const note = notes.find(note => note.id === item.id)!;
-        return note.kind === "note" && JSON.stringify(note.content.tags?.filter(tag => tag.startsWith("home-file-"))) !== JSON.stringify([`home-file-${item.file.replace("/", "-")}`]);
-      });
-      if (!changed.length) return { records: [], backup: null };
-      if (notes.every(note => note.kind === "note" && note.content.tags?.some(tag => tag.startsWith("home-file-")))) throw conflict("Profile is already organized; use refine to move an item between files");
-      const backup = `profile-backup-${createHash("sha256").update(commandId).digest("hex")}.json`;
-      await durableAtomicWriteJson(join(paths.root, backup), { version: 1, notes, histories: notes.map(note => ({ id: note.id, revisions: state.records.get(note.id)!.revisionIds })) }, 0o600);
-      const records: KnowledgeRecord[] = [];
-      for (const item of changed) {
-        const note = notes.find(note => note.id === item.id)!;
-        if (note.kind !== "note") throw invalid("Profile member is not a note");
-        const tags = [...(note.content.tags ?? []).filter(tag => !tag.startsWith("home-file-")), `home-file-${item.file.replace("/", "-")}`];
-        const result = await this.putRecord(state, paths, { ...note, content: { ...note.content, tags } }, note.revisionId);
-        records.push(result.record);
-      }
-      return { records, backup };
-    });
+  async organizeProfile(commandId: string, assignments: readonly ProfileAssignment[]) {
+    return this.mutate("knowledge.profile.organize", commandId, assignments, (state, paths) => organizeProfileRecords(commandId, assignments, {
+      root: paths.root, heads: state.records.entries(), read: id => this.currentRecord(state, paths, id),
+      write: (record, revision) => this.putRecord(state, paths, record, revision),
+    }));
   }
 
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, { ...request.record, content: storedNoteContent(request.record.content) })); }
