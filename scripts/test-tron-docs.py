@@ -85,7 +85,15 @@ class RealRepositoryTests(unittest.TestCase):
         resolved = next(e for e in lock["exchanges"] if e["method"] == "settings.resolve")["response"]["result"]["keys"][0]
         row = next(line for line in self.generate("settings").splitlines() if line.startswith(f"| `{resolved['key']}` |"))
         layers = row.split(" | ")[3].split(", ")
-        self.assertLessEqual(set(resolved["presentation"]["editableLayers"]), set(layers))
+        edited_layers = {
+            change["layer"]
+            for exchange in lock["exchanges"]
+            if exchange["method"] == "settings.change" and exchange["response"]["ok"]
+            for change in exchange["response"]["result"]["changes"]
+            if change["key"] == resolved["key"] and change["status"] == "applied"
+        }
+        self.assertTrue(edited_layers)
+        self.assertLessEqual(edited_layers, set(layers))
         self.assertEqual(row.split(" | ")[2], resolved["group"])
 
     def test_signals_print_and_committed_blocks_are_current(self) -> None:

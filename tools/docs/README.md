@@ -56,7 +56,7 @@ the table in place.
 
 `scripts/tron test tooling scripts/test-tron-docs.py` runs the real CLI against
 this repository (the module map equals the tracked manifests, the RPC and
-settings lists cover what the protocol and settings locks recorded) and against
+settings lists cover what the protocol answered and settings change receipts applied) and against
 disposable fixture repositories, where a deleted manifest or an added settings
 key makes a committed block fail `check`. The last run is kept in
 `test-results/docs-cli/last-run.txt`.
