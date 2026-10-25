@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setModelQueue, settingsDependencies } from "../../../test-support/settings-dependencies.js";
+import { setModelQueue } from "../../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Model, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { DelegationOperations } from "../../kernel/delegation/delegation-operations.js";
 import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../sessions/session-settings.js";
@@ -99,7 +99,7 @@ function validModelList(refusal: Error): string[] {
 describe("Home delegation chooses the worker's model and thinking level", () => {
   it("keeps ordinary subagent and Knowledge queues independent of Home profile", async () => {
     const f = await fixture();
-    const owners = settingsDependencies({ ...queueOwners(f), home: () => homeOwnerOf(f.registry) });
+    const owners = f.settings;
     const mac = `${f.model.provider}/${f.model.id}`;
     const home = `${f.model.provider}/${TASK_REASONING_MODEL_ID}`;
     for (const role of ["subagent", "background"] as const) {
