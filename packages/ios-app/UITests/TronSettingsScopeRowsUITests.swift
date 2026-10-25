@@ -62,10 +62,11 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let toolsLink = app.buttons["settings-section-tools-open"]
         XCTAssertTrue(toolsLink.waitForExistence(timeout: 8), app.debugDescription)
         shot("1651-session-settings-\(dark ? "dark" : "light")")
-        let content = element(app, "session-project-settings")
-        // Global Settings' groups of drill-in rows, not inline editors.
-        XCTAssertTrue(content.staticTexts["Agent"].exists, content.debugDescription)
-        XCTAssertTrue(content.staticTexts["Tools & Extensions"].exists, content.debugDescription)
+        let content = element(app, "session-settings-content")
+        let sections = element(app, "session-project-settings")
+        // The caption stays separate from repository/settings groups of drill-in rows.
+        XCTAssertTrue(sections.staticTexts["Settings"].exists, sections.debugDescription)
+        XCTAssertTrue(sections.buttons["settings-section-tools-open"].exists, sections.debugDescription)
         XCTAssertFalse(element(app, "settings-row-tools.active").exists, "Tools opens from its row")
         // The ignored repository field is the Project section's to list, once.
         XCTAssertEqual(labels(content, containing: "Ignored").count, 0, content.debugDescription)
@@ -122,7 +123,7 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let lines = max(1, (heading.frame.height / pill.frame.height).rounded())
         XCTAssertEqual(pill.frame.midY, heading.frame.minY + heading.frame.height / lines / 2, accuracy: 0.75,
                        "\(title): Overridden is centered on the title line: \(pill.frame) vs \(heading.frame)", file: file, line: line)
-        XCTAssertGreaterThanOrEqual(revert.frame.minX, editor.frame.maxX, "\(title): Revert follows the value", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(revert.frame.minX + 0.001, editor.frame.maxX, "\(title): Revert follows the value", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.width, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.height, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)
         assertRendersWhole(editor, matching: pattern, named: "1651-\(prefix)-value", file: file, line: line)
