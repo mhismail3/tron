@@ -14,7 +14,7 @@ const MAXIMUM_TIMELINE_LEASES_PER_CLIENT = 8;
 const TIMELINE_LEASE_TTL_MS = 60_000;
 const MAXIMUM_TIMELINE_PAGE_SIZE = 200;
 
-export type AutomationTimelineItem =
+type AutomationTimelineItem =
   | {
       kind: "occurrence";
       automationId: string;
@@ -32,7 +32,7 @@ export type AutomationTimelineItem =
       count: number;
     };
 
-export interface AutomationTimelineSource {
+interface AutomationTimelineSource {
   catalogRevision: number;
   items: AutomationTimelineItem[];
 }

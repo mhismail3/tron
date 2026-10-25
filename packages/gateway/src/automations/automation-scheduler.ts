@@ -50,7 +50,7 @@ export class AutomationAdmissionError extends Error {
   }
 }
 
-export interface AutomationSchedulerOptions {
+interface AutomationSchedulerOptions {
   hostEpoch: string;
   onDiagnostic?: (message: string, automationId: string, runId?: string) => void;
   onBlocked?: (record: AutomationRecord, run: AutomationRun) => Promise<void> | void;

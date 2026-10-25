@@ -45,7 +45,7 @@ interface TargetBlockIntent {
 
 type MaintenanceIntent = TargetRekeyIntent | TargetBlockIntent;
 
-export interface AutomationStoreStatus {
+interface AutomationStoreStatus {
   ready: boolean;
   degraded: boolean;
   automationCount: number;
@@ -54,7 +54,7 @@ export interface AutomationStoreStatus {
   catalogRevision: number;
 }
 
-export interface AutomationStoreOptions {
+interface AutomationStoreOptions {
   changed?: (automationId?: string) => void;
 }
 

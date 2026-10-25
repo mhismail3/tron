@@ -12,7 +12,7 @@ import {
   validateTimelineWindow,
 } from "./automation-timeline.js";
 
-export interface AutomationTargetValidator {
+interface AutomationTargetValidator {
   requirePersistedUserSession(sessionId: string): Promise<void>;
   requireResolvedAutomationWorkspace(cwd: string): Promise<string>;
   workspaceForSession(sessionId: string): Promise<string>;
@@ -25,7 +25,7 @@ export interface AutomationPage {
 
 /** One timed part of startup recovery; `detail` is key=value evidence with no
  * target paths or identifiers. */
-export type AutomationRecoveryStep = (
+type AutomationRecoveryStep = (
   step: "store" | "reconcile-targets" | "scheduler-recover", durationMs: number, detail?: string,
 ) => void;
 
