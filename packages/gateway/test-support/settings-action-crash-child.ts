@@ -25,6 +25,7 @@ settingsChanges.registerAction("fixture.append", {
     return { summary: "Appended the effect" };
   },
 });
+await settingsChanges.start();
 const requestPath = join(root, "request.json");
 const request = mode === "apply"
   ? (await settingsChanges.requestAction("fixture.append", {}, { actor, reason: "Crash recovery proof" })).approval!
