@@ -50,6 +50,9 @@ branch/live-work hold decisions and exact waiting-task Stop; no native wait mirr
 `owned-operation-terminal.ts` defines the canonical terminal contract and waiting-Stop code.
 Native completion classification, receipt persistence and abort I/O remain K2.
 
+Managed-provider logging consumes the existing K3 `ModuleLog` contract; K5 does
+not depend on the Transport logger implementation. Optional logging and metadata are unchanged.
+
 ## Session subagent activity
 
 - `process-activity.v1` projects only structured synchronous and asynchronous subagents with

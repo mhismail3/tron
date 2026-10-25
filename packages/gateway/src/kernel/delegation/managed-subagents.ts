@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
 import { DefaultPackageManager, SettingsManager, type Extension, type ExtensionFactory, type InlineExtension, type DefaultResourceLoader, type PackageSource, type ResolvedPaths, type SourceInfo } from "../pi/coding-agent.js";
 import { piExtensionAliases } from "../pi/packages.js";
-import type { GatewayLogger } from "../../transport/logger.js";
+import type { ModuleLog } from "../host/module-host.js";
 import { GatewayError } from "../../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { managedProducerAPI, type ManagedInternalWake } from "./managed-producer.js";
@@ -131,7 +131,7 @@ function validateSdkPeers(entries: Entry[]): void {
  * never a user package declaration, network fallback or in-place replacement. */
 export class ManagedSubagents {
   readonly root: string;
-  constructor(private readonly tronHome: string, private readonly logger?: Pick<GatewayLogger, "log">) {
+  constructor(private readonly tronHome: string, private readonly logger?: ModuleLog) {
     this.tronHome = resolve(tronHome);
     let ancestor = this.tronHome;
     const missing: string[] = [];
@@ -144,7 +144,7 @@ export class ManagedSubagents {
 
   /** Startup returns a selection only after its immutable build is usable.
    * The same boundary owns fresh activation and restart verification. */
-  static activateForStartup(tronHome: string, logger?: Pick<GatewayLogger, "log">): ManagedSubagents {
+  static activateForStartup(tronHome: string, logger?: ModuleLog): ManagedSubagents {
     const provider = new ManagedSubagents(tronHome, logger);
     provider.install();
     return provider;
