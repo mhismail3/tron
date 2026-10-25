@@ -2,7 +2,7 @@ import type { RunOperations } from "./run-operations.js";
 import type { AgentMessage } from "../pi/agent-core.js";
 import type { AgentTerminalOutcome } from "../host/module-host.js";
 import { GatewayError } from "../../errors.js";
-import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "./invocation-receipts.js";
+import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../delegation/owned-operation-terminal.js";
 import type { PromptOwnership } from "./prompt-input.js";
 
 interface OperationObservation {

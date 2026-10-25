@@ -6,7 +6,8 @@ import { invocationResources } from "./queue-commands.js";
 import type { AgentSession} from "../pi/coding-agent.js";
 import type { ImageContent } from "../pi/ai.js";
 import type { ChatOrigin} from "../../protocol/types.js";
-import { makeInvocationReceipt, type InvocationProjection, type OwnedOperationTerminal } from "./invocation-receipts.js";
+import { makeInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
+import type { OwnedOperationTerminal } from "../delegation/owned-operation-terminal.js";
 import { MAXIMUM_PROMPT_ATTACHMENTS, type PromptQueueDisplay, type QueueBehavior, type RuntimeQueuedMessage } from "./queue-input.js";
 
 

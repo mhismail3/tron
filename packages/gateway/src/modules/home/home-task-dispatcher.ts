@@ -7,7 +7,7 @@ import { clampThinkingLevel } from "../../kernel/pi/ai.js";
 import type { FileEntry } from "../../kernel/pi/coding-agent.js";
 import type { GatewayWorkHandle } from "../../kernel/run/gateway-work-registry.js";
 import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
-import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../../kernel/run/invocation-receipts.js";
+import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../../kernel/delegation/owned-operation-terminal.js";
 import type { OwnedOperationDeadline } from "../../kernel/delegation/delegation-operations.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/run/invocation-receipts.js";
 import { GatewayError } from "../../errors.js";

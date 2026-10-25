@@ -62,18 +62,6 @@ interface InvocationReceiptCommon {
   createdAt: string;
 }
 
-export interface OwnedOperationTerminal {
-  lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown";
-  operationId: string;
-  invocationId: string;
-  errorCode?: string;
-  assistantCompletionId?: string;
-}
-/** The terminal a task's Stop or deadline reports while the task waits between turns: no turn
- * was running to interrupt, so the dispatcher reads it as a stop of the waiting task. */
-export const TASK_STOP_WAITING = "task-stop-waiting";
-
-
 /** One skill or prompt a message invoked; the receipt's `submittedText` carries the message text. */
 export interface InvokedResource {
   source: "skill" | "prompt";
