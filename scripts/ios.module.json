@@ -17,6 +17,7 @@
     "test-ios-artifact-validator.sh",
     "test-ios-process-evidence.py",
     "test-ios-share-browser.js",
+    "test-ios-share-concurrency.py",
     "test-ios-test-infrastructure.py",
     "test-tron-ios-device-share.py",
     "tron-ios-device",

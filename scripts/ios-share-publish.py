@@ -30,11 +30,11 @@ import re
 import shutil
 import tempfile
 import urllib.parse
+import uuid
 import zipfile
 from pathlib import Path
 
 IPA_NAME = "TronMobile.ipa"
-BUILD_ID = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{7,40}$")
 SHARED_STYLES = Path(__file__).resolve().parent.parent / "tools" / "web" / "tron.css"
 
 
@@ -141,9 +141,8 @@ def main() -> None:
         raise SystemExit("error: --keep must be at least 1")
     info = app_info(args.ipa)
 
-    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
-    build_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{args.commit[:9]}"
-    if not BUILD_ID.match(build_id):
+    commit = args.commit[:9]
+    if not re.fullmatch(r"[0-9a-f]{7,9}", commit):
         raise SystemExit(f"error: invalid commit {args.commit!r}")
     builds_dir = args.dir / "builds"
     builds_dir.mkdir(parents=True, exist_ok=True)
@@ -151,6 +150,8 @@ def main() -> None:
     lock = open(args.dir / ".publish.lock", "w")
     fcntl.flock(lock, fcntl.LOCK_EX)
 
+    now = dt.datetime.now(dt.timezone.utc)
+    build_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex}-{commit}"
     staging = Path(tempfile.mkdtemp(dir=builds_dir, prefix=".staging-"))
     try:
         ipa = staging / IPA_NAME
@@ -174,18 +175,25 @@ def main() -> None:
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
-    # Newest first by id (UTC timestamp prefix). Partial staging directories
-    # from an interrupted publish are dot-prefixed and removed here too.
+    # The persisted record owns publication time and identity; filenames are
+    # opaque, not a second retention schema. Ignore uncommitted staging trees.
     for stray in builds_dir.glob(".staging-*"):
         shutil.rmtree(stray, ignore_errors=True)
-    ids = sorted((p.name for p in builds_dir.iterdir() if BUILD_ID.match(p.name)), reverse=True)
-    builds = []
-    for old in ids[args.keep:]:
-        shutil.rmtree(builds_dir / old)
-    for kept in ids[:args.keep]:
-        builds.append(json.loads((builds_dir / kept / "build.json").read_text()))
+    releases = []
+    for path in builds_dir.glob("*/build.json"):
+        directory = path.parent
+        if directory.name.startswith(".") or directory.is_symlink():
+            continue
+        record = json.loads(path.read_text())
+        if record["id"] != directory.name:
+            raise SystemExit(f"error: build identity does not match {directory.name}")
+        releases.append((directory, record))
+    releases.sort(key=lambda entry: (entry[1]["time"], entry[0].name), reverse=True)
+    for directory, _ in releases[args.keep:]:
+        shutil.rmtree(directory)
+    builds = [record for _, record in releases[:args.keep]]
 
-    newest_manifest = (builds_dir / builds[0]["id"] / "manifest.plist").read_bytes()
+    newest_manifest = (releases[0][0] / "manifest.plist").read_bytes()
     atomic_write(args.dir / "latest.plist", newest_manifest)
     atomic_write(args.dir / "index.html", render_index(base_url, builds, styles))
 

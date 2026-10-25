@@ -53,11 +53,15 @@ Configurations, schemes, identities and push routes: the skill's
 `share` publishes the validated `Tron Device` + `LocalDevice` artifact, built from fetched
 `origin/main` in a disposable worktree, to a tailnet-only install page; only when the user asks.
 The maintainer-approved share host owns only port 8443's `/` entry.
+Each publication gets its own UUID-bearing build ID and immutable manifest/IPA URLs,
+even for concurrent calls sharing a revision and clock value. Retention reads publication
+time and identity from `build.json`, not a filename grammar; page/latest aliases stay stable.
 
 ```bash
 scripts/tron-ios-device share --title TITLE --notes NOTES
 scripts/tron-ios-device share-host status
 python3 scripts/test-tron-ios-device-share.py --fixture-only  # publisher, server and host, no build
+python3 scripts/test-ios-share-concurrency.py  # eight private publishers, retention and URLs
 ```
 
 ### Profiling a real slowdown
