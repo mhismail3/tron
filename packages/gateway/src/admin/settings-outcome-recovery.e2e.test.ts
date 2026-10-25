@@ -199,6 +199,31 @@ describe("settings outcome recovery at the real Registry/Pi/store boundary", () 
     evidence.push({ case: "native-context-refusal", requestId: held.approval!.requestId });
   });
 
+  it("delivers a settled Home outcome without joining an unrelated action's live effect", async () => {
+    const f = await gateway(); const changes = f.settingsChanges;
+    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+    changes.registerAction("fixture.live-effect", {
+      plan: async () => ({ title: "Held live effect", target: { kind: "global" }, items: [{ label: "Operation", value: "Await the owned gate" }] }),
+      apply: async () => { await gate; return { summary: "Owned effect completed" }; },
+    });
+    changes.registerAction("fixture.other-target", {
+      plan: async () => ({ title: "Independent Home operation", target: { kind: "home" }, items: [{ label: "Operation", value: "No shared target" }] }),
+      apply: async () => ({ summary: "Not invoked for a decline" }),
+    });
+    const actor = { kind: "home" as const, id: f.home.id, sessionId: f.home.id };
+    const active = await changes.requestAction("fixture.live-effect", {}, { actor, reason: "Hold the owned effect while unrelated delivery proceeds" });
+    const applying = f.decide(active);
+    try {
+      await waitFor(async () => (await f.approvals.get(active.approval!.requestId))?.executionStartedAt || undefined, "actual execution claim precedes the held effect");
+      const settled = await changes.requestAction("fixture.other-target", {}, { actor, reason: "Prove unrelated terminal delivery remains independent" }); await f.decide(settled, false);
+      await waitFor(() => f.received.some(body => body.includes(settled.approval!.requestId)) || undefined, "independent outcome reaches Home while the other effect remains live");
+      expect(await f.approvals.get(active.approval!.requestId)).toMatchObject({ status: "pending", executionStartedAt: expect.any(String) });
+      expect(outcomes(f.home)).toHaveLength(1);
+      expect(f.providerInputs.filter(body => body === String(outcomes(f.home)[0]!.content))).toHaveLength(1);
+      evidence.push({ case: "live-effect-independent-outcome", live: active.approval!.requestId, delivered: settled.approval!.requestId });
+    } finally { release(); await applying; }
+  });
+
   it("Stop cancels an already selecting settings wake instead of reviving Home", async () => {
     const f = await gateway(); const owner = homeOwnerOf(f.registry);
     const held = await f.request("Stop during selection"); const calls = f.faux.state.callCount;
