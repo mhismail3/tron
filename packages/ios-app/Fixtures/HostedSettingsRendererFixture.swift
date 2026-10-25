@@ -117,7 +117,17 @@ struct HostedSettingsRendererFixture: View {
         NavigationStack {
             if ready {
                 Group {
-                    if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
+                    if let section = ProcessInfo.processInfo.environment["TRON_MOVE_TWO_SECTION"] {
+                        let kind = ProcessInfo.processInfo.environment["TRON_MOVE_TWO_TARGET"] ?? "global"
+                        let target: JSONValue = kind == "session" ? .object(["kind": .string(kind), "sessionId": .string("preview")])
+                            : kind == "project" ? .object(["kind": .string(kind), "cwd": .string("/fixture/project")]) : SettingsTarget.global.gatewayTarget
+                        if section == "root" { SettingsView() }
+                        else {
+                            SettingsRendererView(target: target, writeLayer: kind == "project" ? nil : kind == "global" ? "global" : "session",
+                                presentation: .section(section))
+                                .tronNavigationTitle(section.capitalized)
+                        }
+                    } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
                        ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
                         let surface = ProcessInfo.processInfo.arguments[index + 1]
                         if surface.hasPrefix("worker-") {
@@ -315,7 +325,12 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "trust.inspect": result = .object(["requiresDecision": .bool(false), "effectiveDecision": .bool(true)])
         case "git.inspect": result = .object(["isRepository": .bool(true), "branch": .null, "dirty": .bool(false), "branches": .array([]), "commits": .array([])])
         case "model.recent": result = .object(["models": .array([])])
-        case "settings.resolve": result = resolution()
+        case "settings.resolve":
+            if let payload = ProcessInfo.processInfo.environment["TRON_MOVE_TWO_PAYLOAD"],
+               let data = payload.data(using: .utf8),
+               let resolutions = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue {
+                result = resolutions[params["target"]?.objectValue?["kind"]?.stringValue ?? "global"] ?? .object([:])
+            } else { result = resolution() }
         case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", cursor: params["cursor"]?.stringValue)
         case "settings.change":
             if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview"),
