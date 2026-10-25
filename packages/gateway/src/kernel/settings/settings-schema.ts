@@ -14,12 +14,12 @@ import type { StoreLayer } from "./settings-types.js";
 export interface SectionDeclaration { id: string; title: string; description: string; order: number; harness: boolean; note?: string; chatInline?: boolean }
 
 export const SECTIONS: readonly SectionDeclaration[] = [
-  { id: "model", title: "Model", description: "Model, thinking, and context window", order: 10, harness: true, chatInline: true },
-  { id: "workers", title: "Workers & delegation", description: "Model queues, thinking, and task budget", order: 15, harness: true, chatInline: true },
+  { id: "model", title: "Model", description: "Model and thinking", order: 10, harness: true, chatInline: true },
+  { id: "workers", title: "Workers & delegation", description: "Task budget and retained overrides", order: 15, harness: true, chatInline: true },
   { id: "context", title: "Compaction", description: "Automatic summaries and retained context", order: 20, harness: true },
   { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30, harness: true },
   { id: "approvals", title: "Agent changes", description: "Which setting changes need your OK", order: 45, harness: true },
-  { id: "run", title: "Connection", description: "Transport, timeouts, delivery, and retries", order: 50, harness: true },
+  { id: "run", title: "Connection", description: "Proxy and retained overrides", order: 50, harness: true },
   { id: "trust", title: "Trusted Projects", description: "Project trust decisions and default policy", order: 55, harness: true },
   { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58, harness: false },
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60, harness: false },
