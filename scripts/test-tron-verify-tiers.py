@@ -113,6 +113,8 @@ class TierTests(fixture.VerifyCase):
         changed = self.plan()
         self.assertIn(nested, changed['selection']['tests'])
         self.assertNotIn(nested, changed['selection']['deferredTests'])
+        self.assertIn(nested, self.plan('--all')['selection']['tests'],
+                      'batch integration must include changed serial tests too')
 
     def test_interrupted_step_preserves_partial_report_and_stops_descendant(self):
         import signal

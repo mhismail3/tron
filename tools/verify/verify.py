@@ -236,12 +236,13 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         reasons.append(f"--all: every lock ({len(locks)} files)")
         touched, chosen = ["(all)"], set()
         declared = set(modules)
-        # A batch's base is its last green: include every unchanged serial file
-        # deferred by the covered diff, not merely the nested lock named by --all.
+        # Include all serial files selected by the covered diff, including changed
+        # tests run before landing: later integration can affect those cases too.
         changed = select("changed", None, base, modules, tracked)
-        selected |= set(changed["deferredTests"])
-        if changed["deferredTests"]:
-            reasons.append(f"covered diff: {len(changed['deferredTests'])} deferred serial test file(s)")
+        serial = set(changed["deferredTests"]) | (set(changed["tests"]) & nested_files()[0])
+        selected |= serial
+        if serial:
+            reasons.append(f"covered diff: {len(serial)} serial test file(s)")
     elif mode in ("module", "update-locks"):
         if target not in modules:
             raise VerifyError(f"no module {target!r}; see scripts/tron ownership --modules")
@@ -334,7 +335,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             full_reasons.append(f"{len(deferred)} unchanged serial nested test file(s)")
             reasons.append(f"deferred to full batch: {len(deferred)} unchanged serial nested test file(s); changed tests still run now")
     if full_reasons:
-        batch_tests |= set(locks)
+        batch_tests |= set(locks) | (selected & nested_files()[0])
     if batch_tests or full_reasons:
         for module in modules.values():
             for command in module.get("verify", []):

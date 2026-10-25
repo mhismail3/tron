@@ -110,8 +110,9 @@ Test/golden-only narrowing precedes module risk; a manifest/configuration edit s
 requires a full batch. Unchanged files in the existing serial `gateway-nested` list
 are deferred, never dropped: production changes selecting them require a full tier.
 A changed serial test file and locks selected by a golden edit run immediately.
-`--all --base <green>` includes every serial file deferred by that covered diff;
-it is not limited to the one nested lock. Explicit `--module` baselines still run
+`--all --base <green>` includes every serial file selected by that covered diff,
+including changed tests already run before landing: later integration may affect
+them too. It is not limited to the one nested lock. Explicit `--module` baselines still run
 the complete scoped set. A serial-only selection may pass its affected static checks
 while explicitly reporting deferred tests; it is not a test pass or a green batch. `ios-ui` risk alone does not widen beyond the affected UI build
 and journeys. Renames include both paths; deleted paths use base ownership. Risk is
