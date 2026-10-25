@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
-import { DISPLAY_SCHEMA, boundedString, eligibleDisplaySurfaces, normalizePublicDisplayURL, type DisplayInlineTapAction, type DisplayKind, type DisplayProjection, type DisplaySurface } from "./display-contract.js";
+import { boundedString, eligibleDisplaySurfaces, normalizePublicDisplayURL } from "./display-contract.js";
+import { BROWSER_LIVE_VIEW_SCHEMA, DISPLAY_SCHEMA, NATIVE_LIVE_VIEW_SCHEMA, type DisplayInlineTapAction, type DisplayKind, type DisplayProjection, type DisplaySurface } from "../modules/display/contract.js";
 import type { DisplayArtifactStore } from "./display-artifact-store.js";
 import { GatewayError } from "../errors.js";
-import { BROWSER_LIVE_VIEW_SCHEMA, type BrowserLiveViewRegistry } from "./browser-live-view.js";
-import { NATIVE_LIVE_VIEW_SCHEMA } from "./native-live-view.js";
+import type { BrowserLiveViewRegistry } from "./browser-live-view.js";
 import { registerNestedPresentationHandlers } from "./nested-presentation-extension.js";
 
 const presentationSchema = Type.Object({

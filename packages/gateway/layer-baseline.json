@@ -4,12 +4,10 @@
     "two-way gateway/admin <-> gateway/home",
     "two-way gateway/admin <-> gateway/transport",
     "two-way gateway/automations <-> gateway/transport",
-    "two-way gateway/display <-> gateway/protocol",
     "two-way gateway/episodic <-> gateway/home",
     "two-way gateway/extension-activity <-> gateway/projection",
     "two-way gateway/extension-activity <-> gateway/run",
     "two-way gateway/foundation <-> gateway/util",
-    "two-way gateway/home <-> gateway/run",
     "two-way gateway/home <-> gateway/transport",
     "two-way gateway/integrations <-> gateway/knowledge",
     "two-way gateway/knowledge <-> gateway/providers",
@@ -21,8 +19,6 @@
     "upward gateway/automations (L3) -> gateway/transport (L4)",
     "upward gateway/delegation (L2) -> gateway/transport (L4)",
     "upward gateway/home (L3) -> gateway/transport (L4)",
-    "upward gateway/protocol (L1) -> gateway/display (L3)",
-    "upward gateway/run (L2) -> gateway/home (L3)",
     "upward gateway/security (L3) -> gateway/transport (L4)",
     "upward gateway/session-catalog (L2) -> gateway/automations (L3)"
   ]

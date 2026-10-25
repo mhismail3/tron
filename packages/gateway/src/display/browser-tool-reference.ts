@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { BROWSER_LIVE_VIEW_SCHEMA, type BrowserLiveViewDescriptor } from "./browser-live-view.js";
+import { BROWSER_LIVE_VIEW_SCHEMA, type BrowserLiveViewDescriptor } from "../modules/display/contract.js";
 
 // A descriptor alone is not tool-result provenance. Bind the provider admission
 // to this canonical call/session without keeping a second per-call registry.

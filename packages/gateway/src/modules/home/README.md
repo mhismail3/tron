@@ -9,6 +9,10 @@ unaffected by every rule here.
 
 ## Owns
 
+Home composes K5's `TaskWorkerControl`, `TaskControlRefusalReason` and
+`TaskWorkerDiagnostic` contracts. Its broader diagnostic union retains authorization,
+store, transition, inbox and pressure policy records; native frames use only K5 records.
+
 - **Designation and chapters:** `home-owner.ts` (record, ledger, profile changes, wake
   scheduler), `home-chapter-state.ts`, `home-chapter-contents.ts`, `home-session-*.ts`.
 - **Profile and seam:** `home-session-profile.ts` (recipe), `home-runtime-policy.ts`, `home-request-policy.ts`,

@@ -2,5 +2,8 @@
   "layer": "L1",
   "owns": [
     "**"
+  ],
+  "dependsOn": [
+    "gateway/display-contract"
   ]
 }

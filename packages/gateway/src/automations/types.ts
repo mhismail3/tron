@@ -5,7 +5,7 @@ export const AUTOMATIONS_TIMELINE_CAPABILITY = "automations.timeline.v1";
 
 export type AutomationActivation = "draft" | "enabled" | "paused" | "completed" | "blocked";
 export type AutomationMisfirePolicy = "latest" | "skip";
-export type AutomationOverlapPolicy = "skip" | "queueLatest";
+type AutomationOverlapPolicy = "skip" | "queueLatest";
 
 export type AutomationTrigger =
   | { kind: "once"; at: string }
@@ -36,7 +36,7 @@ export type AutomationRunState =
   | "skipped"
   | "outcomeUnknown";
 
-export interface AutomationRunResolution {
+interface AutomationRunResolution {
   outcome: "succeeded" | "failed" | "cancelled";
   resolvedAt: string;
   provenance: AutomationProvenance;

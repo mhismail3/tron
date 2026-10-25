@@ -75,10 +75,6 @@ enum AvailableToolsPresentation {
         }
     }
 
-    static func activeNames(from context: JSONValue?) -> Set<String> {
-        Set(context?.objectValue?["activeTools"]?.arrayValue?.compactMap(\.stringValue) ?? [])
-    }
-
     private static func origin(_ object: [String: JSONValue]) -> AvailableToolGroup.Origin {
         if let namespace = object["namespace"]?.objectValue?["name"]?.stringValue,
            namespace.hasPrefix("mcp__") {
@@ -119,8 +115,8 @@ enum AvailableToolsPresentation {
     }
 }
 
-/// The grouped tools surface shared by Available Tools and the settings renderer.
-/// The caller owns selection/mutation so both routes retain their own authority.
+/// The grouped tools surface used by the settings renderer.
+/// The caller owns selection and mutation.
 struct AvailableToolsList: View {
     let groups: [AvailableToolGroup]
     let active: Set<String>
@@ -163,127 +159,6 @@ struct AvailableToolsList: View {
                     }
                 }
             }
-        }
-    }
-}
-
-/// Available Tools: turn individual tools on or off for this chat. Pi records
-/// the change in the chat's history; defaults for new chats live in
-/// Settings → Tools → Default Tools. Only the switch toggles a tool; the
-/// rest of the row opens the tool's full description and inputs.
-struct SessionToolPickerSheet: View {
-    let sessionID: String
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.tronPresentationActivity) private var presentationActivity
-    @PresentationState private var loading = true
-    @PresentationState private var loadGeneration = 0
-    @PresentationState private var saving: String?
-    @PresentationState private var errorMessage: String?
-    @PresentationState private var selected: ProjectResourceSelection?
-
-    private var groups: [AvailableToolGroup] { AvailableToolsPresentation.groups(from: model.resources) }
-    private var active: Set<String> { AvailableToolsPresentation.activeNames(from: model.context) }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
-                    TronSettingsCaption("Turn tools on or off for this chat only. Defaults for new chats are in Settings → Tools. Changes apply while the agent is idle.").containerValue(\.tronSettingsSection, false)
-                    if model.settingsSnapshot(for: SettingsTarget.sessionGatewayTarget(sessionID)) != nil {
-                        TronGlassCard(accent: .tronPrimary) {
-                            SettingsRendererView(target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "session",
-                                presentation: .keys(["tools.active"]), liveControl: { setting in
-                                    AnyView(TronSettingsRow(icon: "checklist", title: setting.presentation?.label ?? "Tools",
-                                        subtitle: setting.presentation?.help, accent: .tronPrimary) {
-                                        TronDynamicValue(text: setting.display)
-                                    })
-                                }, resetDisabled: saving != nil)
-                        }
-                    }
-                    if let errorMessage {
-                        TronSettingsNotice(message: errorMessage, accent: .tronError)
-                    }
-                    if loading && groups.isEmpty {
-                        TronLoadingState(label: "Loading tools…", accent: .tronPrimary)
-                    } else if groups.isEmpty {
-                        TronPlaceholderState(
-                            title: "Tools Unavailable",
-                            detail: "Reopen this chat and try again.",
-                            icon: "wrench.and.screwdriver",
-                            accent: .tronPrimary
-                        )
-                    } else {
-                        AvailableToolsList(groups: groups, active: active, accent: .tronPrimary, isSaving: saving != nil,
-                                          onToggle: { tool, enabled in set(tool, enabled: enabled) },
-                                          onSelect: { tool in
-                            selected = ProjectResourceSelection(kind: .tools, title: tool.title, value: tool.value)
-                        })
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 18)
-            }
-            .tronScrollEdgeChrome()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Available Tools", accent: .tronPrimary)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronPrimary)
-                    }
-                    .accessibilityLabel("Done")
-                }
-            }
-        }
-        .tronManagedSheet(item: $selected, identity: { _ in "chat.available-tool-detail" }) { selection in
-            ProjectResourceDetailSheet(sessionID: sessionID, selection: selection, accentOverride: .tronPrimary) { selected = nil }
-        }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronPrimary)
-        .tint(Color.tronPrimary)
-        .task(id: PresentationActivityTaskID(
-            source: "\(model.sessionContextRevision(for: sessionID))/\(model.sessionResourceRevision(for: sessionID))",
-            presentationActive: presentationActivity.allowsPresentationPublication
-        )) {
-            await load()
-        }
-    }
-
-    private func load() async {
-        guard presentationActivity.allowsPresentationPublication else { return }
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        loading = true
-        async let context: Void = model.loadContext(sessionID: sessionID)
-        async let resources: Void = model.loadResources(sessionID: sessionID)
-        async let settings: Void? = try? model.refreshSettingsSnapshot(for: SettingsTarget.sessionGatewayTarget(sessionID))
-        _ = await (context, resources, settings)
-        guard !Task.isCancelled, generation == loadGeneration,
-              presentationActivity.allowsPresentationPublication else { return }
-        loading = false
-    }
-
-    private func set(_ tool: AvailableToolRow, enabled: Bool) {
-        guard saving == nil else { return }
-        var next = active
-        if enabled { next.insert(tool.name) } else { next.remove(tool.name) }
-        saving = tool.name
-        errorMessage = nil
-        Task {
-            do {
-                try await model.setTools(Array(next).sorted(), sessionID: sessionID)
-                await model.loadContext(sessionID: sessionID)
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            saving = nil
         }
     }
 }

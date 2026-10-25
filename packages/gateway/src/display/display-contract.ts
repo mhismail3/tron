@@ -4,42 +4,13 @@ import {
   DISPLAY_ARTIFACT_ID_PATTERN,
   DISPLAY_MAXIMUM_ARTIFACT_BYTES,
   isDisplayArtifactKind,
-  type DisplayArtifactDescriptor,
-  type DisplayArtifactKind,
 } from "./display-artifact-store.js";
-import { BROWSER_LIVE_VIEW_SCHEMA, type LiveViewDescriptor } from "./browser-live-view.js";
-import { NATIVE_LIVE_VIEW_SCHEMA } from "./native-live-view.js";
-export { NATIVE_LIVE_VIEW_CAPABILITY } from "./native-live-view.js";
-export { BROWSER_LIVE_VIEW_CAPABILITY as DISPLAY_LIVE_VIEW_CAPABILITY } from "./browser-live-view.js";
+import {
+  BROWSER_LIVE_VIEW_SCHEMA, DISPLAY_SCHEMA, NATIVE_LIVE_VIEW_SCHEMA,
+  type DisplayArtifactDescriptor, type DisplayKind, type DisplayProjection, type DisplaySurface, type LiveViewDescriptor,
+} from "../modules/display/contract.js";
 
-export const DISPLAY_SCHEMA = "tron.display.v1";
-export const DISPLAY_CAPABILITY = "display-artifacts.v1";
 const DISPLAY_EMBEDDED_MEDIA_MAXIMUM_BYTES = 50 * 1_024 * 1_024;
-
-export type DisplaySurface = "sheet" | "inline" | "floating";
-export type DisplayInlineTapAction = "sheet" | "none";
-export type DisplayKind = DisplayArtifactKind | "webpage" | "hls" | "browser_live" | "native_live";
-
-export interface DisplayPresentationPreference {
-  requestedSurface: DisplaySurface;
-  inlineTapAction: DisplayInlineTapAction;
-}
-
-export interface DisplayProjection {
-  schema: typeof DISPLAY_SCHEMA;
-  displayId: string;
-  revision: number;
-  title: string;
-  caption?: string;
-  altText: string;
-  kind: DisplayKind;
-  presentation: DisplayPresentationPreference;
-  eligibleSurfaces: DisplaySurface[];
-  fallbackText: string;
-  artifact?: DisplayArtifactDescriptor;
-  remoteURL?: string;
-  liveView?: LiveViewDescriptor;
-}
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
   const admitted = new Set(allowed);

@@ -71,26 +71,6 @@ enum SessionExportPresentationPolicy {
     }
 }
 
-enum SessionModelSelectionPresentation {
-    static func displayed(pending: SessionPendingModelSelection?, authoritative: ModelRef?) -> ModelRef? {
-        pending?.value ?? authoritative
-    }
-
-    static func reconciledPending(
-        pending: SessionPendingModelSelection?,
-        authoritative: ModelRef?,
-        runtimeGeneration: String?,
-        revision: Int?
-    ) -> SessionPendingModelSelection? {
-        pending?.reconciled(authoritative: authoritative, runtimeGeneration: runtimeGeneration, revision: revision)
-    }
-
-    static func modelName(_ selection: ModelRef?, catalog: [ModelSummary]) -> String {
-        guard let selection else { return "Choose model" }
-        return catalog.first(where: { $0.ref == selection })?.displayName ?? selection.displayName
-    }
-}
-
 enum SessionContextUsagePresentation: Equatable {
     case available(used: Int, window: Int, percent: Double)
     case unavailable

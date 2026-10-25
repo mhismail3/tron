@@ -15,9 +15,11 @@ import type { SessionSearchService } from "../src/sessions/session-search-servic
 import type { HomeComposition } from "../src/modules/home/home-module.js";
 import type { HomeOwner } from "../src/modules/home/home-owner.js";
 
-type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "settingsSchema">;
+type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "settingsSchema" | "homeTaskDiagnostic">;
 /** Home's composition inputs a test may supply; the rest are the registry's own. */
-type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "machineId" | "homeTaskDiagnostic" | "modelQueue" | "runtime" | "settings" | "knowledge" | "modelRuntime">;
+type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "machineId" | "homeTaskDiagnostic" | "modelQueue" | "runtime" | "settings" | "knowledge" | "modelRuntime"> & {
+  homeTaskDiagnostic?: NonNullable<HomeComposition["homeTaskDiagnostic"]>;
+};
 
 const homes = new WeakMap<RuntimeRegistry, () => HomeOwner>();
 const recents = new WeakMap<RuntimeRegistry, RecentModelStore>();

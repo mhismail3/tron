@@ -1,0 +1,10 @@
+{
+  "layer": "L1",
+  "owns": [
+    "contract.ts",
+    "display-contract.module.json"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/display/display.store.lock.integration.test.ts src/display/runtime-retirement.lock.integration.test.ts src/display/display-image-lifetime.integration.test.ts src/transport/server-live-view.integration.test.ts src/protocol/protocol.wire.lock.integration.test.ts"
+  ]
+}

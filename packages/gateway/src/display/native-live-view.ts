@@ -3,8 +3,6 @@ import type { NativeCaptureBinding, NativeCaptureFrame, NativeCaptureJoin, Nativ
 import { NativeCaptureHostFailure, openNativeCaptureClient } from "../machine/native-capture-client.js";
 import type { CapturedBrowserFrame } from "./browser-live-cdp.js";
 
-export const NATIVE_LIVE_VIEW_SCHEMA = "tron.native-live-view.v1" as const;
-export const NATIVE_LIVE_VIEW_CAPABILITY = "native-live-view.v1" as const;
 export type NativeLiveFailure = "permission_required" | "source_unavailable" | "capture_busy" | "capture_unavailable" | "first_frame_timeout";
 /** Only finite classifications cross into viewer diagnostics, never native paths or exception text. */
 export function nativeLiveFailure(error: unknown): NativeLiveFailure {

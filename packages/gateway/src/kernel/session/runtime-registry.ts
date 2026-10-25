@@ -1,3 +1,4 @@
+import type { TaskWorkerDiagnostic } from "../delegation/worker-contract.js";
 import type { SettingsSchema } from "../settings/settings-schema.js";
 import { ORDINARY_SESSION_PROFILE } from "../host/session-profile.js";
 import type { LineageRuntimePort, SessionLineagePolicy } from "../host/session-lineage.js";
@@ -681,7 +682,7 @@ export class RuntimeRegistry implements SessionOperations {
        * on it (#480). Only a registry without a Gateway, as in tests, omits it;
        * Home then gets a runtime of its own, as an ordinary session does. */
       gatewayModelRuntime?: ModelRuntime;
-      homeTaskDiagnostic?: (record: import("../../modules/home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
+      homeTaskDiagnostic?: (record: TaskWorkerDiagnostic) => void;
     },
   ) {
     this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);

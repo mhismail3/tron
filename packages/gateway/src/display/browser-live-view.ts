@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { GatewayError } from "../errors.js";
 import { observeBrowserCDP, type CapturedBrowserFrame } from "./browser-live-cdp.js";
-import { NATIVE_LIVE_VIEW_SCHEMA, nativeLiveClientFactory, nativeLiveFailure, observeNativeWindow, type NativeLiveFailure, type NativeLiveClient, type NativeLiveClientFactory } from "./native-live-view.js";
+import { nativeLiveClientFactory, nativeLiveFailure, observeNativeWindow, type NativeLiveFailure, type NativeLiveClient, type NativeLiveClientFactory } from "./native-live-view.js";
+import { BROWSER_LIVE_VIEW_SCHEMA, NATIVE_LIVE_VIEW_SCHEMA, type BrowserLiveViewDescriptor, type LiveViewDescriptor, type NativeLiveViewDescriptor } from "../modules/display/contract.js";
 import { captureRegion, type NativeCaptureRegion, type NativeCaptureSource } from "../machine/native-capture-client.js";
 
 export function browserCDPEndpoint(value: string): URL {
@@ -19,25 +20,12 @@ export function browserCDPEndpoint(value: string): URL {
   return endpoint;
 }
 
-export const BROWSER_LIVE_VIEW_SCHEMA = "tron.browser-live-view.v1" as const;
-export const BROWSER_LIVE_VIEW_CAPABILITY = "browser-live-view.v1" as const;
 const BROWSER_LIVE_VIEW_MAXIMUM_VIEWERS = 4;
 const BROWSER_LIVE_VIEW_MAXIMUM_TOTAL_VIEWERS = 16;
 const BROWSER_LIVE_VIEW_MAXIMUM_REGISTRATIONS = 64;
 const BROWSER_LIVE_VIEW_LEASE_IDLE_MS = 15_000;
 
 interface BrowserLiveViewFrame extends CapturedBrowserFrame { sequence: number }
-export interface BrowserLiveViewDescriptor {
-  schema: typeof BROWSER_LIVE_VIEW_SCHEMA;
-  viewId: string;
-  generation: string;
-  title: string;
-  fallbackText: string;
-}
-interface NativeLiveViewDescriptor extends Omit<BrowserLiveViewDescriptor, "schema"> {
-  schema: typeof NATIVE_LIVE_VIEW_SCHEMA;
-}
-export type LiveViewDescriptor = BrowserLiveViewDescriptor | NativeLiveViewDescriptor;
 interface NativeCatalog {
   loadToken: string;
   client: Promise<NativeLiveClient>;

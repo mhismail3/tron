@@ -44,7 +44,7 @@ import { WorkspaceInspectionService, type WorkspaceDiffScope, type WorkspaceHist
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
 import { MAXIMUM_PROMPT_ATTACHMENTS } from "../kernel/resources/prompt-bounds.js";
 import { type UploadStore } from "../machine/upload-store.js";
-import { DISPLAY_CAPABILITY, DISPLAY_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../display/display-contract.js";
+import { DISPLAY_CAPABILITY, BROWSER_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../modules/display/contract.js";
 import type { TerminalService } from "../machine/terminal-service.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import type { ModelConfigService } from "../admin/model-config-service.js";
@@ -603,7 +603,7 @@ export class GatewayService {
         "uploads.v1",
         "uploads-status.v2",
         DISPLAY_CAPABILITY,
-        DISPLAY_LIVE_VIEW_CAPABILITY,
+        BROWSER_LIVE_VIEW_CAPABILITY,
         NATIVE_LIVE_VIEW_CAPABILITY,
         "terminal.v1",
         "extension-presentation.v1",

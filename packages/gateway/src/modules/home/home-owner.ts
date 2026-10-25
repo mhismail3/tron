@@ -1,3 +1,4 @@
+import type { TaskWorkerControl, TaskControlRefusalReason } from "../../kernel/delegation/worker-contract.js";
 import type { InputEnvelope, InputDelivery } from "../../kernel/host/input-admission.js";
 import type { ImageContent } from "../../kernel/pi/ai.js";
 import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
@@ -10,7 +11,7 @@ import { HomeChapterMaterializer } from "./home-chapter-materialization.js";
 import { HomeGlobalResources } from "./home-global-resources.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
-import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest, type HomeTaskControlRefusalReason, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
+import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
 import type { HomeTaskSubagents } from "../../kernel/delegation/task-subagents.js";
 import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
@@ -312,7 +313,7 @@ export class HomeOwner {
     return { reconfirmed: true };
   }
 
-  async steerTask(sessionId: string, control: HomeTaskControlRequest & { text: string }): Promise<void> {
+  async steerTask(sessionId: string, control: TaskWorkerControl & { text: string }): Promise<void> {
     await this.taskOwner().catch(error => {
       if (error instanceof GatewayError) throw this.tasks.controlRefusal("steer", control, error);
       throw error;
@@ -333,7 +334,7 @@ export class HomeOwner {
     const request = admitHomeTaskToolRequest(input);
     // Tool guards reject before dispatch. Record them here; dispatch records only its own
     // rejections, so the later contextual error wrapping never logs the same refusal twice.
-    const refuse = (error: GatewayError, reason?: HomeTaskControlRefusalReason): GatewayError => {
+    const refuse = (error: GatewayError, reason?: TaskControlRefusalReason): GatewayError => {
       if ((request.action === "steer" || request.action === "interrupt" || request.action === "stop" || request.action === "rename") && request.taskId !== undefined) {
         this.tasks.controlRefusal(request.action, { taskId: request.taskId, ...(request.operationId === undefined ? {} : { operationId: request.operationId }) }, error, reason);
       }
@@ -502,16 +503,16 @@ export class HomeOwner {
     return task ? { taskId: task.taskId, lifecycle: task.lifecycle, operationId: task.operationId } : undefined;
   }
 
-  async maintainTask(control: HomeTaskControlRequest & { text: string }): Promise<void> {
+  async maintainTask(control: TaskWorkerControl & { text: string }): Promise<void> {
     await this.tasks.steer(control);
   }
 
   /** The maintainer's interrupt of a worker's in-flight command (#1189), with optional steering. */
-  async interruptTask(control: HomeTaskControlRequest & { text?: string }): Promise<{ interrupted: string[] }> {
+  async interruptTask(control: TaskWorkerControl & { text?: string }): Promise<{ interrupted: string[] }> {
     return await this.tasks.interrupt(control, "the maintainer");
   }
 
-  async stopTask(control: HomeTaskControlRequest): Promise<void> {
+  async stopTask(control: TaskWorkerControl): Promise<void> {
     await this.tasks.stop(control);
   }
 
