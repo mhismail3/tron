@@ -950,11 +950,11 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         return { ...result, worker: { ...task, ...slot.taskWorkerSettingsState() } };
       },
       takeOutcomes: async delivered => {
-        // Pi runs before-agent-start before appending this admitted trigger. Its
-        // actual input, not a second outbox selection, owns the wake's message.
-        if (this.homeWakeTrigger?.input.message.customType === SETTINGS_OUTCOME_MESSAGE) return undefined;
+        // Home admits settings messages through its bounded, cancellable input
+        // envelope for both user turns and wakes; the native hook is ordinary-only.
+        if (this.usesHomeSettings) return undefined;
         const path = this.sessionFile;
-        if (!path) return delivered?.length ? undefined : owners.changes.takeOutcomes(this.id, []);
+        if (!path) return delivered?.length ? undefined : owners.changes.takeOutcomes([this.id], []);
         const durable = new Set<string>();
         try {
           await visitCanonicalSessionEntries({ path, sessionId: this.id, maxLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES, durable: true,
@@ -962,15 +962,15 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         } catch (error) {
           // A new conversation has no file until its first prompt is saved. It
           // can select an untold outcome, but cannot acknowledge any delivery.
-          if ((error as NodeJS.ErrnoException).code === "ENOENT" && !delivered?.length) return owners.changes.takeOutcomes(this.id, []);
+          if ((error as NodeJS.ErrnoException).code === "ENOENT" && !delivered?.length) return owners.changes.takeOutcomes([this.id], []);
           // An unreadable or unsynchronized cut proves nothing. Keep the outbox
           // pending, without refusing this prompt or appending a duplicate.
           return undefined;
         }
-        // A wake's trigger can already be SDK-visible before its append reaches
-        // this cut. Do not reselect it as a second before-agent-start message.
+        // SDK visibility can precede canonical durability. Unproven delivery
+        // IDs cannot retire an outcome or cause its selection a second time.
         if (delivered?.some(id => !durable.has(id))) return undefined;
-        return owners.changes.takeOutcomes(this.id, delivered ?? [...durable]);
+        return owners.changes.takeOutcomes([this.id], delivered ?? [...durable]);
       },
     };
   }

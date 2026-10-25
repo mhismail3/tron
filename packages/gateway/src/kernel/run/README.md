@@ -59,7 +59,8 @@ actual K3 host; native frames do not select product modules or keep another list
 - `invocation-receipts.ts` and `context-delivery-receipts.ts`: canonical receipt
   parsing, folding, owned terminal facts and canonical inbox delivery; persisted bytes remain stable.
   Settings wakes bind the actual admitted input and use `gateway:settings` attribution.
-  Their before-agent-start hook never reselects the same trigger before Pi appends it.
+  Home selects outcomes through its bounded, cancellable input envelope for both user
+  turns and wakes; the native before-agent-start hook selects only ordinary requesters.
   Ordinary outcome acknowledgement requires the bounded canonical reader's durable
   file-and-directory proof; failed proof defers without refusing the prompt.
   Root supplies its actual settings instances directly to Home and installs the
