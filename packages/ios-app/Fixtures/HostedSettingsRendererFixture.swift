@@ -119,7 +119,12 @@ struct HostedSettingsRendererFixture: View {
                 Group {
                     if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
                        ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
-                        HostedSixSmallUIFixture(surface: ProcessInfo.processInfo.arguments[index + 1])
+                        let surface = ProcessInfo.processInfo.arguments[index + 1]
+                        if surface.hasPrefix("worker-") {
+                            HostedWorkerToolFixture(surface: surface)
+                        } else {
+                            HostedSixSmallUIFixture(surface: surface)
+                        }
                     } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-settings-three-layer-preview"),
                        ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
                         HostedSettingsThreeLayerPreview(surface: ProcessInfo.processInfo.arguments[index + 1])

@@ -491,7 +491,7 @@ struct ReadOnlyToolRunView: View {
     }
 }
 
-private struct ToolActivityChip: View {
+struct ToolActivityChip: View {
     let run: ChatToolRunPresentation
     let action: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
