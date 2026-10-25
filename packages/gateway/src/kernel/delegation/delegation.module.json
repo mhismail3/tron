@@ -28,7 +28,9 @@
     "task-report.ts",
     "task-subagents.ts",
     "task-worker-extension.ts",
-    "worker-contract.ts"
+    "worker-contract.ts",
+    "worker-settlement.ts",
+    "subagent-control.ts"
   ],
   "dependsOn": [
     "gateway/pi",
