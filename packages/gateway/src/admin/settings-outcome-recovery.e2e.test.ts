@@ -11,6 +11,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { SettingsApprovals, APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
 import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/settings/tool-contract.js";
 import type { RuntimeSlot } from "../kernel/run/runtime-slot.js";
+import * as durability from "../util/durable-json.js";
 
 const evidence: unknown[] = [];
 afterEach(async () => { vi.restoreAllMocks(); syncBuiltinESMExports(); await disposeFixtures(); });
@@ -147,6 +148,66 @@ describe("settings outcome recovery at the real Registry/Pi/store boundary", () 
     await waitFor(async () => (await f.approvals.takeOutcomes([f.home.id])).length === 0 || undefined, "independent wake durable acknowledgement");
     expect(await owner.status()).toMatchObject({ taskRecovery: { available: false, reason: "unsafe-state" } });
     evidence.push({ case: "task-refused-independent-settings", requestId: held.approval!.requestId });
+  });
+
+  it("Stop cancels an already selecting settings wake instead of reviving Home", async () => {
+    const f = await gateway(); const owner = homeOwnerOf(f.registry);
+    const held = await f.request("Stop during selection"); const calls = f.faux.state.callCount;
+    const heldResponse: FauxResponseFactory = (_context, options) => new Promise(resolve => {
+      options?.signal?.addEventListener("abort", () => resolve(fauxAssistantMessage("Stopped owned activation.")), { once: true });
+    });
+    f.faux.setResponses([heldResponse]); const turn = f.home.prompt("Hold the real provider until Stop");
+    await waitFor(() => f.faux.state.callCount > calls || undefined, "owned user provider is held");
+    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; }); let selecting = false;
+    const take = f.settingsChanges.takeOutcomes.bind(f.settingsChanges);
+    vi.spyOn(f.settingsChanges, "takeOutcomes").mockImplementation(async (...args) => {
+      const message = await take(...args);
+      if (message && !selecting) { selecting = true; await gate; }
+      return message;
+    });
+    try {
+      await f.decide(held); await waitFor(() => selecting || undefined, "actual outbox selection is held after its real read");
+      await f.home.abort("agent"); await turn.catch(() => {});
+      await waitFor(() => !f.home.isBusy || undefined, "Stop settles all native owned work before releasing selection");
+      f.faux.setResponses(Array.from({ length: 80 }, () => f.respond as never)); release();
+      await (owner as unknown as { wakeDrain?: Promise<void> }).wakeDrain;
+      await waitFor(() => !f.home.isBusy || undefined, "the pending wake attempt reaches native quiescence");
+      expect(outcomes(f.home)).toHaveLength(0);
+      expect(f.faux.state.callCount).toBe(calls + 1);
+      expect((await f.approvals.takeOutcomes([f.home.id])).map(request => request.requestId)).toEqual([held.approval!.requestId]);
+      evidence.push({ case: "stop-held-selection", requestId: held.approval!.requestId });
+    } finally { release(); }
+  });
+
+  it.each(["file", "directory"] as const)("requires durable delivery before sealing a chapter after a %s sync failure", async kind => {
+    const f = await gateway(); const owner = homeOwnerOf(f.registry); const path = f.home.sessionFile!;
+    const target = await fs.stat(kind === "file" ? path : dirname(path)); const sync = durability.syncDurably; let failed = 0;
+    vi.spyOn(durability, "syncDurably").mockImplementation(async handle => {
+      const current = await (handle as import("node:fs/promises").FileHandle).stat();
+      if (outcomes(f.home).length && current.dev === target.dev && current.ino === target.ino) {
+        failed++; throw new Error(`Owned canonical ${kind} sync fault`);
+      }
+      await sync(handle);
+    });
+    const held = await f.request(`seal after ${kind} fault`); await f.decide(held);
+    await waitFor(() => outcomes(f.home).length === 1 && f.home.snapshot().phase === "idle" || undefined, "outcome appends and provider completes");
+    await waitFor(() => failed > 0 || undefined, "actual canonical durability proof fails"); await owner.pauseMemory();
+    await (owner as unknown as { wakeDrain?: Promise<void> }).wakeDrain;
+    await waitFor(() => !f.home.isBusy || undefined, "all earlier wake receipts settle before measuring rollover");
+    const frozen = await fs.readFile(path, "utf8");
+    const measured = owner as unknown as { options: { sessions: { chapterMetrics(id: string): Promise<{ bytes: number; entries: number; quiescent: boolean }> } } };
+    const metrics = measured.options.sessions.chapterMetrics;
+    try {
+      measured.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1024 * 1024 + 1, entries: 3, quiescent: true });
+      await expect(owner.chapterQuiescent(f.home.id)).rejects.toThrow(`Owned canonical ${kind} sync fault`);
+      expect(await owner.status()).toMatchObject({ sessionId: f.home.id, chapter: { count: 1 } });
+      expect((await f.approvals.takeOutcomes([f.home.id])).map(request => request.requestId)).toEqual([held.approval!.requestId]);
+      vi.restoreAllMocks(); await owner.chapterQuiescent(f.home.id);
+    } finally { measured.options.sessions.chapterMetrics = metrics; }
+    expect(await owner.status()).toMatchObject({ phase: "rollover-pending", chapter: { count: 2 } });
+    expect(await f.approvals.takeOutcomes([f.home.id])).toEqual([]);
+    expect(await fs.readFile(path, "utf8")).toBe(frozen); expect(outcomes(f.home)).toHaveLength(1);
+    evidence.push({ case: `seal-${kind}-proof`, requestId: held.approval!.requestId, failed });
   });
 
   it("admits no settings trigger outside the Home input envelope and retains the outcome", async () => {
