@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
 import { homeOwnerOf } from "../../test-support/gateway-registry.js";
@@ -115,6 +115,16 @@ describe("native settings outcome durability", () => {
   it.each(["approved", "declined", "expired"] as const)("Home hears %s autonomously with native invocation and delivery receipts", async status => {
     const f = await gateway(); const owner = homeOwnerOf(f.registry); const slot = await f.registry.acquire(f.home.sessionId);
     await prompt(slot, "Open Home before its request settles");
+    const providerOutcomes: string[] = [];
+    f.faux.setResponses(Array.from({ length: 60 }, () => (context: TranscriptContext) => {
+      for (const message of context.messages) {
+        if (message.role !== "user") continue;
+        const text = typeof message.content === "string" ? message.content
+          : message.content.filter(part => part.type === "text").map(part => part.text).join("");
+        if (text.startsWith("Settings request ")) providerOutcomes.push(text);
+      }
+      return fauxAssistantMessage("Outcome heard successfully.");
+    }));
     const held = await f.request(slot.id, "home");
     if (status === "expired") {
       await waitFor(() => f.timers.some(timer => !timer.cancelled) || undefined, "request deadline armed");
@@ -126,6 +136,9 @@ describe("native settings outcome durability", () => {
     await waitFor(async () => (await f.approvals.takeOutcomes(slot.id)).length === 0 || undefined, "durable wake acknowledgement");
     const entries = slot.canonicalSessionEntries(); const message = outcomes(slot)[0]!;
     expect(message).toMatchObject({ details: { requests: [{ requestId: held.approval!.requestId, status }] } });
+    expect(providerOutcomes).toEqual([String(message.content)]);
+    expect(entries.slice(entries.indexOf(message) + 1).some(entry => entry.type === "message" && entry.message.role === "assistant"
+      && entry.message.content.some(part => part.type === "text" && part.text === "Outcome heard successfully."))).toBe(true);
     expect(entries.some(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
       && (entry.data as { receiptKind?: string; canonicalEntryId?: string }).receiptKind === "binding"
       && (entry.data as { canonicalEntryId?: string }).canonicalEntryId === message.id)).toBe(true);
@@ -133,6 +146,38 @@ describe("native settings outcome durability", () => {
       && JSON.stringify(entry.data).includes("gateway:settings") && JSON.stringify(entry.data).includes(message.id))).toBe(true);
     expect((await owner.status()).enabled).toBe(true);
     artifacts.push({ case: `autonomous-${status}`, requestId: held.approval!.requestId, canonicalEntryId: message.id });
+  });
+
+  it.each(["file", "directory"] as const)("Home retains a visible outcome after a %s sync failure and acknowledges it once after recovery", async kind => {
+    const f = await gateway(); const owner = homeOwnerOf(f.registry); const slot = await f.registry.acquire(f.home.sessionId);
+    await prompt(slot, "Open Home before the durability fault");
+    const path = slot.sessionFile!;
+    const target = await stat(kind === "file" ? path : dirname(path));
+    const sync = durability.syncDurably;
+    let failed = 0;
+    vi.spyOn(durability, "syncDurably").mockImplementation(async handle => {
+      const info = await (handle as import("node:fs/promises").FileHandle).stat();
+      // Initial selection may read durable history. Fail only the post-append
+      // proof, when the actual SDK already exposes this settings message.
+      if (outcomes(slot).length > 0 && info.dev === target.dev && info.ino === target.ino) {
+        failed += 1; throw new Error(`injected Home canonical ${kind} sync failure`);
+      }
+      await sync(handle);
+    });
+    const held = await f.request(slot.id, "home");
+    await f.settingsChanges.decide(held.approval!.requestId, { digest: held.approval!.digest, approved: true, decidedBy: { kind: "ui", id: "phone" } });
+    await waitFor(() => outcomes(slot).length === 1 && slot.snapshot().phase === "idle" || undefined, "Home outcome visibly appended");
+    await waitFor(async () => failed > 0 || (await f.approvals.takeOutcomes(slot.id)).length === 0 || undefined, "Home attempts post-append proof or acknowledgement");
+    expect(failed).toBeGreaterThan(0);
+    await owner.pauseMemory();
+    expect(outcomes(slot)).toHaveLength(1);
+    expect((await f.approvals.takeOutcomes(slot.id)).map(request => request.requestId)).toEqual([held.approval!.requestId]);
+    vi.restoreAllMocks();
+    await owner.resumeMemory();
+    await waitFor(async () => (await f.approvals.takeOutcomes(slot.id)).length === 0 || undefined, "Home acknowledges the existing outcome after durable recovery");
+    expect(outcomes(slot)).toHaveLength(1);
+    expect(await readFile(f.effects, "utf8")).toBe("applied\n");
+    artifacts.push({ case: `home-sync-${kind}`, failed, requestId: held.approval!.requestId, canonicalEntryId: outcomes(slot)[0]!.id });
   });
 
   it("a paused Home refuses a wake without consuming its outcome, then resumes autonomously", async () => {
