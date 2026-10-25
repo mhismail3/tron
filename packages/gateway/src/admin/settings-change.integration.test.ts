@@ -1184,7 +1184,7 @@ describe("every key at every allowed layer", () => {
       session: { kind: "session", sessionId: slot.id }, home: { kind: "home" }, project: { kind: "project", cwd: project }, global: { kind: "global" },
     };
     type Served = { key: string; group: string; qualifiers?: Record<string, string>; value: unknown; layer: string;
-      projectSetting?: { file: string; path: string }; presentation: { editable: boolean; valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
+      projectSetting?: { file: string; path: string }; presentation: { editable: boolean } };
     const resolve = async (layer: string, key: string) => {
       const resolution = await f.service.invoke(client([slot.id]), "settings.resolve", { target: targets[layer], keys: [key] }) as unknown as { keys: Served[] };
       if (key === "permissions.macTerminalKey") expect(resolution.keys[0]?.group).toBe("connections");
@@ -1197,7 +1197,7 @@ describe("every key at every allowed layer", () => {
       const { kind: valueKind, options, range } = key.type;
       const { optionsSource } = key;
       // Queue writes remain typed runtime policy, not an app catalog reader.
-      if (optionsSource?.name === "catalog.models" && valueKind === "stringList") return [`${second.provider}/${second.id}`, `${first.provider}/${first.id}`];
+      if (key.fixed?.role && valueKind === "stringList") return [`${second.provider}/${second.id}`, `${first.provider}/${first.id}`];
       if (optionsSource?.name === "catalog.models") return differs(row.value, { provider: second.provider, id: second.id }) ? { provider: second.provider, id: second.id } : { provider: first.provider, id: first.id };
       if (optionsSource?.name === "catalog.thinkingLevels") {
         const served = await f.service.invoke(client([slot.id]), "settings.options", { target: targets[layer], key: row.key, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }) as unknown as { options: Array<{ value: unknown }> };

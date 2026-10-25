@@ -298,7 +298,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       // An ordered fallback queue (settings-model.md 6.3): the first available
       // model runs; a usage-limit error or a provider at 95% usage moves to the next.
       id: modelQueueKey(role), sessionOverridable: true, projectSettable: false, group: "workers", fixed: { role }, type: modelQueueType(role),
-      optionsSource: { name: "catalog.models", dependsOn: [] }, defaultValue: [],
+      defaultValue: [],
       layers: { ...(role === "background" ? {} : { session: { store: "session-launch" as const } }),
         home: { store: "home", path: ["modelQueue", role] }, global: { store: "gateway", path: ["modelQueues", role] } },
       timing: "live", effect: role === "worker" ? "delegate" : role === "subagent" ? "next-request" : "next-memory-pass",
