@@ -2993,9 +2993,9 @@ final class TronSmokeUITests: XCTestCase {
         let any = app.descendants(matching: .any)
         let count = any.matching(NSPredicate(format: "label == %@", "2 of 2 on")).firstMatch
         XCTAssertTrue(count.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(any.matching(NSPredicate(format: "label == %@", "Read")).firstMatch.exists, app.debugDescription)
+        XCTAssertTrue(any.matching(NSPredicate(format: "label == %@", "Read file")).firstMatch.exists, app.debugDescription)
         keepScreenshot(named: "900-tools-list-light")
-        let detailButton = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Read, Read file contents")).firstMatch
+        let detailButton = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Read file, Read file contents")).firstMatch
         tapScrolling(detailButton, in: app)
         XCTAssertTrue(app.staticTexts["Fixture path input"].waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "900-tools-detail-light")
@@ -3004,7 +3004,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Not available here"].exists, app.debugDescription)
         // Toggles edit a draft like every checklist; Save applies one change.
         let applied = app.staticTexts["fixture.settings-renderer-applied"]
-        let read = app.switches["Read"]
+        let read = app.switches["Read file"]
         XCTAssertTrue(read.waitForExistence(timeout: 5), app.debugDescription)
         read.tap()
         tapScrolling(app.switches["Retired"], in: app)
