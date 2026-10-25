@@ -10,8 +10,9 @@ struct HostedWorkerToolFixture: View {
     var body: some View {
         Color.clear.tronManagedSheet(isPresented: $showing, identity: "worker-tool-review.\(surface)") {
             Group {
-                if surface == "worker-tools" {
-                    ToolRunDetailSheet(run: ChatToolRunPresentation(tools: Self.tools), tools: Self.tools)
+                if surface == "worker-tools" || surface == "worker-identities" {
+                    let tools = surface == "worker-identities" ? Self.identityTools : Self.tools
+                    ToolRunDetailSheet(run: ChatToolRunPresentation(tools: tools), tools: tools)
                 } else {
                     NavigationStack {
                         Group {
@@ -25,7 +26,7 @@ struct HostedWorkerToolFixture: View {
                                     }.padding(16)
                                 }.tronNavigationTitle("Transcript")
                             } else {
-                                let tool = surface == "worker-report" ? Self.report : HostedSixSmallUIFixture.checkin(blocked: true)
+                                let tool = surface == "worker-report" ? Self.reportForReview : HostedSixSmallUIFixture.checkin(blocked: true)
                                 ToolDetailSheet(tool: tool, density: .expanded)
                                     .toolbar { ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: tool) } }
                             }
@@ -43,6 +44,16 @@ struct HostedWorkerToolFixture: View {
             .presentationDetents([.large]).presentationDragIndicator(.hidden)
         }
     }
+
+    static var reportForReview: ChatToolPresentation {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "-worker-report-outcome"), args.indices.contains(index + 1) else { return report }
+        var request = report.request!.objectValue!
+        request["outcome"] = .string(args[index + 1])
+        return tool("report", request: .object(request), details: report.details!, content: report.content)
+    }
+
+    static let identityTools = ["report", "checkin", "subagent", "settings", "knowledge", "mcp__wordcraft__preview_document", "extension_preview_document", "previewDocument"].map { tool($0) }
 
     static let report = tool("report", request: .object([
         "resultId": .string("worker-result"), "outcome": .string("final"),
