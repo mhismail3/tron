@@ -774,26 +774,66 @@ struct ToolDetailPresentation: Hashable, Sendable {
         }
     }
 
+    /// One identity catalog for transcript chips, nested calls and tool sheets.
+    private static let identities: [String: (title: String, icon: String)] = [
+        "read": ("Read file", "doc.text"),
+        "read_file": ("Read file", "doc.text"),
+        "write": ("Write file", "square.and.pencil"),
+        "edit": ("Edit file", "pencil.and.outline"),
+        "bash": ("Run command", "terminal"),
+        "powershell": ("Run PowerShell", "terminal"),
+        "grep": ("Search text", "text.magnifyingglass"),
+        "find": ("Find files", "doc.text.magnifyingglass"),
+        "ls": ("List files", "folder"),
+        "codemode": ("Codemode", "terminal"),
+        "display": ("Display", "rectangle.on.rectangle"),
+        "session_search": ("Session search", "magnifyingglass"),
+        "session_read": ("Read session", "text.bubble"),
+        "delegate": ("Delegate", "person.crop.circle.badge.plus"),
+        "tool_search": ("Search tools", "magnifyingglass"),
+        "list_mcp_resources": ("List MCP resources", "externaldrive"),
+        "list_mcp_resource_templates": ("List MCP resource templates", "externaldrive"),
+        "read_mcp_resource": ("Read MCP resource", "externaldrive"),
+        "report": ("Report result", "doc.text.fill"),
+        "checkin": ("Check in", "text.bubble"),
+        "ask_user": ("Ask user", "questionmark.bubble"),
+        "notify": ("Send notification", "bell"),
+        "zoom": ("Expand memory", "arrow.up.left.and.arrow.down.right"),
+        "date": ("Memory date", "calendar"),
+        "memory_search": ("Search memory", "brain"),
+        "task": ("Manage task", "checklist"),
+        "profile": ("Profile", "person.crop.circle"),
+        "web_search": ("Search web", "globe"),
+        "knowledge": ("Knowledge", "books.vertical"),
+        "connections": ("Connections", "point.3.connected.trianglepath.dotted"),
+        "jev": ("Classify", "slider.horizontal.3"),
+        "native_capture": ("View Mac screen", "macwindow"),
+        "computer": ("Use Mac", "desktopcomputer"),
+        "schedule": ("Schedule", "calendar.badge.clock"),
+        "swift_app": ("Swift apps", "swift"),
+        "settings": ("Settings", "gearshape"),
+        "agent_browser": ("Browse web", "globe"),
+        "subagent": ("Subagents", "person.2"),
+        "subagents_enable": ("Enable subagents", "person.2.badge.gearshape"),
+        "subagent_supervisor": ("Coordinate subagents", "person.2.wave.2"),
+        "bg_wait": ("Wait for work", "hourglass"),
+        "get_goal": ("View goal", "target"),
+        "create_goal": ("Set goal", "target"),
+        "update_goal": ("Update goal", "target"),
+        "workflow": ("Run workflow", "arrow.triangle.branch"),
+        "multi_tool_use.parallel": ("Run tools", "square.stack.3d.up"),
+    ]
+
     static func displayTitle(for tool: ChatToolPresentation) -> String {
-        let name = tool.toolName ?? tool.title
-        if name.hasPrefix("mcp__") {
-            if !tool.title.isEmpty, tool.title != "Tool", tool.title != name { return tool.title }
-            let parts = name.components(separatedBy: "__")
-            if parts.count >= 3, !parts[1].isEmpty, !parts[2].isEmpty {
-                return "\(parts[1])/\(parts[2])"
-            }
+        displayTitle(for: tool.toolName ?? tool.title, label: tool.title)
+    }
+
+    static func displayTitle(for name: String, label: String?) -> String {
+        if let identity = identities[name] { return identity.title }
+        if let label, !label.isEmpty, label != "Tool", label != name {
+            return humanized(label)
         }
-        switch name {
-        case "codemode": return "Codemode"
-        case "display": return "Display"
-        case "session_search": return "Session search"
-        case "delegate": return "Delegate"
-        case "tool_search": return "Search tools"
-        case "list_mcp_resources": return "List MCP resources"
-        case "list_mcp_resource_templates": return "List MCP resource templates"
-        case "read_mcp_resource": return "Read MCP resource"
-        default: return displayTitle(for: tool.title)
-        }
+        return displayTitle(for: name)
     }
 
     static func contextualDisplayTitle(for tool: ChatToolPresentation) -> String {
@@ -806,48 +846,30 @@ struct ToolDetailPresentation: Hashable, Sendable {
         sheetTitleIcon(for: tool.toolName ?? tool.title)
     }
 
-    static func displayTitle(for title: String) -> String {
-        if title.hasPrefix("mcp__") {
-            let parts = title.components(separatedBy: "__")
-            if parts.count >= 3, !parts[1].isEmpty, !parts[2].isEmpty { return "\(parts[1])/\(parts[2])" }
+    static func displayTitle(for name: String) -> String {
+        if let identity = identities[name] { return identity.title }
+        if name.hasPrefix("mcp__") {
+            let parts = name.components(separatedBy: "__")
+            if parts.count >= 3 {
+                return parts.dropFirst().map(humanized).joined(separator: " / ")
+            }
         }
-        return switch title {
-        case "codemode": "Codemode"
-        case "display": "Display"
-        case "session_search": "Session search"
-        case "delegate": "Delegate"
-        case "tool_search": "Search tools"
-        case "list_mcp_resources": "List MCP resources"
-        case "list_mcp_resource_templates": "List MCP resource templates"
-        case "read_mcp_resource": "Read MCP resource"
-        case "read": "Read file"
-        case "read_file": "Read File"
-        case "write": "Write file"
-        case "edit": "Edit file"
-        case "bash": "Run command"
-        case "grep": "Search text"
-        case "find": "Find files"
-        case "ls": "List files"
-        default: title
-        }
+        return humanized(name)
     }
 
-    static func icon(for title: String) -> String {
-        if title.hasPrefix("mcp__") { return "network" }
-        return switch title {
-        case "codemode": "terminal"
-        case "display": "rectangle.on.rectangle"
-        case "tool_search", "session_search": "magnifyingglass"
-        case "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource": "externaldrive"
-        case "read": "doc.text"
-        case "write": "square.and.pencil"
-        case "edit": "pencil.and.outline"
-        case "bash": "terminal"
-        case "grep": "text.magnifyingglass"
-        case "find": "doc.text.magnifyingglass"
-        case "ls": "folder"
-        default: "wrench.and.screwdriver"
-        }
+    /// Dynamic extensions have no finite catalog. Keep authored prose, but never
+    /// expose separator-delimited or camelCase invocation identifiers as labels.
+    private static func humanized(_ name: String) -> String {
+        let spaced = name.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+            .replacingOccurrences(of: "[_.:/-]+", with: " ", options: .regularExpression)
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard let first = spaced.first else { return "Tool" }
+        return String(first).uppercased() + spaced.dropFirst()
+    }
+
+    static func icon(for name: String) -> String {
+        if name.hasPrefix("mcp__") { return "network" }
+        return identities[name]?.icon ?? "puzzlepiece.extension"
     }
 
     static func sheetTitleIcon(for toolName: String) -> String? {

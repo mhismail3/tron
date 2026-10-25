@@ -81,7 +81,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   and Calls; Home's tools use `HomeToolDetailPresentation`; [display artifacts](../../../docs/display-artifacts.md)
   owns display, memory-bounded photo previews and honest load-failure fallback. Technical details hold JSON. `TaskToolDetailPresentation` shows catalog rows/counts,
   status, paged reports and receipts; unknown shapes stay generic. Check-ins lead with the step/summary,
-  then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
+  then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Worker reports render their invocation’s outcome, Markdown summary and acceptance evidence through shared Home sections; opaque receipts stay in Technical details. Report/check-in sheets use `tronPrimary`. `ToolDetailPresentation` owns one name/icon catalog for transcript, nested calls, sheets and resource tools; unknown extension/MCP names are humanized without changing invocation identity. Task reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
 - **Thinking and context.** Thinking shows at most four measured lines, opening the full trace on
   tap. Compaction, branch, configuration and extension status share one notification-pill language;
   command pills never show arguments. `custom_message` is right-aligned context; worker results

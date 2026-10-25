@@ -13,7 +13,7 @@ struct ToolDetailSheet: View {
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.displayPresentationHandler) private var presentDisplay
 
-    private var accent: Color { tool.error ? .tronError : ChatSemanticPillRole.tool.accent }
+    private var accent: Color { ToolDetailNavigationTitle.accent(for: tool) }
 
     @ViewBuilder
     var body: some View {

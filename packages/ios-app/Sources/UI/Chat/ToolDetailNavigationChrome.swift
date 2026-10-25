@@ -20,7 +20,9 @@ struct ToolDetailNavigationTitle: View {
 
     /// The title's tint, which the sheet's toolbar actions share (#963).
     static func accent(for tool: ChatToolPresentation) -> Color {
-        tool.error ? .tronError : ChatSemanticPillRole.tool.accent
+        if tool.error { return .tronError }
+        if ["report", "checkin"].contains(tool.toolName ?? tool.title) { return .tronPrimary }
+        return ChatSemanticPillRole.tool.accent
     }
 
     var body: some View {

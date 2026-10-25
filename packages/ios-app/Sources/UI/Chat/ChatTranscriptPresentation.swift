@@ -1627,7 +1627,7 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     var title: String {
         let value: String
         if displayCount == 1, let tool = tools.first {
-            value = ToolDetailPresentation.displayTitle(for: tool.title)
+            value = ToolDetailPresentation.displayTitle(for: tool.toolName ?? tool.title, label: tool.title)
         } else {
             value = "\(displayCount) tools"
         }

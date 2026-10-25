@@ -153,7 +153,7 @@ extension HomeSheet {
                 .init(title: "Omitted parts", value: item.projection.omissions.isEmpty ? "None" : item.projection.omissions.joined(separator: ", "), icon: "text.badge.minus"),
             ]
             if let timestamp = item.timestamp { rows.append(.init(title: "Timestamp", value: timestamp, icon: "clock")) }
-            if let tool = item.display?.toolName { rows.append(.init(title: "Tool", value: tool, icon: "wrench.adjustable")) }
+            if let tool = item.display?.toolName { rows.append(.init(title: "Tool", value: ToolDetailPresentation.displayTitle(for: tool), icon: ToolDetailPresentation.icon(for: tool))) }
             if let status = item.display?.status { rows.append(.init(title: "Status", value: status, icon: "checkmark.circle")) }
             if let summary = item.summary {
                 rows.append(.init(title: "Summary truncated", value: summary.truncated ? "Yes" : "No", icon: "text.badge.minus"))

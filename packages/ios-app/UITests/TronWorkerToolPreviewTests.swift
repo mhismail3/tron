@@ -20,6 +20,14 @@ import XCTest
             shot.name = "\(surface)-\(mode)"
             shot.lifetime = .keepAlways
             add(shot)
+            if surface == "worker-tools" {
+                app.scrollViews.firstMatch.swipeUp()
+                app.scrollViews.firstMatch.swipeUp()
+                let lower = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                lower.name = "\(surface)-lower-\(mode)"
+                lower.lifetime = .keepAlways
+                add(lower)
+            }
             app.terminate()
         }
     }

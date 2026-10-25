@@ -7,13 +7,15 @@ enum ProjectResourceTitlePresentation {
     static func title(kind: ProjectResourceKind, value: JSONValue) -> String {
         let object = value.objectValue ?? [:]
         let name = nonempty(object["name"]?.stringValue) ?? nonempty(value.stringValue)
+        if kind == .tools, let name {
+            return ToolDetailPresentation.displayTitle(for: name, label: nonempty(object["label"]?.stringValue) ?? nonempty(object["title"]?.stringValue))
+        }
         // Pi registers some tools (codemode, tool_search) with their raw name
         // as the label; only a label that differs from the name is authored.
         for key in ["label", "title"] {
             if let text = nonempty(object[key]?.stringValue), text != name { return text }
         }
         if let name {
-            if kind == .tools, let label = toolLabels[name] { return label }
             return ComposerResourceNameFormatter.friendly(name)
         }
         if let path = nonempty(object["path"]?.stringValue) {
@@ -34,13 +36,6 @@ enum ProjectResourceTitlePresentation {
             : stem(path)
         return ComposerResourceNameFormatter.friendly(candidate)
     }
-
-    private static let toolLabels = [
-        "read": "Read File", "write": "Write File", "edit": "Edit File",
-        "bash": "Run Shell Command", "powershell": "Run PowerShell Command",
-        "grep": "Search File Contents", "find": "Find Files", "ls": "List Files",
-        "codemode": "Code Mode", "tool_search": "Search Tools",
-    ]
 
     /// Extension identities come from package resolutions or inline factory
     /// paths, so they need their own naming rule; the Hooks sheet owns this
