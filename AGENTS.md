@@ -96,11 +96,11 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   children. Reproduce load in-process; if slow, check swap and report foreign hogs.
 
 ## Validation and landing
-
 Run `scripts/tron verify --plan`: **none** = no executable tests (docs/static checks remain);
-**partial** = affected owner tests + consumer locks; **full** = those checks now + broad
-coverage in an explicit Mac `verify --batch` after landing. Manifests, layers, file kinds
-and risk determine it ([rule/batches](tools/verify/README.md)); no queue, gate or auto-revert.
+**partial** = affected owner/consumer checks; unchanged serial tests go to the batch.
+**full** = those checks now + broad coverage in an explicit Mac `verify --batch` after landing.
+Manifests, layers, file kinds and risk determine it ([rule/batches](tools/verify/README.md));
+no queue, gate or auto-revert.
 1. Commit in your own worktree (`git config rerere.enabled true`); fetch/rebase `origin/main`,
    then `scripts/tron verify`. A failure also on base never blocks; cite that base run.
 2. `git push origin HEAD:main`; on non-fast-forward repeat step 1, rerunning tests only if

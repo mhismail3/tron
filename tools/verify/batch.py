@@ -43,9 +43,12 @@ def lanes(root: Path, base: str) -> list[dict]:
 
 
 def signature(message: str, failures: list[str], output: str, root: Path) -> dict | None:
-    diagnostics = [] if failures else re.findall(r'^(?:AssertionError:|Error:|error:|unowned:|overlap:).+$', output, re.M)
-    diagnostics = [line.replace(str(root), '<worktree>') for line in diagnostics[:20]]
-    return {'message': message, 'failedTests': failures, 'diagnostics': diagnostics} if failures or diagnostics else None
+    # A test identity alone cannot distinguish a code regression from setup failing
+    # in that same case (for example missing staged products at the baseline).
+    diagnostics = re.findall(r'^(?:AssertionError:|Error:|error:|unowned:|overlap:).+$', output, re.M)
+    diagnostics = sorted(line.replace(str(root), '<worktree>') for line in diagnostics[:20])
+    failures = sorted(line.replace(str(root), '<worktree>') for line in failures)
+    return {'message': message, 'failedTests': failures, 'diagnostics': diagnostics} if diagnostics else None
 
 
 def execute(root: Path, lane: dict, directory: Path) -> dict:
@@ -137,69 +140,103 @@ def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
     """Prove the baseline, then bisect main's integration commits, never a live worker tree."""
     commits = verify.git('rev-list', '--first-parent', '--reverse', f'{base}..{head}').splitlines()
     result = {'status': 'inconclusive', 'candidates': commits, 'probes': []}
-    with tempfile.TemporaryDirectory(prefix='tron-verify-bisect-') as temporary:
-        root = Path(temporary) / 'repo'
-        verify.git('worktree', 'add', '--detach', str(root), base)
-        try:
-            # One probe worktree preserves Xcode incrementals across revisions. npm installs stay local.
-            dependency_key = None
-            def probe(sha: str) -> str:
-                nonlocal dependency_key
-                subprocess.run(['git', 'checkout', '--detach', sha], cwd=root, check=True, capture_output=True)
-                attempt = directory / f'probe-{len(result["probes"]):02d}-{sha[:12]}'
-                lock = root / 'packages/gateway/package-lock.json'
-                key = hashlib.sha256(lock.read_bytes()).hexdigest() if lock.exists() else ''
-                if key != dependency_key:
-                    if not prepare(root, attempt / 'dependencies'):
-                        result['probes'].append({'commit': sha, 'outcome': 'setup failure'})
-                        return 'unknown'
-                    dependency_key = key
-                try:
-                    lane = {**failed['probe'], 'probe': True} if failed.get('probe') else {k: failed[k] for k in ('name', 'command')}
-                    outcome = execute(root, lane, attempt)
-                finally:
-                    stop_fixture(root, attempt / 'stop')
-                if outcome['exit'] == 0:
-                    state = 'good'
-                elif failed.get('signature') and outcome.get('signature') == failed['signature']:
-                    state = 'bad'
-                else:
-                    # An exit alone is not proof that the same regression reproduced.
-                    state = 'unknown'
-                result['probes'].append({'commit': sha, 'outcome': state, **outcome})
-                return state
-            baseline = probe(base)
-            if baseline == 'bad':
-                result['status'] = 'pre-existing at baseline'
-                return result
-            if baseline != 'good':
-                return result
-            # Reproduce head in the same isolated environment before attributing a host failure.
-            if probe(head) != 'bad':
-                return result
-            low, high = -1, len(commits) - 1
-            while high - low > 1:
-                middle = (low + high) // 2
-                state = probe(commits[middle])
-                if state == 'unknown':
-                    return result
-                if state == 'bad':
-                    high = middle
-                else:
-                    low = middle
-            culprit = commits[high]
-            result.update(status='first failing main integration', commit=culprit,
-                          files=verify.git('diff-tree', '--root', '--no-commit-id', '--name-only', '-r', culprit).splitlines())
+    directory.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix='tron-verify-bisect-')).resolve()
+    root = temporary / 'repo'
+    verify.git('worktree', 'add', '--detach', str(root), base)
+    try:
+        # One probe worktree preserves Xcode incrementals across revisions. npm installs stay local.
+        dependency_key = None
+        def probe(sha: str) -> str:
+            nonlocal dependency_key
+            subprocess.run(['git', 'checkout', '--detach', sha], cwd=root, check=True, capture_output=True)
+            attempt = directory / f'probe-{len(result["probes"]):02d}-{sha[:12]}'
+            lock = root / 'packages/gateway/package-lock.json'
+            key = hashlib.sha256(lock.read_bytes()).hexdigest() if lock.exists() else ''
+            pure_static = failed.get('probe', {}).get('name') in {
+                'ownership', 'budgets', 'documentation policy', 'agent policy', 'privacy guard',
+                'git diff --check', 'moved-lines (advisory)'}
+            if not pure_static and key != dependency_key:
+                if not prepare(root, attempt / 'dependencies'):
+                    result['probes'].append({'commit': sha, 'outcome': 'setup failure'})
+                    return 'unknown'
+                dependency_key = key
+            try:
+                lane = {**failed['probe'], 'probe': True} if failed.get('probe') else {k: failed[k] for k in ('name', 'command')}
+                outcome = execute(root, lane, attempt)
+            finally:
+                stop_fixture(root, attempt / 'stop')
+            if outcome['exit'] == 0:
+                state = 'good'
+            elif failed.get('signature') and outcome.get('signature') == failed['signature']:
+                state = 'bad'
+            else:
+                # An exit alone is not proof that the same regression reproduced.
+                state = 'unknown'
+            result['probes'].append({'commit': sha, 'outcome': state, **outcome})
+            save(directory / 'progress.json', result)
+            return state
+        baseline = probe(base)
+        if baseline == 'bad':
+            result['status'] = 'pre-existing at baseline'
             return result
-        finally:
-            # Resource owners clean only this disposable worktree's simulator/products/fixture.
-            for script in ('scripts/ios-gateway-e2e-test', 'scripts/tron-ios-test'):
-                if (root / script).is_file():
-                    execute(root, {'name': 'probe cleanup', 'command': [script, 'clean']}, directory / Path(script).name)
+        if baseline != 'good':
+            return result
+        # Reproduce head in the same isolated environment before attributing a host failure.
+        if probe(head) != 'bad':
+            return result
+        low, high = -1, len(commits) - 1
+        while high - low > 1:
+            middle = (low + high) // 2
+            state = probe(commits[middle])
+            if state == 'unknown':
+                return result
+            if state == 'bad':
+                high = middle
+            else:
+                low = middle
+        culprit = commits[high]
+        result.update(status='first failing main integration', commit=culprit,
+                      files=verify.git('diff-tree', '--root', '--no-commit-id', '--name-only', '-r', culprit).splitlines())
+        return result
+    finally:
+        # Never erase a probe whose owning resource helper could not clean it.
+        cleanup = []
+        result.update(cleanup=cleanup, retainedWorktree=str(root))
+        save(directory / 'progress.json', result)
+        for script in ('scripts/ios-gateway-e2e-test', 'scripts/tron-ios-test'):
+            if (root / script).is_file():
+                try:
+                    cleanup.append(execute(root, {'name': 'probe cleanup', 'command': [script, 'clean']}, directory / Path(script).name))
+                except KeyboardInterrupt:
+                    cleanup.append({'exit': 130, 'command': [script, 'clean'], 'status': 'interrupted'})
+                    raise
+                except OSError as error:
+                    cleanup.append({'exit': 2, 'command': [script, 'clean'], 'error': str(error)})
+                finally:
+                    save(directory / 'progress.json', result)
+        if any(item['exit'] for item in cleanup):
+            result['retainedWorktree'] = str(root)
+            print(f'batch: probe cleanup failed; preserved worktree {root}', flush=True)
+        else:
             verify.git('worktree', 'remove', '--force', str(root))
+            shutil.rmtree(temporary)
+            del result['retainedWorktree']
+        save(directory / 'progress.json', result)
 
 
-def file_issue(report: dict, directory: Path) -> dict:
+def file_issue(report: dict, directory: Path, state: Path) -> dict:
+    # The batch lock serializes this journal. Persist BEFORE dispatch: a killed or
+    # uncertain GitHub write must not become a second create on an operator rerun.
+    key = hashlib.sha256(json.dumps([report['base'], report['head'], report['failed']['name']]).encode()).hexdigest()
+    journal = state / 'issue-writes' / f'{key}.json'
+    if journal.exists():
+        print(f'batch: retaining prior issue-write outcome: {journal}', flush=True)
+        return {**json.loads(journal.read_text()), 'reused': True}
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    pending = {'status': 'attempting', 'exit': None, 'batch': str(directory), 'range': [report['base'], report['head']],
+               'lane': report['failed']['name']}
+    save(journal, pending)
     attribution = report['attribution']
     body = directory / 'issue.md'
     body.write_text('## Failed verification batch\n\n'
@@ -215,7 +252,8 @@ def file_issue(report: dict, directory: Path) -> dict:
                f"Verification batch {report['head'][:12]}: {report['failed']['name']}",
                '--body-file', str(body), '--kind', 'kind:bug', '--area', 'area:tooling']
     outcome = execute(ROOT, {'name': 'file failure issue', 'command': command}, directory / 'issue')
-    # A failed/uncertain write is retained, never automatically replayed.
+    outcome = {**outcome, 'status': 'completed' if outcome['exit'] == 0 else 'unresolved'}
+    save(journal, outcome)
     return outcome
 
 
@@ -265,18 +303,25 @@ def main(argv: list[str]) -> int:
             path = directory / 'report.json'
             save(path, report)
             try:
+                def source_unchanged():
+                    if verify.git('rev-parse', 'HEAD').strip() != head or verify.git('status', '--porcelain', '--untracked-files=normal').strip():
+                        raise verify.VerifyError('source changed during batch; no green coverage recorded')
                 for index, lane in enumerate(plan['lanes']):
+                    source_unchanged()
                     report['activeLane'] = lane['name']
                     save(path, report)
                     outcome = execute(ROOT, lane, directory / f'lane-{index}')
                     report['results'].append(outcome)
                     save(path, report)
+                    source_unchanged()
                     if outcome['exit']:
                         report.update(verdict='failed', failed=outcome)
                         save(path, report)
+                        report['attributionProgress'] = str(directory / 'attribution/progress.json')
+                        save(path, report)
                         report['attribution'] = attribute(base, head, outcome, directory / 'attribution')
                         save(path, report)
-                        report['issue'] = file_issue(report, directory)
+                        report['issue'] = file_issue(report, directory, state)
                         save(path, report)
                         print(f'batch: FAILED; evidence {path}; last-green unchanged', flush=True)
                         return 1
@@ -290,8 +335,15 @@ def main(argv: list[str]) -> int:
                 save(path, report)
                 print(f'batch: INTERRUPTED; partial evidence {path}; last-green unchanged', flush=True)
                 return 130
-            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+            except (verify.VerifyError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
                 report.update(verdict='error', error=str(error))
+                report.setdefault('failed', {'name': report.get('activeLane', 'batch infrastructure')})
+                report.setdefault('attribution', {'status': 'infrastructure/source changed; no culprit proven', 'candidates': commits})
+                save(path, report)
+                try:
+                    report['issue'] = file_issue(report, directory, state)
+                except (OSError, ValueError, subprocess.SubprocessError) as issue_error:
+                    report['issueError'] = str(issue_error)
                 save(path, report)
                 print(f'batch: ERROR; partial evidence {path}; last-green unchanged', flush=True)
                 return 2

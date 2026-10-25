@@ -11,7 +11,7 @@ scripts/tron verify [--base <ref>]             # affected checks since merge-bas
 scripts/tron verify --plan                     # tier, paths, reasons and exact commands; dirty trees allowed
 scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also used by mutation sampling
 scripts/tron verify --module <id>               # scoped baseline: owner tests + transitive consumer locks
-scripts/tron verify --all                       # explicit all-lock diagnostic run (normally part of a batch)
+scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
 scripts/tron verify --batch --base <green-sha>   # initialize coverage in a dedicated clean main worktree
 scripts/tron verify --batch [--plan]            # next pinned batch since the local last green
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
@@ -106,14 +106,20 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 | **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus all-lock/full-lane coverage in the next explicit batch |
 
 Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
-requires a full batch. `ios-ui` risk alone does not widen beyond the affected UI build
+requires a full batch. Unchanged files in the existing serial `gateway-nested` list
+are deferred, never dropped: production changes selecting them require a full tier.
+A changed serial test file and locks selected by a golden edit run immediately.
+`--all --base <green>` includes every serial file deferred by that covered diff;
+it is not limited to the one nested lock. Explicit `--module` baselines still run
+the complete scoped set. A serial-only selection may pass its affected static checks
+while explicitly reporting deferred tests; it is not a test pass or a green batch. `ios-ui` risk alone does not widen beyond the affected UI build
 and journeys. Renames include both paths; deleted paths use base ownership. Risk is
 read from each changed producer's manifest, not inferred from every reverse consumer.
 An unowned tracked path still fails ownership, not a green partial run. A new module
 without executable evidence still fails; a tier never turns missing evidence into a pass.
 
 `--plan` prints `selection.tier`, paths, reasons, immediate tests, `batchTests`, and
-commands/cwds. A successful **full-tier** ordinary run proves affected checks only;
+commands/cwds, `deferredTests` and their exact commands. A successful **full-tier** ordinary run proves affected checks only;
 it does not claim the full batch passed. Locks are `*.lock.integration.test.ts`, the
 Pi trace/persisted-state corpus and `UITests/Locks/`. `ios-app/ui-tests` declares
 `spawn` edges to the hosted app modules, selecting their affected UI locks.
@@ -218,8 +224,14 @@ when the **same failure signature** reproduces. Other failures/setup errors are
 inconclusive; a failing baseline is pre-existing. A report never invents a culprit:
 it records proven integration/files or candidate commits. The worktree retains its
 incremental products between probes and cleans its own fixture/lane/products on exit.
+If an owner refuses cleanup or cleanup is interrupted, it preserves that worktree and
+journals its exact path and completed cleanup results in `attribution/progress.json`;
+resolve those owned resources before discarding it.
 A privacy-checked `scripts/tron work issue create` files the result; a refused or
-uncertain write is recorded and never blindly retried. No unrelated worker waits,
+uncertain write is recorded before dispatch in `<git-common-dir>/verify/issue-writes/`,
+keyed by range/lane. Re-running that range retains the previous outcome, including an
+unfinished attempt; resolve uncertain GitHub state manually, never create blindly again.
+No unrelated worker waits,
 main is never reverted, and failed coverage is not silently skipped by changing base.
 
 ## Mutation sampling

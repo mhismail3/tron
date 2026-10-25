@@ -229,12 +229,19 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
     selected: set[str] = set()
     narrow: set[str] = set()
     batch_tests: set[str] = set()
+    deferred: set[str] = set()
     full_reasons: list[str] = []
     if mode == "all":
         selected |= set(locks)
         reasons.append(f"--all: every lock ({len(locks)} files)")
         touched, chosen = ["(all)"], set()
         declared = set(modules)
+        # A batch's base is its last green: include every unchanged serial file
+        # deferred by the covered diff, not merely the nested lock named by --all.
+        changed = select("changed", None, base, modules, tracked)
+        selected |= set(changed["deferredTests"])
+        if changed["deferredTests"]:
+            reasons.append(f"covered diff: {len(changed['deferredTests'])} deferred serial test file(s)")
     elif mode in ("module", "update-locks"):
         if target not in modules:
             raise VerifyError(f"no module {target!r}; see scripts/tron ownership --modules")
@@ -315,6 +322,19 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         if external:
             selected |= external
             reasons.append(f"{key}: declared verification ({len(external)} test file(s))")
+    if mode == "changed":
+        nested, _ = nested_files()
+        golden_owners = {owner[path] for path in touched if is_golden(path) and path in owner}
+        immediate = {path for path in selected if owner.get(path) in narrow
+                     or (is_lock(path) and owner.get(path) in golden_owners)}
+        deferred = (selected & nested) - set(touched) - immediate
+        selected -= deferred
+        if deferred:
+            batch_tests |= deferred
+            full_reasons.append(f"{len(deferred)} unchanged serial nested test file(s)")
+            reasons.append(f"deferred to full batch: {len(deferred)} unchanged serial nested test file(s); changed tests still run now")
+    if full_reasons:
+        batch_tests |= set(locks)
     if batch_tests or full_reasons:
         for module in modules.values():
             for command in module.get("verify", []):
@@ -324,7 +344,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
     doc_inputs = mode == "all" or any(is_doc(path) or path.endswith(".module.json") for path in touched)
     tier = "none" if docs_only else "full" if mode == "all" or full_reasons else "partial"
     return {"mode": mode, "base": base, "modules": sorted(chosen), "touched": len(touched), "paths": touched,
-            "tier": tier, "fullReasons": full_reasons, "batchTests": sorted(batch_tests), "reasons": reasons,
+            "tier": tier, "fullReasons": full_reasons, "batchTests": sorted(batch_tests), "deferredTests": sorted(deferred), "reasons": reasons,
             "tests": sorted(selected), "docsOnly": docs_only, "docInputs": doc_inputs}
 
 
@@ -539,7 +559,12 @@ def main(argv: list[str]) -> int:
             else:
                 command, cwd, _ = test_spec(group, files, selectors, ROOT / "test-results/verify" / sha)
                 commands.append({"name": f"tests: {group}", "command": command, "cwd": str(cwd.relative_to(ROOT))})
-        print(json.dumps({"selection": selection, "groups": groups, "steps": plan_steps, "commands": commands}, indent=2))
+        deferred_commands = []
+        if selection["deferredTests"]:
+            command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha)
+            deferred_commands.append({"name": "tests: gateway-nested", "command": command, "cwd": str(cwd.relative_to(ROOT))})
+        print(json.dumps({"selection": selection, "groups": groups, "steps": plan_steps, "commands": commands,
+                          "deferredCommands": deferred_commands, "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
         return 0
 
     # Worktree creation deliberately does not install dependencies. Refuse before
@@ -636,11 +661,14 @@ def main(argv: list[str]) -> int:
         if not_run:
             return finish("incomplete", f"selected tests were not run: {', '.join(not_run)} (pass --skip to accept explicitly)")
         if passing == 0 and selection["docsOnly"]:
-            return finish("passed", "Markdown-only change: the documentation checks are its evidence; no test reads it")
+            return finish("passed", "Empty or Markdown-only change: static/documentation checks are its evidence")
+        if passing == 0 and selection["deferredTests"]:
+            return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial test file(s) deferred; full batch is not green")
         if passing == 0:
             return finish("failed", "zero tests ran: an empty selection is not evidence")
         groups_run = len([step for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"])
         return finish("passed", f"{passing} passing test(s) across {groups_run} runner group(s)"
+                      + (f"; {len(selection['deferredTests'])} serial file(s) deferred to explicit batch" if selection["deferredTests"] else "")
                       + (f"; skipped by request: {', '.join(sorted(skip))}" if skip else ""))
 
     except KeyboardInterrupt:
