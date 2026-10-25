@@ -1,3 +1,4 @@
+import { attributeExtensions } from "../extensions/owner-attribution.js";
 import type { ModuleDescriptor } from "../kernel/host/module-host.js";
 import { createTronCoreExtension, tronContext } from "./tron-core-extension.js";
 import { workspaceModule } from "./workspace-module.js";
@@ -15,7 +16,11 @@ export function createCoreModule(services: () => CoreModuleServices): ModuleDesc
     tools: ["knowledge", "connections", "jev"], commands: [], dependsOn: [workspaceModule],
     start: host => {
       const workspace = host.contract(workspaceModule);
-      return { hooks: { operatingContext: tronContext }, extension: session => {
+      return { hooks: {
+        operatingContext: tronContext,
+        extensionAdmission: (base, browserLiveView, managedSubagents) => attributeExtensions(base, browserLiveView,
+          { requireTronAskUser: true, ...(managedSubagents ? { managedSubagents } : {}) }),
+      }, extension: session => {
         const owners = services();
         return createTronCoreExtension(workspace, owners.knowledge, new JevDecisionClient(session.modelRuntime), owners.connections);
       } };

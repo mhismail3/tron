@@ -11,8 +11,8 @@ import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
-import { managedProducerAPI } from "../../extensions/managed-producer.js";
-import { producerIdentity } from "../../extensions/owner-attribution.js";
+import { managedProducerAPI } from "./managed-producer.js";
+import { producerIdentity } from "../host/extension-registration.js";
 import { withExtensionOwner } from "../host/extension-execution-context.js";
 import { AsyncResource } from "node:async_hooks";
 import { ChildProcess } from "node:child_process";
@@ -300,7 +300,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const api = globals.tronAttributionPi;
     delete globals.tronAttributionPi;
     if (!api) throw new Error("Missing real SDK API fixture");
-    const owner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, "fixture-producer", "Subagents");
+    const owner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, "fixture-producer", "Subagents", "subagent");
     const managed = managedProducerAPI(api, owner, (content, options, producer, messages) => slot.admitSubagentWake(content, options, producer, messages));
     const send = (type: string, content: Parameters<ExtensionAPI["sendMessage"]>[0]["content"], options?: Parameters<ExtensionAPI["sendMessage"]>[1]) =>
       external.runInAsyncScope(() => managed.sendMessage({ customType: type, content, display: true }, options));
@@ -323,7 +323,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     send("busy-stored", "busy stored", { triggerTurn: false });
     // A competing producer using the same input array must not overwrite the
     // first sends' identity while those messages are still queued.
-    const otherOwner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, "other-fixture", "Subagents");
+    const otherOwner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, "other-fixture", "Subagents", "subagent");
     const other = managedProducerAPI(api, otherOwner);
     external.runInAsyncScope(() => other.sendMessage({ customType: "busy-other", content: reused, display: true }, { triggerTurn: true, deliverAs: "followUp" }));
     release();

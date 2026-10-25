@@ -47,6 +47,7 @@ lists in composition order, because four owners observe session removal today
 
 | Hook | Shape | Replaces (call site today) | Implementer |
 |---|---|---|---|
+| `extensionAdmission` | sync loader admission with live browser observer and actual managed producer admission | product reservation policy supplied at `extensionsOverride`; generic registration maps and late owner lookup stay in K3 | core |
 | `profileDecision` | sync `(sessionId, cwd) → name \| "unrecorded"`; `unrecorded` uses the creation profile given to K1 `create`, once | `homeProfile` + `explicitHomeSessionId` (`runtime-slot.ts:607`, `:997`, `:2199-2205`, cleared `:2273`) | Home |
 | `requestPolicy` | per runtime: `admit`, `deliveryHeadroom`, `settle`, `cancel`, `transferOperation`, `contextEvidence`, `wrapStream` (innermost), `wrapTransformContext`, `wrapPrepareRequest` (outermost) | `HomeRequestPolicy` (`modules/home/home-request-policy.ts:313-521`); calls `runtime-slot.ts:8826`, `:8844`, `:9390`, settle ×4, transfer ×2, wraps `:2551-2568` | Home |
 | `inputAdmission` | async in the lane before SDK admission; may return a wake trigger; `release`, `settle` | `homeInboxAdmission` (`:8833-8858`), `homeInboxRelease` (`:8274`), `homeInboxSettlement` (`:4111`), `admitHomeWake` (`:8230-8320`) | Home |
@@ -54,7 +55,7 @@ lists in composition order, because four owners observe session removal today
 | `runSettled` | `quiescent` (awaited), `idle` (sync) | `homeQuiescent` (`:4487`), `homeIdle` (`:8322`) | Home |
 | `runTerminal` | async, best-effort; skipped for task workers | `notifyAgentTerminal` (`:3752-3779`); failure → `session.diagnostic terminal-notification-failed` | notifications |
 | `interactionRequired` | detached; presence sampled at admission | `userInputRequired` (`:1058-1074`) | notifications |
-| `toolResultProjection` | display projection + browser result observer | `admitToolDisplayProjection` (`display/display-contract.ts:127`; calls `runtime-slot.ts:2145`, `sessions/projection.ts:1368`), `extensions/owner-attribution.ts:17-18` | display |
+| `toolResultProjection` | display projection + browser result observer | `admitToolDisplayProjection` (`display/display-contract.ts:127`; calls `runtime-slot.ts:2145`, `sessions/projection.ts:1368`), `kernel/host/extension-registration.ts` | display |
 | `modelRuntimeInstalled` | sync, owner runtimes only | `openAIModelEligibility.attachRuntime` (`runtime-slot.ts:2243`), Kimi/Jev pricing (`runtime-registry.ts:1827`) | providers |
 | `modelUsed` | sync, off the critical path | `noteModelUsed` (`runtime-slot.ts:4662`) | providers |
 | `sessionRemoval` (observers) | async before delete/rekey; rejection refuses | `beforeSessionDelete/Rekey` (`runtime-registry.ts:682-683`) | automations |
@@ -146,7 +147,7 @@ order, replacing late binding (`setKnowledgeService`, `setSessionSearchService`,
 `runtime-registry.ts:898-920`). Pi extension registration order is model-visible (tool order,
 prompt sections: B2) and is reproduced exactly per profile:
 - ordinary (`runtime-slot.ts:2333-2369`): managed-subagent factories, Pi built-ins
-  (`extensions/pi-builtins.ts`), `TRON_MODULES` in definition order, `tron-model-queue`,
+  (`kernel/host/pi-builtins.ts`), `TRON_MODULES` in definition order, `tron-model-queue`,
   `tron-home-task-worker`;
 - Home (`extensions/tron-modules.ts:288-300`): the kept modules in `TRON_MODULES` order, then
   `tron-home`, then `tron-home-research`; no settlement, built-ins, managed or queue extensions.
@@ -164,7 +165,7 @@ export list is the patch-removal checklist.
 
 | Package | Runtime names at base (production) |
 |---|---|
-| `pi-coding-agent` | `createAgentSessionRuntime`, `createAgentSessionServices`, `createAgentSessionFromServices`, `AgentSessionRuntime` (runtime-slot); `SessionManager` (3 files), `parseSessionEntries`; `SettingsManager` (11, incl. `client/work-owner-status.ts:21`), `ModelRuntime` (3, incl. `gateway-main.ts:181`), `DefaultResourceLoader` (2), `DefaultPackageManager` (3), `ProjectTrustStore`, `hasTrustRequiringProjectResources`, `CredentialSynchronizationError`; `create{Bash,Edit,Find,Grep,Ls,PowerShell,Read,Write}ToolDefinition` (`admin/tool-catalog.ts`, `sessions/direct-bash-process-owner.ts`), `getShellConfig`; `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension` (`extensions/pi-builtins.ts`); `estimateTokens` (3), `stripFrontmatter`, `Theme`, `initTheme` |
+| `pi-coding-agent` | `createAgentSessionRuntime`, `createAgentSessionServices`, `createAgentSessionFromServices`, `AgentSessionRuntime` (runtime-slot); `SessionManager` (3 files), `parseSessionEntries`; `SettingsManager` (11, incl. `client/work-owner-status.ts:21`), `ModelRuntime` (3, incl. `gateway-main.ts:181`), `DefaultResourceLoader` (2), `DefaultPackageManager` (3), `ProjectTrustStore`, `hasTrustRequiringProjectResources`, `CredentialSynchronizationError`; `create{Bash,Edit,Find,Grep,Ls,PowerShell,Read,Write}ToolDefinition` (`admin/tool-catalog.ts`, `sessions/direct-bash-process-owner.ts`), `getShellConfig`; `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension` (`kernel/host/pi-builtins.ts`); `estimateTokens` (3), `stripFrontmatter`, `Theme`, `initTheme` |
 | `pi-ai` | `Type` (17 tool-schema files), `StringEnum` (3), `clampThinkingLevel` (5), `getSupportedThinkingLevels` (3), `getCurrentSystemMessage`, `getCurrentTools`, `isRetryableAssistantError`, `lazyStream`, `normalizeContext` |
 | `pi-tui` | `Box`, `Text`, `TruncatedText`, `truncateToWidth`, `visibleWidth`, `CURSOR_MARKER`, `KeybindingsManager`, `TUI_KEYBINDINGS`, `TuiMainScreen`, `setCapabilities` (`extensions/host/*`, ask-user) |
 | `pi-agent-core` | types only |

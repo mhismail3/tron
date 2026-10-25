@@ -4,7 +4,6 @@
     "two-way gateway/admin <-> gateway/home",
     "two-way gateway/admin <-> gateway/transport",
     "two-way gateway/automations <-> gateway/transport",
-    "two-way gateway/delegation <-> gateway/extensions",
     "two-way gateway/display <-> gateway/protocol",
     "two-way gateway/episodic <-> gateway/home",
     "two-way gateway/extension-activity <-> gateway/projection",
