@@ -433,13 +433,18 @@ FILE_MARKER = "### verify file: "
 
 
 def python_count(output: str) -> int:
-    """A unittest file counts its `Ran N tests` (zero stays zero); a plain script that exits 0 counts once."""
+    """Count executed unittest passes, not skipped/expected-failure cases; plain successful scripts count once."""
     total = 0
     for segment in output.split(FILE_MARKER)[1:]:
         ran = re.findall(r"^Ran (\d+) tests?", segment, re.M)
         if "0" in ran:
             return 0  # an empty declared/owned suite is not hidden by a passing neighbour
-        total += sum(int(n) for n in ran) if ran else 1
+        summaries = re.findall(r"^OK \(([^)]*)\)$", segment, re.M)
+        excluded = sum(int(n) for summary in summaries for n in re.findall(r"(?:skipped|expected failures)=(\d+)", summary))
+        passing = sum(int(n) for n in ran) - excluded if ran else 1
+        if passing <= 0:
+            return 0
+        total += passing
     return total
 
 

@@ -18,6 +18,26 @@ class TierTests(fixture.VerifyCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return json.loads(result.stdout[result.stdout.index('{'):])
 
+    def test_skipped_python_cases_are_not_reported_as_passes(self):
+        r = self.repo
+        r.write('mods/alpha/test-alpha.py',
+                "import unittest\nclass Boundary(unittest.TestCase):\n"
+                "    def test_executed(self):\n        self.assertTrue(True)\n"
+                "    @unittest.skip('unavailable platform')\n    def test_unavailable(self):\n        self.fail()\n"
+                "unittest.main()\n")
+        r.commit('one actual pass and one skip')
+        result = r.verify()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(r.report()['passingTests'], 1)
+        r.write('mods/alpha/test-alpha.py',
+                "import unittest\nclass Boundary(unittest.TestCase):\n"
+                "    @unittest.skip('unavailable platform')\n    def test_unavailable(self):\n        self.fail()\n"
+                "unittest.main()\n")
+        r.commit('no executed test')
+        result = r.verify()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(r.report()['passingTests'], 0)
+
     def test_default_docs_and_empty_diff_need_no_executable_tests(self):
         r = self.repo
         empty = self.plan()
