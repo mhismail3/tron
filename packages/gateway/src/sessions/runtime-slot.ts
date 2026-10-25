@@ -140,8 +140,7 @@ import {
   subagentProcessesFromActivity,
 } from "../kernel/projection/process-activity.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import type { TronWorkspace } from "../workspace/tron-workspace.js";
-import { tronContext } from "../workspace/tron-core-extension.js";
+import type { ResourceRoot } from "../kernel/resources/resource-root.js";
 import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
 import type { ToolDisplayProjection, ToolReferences } from "../kernel/projection/tool-result.js";
 import { trustedExtensionOriginKind } from "../kernel/projection/extension-origin.js";
@@ -336,7 +335,7 @@ export interface RuntimeSlotDependencies {
   /** The settings model and its one change path, late-bound:
    * installed on the registry after construction (docs/settings-model.md 5.1). */
   settings: () => { model: SettingsModel; changes: SettingsChangePath } | undefined;
-  workspace: TronWorkspace;
+  workspace: ResourceRoot;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
   processActivityRecency: ProcessActivityRecency;
@@ -6179,7 +6178,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       // Older clients read Pi's base prompt; `instructions` is the complete
       // attributed prompt the model receives, including the per-turn context.
       systemPrompt: session.systemPrompt,
-      instructions: this.agentInstructions(tronContext(workspace, this.cwd, session.getActiveToolNames())),
+      instructions: this.agentInstructions(this.dependencies.modules.policy("operatingContext")!(workspace, this.cwd, session.getActiveToolNames())),
       contextUsage: session.getContextUsage(),
       stats: session.getSessionStats(),
       activeTools: session.getActiveToolNames(),

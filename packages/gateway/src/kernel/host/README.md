@@ -69,6 +69,11 @@ that epoch; the runtime replaces its activity source when rotating the host.
   switch. `read` handlers are admitted while the Gateway drains; `mutation`
   handlers run under the command receipt and are refused while draining.
   Capabilities are listed in composition order.
+- **Resource lifetime and context.** `resourceRoot` returns the module's actual root
+  owner. The kernel initializes it at its existing startup cut and requires its
+  disposal after lifecycle owners, retaining failed disposal for retry. This is
+  not a best-effort observer. `operatingContext` is the module's actual formatter;
+  preview calls it after the awaited root description and trust fences, using live tools.
 - **Hooks (D6).** A `policy` hook has one implementer; `observers` hooks run every
   implementer in composition order. Dispatch reads each module's `hooks` at the
   call, never a copy taken at start. Notification hooks resolve optional owner

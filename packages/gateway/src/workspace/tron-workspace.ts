@@ -2,14 +2,9 @@ import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { GatewayError } from "../errors.js";
+import type { TronWorkspaceDescriptor } from "../kernel/resources/resource-root.js";
 import { readSecureJson } from "../util/secure-json.js";
 import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
-
-export interface TronWorkspaceDescriptor {
-  root: string;
-  available: boolean;
-  reason?: "unavailable" | "owned_elsewhere" | "closed";
-}
 
 /** The capabilities that record their namespace's initialization beside the
  * workspace root. Adding one here is what lets a missing namespace be reported

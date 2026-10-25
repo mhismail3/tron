@@ -1,3 +1,4 @@
+import { workspaceModule } from "../../workspace/workspace-module.js";
 import { basename, join } from "node:path";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxToolCall, type AssistantMessage } from "@earendil-works/pi-ai";
@@ -138,7 +139,7 @@ describe("Home learned profile in the breakdown", () => {
     // Knowledge installed first, as gateway-main does, and Home's runtime is built after it.
     const registry = await f.restartToReadiness();
     f.registry = registry;
-    const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
+    const store = new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {});
     knowledge = new KnowledgeService(store);
     // Home's profile tool writes through the settings change path the restarted fixture installed,
     // as gateway-main wires it, with this Knowledge owner.

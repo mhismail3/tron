@@ -5,6 +5,7 @@
   ],
   "dependsOn": [
     "gateway/pi",
+    "gateway/resources",
     "gateway/protocol",
     "gateway/projection",
     "gateway/settings"

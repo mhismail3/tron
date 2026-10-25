@@ -1,3 +1,4 @@
+import { workspaceModule } from "../workspace/workspace-module.js";
 import { createTestRegistry } from "../../test-support/gateway-registry.js";
 /**
  * Chronicle generation is retired (#1315); its history is not.
@@ -58,7 +59,7 @@ describe("retired Chronicle generation over preserved legacy history", { concurr
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     cleanup.push(() => registry.dispose());
-    const workspace = registry.knowledgeWorkspace();
+    const workspace = registry.moduleHost.contract(workspaceModule);
     const store = new KnowledgeStore(workspace);
     // Reflection is an explicit reader of legacy observations; its model is a
     // deterministic stand-in for the background queue.

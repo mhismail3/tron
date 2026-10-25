@@ -1,3 +1,4 @@
+import { workspaceModule } from "../workspace/workspace-module.js";
 import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
 import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
@@ -227,7 +228,7 @@ async function fixture(label: string): Promise<Fixture> {
   await waitFor(() => (registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "catalog cut", { boundMs: 30_000 });
   await registry.catalog("all");
 
-  const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
+  const store = new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {});
   knowledge = new KnowledgeService(store);
   // The one settings change path, wired as gateway-main wires it: Home's profile tool
   // and the maintainer's home.profileChange share its profile applier and record.

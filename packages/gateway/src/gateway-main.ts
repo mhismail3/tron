@@ -1,3 +1,4 @@
+import { workspaceModule } from "./workspace/workspace-module.js";
 import { MacTerminalHost, MacTerminalKeys } from "./security/mac-terminal.js";
 import { ManagedSubagents } from "./kernel/delegation/managed-subagents.js";
 import { homedir } from "node:os";
@@ -491,7 +492,7 @@ const knowledgeChanges = new KnowledgeChangeCoalescer(change => transport?.broad
   ...(change.recordIds ? { recordIds: change.recordIds } : {}),
 }));
 const knowledgeStore = new KnowledgeStore(
-  sessions.knowledgeWorkspace(),
+  modules.contract(workspaceModule),
   change => knowledgeChanges.record(change),
   async (connectionId) => connections.resolveInstance(connectionId).catch(() => undefined),
 );

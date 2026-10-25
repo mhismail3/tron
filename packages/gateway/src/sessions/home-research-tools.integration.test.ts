@@ -1,3 +1,4 @@
+import { workspaceModule } from "../workspace/workspace-module.js";
 import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's curated read-only research tools (#724), end to end: `web_search`,
@@ -192,7 +193,7 @@ async function fixture(
   await registry.catalog("all");
 
   // Real owners, installed the way gateway-main installs them.
-  const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
+  const store = new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {});
   knowledge = new KnowledgeService(store);
   const indexPath = join(tronHome, "gateway", "session-search.sqlite");
   await seedIndex?.(registry, indexPath);
@@ -784,7 +785,7 @@ describe("Tron Home research tools", () => {
     if (!anchor) throw new Error("fixture has no historical answer");
     const range = { sessionId: ordinary.id, fromEntryId: anchor.id, toEntryId: anchor.id, entryIds: [anchor.id], entryDigest: legacyEntriesDigest([anchor]) };
     // A pre-#1315 observer's record; Chronicle generation itself is retired.
-    const published = await seedLegacyChronicle(f.registry.knowledgeWorkspace(), f.store, { groups: [{ coverageId: "legacy-fixture-cut", range,
+    const published = await seedLegacyChronicle(f.registry.moduleHost.contract(workspaceModule), f.store, { groups: [{ coverageId: "legacy-fixture-cut", range,
       records: [{ id: "legacy-chronicle-record", item: { text: "LEGACY-UNIQUE-DECISION was accepted", attribution: "assistant", certainty: "certain", observedAt: anchor.timestamp } }] }] });
     const legacy = published.records[0]!;
     const before = JSON.stringify(await f.store.read(legacy.id, legacy.revisionId));

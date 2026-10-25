@@ -17,6 +17,11 @@ owner for all runtime profiles and its explicit scoped native-child socket bridg
 contract is [internal-workspace.md](../../docs/internal-workspace.md); installed Swift
 apps under `state/apps/` are [swift-apps.md](../../docs/swift-apps.md).
 
+The `resourceRoot` policy supplies this same workspace to the native kernel's
+critical lifetime and context reads; capability stores use the module contract.
+`operatingContext` supplies the existing `tronContext` formatter to preview without
+moving its product copy or changing prompt timing.
+
 ## Contract
 
 - `tron-core` appends Tron identity, the resolved workspace path and availability,

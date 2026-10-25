@@ -135,8 +135,9 @@ describe("kernel/host module host", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     try {
-      expect(registry.knowledgeWorkspace()).toBe(modules.contract(workspaceModule));
-      expect((await registry.knowledgeWorkspace().describe()).root).toBe(join(tronHome, "workspace"));
+      const workspace = modules.policy("resourceRoot")!();
+      expect(workspace).toBe(modules.contract(workspaceModule));
+      expect((await workspace.describe()).root).toBe(join(tronHome, "workspace"));
     } finally {
       await registry.dispose();
       await modules.stop();

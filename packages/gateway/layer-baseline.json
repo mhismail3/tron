@@ -25,7 +25,6 @@
     "upward gateway/protocol (L1) -> gateway/display (L3)",
     "upward gateway/run (L2) -> gateway/episodic (L3)",
     "upward gateway/run (L2) -> gateway/home (L3)",
-    "upward gateway/run (L2) -> gateway/workspace (L3)",
     "upward gateway/security (L3) -> gateway/transport (L4)",
     "upward gateway/session-catalog (L2) -> gateway/automations (L3)"
   ]

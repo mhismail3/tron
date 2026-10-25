@@ -1,6 +1,7 @@
 import { Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
-import type { TronWorkspace, TronWorkspaceDescriptor } from "./tron-workspace.js";
+import type { TronWorkspace } from "./tron-workspace.js";
+import type { TronWorkspaceDescriptor } from "../kernel/resources/resource-root.js";
 import { KNOWLEDGE_TOOL_PARAMETERS, type KnowledgeService, type KnowledgeToolParameters } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import { createJevExtension } from "../knowledge/jev-extension.js";

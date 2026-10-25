@@ -58,8 +58,7 @@ import { completionOwnedByMarker, type CanonicalAssistantCompletion, type Sessio
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { ProcessActivityRecency } from "../kernel/projection/process-activity-recency.js";
 import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
-import type { TronWorkspace } from "../workspace/tron-workspace.js";
-import { workspaceModule } from "../workspace/workspace-module.js";
+import type { ResourceRoot } from "../kernel/resources/resource-root.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
 import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { readCanonicalSessionFile } from "../episodic/episodic-source.js";
@@ -524,7 +523,7 @@ export class RuntimeRegistry implements SessionOperations {
   /** Linearizes display lease admission with canonical session deletion. */
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
-  private readonly workspace: TronWorkspace;
+  private readonly workspace: ResourceRoot;
   private settingsOwners: Readonly<{ model: import("../kernel/settings/settings-model.js").SettingsModel; changes: import("../kernel/settings/settings-change.js").SettingsChangePath }> | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
@@ -687,7 +686,9 @@ export class RuntimeRegistry implements SessionOperations {
   ) {
     this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
-    this.workspace = options.modules.contract(workspaceModule);
+    const workspace = options.modules.policy("resourceRoot")?.();
+    if (!workspace) throw new Error("Kernel resource root is not installed");
+    this.workspace = workspace;
     this.exports = new BlobStore({
       maximumItemBytes: SESSION_EXPORT_MAX_ITEM_BYTES,
       maximumItems: SESSION_EXPORT_MAX_ITEMS,
@@ -728,8 +729,6 @@ export class RuntimeRegistry implements SessionOperations {
     return this.revision;
   }
 
-  /** The composition's one workspace (`workspaceModule`), shared by capability stores. */
-  knowledgeWorkspace(): TronWorkspace { return this.workspace; }
   get moduleHost(): ModuleHost { return this.options.modules; }
   /** The installed K6 owner, read late by session and composition consumers. */
   get settings() { return this.settingsOwners; }
