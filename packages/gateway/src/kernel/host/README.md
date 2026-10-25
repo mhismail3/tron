@@ -26,6 +26,9 @@ construction; native admission throws that exact fact before SDK open, without a
 module workflow mirror or another runtime owner. The same policy supplies the exact
 identity refusal; native frames keep lineage selection and physical replacement checks.
 
+`extension-execution-context.ts` owns the single call-time extension-owner and
+invocation context stores shared by host callbacks and their consumers.
+
 ## Contract
 
 - **Composition.** `main/modules.ts` is the one ordered list. `ModuleHost.start`

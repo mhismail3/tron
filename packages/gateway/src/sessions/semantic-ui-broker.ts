@@ -31,7 +31,7 @@ import {
   ExtensionPresentationStore,
 } from "../extensions/host/extension-presentation-store.js";
 import { stripTerminalControls } from "../extensions/host/terminal-sanitizer.js";
-import { currentExtensionOwner, currentInvocationContext } from "../extensions/owner-attribution.js";
+import { currentExtensionOwner, currentInvocationContext } from "../kernel/host/extension-execution-context.js";
 
 export interface ExtensionNotificationInput {
   message: string;

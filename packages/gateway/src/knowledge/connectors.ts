@@ -8,7 +8,7 @@ import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { sourceAdmissionIsDecided, type KnowledgeStore } from "./knowledge-store.js";
 import { CONNECTOR_CREDENTIAL_SERVICE, isConnectorCredentialReference, type ConnectorCredentialStore, type WritableConnectorCredentialStore } from "./connector-credentials.js";
-import { currentInvocationContext } from "../extensions/owner-attribution.js";
+import { currentInvocationContext } from "../kernel/host/extension-execution-context.js";
 import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";
 import { JEV_DEFAULT_MODEL } from "./jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";

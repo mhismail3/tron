@@ -12,7 +12,8 @@ import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArt
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { managedProducerAPI } from "../../extensions/managed-producer.js";
-import { producerIdentity, withExtensionOwner } from "../../extensions/owner-attribution.js";
+import { producerIdentity } from "../../extensions/owner-attribution.js";
+import { withExtensionOwner } from "../host/extension-execution-context.js";
 import { AsyncResource } from "node:async_hooks";
 import { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";

@@ -1,7 +1,7 @@
 import { StringEnum } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { Type } from "../kernel/pi/ai.js";
-import { currentInvocationContext } from "../extensions/owner-attribution.js";
+import { currentInvocationContext } from "../kernel/host/extension-execution-context.js";
 import type { JsonValue } from "../protocol/types.js";
 
 export interface ScheduleToolRequest {

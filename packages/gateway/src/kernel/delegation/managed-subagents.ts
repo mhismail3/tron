@@ -11,7 +11,8 @@ import { GatewayError } from "../../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { managedProducerAPI, type ManagedInternalWake } from "../../extensions/managed-producer.js";
 import { loadSubagentCatalog } from "./subagent-catalog.js";
-import { producerIdentity, withExtensionOwner } from "../../extensions/owner-attribution.js";
+import { producerIdentity } from "../../extensions/owner-attribution.js";
+import { withExtensionOwner } from "../host/extension-execution-context.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {

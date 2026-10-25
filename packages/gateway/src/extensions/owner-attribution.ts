@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from "node:async_hooks";
+import { withExtensionOwner } from "../kernel/host/extension-execution-context.js";
 import { createHash } from "node:crypto";
 import { basename, extname } from "node:path";
 import type {
@@ -23,10 +23,6 @@ type ExtensionHandlerList = Parameters<Extension["handlers"]["set"]>[1];
 type ExtensionShortcutKey = Parameters<Extension["shortcuts"]["set"]>[0];
 type ExtensionShortcut = Parameters<Extension["shortcuts"]["set"]>[1];
 
-/** The owner is intentionally opaque to extension code and is only readable by
- * the gateway presentation projection. AsyncLocalStorage preserves it across
- * promises and timers without guessing attribution for unattributed calls. */
-const ownerStorage = new AsyncLocalStorage<ExtensionOwner>();
 /** First-party inline tool names and the exact inline extension that may own them. */
 const RESERVED_FIRST_PARTY_TOOLS: ReadonlyArray<readonly [string, string]> = [
   ["notify", "tron-notify"],
@@ -35,11 +31,6 @@ const RESERVED_FIRST_PARTY_TOOLS: ReadonlyArray<readonly [string, string]> = [
   ["computer", "tron-computer"],
   ["web_search", "tron-web-research"],
 ];
-export interface InvocationExecutionContext {
-  invocationId: string;
-  operationId: string;
-}
-const invocationStorage = new AsyncLocalStorage<InvocationExecutionContext>();
 const attributedCommandOwners = new WeakMap<RegisteredCommand["handler"], Extension>();
 const builtinMcpCommandHandlers = new WeakSet<RegisteredCommand["handler"]>();
 const attributedToolOwners = new WeakMap<ToolDefinition["execute"], Extension>();
@@ -49,14 +40,6 @@ const attributedToolOwners = new WeakMap<ToolDefinition["execute"], Extension>()
  * wrapper. */
 const admittedCallbackOwners = new WeakMap<Function, Extension>();
 
-export function currentExtensionOwner(): ExtensionOwner | undefined { return ownerStorage.getStore(); }
-export function withExtensionOwner<T>(owner: ExtensionOwner, operation: () => T): T {
-  return ownerStorage.run(owner, operation);
-}
-export function currentInvocationContext(): InvocationExecutionContext | undefined { return invocationStorage.getStore(); }
-export function withInvocationContext<T>(context: InvocationExecutionContext, operation: () => T): T {
-  return invocationStorage.run(context, operation);
-}
 export function isBuiltinMcpCommand(command: RegisteredCommand | undefined): boolean {
   return command !== undefined && builtinMcpCommandHandlers.has(command.handler);
 }
@@ -144,7 +127,7 @@ export function producerIdentity(source: string, path: string, title: string): E
  */
 function ownCallback<T extends (...args: any[]) => any>(callback: T, extension: Extension): T {
   if (admittedCallbackOwners.get(callback) === extension) return callback;
-  const wrapper = ((...args: Parameters<T>) => ownerStorage.run(extensionOwnerFor(extension), () => callback(...args))) as T;
+  const wrapper = ((...args: Parameters<T>) => withExtensionOwner(extensionOwnerFor(extension), () => callback(...args))) as T;
   admittedCallbackOwners.set(wrapper, extension);
   return wrapper;
 }

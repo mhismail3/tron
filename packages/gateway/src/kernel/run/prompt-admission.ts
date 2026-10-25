@@ -4,7 +4,7 @@ import type { ImageContent } from "../pi/ai.js";
 import type { SessionPhase } from "../../protocol/types.js";
 import { GatewayError, asUncertainOutcome } from "../../errors.js";
 import { count, wait } from "../../util/request-span.js";
-import { withInvocationContext } from "../../extensions/owner-attribution.js";
+import { withInvocationContext } from "../host/extension-execution-context.js";
 import { safeJson } from "../projection/projection.js";
 import type { InputTrigger } from "../host/input-admission.js";
 import type { GatewayWorkHandle } from "./gateway-work-registry.js";

@@ -16,7 +16,7 @@ import { boundedExtensionFrame, parseExtensionFrame } from "./frame-parser.js";
 import { InMemoryTerminal } from "./in-memory-terminal.js";
 import { type ComponentDiagnostic } from "./recording-component.js";
 import { boundedDisplayError, stripTerminalControls } from "./terminal-sanitizer.js";
-import { currentExtensionOwner } from "../owner-attribution.js";
+import { currentExtensionOwner } from "../../kernel/host/extension-execution-context.js";
 
 export interface RemotePiExtensionHostOptions {
   columns?: number;

@@ -18,7 +18,7 @@ import { captureSource, extractReadableText, readPublicXPost, refreshSourcePrevi
 import { triageSource } from "./source-triage.js";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import { currentInvocationContext } from "../extensions/owner-attribution.js";
+import { currentInvocationContext } from "../kernel/host/extension-execution-context.js";
 import { createHash } from "node:crypto";
 import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, KNOWLEDGE_TAG_QUESTIONS_PER_CALL, activeTagDefinitions } from "./knowledge-tagger.js";
 

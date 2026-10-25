@@ -120,7 +120,8 @@ import {
 } from "../kernel/projection/projection.js";
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { type RunMarkerStore } from "../kernel/run/run-markers.js";
-import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext } from "../extensions/owner-attribution.js";
+import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand } from "../extensions/owner-attribution.js";
+import { currentExtensionOwner, currentInvocationContext } from "../kernel/host/extension-execution-context.js";
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
 import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "../kernel/delegation/child-session-admission.js";
