@@ -10,6 +10,7 @@ import { GatewayError } from "../errors.js";
 import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
 import { readJson } from "../util/json.js";
 import type { BlobByteRange, BlobLease } from "../sessions/blob-store.js";
+import { DISPLAY_ARTIFACT_KINDS, type DisplayArtifactDescriptor, type DisplayArtifactKind } from "../modules/display/contract.js";
 
 const METADATA_MAX_BYTES = 64 * 1_024;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -24,24 +25,9 @@ const DEFAULT_MINIMUM_FREE_BYTES = 1 * 1_024 * 1_024 * 1_024;
 const MAXIMUM_ACTIVE_READERS = 4;
 const MAXIMUM_ACTIVE_INGESTS = 2;
 
-const DISPLAY_ARTIFACT_KINDS = [
-  "image", "markdown", "text", "code", "pdf", "html",
-  "video", "audio", "document",
-] as const;
-
-export type DisplayArtifactKind = (typeof DISPLAY_ARTIFACT_KINDS)[number];
-
 /** Closed artifact-kind admission, shared with the `tron.display.v1` projection. */
 export function isDisplayArtifactKind(value: unknown): value is DisplayArtifactKind {
   return (DISPLAY_ARTIFACT_KINDS as readonly string[]).includes(String(value));
-}
-
-export interface DisplayArtifactDescriptor {
-  id: string;
-  name: string;
-  mimeType: string;
-  size: number;
-  kind: DisplayArtifactKind;
 }
 
 interface DisplayArtifactMetadata extends DisplayArtifactDescriptor {

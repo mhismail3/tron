@@ -1,4 +1,4 @@
-import type { DisplayProjection } from "../display/display-contract.js";
+import type { DisplayProjection } from "../modules/display/contract.js";
 
 // Tron protocol v5 is a typed, bounded mobile contract. Pi objects must be
 // projected into these values rather than serialized directly; Pi JSONL and

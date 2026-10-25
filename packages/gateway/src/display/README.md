@@ -15,6 +15,12 @@ settlement](../../docs/native-tool-settlement.md).
 
 ## Contract
 
+**Pure wire values.** [The L1 contract](../modules/display/contract.ts) owns the
+projection/artifact/live-view descriptors, kind vocabulary and schema/capability
+constants. Protocol consumes that contract directly; admission, provenance,
+stores and live-view lifetime remain here. The module-host hooks are the existing
+consumer operations, not a second display service port.
+
 **Display descriptors.** `display-modules.ts` owns `DisplayOwner` and display/native-capture
 metadata. Composition supplies its shared store, live views and lazy native session reads;
 native capture remains absent without live views. Transport consumes the owner directly.
