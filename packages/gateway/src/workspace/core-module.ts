@@ -4,9 +4,9 @@ import { createTronCoreExtension, tronContext } from "./tron-core-extension.js";
 import { workspaceModule } from "./workspace-module.js";
 import { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import type { ConnectionOwner } from "../integrations/connection-owner.js";
+import type { ConnectionAccess } from "../modules/integrations/contract.js";
 
-export interface CoreModuleServices { knowledge: KnowledgeService | undefined; connections: ConnectionOwner | undefined }
+export interface CoreModuleServices { knowledge: KnowledgeService | undefined; connections: Pick<ConnectionAccess, "snapshot"> | undefined }
 
 /** Gateway owners are resolved when the runtime assembles its extension, not at start. */
 export function createCoreModule(services: () => CoreModuleServices): ModuleDescriptor {

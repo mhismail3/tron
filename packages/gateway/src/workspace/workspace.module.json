@@ -4,6 +4,7 @@
     "**"
   ],
   "dependsOn": [
+    "gateway/integrations-contract",
     "gateway/host",
     "gateway/pi"
   ]

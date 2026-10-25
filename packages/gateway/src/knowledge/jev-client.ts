@@ -1,9 +1,7 @@
 import type { ClassifierContext } from "../kernel/pi/ai.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
+import { JEV_CLASSIFIER } from "../providers/jev-model-pricing.js";
 
-/** Tron pins the model identity to Pi's catalog, but retains a qualified cost
- * because TypeSafe's catalog currently reports zero rather than billable price. */
-export const JEV_CLASSIFIER = { provider: "typesafe", model: "jev-latest", inputUsdPerMillion: 0.042, outputUsdPerMillion: 0 } as const;
 export const JEV_DEFAULT_MODEL = JEV_CLASSIFIER.model;
 export const JEV_MAX_STATE_BYTES = 24_000;
 export const JEV_MAX_BODY_BYTES = 60_000;

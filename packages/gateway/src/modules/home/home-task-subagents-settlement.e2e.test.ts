@@ -9,6 +9,7 @@ import { HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "../../kernel/delegation/task-su
 import { waitFor } from "../../../test-support/wait-for.js";
 import { closeSubagentFixtures, bound, childModel, captureTimer, captureDeadline, launchResults, asyncState, holdingWorkflowLaunch, workflowChildRunId, holdingAsyncLaunch, waitBetweenTurns, toolResultText, type FauxContext } from "../../../test-support/home-task-subagents-support.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import * as subagentControl from "../../kernel/delegation/subagent-control.js";
 
 afterEach(closeSubagentFixtures);
 
@@ -342,13 +343,12 @@ describe("Home task subagents: settlement and stop", () => {
       }),
     ]);
     const run = await dispatch(f);
-    const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => child.heldRequests() === 1, "async child live", bound);
     // The Gateway's stop of the run is refused (an injected control failure): the run
     // stays live, so the join ends at its own bound, well before the 24-hour deadline,
     // and the task is not allowed to settle as clean. The provider's tool is untouched.
     let stopRefusals = 0;
-    const control = vi.spyOn(slot as any, "controlSubagentRun").mockImplementation(async () => {
+    const control = vi.spyOn(subagentControl, "controlSubagentRun").mockImplementation(async () => {
       stopRefusals += 1;
       throw new Error("injected stop refusal");
     });

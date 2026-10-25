@@ -16,7 +16,7 @@ import { GatewayService, type GatewayServiceDependencies } from "../../transport
 import { GatewayServer } from "../../transport/server.js";
 import { PROTOCOL_VERSION } from "../../version.js";
 import { ConnectionOwner } from "../connection-owner.js";
-import type { ConnectionOwnerSnapshot, ConnectionPolicy } from "../connection-contract.js";
+import type { ConnectionOwnerSnapshot, ConnectionPolicy } from "../../modules/integrations/contract.js";
 
 // Real loopback admission, command receipts and durable connection ownership.
 // Nothing contacts a provider or resolves a credential: setup carries only a

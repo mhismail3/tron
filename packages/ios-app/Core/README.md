@@ -10,7 +10,8 @@ the hosted test targets link.
 
 - `Gateway/`: `GatewayClient` (one authenticated WebSocket per connection epoch), protocol
   decoding (`GatewayProtocol`, `GatewayProtocolContract`), `SessionEventSynchronizer`, socket and
-  bounded HTTP transports, pairing profiles and their store, LAN pin and path snapshots.
+  bounded HTTP transports, [`GatewayEventHub`](Gateway/GatewayEventHub.swift) and its event stream,
+  pairing profiles and their store, LAN pin and path snapshots.
 - `Models/`: wire-compatible value types grouped by authority (connection, session catalog,
   transcript, runtime, resources, workspace, terminal, automations, knowledge, notifications…),
   plus `JSONValue` and `ModelDisplayFormatting`.
@@ -35,6 +36,9 @@ the hosted test targets link.
   owner: no duplicate copies, re-export shims or compatibility typealiases.
 - **Transport.** Epoch ownership, deadlines, the shared ping grid, frame and `JSONValue` ceilings
   and decoding are specified in [Gateway connection and events](../docs/events.md).
+- **Event delivery.** One `GatewayEventHub` owns buffering, coalescing, epoch retirement,
+  cancellation and stream completion for its client lifetime. `GatewayEventStream` construction
+  is Core-internal through its explicit initializer; the backing hub stays file-private.
 - **Requests.** Each request owns its send and timeout tasks through queued → sending → sent;
   failure after send begins is a local, non-Codable possibly-sent error the Gateway cannot forge.
 - **HTTP.** Idempotent bodiless GET/HEAD (media, exports, live-view frames) share one long-lived
@@ -69,7 +73,8 @@ the hosted test targets link.
 
 ## Entry points
 
-`Gateway/GatewayClient.swift`, `Gateway/GatewayProtocol.swift`, `Gateway/GatewayProfileStore.swift`,
+`Gateway/GatewayClient.swift`, `Gateway/GatewayEventHub.swift`, `Gateway/GatewayProtocol.swift`,
+`Gateway/GatewayProfileStore.swift`,
 `Support/AppLog.swift`, `Support/ChatInteractionTrace.swift`.
 
 ## Signals

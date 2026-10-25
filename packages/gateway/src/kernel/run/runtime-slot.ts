@@ -1,3 +1,5 @@
+import { WorkerSettlement } from "../delegation/worker-settlement.js";
+import { controlSubagentRun } from "../delegation/subagent-control.js";
 import type { TaskWorkerControl, TaskWorkerDiagnostic } from "../delegation/worker-contract.js";
 import * as activityProjection from "../projection/activity.js";
 import * as sessionPages from "../projection/session-pages.js";
@@ -483,11 +485,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** Bounded, disposable extension-owned run projections retain completed work
    * for Manage Session while the owning tool carries the live copy. */
   private readonly extensionActivities = new Map<string, ExtensionRunActivity>();
-  /** Task-end joins waiting for a detached run's state to change. Each join owns its
-   * entry and removes it when it stops waiting. */
-  private readonly detachedWorkWaiters = new Set<() => void>();
-  /** Task-end joins waiting for a completion notice's delivery receipt to be recorded. */
-  private readonly canonicalDeliveryWaiters = new Set<() => void>();
+  private readonly workerSettlement = new WorkerSettlement(DEFAULT_RUNTIME_DISPOSAL_GRACE_MS);
   /** Monotonic lifecycle projection ordering and terminal latches are runtime
    * facts; producer timestamps are display evidence only. */
   private readonly extensionActivitySequences = new Map<string, number>();
@@ -805,7 +803,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           safeJson(makeContextDeliveryReceipt(candidate.id, effect.delivery, effect.origin, effect.delivery === "stored" ? effect.managedMessage?.wakeOperationId : undefined)),
           candidate.id,
         );
-        this.notifyCanonicalDelivery();
+        this.workerSettlement.publish("delivery");
       }
       changed = true;
     }
@@ -2539,7 +2537,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       this.liveActivityRevision += 1;
       this.extensionActivityAsOf = new Date().toISOString();
       this.syncSubagentProcesses(activity);
-      this.notifyDetachedWork();
+      this.workerSettlement.publish("detached");
     }
     return visibility;
   }
@@ -5092,7 +5090,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       extensionActivityAsOf: this.extensionActivityAsOf,
     }));
     this.publishProcessesForToolCall(activity.toolCallId);
-    this.notifyDetachedWork();
+    this.workerSettlement.publish("detached");
     // Detached lifecycle updates do not rebuild the full transcript snapshot,
     // but they are authoritative live catalog activity and must reorder rows.
     this.publishSummary();
@@ -5560,20 +5558,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }
 
     if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
-    await this.controlSubagentRun(tool, { action: "stop", id: route.runId, childId: route.childId });
-  }
-
-  /** The provider's own control for one run, through the exact installed controller.
-   * A rejection is an error: the caller must not assume the run was stopped. */
-  private async controlSubagentRun(tool: ToolDefinition, input: Record<string, unknown>): Promise<void> {
-    const toolCallId = `tron-control-${randomUUID()}`;
-    const signal = new AbortController().signal;
-    const result = await tool.execute(toolCallId, input, signal, undefined,
-      this.runtime.session.extensionRunner.createToolContext(toolCallId, signal));
-    if ((result as typeof result & { isError?: boolean }).isError === true) {
-      const message = result.content.find(content => content.type === "text")?.text;
-      throw new GatewayError("conflict", message?.slice(0, 512) || "The subagent controller rejected the request", true);
-    }
+    await controlSubagentRun(this.runtime.session, tool, { action: "stop", id: route.runId, childId: route.childId });
   }
 
   /** Whether this session owns a run: one its canonical history launched (a launch or a resume
@@ -5620,7 +5605,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     const tool = this.trustedSubagentController();
     const stops = await Promise.allSettled(targets.map(async runId => {
       if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
-      await this.controlSubagentRun(tool, { action: "stop", id: runId });
+      await controlSubagentRun(this.runtime.session, tool, { action: "stop", id: runId });
     }));
     // The join is also bounded once stops are requested: a run whose stop never lands
     // must not hold the sealed task open for the rest of its 24-hour deadline.
@@ -5630,13 +5615,13 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     let joined: boolean;
     let noticesUndelivered: number;
     try {
-      joined = await this.joinDetachedWork(bound);
+      joined = await this.workerSettlement.until("detached", () => !this.hasDetachedDashboardWork(), bound);
       // A run's completion notice is written after the run is terminal, so it can land after
       // the report. It is canonical evidence of the run, so settlement records it before the fact
       // and the evidence cut. A notice still missing at the bound is counted, not waited for.
       const runIds = launched.flatMap(launch => launch.asyncDir ? [basename(launch.asyncDir)] : []);
       const undelivered = (): string[] => undeliveredSubagentNotices(this.canonicalSessionEntries(), runIds);
-      await this.joinUntil(() => undelivered().length === 0, this.canonicalDeliveryWaiters, bound);
+      await this.workerSettlement.until("delivery", () => undelivered().length === 0, bound);
       noticesUndelivered = undelivered().length;
     } finally {
       clearTimeout(stopJoinTimer);
@@ -5658,53 +5643,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const binding = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId);
       return binding?.asyncDir === undefined ? [] : this.liveActivitySubagentRuns(activity).map(run => run.runId);
     });
-  }
-
-  /** Waits until no detached run is live. The wait is bounded by the operation's
-   * deadline, then by one disposal grace after it fires. A run still live then is
-   * not joined, and the caller keeps the detached outcome. */
-  private async joinDetachedWork(deadline: AbortSignal): Promise<boolean> {
-    return this.joinUntil(() => !this.hasDetachedDashboardWork(), this.detachedWorkWaiters, deadline);
-  }
-
-  /** Waits until `done` holds. Each wake from `waiters` re-checks it. The wait is bounded by
-   * the deadline, then by one disposal grace after it fires; a condition still unmet then
-   * returns false, and the caller keeps its unproven outcome. */
-  private async joinUntil(done: () => boolean, waiters: Set<() => void>, deadline: AbortSignal): Promise<boolean> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let resolveBound!: (value: "bound") => void;
-    const bound = new Promise<"bound">(resolve => { resolveBound = resolve; });
-    const start = (): void => { timer = setTimeout(() => resolveBound("bound"), DEFAULT_RUNTIME_DISPOSAL_GRACE_MS); };
-    if (deadline.aborted) start();
-    else deadline.addEventListener("abort", start, { once: true });
-    try {
-      while (!done()) {
-        let wake!: () => void;
-        const changed = new Promise<"changed">(resolve => { wake = () => resolve("changed"); });
-        waiters.add(wake);
-        const outcome = await Promise.race([changed, bound]);
-        waiters.delete(wake);
-        if (outcome === "bound") break;
-      }
-    } finally {
-      deadline.removeEventListener("abort", start);
-      if (timer !== undefined) clearTimeout(timer);
-    }
-    return done();
-  }
-
-  /** Every extension-activity publication may end a join's wait. */
-  private notifyDetachedWork(): void {
-    const waiters = [...this.detachedWorkWaiters];
-    this.detachedWorkWaiters.clear();
-    for (const wake of waiters) wake();
-  }
-
-  /** A recorded completion notice may end a notice join's wait. */
-  private notifyCanonicalDelivery(): void {
-    const waiters = [...this.canonicalDeliveryWaiters];
-    this.canonicalDeliveryWaiters.clear();
-    for (const wake of waiters) wake();
   }
 
   publishSnapshot(): void {

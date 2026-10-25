@@ -33,7 +33,9 @@ and before worker controls, reading canonical fixed settings and the worker fact
 - **Virtual models** are replayed by `GlobalProviderResources`; the picker marks them
   virtual while assistant rows, context limits, usage and cost use Pi's routed
   physical model. Jev uses Pi `ModelRuntime.classify()` with TypeSafe's `jev-latest`;
-  Tron keeps input bounds, price ceilings and assessment versions.
+  `jev-model-pricing.ts` owns the shared qualified model identity and catalog price;
+  the Knowledge decision client consumes that metadata, retaining its input bounds,
+  price ceilings and assessment versions.
 - **`provider.usage`** (`provider-usage.v1`) queries only exact first-party shapes:
   Anthropic OAuth (subscription quota `/api/oauth/usage`; also CortexKit's
   `cortexkit-anthropic-messages` at Anthropic's host), OpenAI Codex, OpenRouter, Kimi

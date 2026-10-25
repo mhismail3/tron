@@ -81,8 +81,7 @@ import { openAIModelEligibility } from "../providers/openai-model-eligibility.js
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_BATCH_ITEMS, KNOWLEDGE_PREVIEW_MAX_BYTES } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
-import type { ConnectionOwner } from "../integrations/connection-owner.js";
-import type { ConnectionAction } from "../integrations/connection-contract.js";
+import type { ConnectionAccess, ConnectionAction } from "../modules/integrations/contract.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
 import type { HomeOwner } from "../modules/home/home-owner.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
@@ -391,7 +390,7 @@ export interface GatewayServiceDependencies {
   automations?: AutomationService;
   knowledge?: KnowledgeService;
   /** Generic account-envelope owner. Provider progress/evidence remains with its adapter. */
-  connections?: ConnectionOwner;
+  connections?: Pick<ConnectionAccess, "invoke">;
   /** Tron Home's designation owner; absent only in a Gateway without one. */
   home?: HomeOwner;
   /** Bounded account-usage owner; injectable for fixture transport tests. */

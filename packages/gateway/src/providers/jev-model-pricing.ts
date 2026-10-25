@@ -1,6 +1,9 @@
 import type { AnyModel } from "../kernel/pi/ai.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
-import { JEV_CLASSIFIER } from "../knowledge/jev-client.js";
+
+/** Tron pins the model identity to Pi's catalog, but retains a qualified cost
+ * because TypeSafe's catalog currently reports zero rather than billable price. */
+export const JEV_CLASSIFIER = { provider: "typesafe", model: "jev-latest", inputUsdPerMillion: 0.042, outputUsdPerMillion: 0 } as const;
 
 function withJevEstimate(model: AnyModel): AnyModel {
   if (model.type !== "classifier" || model.provider !== JEV_CLASSIFIER.provider || model.id !== JEV_CLASSIFIER.model) return model;

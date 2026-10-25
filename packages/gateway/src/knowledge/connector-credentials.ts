@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { CONNECTOR_CREDENTIAL_SERVICE } from "../modules/integrations/contract.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -13,9 +14,6 @@ function securityCommandArgument(value: string): string {
   // escapes the next character. Escape both backslashes and double quotes.
   return `"${value.replace(/[\\"]/g, "\\$&")}"`;
 }
-
-/** The Keychain service the Gateway credential adapter reads. */
-export const CONNECTOR_CREDENTIAL_SERVICE = "Tron Connector Credentials";
 
 /** Connector credentials are addressed by opaque references, never copied into
  * knowledge state or DTOs. The Mac implementation reads the dedicated Tron

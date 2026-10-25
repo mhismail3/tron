@@ -8,8 +8,11 @@ observations. This owner does not hold credentials or run provider operations.
 ## Owns
 
 `ConnectionOwner` serializes mutations and publishes
-`<tronHome>/state/integrations/connections.json`. `connection-contract.ts` owns
-its schema, validation and public/private values. The missing file is an empty
+`<tronHome>/state/integrations/connections.json`. The [pure L1 contract](../modules/integrations/contract.ts)
+owns schema/public/private values, the shared credential-service identifier and
+the existing peer operations consumed by tools, RPCs and connector adapters.
+`connection-contract.ts` retains hashing and runtime validation; `ConnectionOwner`
+implements the adapter contract without a second service or forwarding facade. The missing file is an empty
 read projection, not permission to initialize storage during startup or reads.
 
 ## Contract

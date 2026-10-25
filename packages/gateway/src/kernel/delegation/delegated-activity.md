@@ -11,6 +11,11 @@ and bounded cold artifact proof), `gateway/extension-activity` and `gateway/proj
 shared worker/control diagnostic records. Home's broader business diagnostics compose
 these records; native frames do not import the Home dispatcher for their contracts.
 
+`WorkerSettlement` owns the live worker's delivery/detached waiter sets and
+operation-deadline/disposal-grace join. Native publications address that owner directly;
+they retain no parallel waiters. `subagent-control.ts` executes the exact installed
+controller against the actual SDK session, retaining the provider's rejection semantics.
+
 ## Session subagent activity
 
 - `process-activity.v1` projects only structured synchronous and asynchronous subagents with

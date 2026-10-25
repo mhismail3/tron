@@ -9,8 +9,6 @@
     "two-way gateway/extension-activity <-> gateway/run",
     "two-way gateway/foundation <-> gateway/util",
     "two-way gateway/home <-> gateway/transport",
-    "two-way gateway/integrations <-> gateway/knowledge",
-    "two-way gateway/knowledge <-> gateway/providers",
     "two-way gateway/knowledge <-> gateway/workspace",
     "two-way gateway/projection <-> gateway/run",
     "two-way gateway/run <-> gateway/session-catalog",
