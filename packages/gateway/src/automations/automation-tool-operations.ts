@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
-import type { CommandReceiptStore } from "../transport/command-receipts.js";
 import type { AutomationService } from "./automation-service.js";
 import type { ScheduleToolOperations, ScheduleToolRequest, ScheduleToolResult } from "./tron-schedule-extension.js";
 import type { AutomationAction, AutomationRecord, AutomationTrigger } from "./types.js";
+
+/** The existing receipt operation required by assistant schedule mutations.
+ * Composition supplies the canonical owner; this consumer owns no receipt state. */
+interface ScheduleMutationReceipts {
+  execute(identity: string, method: string, commandId: string, operation: () => Promise<JsonValue>): Promise<JsonValue>;
+}
 
 function commandId(sessionId: string, toolCallId: string, action: string): string {
   return createHash("sha256").update("schedule\0").update(sessionId).update("\0").update(toolCallId).update("\0").update(action).digest("base64url");
@@ -47,7 +52,7 @@ function result(message: string, details: unknown): ScheduleToolResult {
 export class GatewayScheduleToolOperations implements ScheduleToolOperations {
   constructor(
     private readonly service: AutomationService,
-    private readonly receipts: CommandReceiptStore,
+    private readonly receipts: ScheduleMutationReceipts,
     private readonly now: () => number = Date.now,
   ) {}
 

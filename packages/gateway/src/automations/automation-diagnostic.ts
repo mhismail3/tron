@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import type { GatewayLogger } from "../transport/logger.js";
+import type { ModuleLog } from "../kernel/host/module-host.js";
 
 /** Keep scheduler attribution bounded and content-free, using the shared log schema. */
 export function logAutomationDiagnostic(
-  logger: Pick<GatewayLogger, "log">,
+  logger: ModuleLog,
   message: string,
   automationId: string,
   runId?: string,

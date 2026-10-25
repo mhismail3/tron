@@ -61,6 +61,9 @@ sync the file and its directory before acknowledgement.
   workspace, dedupes by tool-call identity, and refuses mutations from an
   automation-originated turn. Paired credentials are machine-administrator
   credentials, so any paired client may manage any automation.
+  Composition supplies the canonical receipt owner's existing mutation operation;
+  this tool owns no receipt lane or completion policy. Diagnostics use the shared
+  module log port, not a transport logger dependency.
 
 ## Invariants
 
