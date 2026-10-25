@@ -77,6 +77,9 @@ struct HostedDisplayDocumentThemeChanges: View {
                         Button("Switch reader theme") {
                             AppearanceSettings.shared.themeColor =
                                 AppearanceSettings.shared.themeColor == .burgundy ? .oliveGold : .burgundy
+                            // This command-line fixture owns its theme input. Keep
+                            // the live mutation from coloring later test launches.
+                            UserDefaults.standard.removeObject(forKey: "themeColor")
                         }
                         Button("Switch reader appearance") { dark.toggle() }
                     }
