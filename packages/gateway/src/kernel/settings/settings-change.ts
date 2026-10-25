@@ -188,7 +188,7 @@ export class SettingsChangePath {
   private readonly actions = new Map<string, ApprovalActionHandler>();
   /** Requesters to nudge when an outcome they have not heard settles (Home's wake). */
   private readonly outcomeListeners = new Set<(sessionId: string) => void>();
-  private expiry: { at: number; timer: { cancel(): void } } | undefined;
+  private expiry: ReturnType<ExpiryScheduler> | undefined;
   private disposed = false;
   private started = false;
   private armWork: Promise<void> = Promise.resolve();
@@ -245,25 +245,34 @@ export class SettingsChangePath {
       if (this.disposed || !this.started) return;
       const pending = await this.approvals.pending();
       if (this.disposed) return;
-      const at = Math.min(...pending.map(request => request.executionStartedAt ? this.now().getTime() : Date.parse(request.expiresAt)));
-      if (this.expiry?.at === at) return;
-      this.expiry?.timer.cancel();
-      this.expiry = undefined;
-      if (!Number.isFinite(at)) return;
-      this.expiry = { at, timer: this.schedule(() => {
-        if (this.disposed) return;
-        this.expiry = undefined;
-        void this.expireDue().then(() => this.armExpiry()).catch(() => undefined);
-      }, Math.max(0, at - this.now().getTime())) };
+      this.scheduleExpiry(pending.map(request => request.executionStartedAt ? this.now().getTime() : Date.parse(request.expiresAt)));
     });
     return this.armWork;
+  }
+
+  /** Deadline hints only wake the owner: every effect re-reads the approvals store.
+   * Keep the later known deadline before I/O, so a failed pass cannot disarm it.
+   * Do not retry the failed deadline immediately against a persistently bad store. */
+  private scheduleExpiry(deadlines: readonly number[]): void {
+    this.expiry?.cancel();
+    this.expiry = undefined;
+    const at = Math.min(...deadlines);
+    if (this.disposed || !Number.isFinite(at)) return;
+    const timer = this.schedule(() => {
+      if (this.disposed || this.expiry !== timer) return;
+      this.scheduleExpiry(deadlines.filter(deadline => deadline > this.now().getTime()));
+      void this.expireDue().then(() => this.armExpiry()).catch(() => {
+        if (!this.disposed) process.emitWarning("Settings approval expiry failed; retained requests retry at the next deadline or admission", { code: "TRON_SETTINGS_EXPIRY_FAILED" });
+      });
+    }, Math.max(0, at - this.now().getTime()));
+    this.expiry = timer;
   }
 
   /** Composition stops the timer before releasing its stores; accepted expiry
    * work is joined, not abandoned against the next installation's owner. */
   async dispose(): Promise<void> {
     this.disposed = true;
-    this.expiry?.timer.cancel();
+    this.expiry?.cancel();
     this.expiry = undefined;
     this.outcomeListeners.clear();
     await Promise.all(this.expiryWork.values());
@@ -596,23 +605,28 @@ export class SettingsChangePath {
     });
   }
 
-  /** Whether the requester has a settled outcome it has not heard (Home's wake asks). */
-  async hasUntoldOutcomes(sessionId: string): Promise<boolean> {
-    await this.expireDue({ sessionId });
-    return this.approvals.hasUntold(sessionId);
-  }
-
   /**
    * Every settled request this requester has not heard, as one canonical message
    * (decision 4e6e8f54): approved and applied, declined, failed, superseded or expired.
    * The text is for the model; `details` carries the same facts for the chat's chip.
    */
-  async takeOutcomes(sessionId: string, deliveredRequestIds: readonly string[] = []): Promise<SettingsOutcomeMessage | undefined> {
-    await this.expireDue({ sessionId });
-    await this.approvals.acknowledge(sessionId, deliveredRequestIds);
-    const taken = await this.approvals.takeOutcomes(sessionId);
-    if (!taken.length) return undefined;
-    const requests = taken.map(request => this.outcomeRequest(request));
+  async takeOutcomes(requesterSessionIds: readonly string[], deliveredRequestIds: readonly string[] = [], accepts?: (message: SettingsOutcomeMessage) => boolean): Promise<SettingsOutcomeMessage | undefined> {
+    await this.expireDue({ requesterSessionIds });
+    await this.approvals.acknowledge(requesterSessionIds, deliveredRequestIds);
+    const requests = (await this.approvals.takeOutcomes(requesterSessionIds)).map(request => this.outcomeRequest(request));
+    if (!requests.length) return undefined;
+    if (!accepts) return this.outcomeMessage(requests);
+    const selected: SettingsOutcomeRequest[] = [];
+    let message: SettingsOutcomeMessage | undefined;
+    for (const request of requests) {
+      const candidate = this.outcomeMessage([...selected, request]);
+      if (!accepts(candidate)) break;
+      selected.push(request); message = candidate;
+    }
+    return message;
+  }
+
+  private outcomeMessage(requests: readonly SettingsOutcomeRequest[]): SettingsOutcomeMessage {
     const lines = requests.map(request => {
       const what = request.action ? request.action.title
         : request.items.map(item => `${item.label} (${item.key}) at the ${LAYER_LABELS[item.layer]} layer${item.before !== undefined ? `: ${item.before} → ${item.after}` : ""}`).join("; ");
@@ -625,7 +639,7 @@ export class SettingsChangePath {
     });
     const eventId = `settings-outcome:${createHash("sha256").update(requests.map(request => request.requestId).join(",")).digest("hex").slice(0, 32)}`;
     return { customType: SETTINGS_OUTCOME_MESSAGE, content: lines.join("\n"), display: true,
-      details: { version: 1, eventId, taskId: `settings:${requests[0]!.requestId}`, requests } };
+      details: { version: 1, eventId, taskId: `settings:${requests[0]!.requestId}`, requests: [...requests] } };
   }
 
   private outcomeRequest(request: ApprovalRequest): SettingsOutcomeRequest {
@@ -653,13 +667,13 @@ export class SettingsChangePath {
 
   /** Expiry uses the same target stripe as decision admission and effects. A
    * timer may become due during apply, but cannot contradict an admitted decision. */
-  private async expireDue(filter: { target?: SettingsTarget; sessionId?: string } = {}): Promise<void> {
+  private async expireDue(filter: { target?: SettingsTarget; requesterSessionIds?: readonly string[] } = {}): Promise<void> {
     if (this.disposed) throw new GatewayError("conflict", "Settings approvals are disposed");
     const work: Promise<void>[] = [];
     for (const request of await this.approvals.pending()) {
       if (this.disposed) return;
       if (filter.target && !deepEqual(request.target, filter.target)) continue;
-      if (filter.sessionId && request.actor.sessionId !== filter.sessionId) continue;
+      if (filter.requesterSessionIds && (!request.actor.sessionId || !filter.requesterSessionIds.includes(request.actor.sessionId))) continue;
       if (!request.executionStartedAt && Date.parse(request.expiresAt) > this.now().getTime()) continue;
       let pending = this.expiryWork.get(request.requestId);
       if (!pending) {

@@ -46,17 +46,17 @@ it("settings-approvals-paths: create, supersede, settle, expire, take outcomes a
   await log.step("settle a missing request is refused", () => approvals.settle("missing", "approved", new Date()), "refused");
   await log.step("settle r4 approved stays until its requester hears it", () => approvals.settle(ids[3]!, "approved", new Date()), "result");
   await log.step("settle r3 failed keeps its failure", () => approvals.settle(ids[2]!, "failed", new Date(), "boom"), "result");
-  await log.step("take s1 outcomes (superseded r1, declined r2)", () => approvals.takeOutcomes("s1"));
-  await log.step("take s1 outcomes again before canonical delivery returns the same requests", () => approvals.takeOutcomes("s1"));
-  await log.step("canonical delivery acknowledges s1 outcomes", () => approvals.acknowledge("s1", [ids[0]!, ids[1]!]));
-  await log.step("take s1 outcomes after acknowledgement is empty", () => approvals.takeOutcomes("s1"));
-  await log.step("take s2 outcomes (failed r3, approved r4)", () => approvals.takeOutcomes("s2"));
-  await log.step("canonical delivery acknowledges s2 outcomes", () => approvals.acknowledge("s2", [ids[2]!, ids[3]!]));
+  await log.step("take s1 outcomes (superseded r1, declined r2)", () => approvals.takeOutcomes(["s1"]));
+  await log.step("take s1 outcomes again before canonical delivery returns the same requests", () => approvals.takeOutcomes(["s1"]));
+  await log.step("canonical delivery acknowledges s1 outcomes", () => approvals.acknowledge(["s1"], [ids[0]!, ids[1]!]));
+  await log.step("take s1 outcomes after acknowledgement is empty", () => approvals.takeOutcomes(["s1"]));
+  await log.step("take s2 outcomes (failed r3, approved r4)", () => approvals.takeOutcomes(["s2"]));
+  await log.step("canonical delivery acknowledges s2 outcomes", () => approvals.acknowledge(["s2"], [ids[2]!, ids[3]!]));
   await created("create r5 (s3)", "s3", mac, change("c.z", "on"));
-  await log.step("take s3 outcomes while r5 is pending is empty", () => approvals.takeOutcomes("s3"));
+  await log.step("take s3 outcomes while r5 is pending is empty", () => approvals.takeOutcomes(["s3"]));
   await log.step("settle r5 declined", () => approvals.settle(ids[4]!, "declined", new Date()), "result");
-  await log.step("take s3 outcomes (declined r5, the only untold)", () => approvals.takeOutcomes("s3"));
-  await log.step("canonical delivery acknowledges s3 outcomes", () => approvals.acknowledge("s3", [ids[4]!]));
+  await log.step("take s3 outcomes (declined r5, the only untold)", () => approvals.takeOutcomes(["s3"]));
+  await log.step("canonical delivery acknowledges s3 outcomes", () => approvals.acknowledge(["s3"], [ids[4]!]));
 
   await created("create r6 (s5)", "s5", mac, change("e.e", 1));
   log.advance(APPROVAL_TTL_MS / 2);
@@ -65,8 +65,8 @@ it("settings-approvals-paths: create, supersede, settle, expire, take outcomes a
   await log.step("expire one millisecond early expires nothing", () => approvals.expire(new Date()));
   log.advance(1);
   await log.step("expire at r6's deadline expires r6 only", () => approvals.expire(new Date()));
-  await log.step("take s5 outcomes (expired r6)", () => approvals.takeOutcomes("s5"));
-  await log.step("canonical delivery acknowledges s5 outcomes", () => approvals.acknowledge("s5", [ids[5]!]));
+  await log.step("take s5 outcomes (expired r6)", () => approvals.takeOutcomes(["s5"]));
+  await log.step("canonical delivery acknowledges s5 outcomes", () => approvals.acknowledge(["s5"], [ids[5]!]));
 
   // Hand-written state: a decided and told request any write would drop, so a step
   // that must not write leaves it in the recorded file.
@@ -83,10 +83,10 @@ it("settings-approvals-paths: create, supersede, settle, expire, take outcomes a
     ] }));
   });
   await log.step("expire with nothing due does not write", () => approvals.expire(new Date()));
-  await log.step("take outcomes of a session with none does not write", () => approvals.takeOutcomes("nobody"));
-  await log.step("take s6 outcomes with only a pending request does not write", () => approvals.takeOutcomes("s6"));
-  await log.step("take s7 outcomes does not consume or rewrite the store", () => approvals.takeOutcomes("s7"));
-  await log.step("canonical delivery acknowledges s7 outcomes, dropping every told request (s6's too)", () => approvals.acknowledge("s7", ["h-untold"]));
+  await log.step("take outcomes of a session with none does not write", () => approvals.takeOutcomes(["nobody"]));
+  await log.step("take s6 outcomes with only a pending request does not write", () => approvals.takeOutcomes(["s6"]));
+  await log.step("take s7 outcomes does not consume or rewrite the store", () => approvals.takeOutcomes(["s7"]));
+  await log.step("canonical delivery acknowledges s7 outcomes, dropping every told request (s6's too)", () => approvals.acknowledge(["s7"], ["h-untold"]));
 
   await log.step("write a version 2 store", () => writeFile(path, JSON.stringify({ version: 2, requests: [] })));
   await log.step("read of version 2 is refused", () => approvals.pending(), "refused");
