@@ -1,5 +1,7 @@
 import type { TaskWorkerControl, TaskControlRefusalReason } from "../../kernel/delegation/worker-contract.js";
-import type { InputEnvelope, InputDelivery } from "../../kernel/host/input-admission.js";
+import type { InputEnvelope, InputDelivery, InputTrigger } from "../../kernel/host/input-admission.js";
+import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
+import type { SettingsOutcomeMessage } from "../../kernel/settings/tool-contract.js";
 import type { ImageContent } from "../../kernel/pi/ai.js";
 import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
@@ -145,6 +147,8 @@ export interface HomeOwnerOptions {
   taskDiagnostic?: (record: HomeTaskDiagnostic) => void;
   /** Knowledge supplies the learned profile section of Home's system prompt. */
   knowledge: () => KnowledgeService | undefined;
+  /** The settings approvals owner: Home's settled requests wake it as their own turn (#1642). */
+  settingsOutcomes?: () => Pick<SettingsChangePath, "hasUntoldOutcomes" | "takeOutcomes" | "returnOutcomes" | "onOutcome"> | undefined;
 }
 
 /** Tron Home's neutral workspace. It is never part of a Project, so project
@@ -205,6 +209,9 @@ export class HomeOwner {
    * asks for another attempt when it ends, so a refused or failed wake cannot
    * retry itself in a loop. */
   private lastWakeDelivered = false;
+  /** Settings outcomes a wake took as its trigger, returned if the trigger never lands. */
+  private readonly settingsTriggers = new Map<string, SettingsOutcomeMessage>();
+  private settingsWatch: { owner: object; stop: () => void } | undefined;
 
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
@@ -536,19 +543,33 @@ export class HomeOwner {
     return (await this.tasks.recoveryStatus()).available;
   }
 
-  async admitTaskResults(sessionId: string, operationId: string, delivery: InputDelivery, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<InputEnvelope>): Promise<HomeWakeTrigger | undefined> {
+  async admitTaskResults(sessionId: string, operationId: string, delivery: InputDelivery, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<InputEnvelope>): Promise<HomeWakeTrigger | InputTrigger | undefined> {
     const route = this.wakeRoute(sessionId);
-    if (!route?.enabled || !(await this.inboxAvailable())) return undefined;
-    await this.inbox.recover(route);
-    return this.inbox.admit(route, operationId, delivery, append, envelope);
+    if (!route?.enabled) return undefined;
+    let trigger: HomeWakeTrigger | undefined;
+    // Task results need the task namespace's proof; settings outcomes have their own store.
+    if (await this.inboxAvailable()) {
+      await this.inbox.recover(route);
+      trigger = await this.inbox.admit(route, operationId, delivery, append, envelope);
+    }
+    if (trigger || delivery !== "wake") return trigger;
+    // No task result: a settled settings request is the wake's trigger. A task-result wake and
+    // a user turn hear the same outcomes from the settings tool's agent start instead.
+    const message = await this.options.settingsOutcomes?.()?.takeOutcomes(sessionId);
+    if (!message) return undefined;
+    this.settingsTriggers.set(message.details.eventId, message);
+    return { taskId: message.details.taskId, message };
   }
 
   /** A wake whose trigger never reached the canonical session goes back to pending. */
   async releaseWakeTrigger(taskId: string, operationId: string, eventId: string): Promise<void> {
+    const settings = this.settingsTriggers.get(eventId);
+    if (settings) { this.settingsTriggers.delete(eventId); await this.options.settingsOutcomes?.()?.returnOutcomes(settings); return; }
     await this.inbox.releaseTrigger(taskId, operationId, eventId);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
+    this.settingsTriggers.clear();
     const route = this.wakeRoute(sessionId);
     if (route && await this.inboxAvailable()) await this.inbox.settle(route, operationId);
   }
@@ -561,7 +582,17 @@ export class HomeOwner {
     if (by === "user" || this.lastWakeDelivered) this.requestWake();
   }
 
+  /** The settings owner nudges Home when a request it made settles; the outcome itself
+   * stays in the approvals store until a wake or turn takes it. */
+  private watchSettingsOutcomes(): void {
+    const owner = this.options.settingsOutcomes?.();
+    if (!owner || this.settingsWatch?.owner === owner) return;
+    this.settingsWatch?.stop();
+    this.settingsWatch = { owner, stop: owner.onOutcome(sessionId => { if (this.wakeRoute(sessionId)?.enabled) this.requestWake(); }) };
+  }
+
   private requestWake(): void {
+    this.watchSettingsOutcomes();
     this.wakeRequested = true;
     // A drain that fails must not become an unhandled rejection: the attempt is
     // reported and no further attempt starts until the next event.
@@ -589,16 +620,17 @@ export class HomeOwner {
    * notice; an undeliverable result says Home is waiting. */
   private async wakeOnce(): Promise<"busy" | "done"> {
     const record = this.record;
-    if (this.unavailable || !record || !(await this.inboxAvailable())) return "done";
+    if (this.unavailable || !record) return "done";
     const sessionId = homeSessionId(record);
-    if (!(await this.inbox.pendingTasks(record.homeId)).length) { this.lastWakeDelivered = false; return "done"; }
+    const tasks = await this.inboxAvailable() && (await this.inbox.pendingTasks(record.homeId)).length > 0;
+    if (!tasks && !(await this.options.settingsOutcomes?.()?.hasUntoldOutcomes(sessionId))) { this.lastWakeDelivered = false; return "done"; }
     // An attempt runs after recovery, so the task namespace and the session catalog are settled here.
     // A Home that never wrote its conversation has no session to run; a wake materializes a reserved successor (#1518).
     const refusal = this.reservedChapter(sessionId) === undefined && !(await this.options.runtimes.sessionPresent(sessionId)) ? "unavailable" : await this.homeRefusal(record);
     if (refusal) {
       this.lastWakeDelivered = false;
       this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: refusal });
-      await this.inbox.pushPending(record.homeId, "task");
+      if (tasks) await this.inbox.pushPending(record.homeId, "task");
       return "done";
     }
     let delivered: boolean;
@@ -613,13 +645,13 @@ export class HomeOwner {
       }
       this.lastWakeDelivered = false;
       this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: "failed" });
-      await this.inbox.pushPending(record.homeId, "waiting");
+      if (tasks) await this.inbox.pushPending(record.homeId, "waiting");
       return "done";
     }
     this.lastWakeDelivered = delivered;
     if (!delivered) {
       this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: "nothing-deliverable" });
-      await this.inbox.pushPending(record.homeId, "waiting");
+      if (tasks) await this.inbox.pushPending(record.homeId, "waiting");
     } else {
       this.options.diagnostic?.({ outcome: "wake", decision: "admitted", reason: "delivered" });
     }

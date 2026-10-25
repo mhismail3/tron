@@ -12,7 +12,7 @@ import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
 import type { ChangeEntry } from "../kernel/settings/settings-record.js";
-import { SETTINGS_OUTCOME_MESSAGE } from "./tron-settings-extension.js";
+import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/settings/tool-contract.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
@@ -159,7 +159,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
     const first = requests[0]!;
     const turn = first.slice(first.findLastIndex(message => message.role === "assistant") + 1);
-    const outcomes = turn.filter(message => message.role === "user" && text(message).startsWith("Settings change ")).map(text);
+    const outcomes = turn.filter(message => message.role === "user" && text(message).startsWith("Settings request ")).map(text);
     return { results, outcomes };
   }
   const settle = (results: Array<{ tool: string; details?: Record<string, unknown> }>) => results.find(result => result.tool === "settings")!.details!;
