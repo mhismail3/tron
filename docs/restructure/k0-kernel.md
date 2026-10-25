@@ -14,7 +14,7 @@ same ordering, sync/async shape and failure handling.
 | `RuntimeSlot` (11,165 lines) builds the Pi runtime, module host, Home profile, request pipeline and task-worker role in one closure | `kernel/run/runtime-slot.ts:2212-2608` (`runtimeFactory`) |
 | Slot dependencies: 60 fields (18 `home*`, plus `validateTaskMarker`); hooks: 10 (3 Home); 14 more branches on `liveProfile()` | `kernel/run/runtime-slot.ts:522-635`, `:455-486`, `:1290-10431` |
 | The registry (5,030 lines) is also a composition root: it builds Swift apps, display, workspace, model queues and `HomeOwner`, and passes itself to Home | `kernel/session/runtime-registry.ts:762-866` (`taskSessions: this` `:865`) |
-| Home and automations reach the concrete registry | `modules/home/home-owner.ts:162`, `modules/home/home-task-dispatcher.ts:217`, `modules/home/home-session-read.ts:29`, `sessions/delegation-operations.ts:20` |
+| Home and automations reach the concrete registry | `modules/home/home-owner.ts:162`, `modules/home/home-task-dispatcher.ts:217`, `modules/home/home-session-read.ts:29`, `kernel/delegation/delegation-operations.ts:20` |
 | The module host is one interface carrying every module's service | `extensions/tron-modules.ts:32-80` (`TronModuleHost`), lists `:102-224`, `:236-301` |
 | Upward edges in the layer ratchet | `gateway/run` → 13 L3/L4 modules, `gateway/extensions` → 11, `gateway/projection` → display (`packages/gateway/layer-baseline.json`) |
 | Pi: 50 production files import runtime values (39 more types only), plus 4 `import.meta.resolve` sites | §4 |
@@ -191,7 +191,7 @@ theme set at module load (`sessions/semantic-ui-broker.ts:61`), which becomes an
 ## 5. Home: generic delegation versus Home policy
 
 Automations already use the worker-session boundary (`automations/automation-executor.ts` via
-`sessions/delegation-operations.ts`), so it is generic. Plan §5.2 puts the "generic parts" of
+`kernel/delegation/delegation-operations.ts`), so it is generic. Plan §5.2 puts the "generic parts" of
 `home-task-*` in K5; the line below is what is generic.
 
 | `kernel/delegation` (generic) | `modules/home` (policy) |
@@ -210,6 +210,12 @@ Automations already use the worker-session boundary (`automations/automation-exe
 implemented on `SessionOperations` (the last three by Home over K1 `replaceRuntime` and
 `retire`); the second becomes `DelegationOperations` (`acquire` `:265`, `readTaskEvidence`
 `:510`, recovery, `admitTaskWorkerChoice` `runtime-registry.ts:3012`).
+The current shared service is `RuntimeRegistry.delegation`; the §3 `GatewayHost`
+operations sketch remains a target, not the current platform/contract-only host.
+Home's dispatcher still uses the concrete Registry for native evidence/projection
+and admission access. The sole held-turn/observer owner also remains native in
+`run-terminal.ts`; #1972 tracks its atomic K5 transfer and observer-schema approval.
+Neither a second facade nor compatibility state stands in for those remaining seams.
 
 Persisted names never change in Phase 2: custom entry types (`HOME_TASK_MARKER`,
 `HOME_TASK_REPORT`, `tron.home-task-report-reminder.v1`), receipt types and store paths keep
