@@ -10,7 +10,11 @@ final class TronChatErrorsPreviewTests: XCTestCase {
                                        "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
                 if dark { app.launchArguments.append("-error-preview-dark") }
                 app.launch()
-                _ = app.staticTexts["Design preview · Synthetic errors"].waitForExistence(timeout: 20)
+                if surface == "pills" {
+                    _ = app.staticTexts["Design preview · Synthetic errors"].waitForExistence(timeout: 20)
+                } else {
+                    _ = app.buttons["Done"].waitForExistence(timeout: 20)
+                }
                 let attachment = XCTAttachment(screenshot: app.screenshot())
                 attachment.name = "chat-errors-\(surface)-\(dark ? "dark" : "light")"
                 attachment.lifetime = .keepAlways

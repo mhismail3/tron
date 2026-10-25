@@ -35,6 +35,15 @@ export function redactedUpstreamError(raw: string): string {
   return redactCredentials(redact(raw));
 }
 
+/** Account endpoints may only infer credential/plan facts from these typed
+ * refusals, never from general prose such as an edge page's "unauthorized". */
+export function upstreamAccountRefusal(body: unknown): "entitlement" | "credential" | undefined {
+  const type = object(object(body)?.error)?.type;
+  if (type === "EntitlementError") return "entitlement";
+  if (type === "AuthError") return "credential";
+  return undefined;
+}
+
 export function upstreamErrorInfo(raw: string, provider: string): UpstreamErrorInfo {
   const safe = redactedUpstreamError(raw);
   let root: Record<string, unknown> | undefined;
@@ -48,11 +57,12 @@ export function upstreamErrorInfo(raw: string, provider: string): UpstreamErrorI
   const httpStatus = numericStatus && numericStatus >= 400 && numericStatus <= 599 ? numericStatus
     : Number(safe.match(/(?:^|\bHTTP(?:\/\d(?:\.\d)?)?\s*|\bstatus(?:\s+code)?\s*[:=]?\s*)([45]\d\d)\b/iu)?.[1]) || undefined;
   const text = `${type ?? ""} ${message}`;
+  const accountRefusal = upstreamAccountRefusal({ error });
   const name = ({ anthropic: "Anthropic", openai: "OpenAI", "openai-codex": "OpenAI", "opencode-go": "OpenCode Go", opencode: "OpenCode" } as Record<string, string>)[provider] ?? (provider || "The provider");
   let category: UpstreamErrorInfo["category"] = "unknown";
   let friendly = message;
-  if (/EntitlementError/iu.test(type ?? "")) { category = "entitlement"; friendly = `${name} requires an active subscription`; }
-  else if (httpStatus === 401 || /AuthError|authentication_error|invalid_api_key|unauthorized/iu.test(text)) { category = "authentication"; friendly = `Authentication failed for ${name}`; }
+  if (accountRefusal === "entitlement") { category = "entitlement"; friendly = `${name} requires an active subscription`; }
+  else if (accountRefusal === "credential" || httpStatus === 401 || /authentication_error|invalid_api_key|unauthorized/iu.test(text)) { category = "authentication"; friendly = `Authentication failed for ${name}`; }
   else if (httpStatus === 403 || /permission_error|permission denied|forbidden/iu.test(text)) { category = "forbidden"; friendly = `Access denied by ${name}`; }
   else if (/overload|engine_overloaded/iu.test(text) || httpStatus === 529) { category = "overloaded"; friendly = `${name} is overloaded`; }
   else if (/abort|cancelled|canceled/iu.test(text)) { category = "aborted"; friendly = "Request cancelled"; }

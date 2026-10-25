@@ -24,7 +24,7 @@ export function redactCredentials(value: string): string {
  * whose field names it as a credential (including prefixed header/SDK names). */
 export function redactCredentialField(key: string, value: unknown): unknown {
   const normalized = key.replace(/([a-z0-9])([A-Z])/gu, "$1_$2");
-  if (/(?:^|[-_])(?:api[-_]?key|authorization|password|secret|credential|token|cookie|set[-_]cookie)$/iu.test(normalized)) return "[REDACTED]";
+  if (/(?:^|[-_])(?:key|api[-_]?key|authorization|password|secret|credential|token|cookie|set[-_]cookie)$/iu.test(normalized)) return "[REDACTED]";
   return typeof value === "string" ? redactCredentials(redact(value)) : value;
 }
 

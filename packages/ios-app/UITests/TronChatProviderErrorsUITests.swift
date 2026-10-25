@@ -49,6 +49,12 @@ final class TronChatProviderErrorsUITests: XCTestCase {
         keep(app, "mixed-raw-text")
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "chat-error-summary", "3 errors · 2 distinct errors")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.buttons["Done"].exists, "Live update must keep the same sheet open")
+        app.swipeUp()
+        let occurrence = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "The connection to OpenAI timed out")).firstMatch
+        occurrence.tap()
+        XCTAssertTrue(raw.waitForNonExistence(timeout: 10), "Collapsing an occurrence hides only its details")
+        occurrence.tap()
+        XCTAssertTrue(raw.waitForExistence(timeout: 10), "Expanding restores the full raw error")
     }
 
     @MainActor private func launch() -> XCUIApplication {
