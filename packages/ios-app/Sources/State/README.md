@@ -6,7 +6,8 @@ The app's authoritative UI projection and its owners: the Gateway lifecycle, the
 the dashboard catalog, accepted-mutation receipts, drafts, and the per-domain coordinators that
 feature UI reads. Canonical truth stays in the Gateway and Pi; everything here is a bounded,
 disposable projection or an in-flight command owner. The `ios-app/state` module owns this
-folder and [`Kernel`](../Kernel/) through [`state.module.json`](../state.module.json).
+folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) through
+[`state.module.json`](../state.module.json).
 
 ## Owns
 
@@ -18,7 +19,7 @@ folder and [`Kernel`](../Kernel/) through [`state.module.json`](../state.module.
 | `SessionPresentationStore` | The mounted session: target, subscription lease, synchronization, cursor, paging, presentation lease, process activity, session-keyed secondary reads. |
 | `SessionCatalogCoordinator`, `AutomationDashboardPreferencesOwner` (`DashboardStateOwners`) | Dashboard rows per `(profileID, sessionID)`; Automations sheet preferences. |
 | [`ConfirmedMutationExecutor`](../Kernel/ConfirmedMutationExecutor.swift), `SessionMutationService`, `SessionImportCoordinator` | Kernel receipt policy for every mutation; session command DTOs; file import under one captured lifecycle. |
-| `ComposerDraftCoordinator`, `ComposerDraftStore` | Composer text, staged resources, annotations, attachments, uploads, submission. |
+| `ComposerDraftCoordinator`, [`ComposerDraftStore`](../Features/Chat/State/ComposerDraftStore.swift) | Composer text, staged resources, annotations, attachments, uploads, submission. |
 | `ChatMediaLoader`, `SessionExportArtifactStore` | Transcript media by `(profile, lifecycle, session, blob)`; photo decoding preflights dimensions/component depth against 64 MiB, then verifies actual bytes; export artifacts. |
 | `TerminalCoordinator`, `TerminalReducer` | Session terminals: wire, presentation intents, attach/replay, resize. |
 | `MacTerminalController`, `MacTerminalEnrollmentStore` | Mac Terminal enrollment and shells ([Terminal](../UI/Terminal/README.md)). |

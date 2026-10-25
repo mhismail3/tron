@@ -3,6 +3,7 @@
   "owns": [
     "State/**",
     "Kernel/**",
+    "Features/Chat/State/**",
     "state.module.json"
   ]
 }
