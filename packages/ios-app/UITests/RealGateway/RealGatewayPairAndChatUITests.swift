@@ -1451,7 +1451,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     func testRoutineEditorsDisappearAndExplicitGlobalValueResets() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let file = URL(fileURLWithPath: fixture.agentDirectory).appendingPathComponent("settings.json")
+        let agentDirectory = try XCTUnwrap(fixture.agentDirectory)
+        let file = URL(fileURLWithPath: agentDirectory).appendingPathComponent("settings.json")
         var document = try globalSettingsDocument(fixture.agentDirectory)
         document["retry"] = ["maxRetries": 0]
         try JSONSerialization.data(withJSONObject: document).write(to: file)
