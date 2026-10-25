@@ -255,6 +255,48 @@ class ExternalVerificationTests(VerifyCase):
         self.assertNotIn("Traceback", malformed.stderr)
 
 
+class GatewayDependenciesTests(VerifyCase):
+    def test_gateway_requires_local_pinned_compiler_before_running_checks(self) -> None:
+        r = self.repo
+        r.write("packages/gateway/compiler.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write("packages/gateway/package.json", json.dumps({"devDependencies": {"typescript": "7.0.2"},
+                                                              "scripts": {"check": "tsc --version"}}))
+        shutil.copy2(ROOT / "scripts/tron-node", r.path / "scripts/tron-node")
+        r.write(".node-version", (ROOT / ".node-version").read_text())
+        tooling = json.loads((r.path / "tooling.module.json").read_text())
+        tooling["owns"].extend(["scripts/tron-node", ".node-version"])
+        r.write("tooling.module.json", json.dumps(tooling))
+        r.env["TRON_NODE_BIN"] = subprocess.check_output([str(ROOT / "scripts/tron-node")], text=True).strip()
+        r.write("packages/gateway/test-compiler.py", PASSING)
+        r.write(".gitignore", "test-results/\npackages/gateway/node_modules/\n")
+        r.commit("Gateway compiler consumer")
+        # A global compiler must not satisfy a checkout with no dependencies.
+        global_bin = Path(self.temp.name) / "bin"
+        global_bin.mkdir()
+        compiler = global_bin / "tsc"
+        compiler.write_text("#!/bin/sh\necho global-compiler-was-used\nexit 0\n")
+        compiler.chmod(0o755)
+        r.env["PATH"] = str(global_bin) + os.pathsep + r.env["PATH"]
+        missing = r.verify("--module", "gateway/compiler")
+        self.assertEqual(missing.returncode, 2, missing.stdout + missing.stderr)
+        self.assertIn("Gateway TypeScript", missing.stderr)
+        self.assertIn("scripts/tron-node exec npm --prefix packages/gateway ci --include=dev", missing.stderr)
+        self.assertNotIn("global-compiler-was-used", missing.stdout + missing.stderr)
+        # Stale package metadata must not masquerade as the repository pin.
+        r.write("packages/gateway/node_modules/typescript/package.json", json.dumps({"version": "0.0.0"}))
+        stale = r.verify("--module", "gateway/compiler")
+        self.assertEqual(stale.returncode, 2, stale.stdout + stale.stderr)
+        self.assertIn("installed 0.0.0, pinned 7.0.2", stale.stderr)
+        # A matching package without its npm executable link is still unusable.
+        r.write("packages/gateway/node_modules/typescript/package.json", json.dumps({"version": "7.0.2"}))
+        broken = r.verify("--module", "gateway/compiler")
+        self.assertEqual(broken.returncode, 2, broken.stdout + broken.stderr)
+        self.assertIn("local executable", broken.stderr)
+        # Planning is read-only and does not require an installed toolchain.
+        planned = r.verify("--module", "gateway/compiler", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+
+
 class SelectionTests(VerifyCase):
     def test_one_module_change_runs_only_its_tests_and_a_failure_fails_loudly(self) -> None:
         r = self.repo
