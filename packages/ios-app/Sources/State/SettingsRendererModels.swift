@@ -3,16 +3,16 @@ import TronMobileCore
 
 /// The renderer contract this app speaks (gateway docs/settings-model.md 7.5).
 /// It names only the controls implemented here: the Gateway serves any other
-/// control's declared fallback, or read-only, so a key never disappears.
+/// control's declared fallback, or read-only. The Gateway owns row exposure.
 enum SettingsRendererContract {
     static let version = 1
-    static let controls = ["toggle", "choice", "number", "text", "secret", "list", "checklist", "catalog", "readOnly"]
+    static let controls = ["toggle", "choice", "text", "secret", "list", "checklist", "catalog", "readOnly"]
 }
 
 /// The control one row renders with. A control this app does not implement, or
 /// a missing presentation, is read-only: the row still shows its `display`.
 enum SettingsRowControl: String, Equatable, Sendable {
-    case toggle, choice, number, text, secret, list, checklist, catalog, readOnly
+    case toggle, choice, text, secret, list, checklist, catalog, readOnly
 
     init(negotiated control: String?) {
         self = control.flatMap(Self.init(rawValue:)) ?? .readOnly
@@ -32,7 +32,7 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
     let order: Int
     let importance: String
     /// The negotiated control, already a control the client named or a fallback.
-    let control: String
+    let control: String?
     let note: String?
     let valueKind: String?
     /// Static choices, or field names/labels for a `numberMap` list.
@@ -128,7 +128,6 @@ struct SettingsOptionsResponse: Decodable, Equatable, Sendable {
     let source: String
     let dependsOn: [String]
     let options: [SettingsOption]
-    let range: SettingsRange?
     let nextCursor: String?
 }
 

@@ -96,7 +96,6 @@ struct SettingsRendererRow: View {
         }
         return switch control {
         case .toggle: "switch.2"
-        case .number: "number"
         case .text: "character.cursor.ibeam"
         case .secret: "key"
         case .list: "list.bullet"
@@ -104,10 +103,6 @@ struct SettingsRendererRow: View {
         case .catalog: "square.stack.3d.up"
         case .choice, .readOnly: "slider.horizontal.3"
         }
-    }
-
-    private var numberRange: SettingsRange? {
-        presentation?.optionsSource == nil ? presentation?.range : options?.range
     }
 
     var body: some View {
@@ -161,14 +156,14 @@ struct SettingsRendererRow: View {
                 .accessibilityIdentifier("\(settingsRowIdentifier(setting))-project")
             ) }
         }
-        guard canReset && editable && control != .readOnly else { return { AnyView(EmptyView()) } }
+        guard canReset && editable && (control != .readOnly || presentation?.control == nil) else { return { AnyView(EmptyView()) } }
         return { AnyView(resetButton) }
     }
 
     /// Session and Home overrides name their state beside the title, never in
     /// the value's trailing room (#1651); Global values are not overrides.
     private var overriddenStatus: String? {
-        !modelConfiguration && canReset && editable && control != .readOnly && setting.projectSetting == nil
+        !modelConfiguration && canReset && editable && (control != .readOnly || presentation?.control == nil) && setting.projectSetting == nil
             && target.objectValue?["kind"]?.stringValue != "global" ? "Overridden" : nil
     }
 
@@ -190,7 +185,6 @@ struct SettingsRendererRow: View {
 
     /// An absent optional value is not a second provenance statement.
     private var display: String {
-        if modelConfiguration && setting.key == "model.contextWindow" && setting.value == nil { return "Default" }
         return setting.value == nil && setting.display == "Not set" && presentation?.redacted != true ? "—" : setting.display
     }
 
@@ -231,31 +225,6 @@ struct SettingsRendererRow: View {
                                                                 disabledReason: $0.disabledReason) },
                               selected: setting.value) { onChange($0) }
             }
-        case .number:
-            if let range = numberRange, range.supportsIntegerSlider {
-                if case .number(let raw) = setting.value, let value = Int(exactly: raw) {
-                    SettingsNumberSelectionRow(title: title, value: value, display: display, range: range,
-                                               icon: icon, information: subtitle) {
-                        onChange(.number(Double($0)))
-                    }
-                    .controlSize(.small)
-                } else if setting.value == nil {
-                    // Unset: the slider still opens. A token limit's unset value is the
-                    // served maximum (the model's capacity), its reference "Default".
-                    let tokens = range.unit == "tokens"
-                    SettingsNumberSelectionRow(title: title, value: Int(tokens ? range.max : range.min), display: display,
-                                               range: range, icon: icon, information: subtitle,
-                                               actionDisplay: display,
-                                               referenceValue: tokens ? Int(range.max) : nil) {
-                        onChange(.number(Double($0)))
-                    }
-                    .controlSize(.small)
-                } else {
-                    readOnlyRow
-                }
-            } else {
-                readOnlyRow
-            }
         case .text:
             SettingsRendererTextRow(title: title, icon: icon, subtitle: entrySubtitle, example: presentation?.entry?.example,
                                     value: setting.value?.stringValue ?? "", onCommit: { onChange(.string($0)) })
@@ -283,7 +252,7 @@ struct SettingsRendererRow: View {
                 let values = setting.value?.arrayValue ?? []
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     SettingsListEditor(title: title, help: presentation?.help ?? "", entry: presentation?.entry,
-                                       values: values.compactMap(\.stringValue), entryPicker: modelEntryPicker, onChange: onChange)
+                                       values: values.compactMap(\.stringValue), onChange: onChange)
                 }
             } else {
                 readOnlyRow
@@ -322,18 +291,6 @@ struct SettingsRendererRow: View {
             }
         case .readOnly:
             readOnlyRow
-        }
-    }
-
-    /// A list of `provider/id` model references (a model queue) adds from the
-    /// shared model picker, limited to the models the Gateway serves for the key.
-    private var modelEntryPicker: ((@escaping (String) -> Void) -> AnyView)? {
-        guard presentation?.optionsSource?.name == "catalog.models" else { return nil }
-        return { add in
-            AnyView(SettingsModelPicker(setting: setting, target: target, title: "Add model") { value in
-                guard let provider = value.objectValue?["provider"]?.stringValue, let id = value.objectValue?["id"]?.stringValue else { return }
-                add("\(provider)/\(id)")
-            })
         }
     }
 

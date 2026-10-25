@@ -223,10 +223,14 @@ Words and values come from the schema and resolver; iOS decides only layout.
 `settings.resolve` serves sections (Model, Workers & delegation, Compaction, Tools,
 Agent changes, Connection, Trusted Projects, Mac Terminal, Accounts, Sources, Storage) and badges `{ kind, label, detail?, action? }`
 (Layer, Source, Scope, Authority, State; unknown kinds render neutrally; actions go through
-`settings.change`). Controls: `toggle`, `choice`, `number`, `text`, `secret`, `list`,
+`settings.change`). Controls: `toggle`, `choice`, `text`, `secret`, `list`,
 `checklist`, `catalog`, `readOnly`; the client sends what it implements and gets the declared
 control, its `fallback`, or `readOnly` with "Update Tron to edit". Stopped-runtime settings with
-no writer are not Settings rows. `sessionOverridable`/`projectSettable` grant scopes; `editable`
+no writer are not Settings rows. A declaration without a `control` has no routine editing row:
+renderer responses retain only its explicit local values (read-only with independent Reset/Revert)
+and Project inspection. Their presentation omits `control`; this does not grant a writer or scope.
+An empty section has no navigation destination. Direct chat model/thinking, safety controls,
+approvals and Changes/undo remain. `sessionOverridable`/`projectSettable` grant scopes; `editable`
 is the target's binding/writer capability, not a second client-side permission list. Override
 presence is explicit even for equal/false/zero values. Applied Project values serve their exact
 file/key; ignored fields serve bounded value-free diagnostics. Untrusted/unreadable Project notices

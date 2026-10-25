@@ -87,7 +87,8 @@ export interface KeyDeclaration {
   help: string;
   order: number;
   importance: "essential" | "advanced";
-  control: Control;
+  /** Declared editing surface. Absent keys retain inspection and explicit reset only. */
+  control?: Control;
   fallback?: Control;
   confirm?: string;
   /** What to type into a text field or a list's new value (#939): the format in
@@ -97,14 +98,6 @@ export interface KeyDeclaration {
 }
 
 export interface EntryGuidance { hint: string; example: string }
-
-/** Search-path entries, as pi resolves them (pi docs/settings.md "Resources"). */
-const SEARCH_PATH_ENTRY: Record<"extensions" | "skills" | "prompts" | "themes", EntryGuidance> = {
-  extensions: { hint: "An extension file or folder on the Mac. Start with ~ or /.", example: "~/Code/pi-extensions" },
-  skills: { hint: "A skill file or folder on the Mac. Start with ~ or /.", example: "~/Code/skills" },
-  prompts: { hint: "A prompt-template file or folder on the Mac. Start with ~ or /.", example: "~/Code/prompts" },
-  themes: { hint: "A theme file or folder on the Mac. Start with ~ or /.", example: "~/Code/themes/dusk.json" },
-};
 
 /** The maintainer, Home, an ordinary chat's agent and a task worker. A key an
  * agent may change, a task worker may change too (decision 34). */
@@ -287,20 +280,19 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       layers: { session: { store: "session", field: "contextWindow" }, ...both(pi("modelContextWindows", "{model}")) },
       timing: "fixed", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
       label: "Context window", help: "Tokens of conversation the model is given.",
-      order: 30, importance: "essential", control: "number",
+      order: 30, importance: "essential",
     },
     {
       id: "model.thinkingBudgets", sessionOverridable: false, projectSettable: false, group: "workers", type: thinkingBudgetsType(),
       layers: both(pi("thinkingBudgets")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ANY_ACTOR,
       label: "Thinking budgets", help: "Token budget per thinking level, for models that take one.", order: 60, importance: "advanced",
-      control: "list",
     },
     {
       id: "model.thinking[role=summarizer]", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "context", fixed: { role: "summarizer" },
       type: types.choice([{ value: "inherit", label: "Same as chat", detail: "Uses the chat's own thinking level" }, ...THINKING], true),
       layers: both(pi("compaction", "thinkingLevel")), defaultValue: "inherit", timing: "live", effect: "next-compaction", floor: "quiet",
       writers: ANY_ACTOR, label: "Summary thinking", help: "Thinking level for compaction summaries.", order: 80,
-      importance: "advanced", control: "choice",
+      importance: "advanced",
     },
     ...MODEL_QUEUE_ROLES.map((role, index): KeyDeclaration => ({
       // An ordered fallback queue (settings-model.md 6.3): the first available
@@ -311,14 +303,13 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         home: { store: "home", path: ["modelQueue", role] }, global: { store: "gateway", path: ["modelQueues", role] } },
       timing: "live", effect: role === "worker" ? "delegate" : role === "subagent" ? "next-request" : "next-memory-pass",
       floor: "notify", writers: ["ui", "home"], label: MODEL_QUEUE_LABELS[role].label, help: MODEL_QUEUE_LABELS[role].help,
-      order: 40 + index * 2, importance: "essential", control: "list", fallback: "readOnly",
-      entry: { hint: "A provider/model ID. Tron uses the first available model in this order.", example: "anthropic/claude-haiku-5-5" },
+      order: 40 + index * 2, importance: "essential",
     })),
     {
       id: "model.thinking[role=worker]", sessionOverridable: true, projectSettable: false, group: "workers", fixed: { role: "worker" }, type: sameAsHomeChoice(thinkingType),
       layers: { home: { store: "home", path: ["thinking", "worker"] }, global: { store: "gateway", path: ["workerThinking"] } }, defaultValue: { sameAs: "home" },
       timing: "fixed", effect: "delegate", floor: "notify", writers: ["ui", "home"],
-      label: "Worker thinking", help: "The thinking level Home's task workers start with.", order: 41, importance: "essential", control: "choice",
+      label: "Worker thinking", help: "The thinking level Home's task workers start with.", order: 41, importance: "essential",
     },
     // Context -------------------------------------------------------------
     {
@@ -327,36 +318,35 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       // Global result at the operation boundary.
       layers: sessionPi("compaction", "enabled"), defaultValue: true, timing: "live", effect: "next-compaction", floor: "quiet",
       writers: ANY_ACTOR, label: "Automatic compaction", help: "Summarize older conversation when the context fills.",
-      order: 10, importance: "essential", control: "toggle",
+      order: 10, importance: "essential",
     },
     {
       id: "context.compaction.reserveTokens", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(1_024, 1_000_000, "tokens"),
       layers: { session: { store: "session-settings", path: ["compaction", "reserveTokens"] }, ...both({ store: "pi", path: ["compaction", "reserveTokens"], qualified: ["compaction", "modelOverrides", "{model}", "reserveTokens"] }) },
       defaultValue: 16_384, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
-      label: "Response reserve", help: "Tokens kept free for the reply. Compaction starts once the conversation fills the context window minus this.", order: 20, importance: "advanced", control: "number",
+      label: "Response reserve", help: "Tokens kept free for the reply. Compaction starts once the conversation fills the context window minus this.", order: 20, importance: "advanced",
     },
     {
       id: "context.compaction.keepRecentTokens", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
       layers: { session: { store: "session-settings", path: ["compaction", "keepRecentTokens"] }, ...both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }) },
       defaultValue: 20_000, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
-      label: "Kept after compaction", help: "The latest tokens of conversation kept word for word; older turns become a summary.", order: 30, importance: "advanced", control: "number",
+      label: "Kept after compaction", help: "The latest tokens of conversation kept word for word; older turns become a summary.", order: 30, importance: "advanced",
     },
     {
       id: "context.compaction.instructions", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.text(compactionInstructionLimit, { raw: true }),
       layers: sessionPi("compaction", "instructions"), defaultValue: "", timing: "live", effect: "next-compaction", floor: "notify", writers: ["ui", "home"],
-      label: "Summary instructions", help: "Extra instructions for compaction summaries.", order: 40, importance: "advanced", control: "text",
-      entry: { hint: "Plain sentences added to the summary prompt.", example: "Keep file paths and open decisions." },
+      label: "Summary instructions", help: "Extra instructions for compaction summaries.", order: 40, importance: "advanced",
     },
     {
       id: "context.branchSummary.reserveTokens", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.integer(1_024, 1_000_000, "tokens"),
       layers: both(pi("branchSummary", "reserveTokens")), defaultValue: 16_384, timing: "live", effect: "next-compaction", floor: "quiet",
       writers: ANY_ACTOR, label: "Branch summary reserve", help: "Tokens reserved when summarizing an abandoned branch.",
-      order: 50, importance: "advanced", control: "number",
+      order: 50, importance: "advanced",
     },
     {
       id: "context.images.autoResize", sessionOverridable: true, projectSettable: true, group: "tools", subgroup: "Images", type: types.boolean(),
       layers: sessionPi("images", "autoResize"), defaultValue: true, timing: "fixed", effect: "new-chat", floor: "quiet", writers: ANY_ACTOR,
-      label: "Resize images", help: "Shrink large images before they are sent.", order: 60, importance: "advanced", control: "toggle",
+      label: "Resize images", help: "Shrink large images before they are sent.", order: 60, importance: "advanced",
     },
     {
       id: "context.images.block", sessionOverridable: true, projectSettable: false, group: "tools", subgroup: "Images", type: types.boolean(["Blocked", "Allowed"]),
@@ -386,7 +376,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     {
       id: "tools.codemode.inlineBudget", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "tools", type: types.integer(0, 1_000_000, "bytes"),
       layers: both(pi("codemode", "inlineBudget")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ["ui", "home"],
-      label: "Inline budget", help: "Bytes of script output returned inline.", order: 30, importance: "advanced", control: "number",
+      label: "Inline budget", help: "Bytes of script output returned inline.", order: 30, importance: "advanced",
     },
     {
       id: "tools.shell.path", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "tools", type: types.text(4_096),
@@ -462,43 +452,43 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     {
       id: "run.queue.steeringMode", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Queue", type: types.choice(QUEUE),
       layers: sessionPi("steeringMode"), defaultValue: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
-      label: "Steering delivery", help: "How queued steering messages reach a running turn.", order: 10, importance: "advanced", control: "choice",
+      label: "Steering delivery", help: "How queued steering messages reach a running turn.", order: 10, importance: "advanced",
     },
     {
       id: "run.queue.followUpMode", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Queue", type: types.choice(QUEUE),
       layers: sessionPi("followUpMode"), defaultValue: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
-      label: "Follow-up delivery", help: "How queued follow-up messages are delivered after a turn.", order: 20, importance: "advanced", control: "choice",
+      label: "Follow-up delivery", help: "How queued follow-up messages are delivered after a turn.", order: 20, importance: "advanced",
     },
     {
       id: "run.retry.enabled", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.boolean(),
       layers: sessionPi("retry", "enabled"), defaultValue: true, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
-      label: "Retry", help: "Retry a failed model request.", order: 30, importance: "advanced", control: "toggle",
+      label: "Retry", help: "Retry a failed model request.", order: 30, importance: "advanced",
     },
     {
       id: "run.retry.maxRetries", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
       layers: sessionPi("retry", "maxRetries"), defaultValue: 3, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
-      label: "Retries", help: "How many times a failed request is retried.", order: 40, importance: "essential", control: "number",
+      label: "Retries", help: "How many times a failed request is retried.", order: 40, importance: "essential",
     },
     {
       id: "run.retry.baseDelayMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
       layers: sessionPi("retry", "baseDelayMs"), defaultValue: 2_000, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
-      label: "Retry delay", help: "The first delay between retries; later delays grow.", order: 50, importance: "advanced", control: "number",
+      label: "Retry delay", help: "The first delay between retries; later delays grow.", order: 50, importance: "advanced",
     },
     {
       id: "run.retry.provider.timeoutMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(1_000, 3_600_000, "ms"),
       layers: sessionPi("retry", "provider", "timeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
-      label: "Provider timeout", help: "The provider client's request timeout.", order: 60, importance: "advanced", control: "number",
+      label: "Provider timeout", help: "The provider client's request timeout.", order: 60, importance: "advanced",
     },
     {
       id: "run.retry.provider.maxRetries", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
       layers: sessionPi("retry", "provider", "maxRetries"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
-      label: "Provider retries", help: "Retries inside the provider client.", order: 70, importance: "advanced", control: "number",
+      label: "Provider retries", help: "Retries inside the provider client.", order: 70, importance: "advanced",
     },
     {
       id: "run.retry.provider.maxRetryDelayMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
       layers: sessionPi("retry", "provider", "maxRetryDelayMs"), defaultValue: 60_000, timing: "live", effect: "next-request", floor: "quiet",
       writers: ANY_ACTOR, label: "Provider retry delay cap", help: "The longest delay the provider client waits.",
-      order: 80, importance: "advanced", control: "number",
+      order: 80, importance: "advanced",
     },
     {
       id: "run.transport", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Connection",
@@ -509,17 +499,17 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         { value: "websocket-cached", label: "WebSocket (cached)", detail: "One WebSocket reused between requests" },
       ]),
       layers: sessionPi("transport"), defaultValue: "auto", timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
-      label: "Transport", help: "How requests reach the provider.", order: 90, importance: "essential", control: "choice",
+      label: "Transport", help: "How requests reach the provider.", order: 90, importance: "essential",
     },
     {
       id: "run.httpIdleTimeoutMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Connection", type: types.integer(1_000, 3_600_000, "ms"),
       layers: sessionPi("httpIdleTimeoutMs"), defaultValue: 300_000, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
-      label: "Idle timeout", help: "How long a silent HTTP stream may idle.", order: 100, importance: "advanced", control: "number",
+      label: "Idle timeout", help: "How long a silent HTTP stream may idle.", order: 100, importance: "advanced",
     },
     {
       id: "run.websocketConnectTimeoutMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Connection", type: types.integer(1_000, 300_000, "ms"),
       layers: sessionPi("websocketConnectTimeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
-      label: "WebSocket connect timeout", help: "How long a WebSocket connection may take to open.", order: 110, importance: "advanced", control: "number",
+      label: "WebSocket connect timeout", help: "How long a WebSocket connection may take to open.", order: 110, importance: "advanced",
     },
     {
       id: "run.httpProxy", sessionOverridable: false, projectSettable: false, group: "run", subgroup: "Connection", type: types.text(4_096), redacted: true,
@@ -535,14 +525,18 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       ]),
       layers: { global: pi("cacheWarming") }, defaultValue: "streaming", timing: "fixed", effect: "new-chat", floor: { widen: "notify", narrow: "quiet" },
       direction: (_b, a) => a === "idle" ? "widen" : "narrow", writers: ["ui", "home"],
-      label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced", control: "choice",
+      label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced",
     },
     // Sources -------------------------------------------------------------
     ...(["extensions", "skills", "prompts", "themes"] as const).map((name, index): KeyDeclaration => ({
       id: `sources.${name}`, sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", subgroup: "Search paths", type: types.stringList(500),
       layers: both(pi(name)), timing: "fixed", effect: "reload", floor: { widen: "notify", narrow: "quiet" }, direction: toolsDirection,
       writers: ["ui", "home"], label: name[0]!.toUpperCase() + name.slice(1), help: `Paths searched for ${name}.`,
-      order: 10 + index * 10, importance: "advanced", control: "list", entry: SEARCH_PATH_ENTRY[name],
+      order: 10 + index * 10, importance: "advanced",
+      ...(name === "extensions" ? {
+        control: "list" as const,
+        entry: { hint: "An extension file or folder on the Mac. Start with ~ or /.", example: "~/Code/pi-extensions" },
+      } : {}),
     })),
     {
       id: "sources.packages", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
