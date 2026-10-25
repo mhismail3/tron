@@ -1,0 +1,152 @@
+import { createHash, randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { GatewayError } from "../errors.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { readSecureJson } from "../util/secure-json.js";
+import { assertKnowledgeId, validateKnowledgeRecord, type KnowledgeRecord, type NoteContent } from "./knowledge-contract.js";
+
+export type ProfileFile = "core" | "home" | `scopes/${string}`;
+export const PROFILE_FILE_TAG = "home-file-";
+export const PROFILE_FILE_PATTERN = "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$";
+const FILE_NAME = new RegExp(PROFILE_FILE_PATTERN);
+export function validProfileFile(file: string): file is ProfileFile { return FILE_NAME.test(file); }
+export function profileFile(tags: readonly string[] = []): ProfileFile | undefined {
+  const labels = tags.filter(tag => tag.startsWith(PROFILE_FILE_TAG));
+  if (!labels.length) return undefined;
+  const file = labels[0]!.slice(PROFILE_FILE_TAG.length).replace(/^scopes-/, "scopes/");
+  if (labels.length !== 1 || !validProfileFile(file)) throw new GatewayError("invalid_request", "Profile note has invalid partition labels");
+  return file;
+}
+export function profileFileTags(tags: readonly string[], file?: ProfileFile): string[] {
+  return [...tags.filter(tag => !tag.startsWith(PROFILE_FILE_TAG)), ...(file ? [PROFILE_FILE_TAG + file.replace("/", "-")] : [])];
+}
+
+/** A native typed edit does not model owner labels/retirement; omission preserves them. */
+export function carryNoteMarks(current: KnowledgeRecord, content: NoteContent): NoteContent {
+  if (current.kind !== "note") return storedNoteContent(content);
+  const tags = content.tags ?? current.content.tags;
+  const retired = content.retired ?? current.content.retired;
+  const { retired: _named, ...rest } = content;
+  return { ...rest, ...(tags ? { tags } : {}), ...(retired ? { retired: true } : {}) };
+}
+export function storedNoteContent(content: NoteContent): NoteContent {
+  if (content.retired !== false) return content;
+  const { retired: _cleared, ...rest } = content;
+  return rest;
+}
+
+type Note = Extract<KnowledgeRecord, { kind: "note" }>;
+export interface ProfileAssignment { id: string; expectedRevision: string; file?: ProfileFile }
+export interface ProfilePartitionRequest { commandId: string; mode: "migrate" | "reorganize"; assignments: ProfileAssignment[] }
+export interface ProfilePartitionResult {
+  backup?: string;
+  changes: Array<{ id: string; beforeRevision: string; revisionId: string; beforeFile?: ProfileFile; file?: ProfileFile }>;
+}
+interface PartitionBackup {
+  version: 1;
+  digest: string;
+  assignments: ProfileAssignment[];
+  originals: Array<{ record: Note; history: KnowledgeRecord[] }>;
+  prepared: Note[];
+}
+interface PartitionAccess {
+  backupDirectory(): Promise<string>;
+  recordBytes: number;
+  notes(): AsyncIterable<KnowledgeRecord>;
+  excluded(note: Note): boolean;
+  history(id: string): AsyncIterable<KnowledgeRecord>;
+  write(record: Note, expectedRevision: string): Promise<void>;
+}
+const BACKUP_BYTES = 64 * 1_048_576;
+const refuse = (message: string): never => { throw new GatewayError("conflict", message); };
+
+/** Runs INSIDE KnowledgeStore's admitted SQL transaction. The backup is a bounded
+ * immutable recovery manifest, not another catalog: canonical heads stay in SQL.
+ * Prepared revision identities are durable before any body write, so a retry adopts
+ * every staged body instead of silently leaking precommit immutable revisions.
+ * Explicit recovery retries the same assignments; opening the store never migrates.
+ */
+export async function partitionProfileNotes(request: ProfilePartitionRequest, access: PartitionAccess): Promise<ProfilePartitionResult> {
+  if (request.mode !== "migrate" && request.mode !== "reorganize") refuse("Unknown profile partition operation");
+  if (request.assignments.length < 1 || request.assignments.length > 500) refuse("Partition requires 1 to 500 explicit assignments");
+  const assignments = request.assignments.map(item => ({ id: item.id, expectedRevision: item.expectedRevision, ...(item.file !== undefined ? { file: item.file } : {}) })).sort((a, b) => a.id.localeCompare(b.id));
+  if (new Set(assignments.map(item => item.id)).size !== assignments.length) refuse("Duplicate profile assignment");
+  for (const item of assignments) {
+    assertKnowledgeId(item.id, "profile note"); assertKnowledgeId(item.expectedRevision, "profile revision");
+    if (item.file !== undefined && !validProfileFile(item.file)) refuse("Invalid explicit profile partition");
+    if (request.mode === "migrate" && item.file === undefined) refuse("Migration requires a file for every note");
+  }
+  const digest = createHash("sha256").update(JSON.stringify({ mode: request.mode, assignments })).digest("hex");
+  const backup = join(await access.backupDirectory(), `${digest}.json`);
+  const saved = await readSecureJson<PartitionBackup>(backup, BACKUP_BYTES);
+  const notes: Note[] = [];
+  let activeBytes = 0;
+  for await (const note of access.notes()) {
+    if (note.kind !== "note" || note.scope !== "personal" || !note.content.tags?.includes("home-profile")) continue;
+    activeBytes += Buffer.byteLength(JSON.stringify(note));
+    if (activeBytes > BACKUP_BYTES || notes.length >= 500) refuse("Profile partition exceeds its bounded snapshot; no note was changed");
+    notes.push(note);
+  }
+  if (notes.some(note => access.excluded(note))) refuse("An excluded profile note needs an explicit eligibility decision before partitioning");
+  const current = new Map(notes.map(note => [note.id, note]));
+  if (request.mode === "migrate" && (notes.length !== assignments.length || notes.some(note => !assignments.some(item => item.id === note.id)))) refuse("Migration must explicitly assign every profile note, including inactive members");
+  let plan: PartitionBackup;
+  if (saved.present) {
+    plan = saved.value;
+    if (plan.version !== 1 || plan.digest !== digest || JSON.stringify(plan.assignments) !== JSON.stringify(assignments)) refuse("Profile backup does not match this migration");
+    for (const record of [...plan.prepared, ...plan.originals.flatMap(item => [item.record, ...item.history])]) validateKnowledgeRecord(record);
+    if (plan.prepared.length !== assignments.length || plan.originals.length !== assignments.length || plan.prepared.some((note, index) => note.id !== assignments[index]!.id || plan.originals[index]!.record.id !== note.id)) refuse("Incomplete profile backup");
+  } else {
+    if (assignments.every(item => current.has(item.id) && profileFile(current.get(item.id)!.content.tags) === item.file)) {
+      if (assignments.some(item => current.get(item.id)!.revisionId !== item.expectedRevision)) refuse("Profile assignment revision is stale");
+      return { changes: [] };
+    }
+    const originals = [];
+    const prepared = [];
+    let planBytes = 4_096 + Buffer.byteLength(JSON.stringify(assignments, null, 8));
+    const admit = (value: unknown) => {
+      planBytes += 256 + Buffer.byteLength(JSON.stringify(value, null, 8));
+      if (planBytes > BACKUP_BYTES) refuse("Profile backup exceeds its bound; no note was changed");
+    };
+    for (const item of assignments) {
+      const note = current.get(item.id);
+      if (!note || note.revisionId !== item.expectedRevision) refuse("Profile assignment revision is stale or unavailable");
+      const next = profileFile(note!.content.tags) === item.file ? note! : { ...note!, revisionId: randomUUID(), content: { ...note!.content, tags: profileFileTags(note!.content.tags ?? [], item.file) } };
+      validateKnowledgeRecord(next);
+      if (Buffer.byteLength(JSON.stringify(next, null, 2) + "\n") > access.recordBytes) refuse("Partitioned note exceeds its record byte bound");
+      admit({ record: note, prepared: next });
+      if (request.mode === "migrate" && profileFile(note!.content.tags) !== undefined && profileFile(note!.content.tags) !== item.file) refuse("A migrated note needs explicit reorganization, not another migration");
+      const history = [];
+      for await (const record of access.history(item.id)) { admit(record); history.push(record); }
+      originals.push({ record: note!, history });
+      prepared.push(next);
+    }
+    plan = { version: 1, digest, assignments, originals, prepared };
+    if (Buffer.byteLength(JSON.stringify(plan, null, 2) + "\n") > BACKUP_BYTES) refuse("Profile backup exceeds its bound; no note was changed");
+    await durableAtomicWriteJson(backup, plan);
+  }
+  // Validate the ENTIRE plan against canonical heads before writing any body.
+  for (const [index, next] of plan.prepared.entries()) {
+    const now = current.get(next.id);
+    const before = plan.originals[index]!.record;
+    if (Buffer.byteLength(JSON.stringify(next, null, 2) + "\n") > access.recordBytes) refuse("Partitioned note exceeds its record byte bound");
+    const expected = next.revisionId === before.revisionId ? before : { ...before, revisionId: next.revisionId, content: { ...before.content, tags: profileFileTags(before.content.tags ?? [], assignments[index]!.file) } };
+    if (before.revisionId !== assignments[index]!.expectedRevision || JSON.stringify(expected) !== JSON.stringify(next)) refuse("Backup would change more than partition labels");
+    if (!now || (now.revisionId !== before.revisionId && now.revisionId !== next.revisionId)) refuse("Profile changed since the backed-up partition plan");
+    if (now!.revisionId === before.revisionId && JSON.stringify(now) !== JSON.stringify(before)) refuse("Original profile revision differs from its backup");
+    if (now!.revisionId === next.revisionId && JSON.stringify(now) !== JSON.stringify(next)) refuse("Prepared profile revision was changed");
+    let position = 0;
+    for await (const record of access.history(next.id)) {
+      if (next.revisionId !== before.revisionId && record.revisionId === next.revisionId) continue;
+      if (JSON.stringify(record) !== JSON.stringify(plan.originals[index]!.history[position++])) refuse("Profile history differs from its complete backup");
+    }
+    if (position !== plan.originals[index]!.history.length) refuse("Profile history differs from its complete backup");
+  }
+  for (const [index, next] of plan.prepared.entries()) if (current.get(next.id)!.revisionId !== next.revisionId) await access.write(next, plan.originals[index]!.record.revisionId);
+  // Return only references, never note bodies in generic command receipts. The
+  // Home change owner must recover/deduplicate its undo audit before success.
+  return { backup, changes: plan.prepared.map((next, index) => {
+    const oldFile = profileFile(plan.originals[index]!.record.content.tags), file = profileFile(next.content.tags);
+    return { id: next.id, beforeRevision: plan.originals[index]!.record.revisionId, revisionId: next.revisionId, ...(oldFile ? { beforeFile: oldFile } : {}), ...(file ? { file } : {}) };
+  }).filter(change => change.beforeRevision !== change.revisionId) };
+}

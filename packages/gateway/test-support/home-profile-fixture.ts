@@ -306,6 +306,23 @@ export function profileCall(args: Parameters<typeof fauxToolCall>[1], id: string
 }
 export const say = (text: string): Step => () => fauxAssistantMessage(text);
 
+export interface ProfilePage {
+  status: "read";
+  file: string;
+  items: Array<ListedItem & { file: string; provenance: KnowledgeRecord["provenance"]; content: Extract<KnowledgeRecord, { kind: "note" }>["content"] }>;
+  nextOffset?: number;
+}
+export function profileReadResult(messages: Array<Record<string, unknown>>, callId: string): ProfilePage {
+  const result = messages.find(message => message.role === "toolResult" && message.toolCallId === callId)?.details as ProfilePage | undefined;
+  if (result?.status !== "read") throw new Error(`Expected an explicit profile read: ${JSON.stringify(result)}`);
+  return result;
+}
+export async function readProfilePage(f: Fixture, file = "core", offset = 0): Promise<ProfilePage> {
+  const callId = command("read-profile");
+  const turn = await homeActivation(f, `Read profile file ${file} at ${offset}.`, [profileCall({ action: "read", file, offset }, callId), say("read")]);
+  return profileReadResult(turn.last.messages, callId);
+}
+
 /** The profile section of a system prompt, from its heading to the end. */
 export function profileSection(systemPrompt: string): string {
   const start = systemPrompt.indexOf(PROFILE_HEADING);

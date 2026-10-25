@@ -9,7 +9,8 @@ history under `state/knowledge`, their curation, Jev assessment, connectors
 ## Owns
 
 `knowledge-store.ts` (`KnowledgeStore`), `knowledge-catalog.ts` (SQLite catalog),
-`knowledge-service.ts`, `knowledge-curation.ts`, `knowledge-tagger.ts`,
+`knowledge-service.ts`, `knowledge-notes.ts` (note marks and explicit partition plans),
+`knowledge-curation.ts`, `knowledge-tagger.ts`,
 `source-capture.ts`, `source-triage.ts`, `connectors.ts`, `connector-credentials.ts`,
 `x-public-post.ts`, `jev-*.ts`, `paid-budget-ledger.ts`. Record, curation and
 connector details: [contract](contract.md).
@@ -30,6 +31,7 @@ connector details: [contract](contract.md).
     catalog-<id>.sqlite                    # canonical transactional catalog
     records/<record-id>/<revision-id>.json # immutable record revisions
     objects/<sha256>                       # immutable content-addressed bytes
+    profile-backups/<plan-digest>.json     # bounded owner-only partition recovery
   ```
 
   A deleted namespace, manifest or catalog in an established workspace is
@@ -46,6 +48,12 @@ connector details: [contract](contract.md).
   journal, secure delete) publishes heads, ownership, coverage, fences and the
   receipt. Mutations serialize per workspace with command IDs, exact request hashes
   and expected revisions; reads never take the workspace mutex.
+- **Profile partition.** Explicit assignments over personal `home-profile` notes
+  preserve exact content, labels, status, provenance and historical revisions. An
+  owner-only backup precedes all staged bodies; one SQL commit publishes every
+  head. Explicit recovery reuses prepared identities; reads never migrate. Home's
+  canonical Changes/undo owner is separate from this store-level commit
+  ([profile contract](../modules/home/profile.md)).
 - **Upgrade.** The user-initiated start of an updated Gateway runs the one explicit
   `upgradeStorage()` (`CATALOG_STORAGE_VERSION` 4); reads refuse an older manifest.
 - **One searchable history, centered on Home.** Chronicle generation is retired (#1315):

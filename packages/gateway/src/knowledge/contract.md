@@ -233,3 +233,12 @@ Cleanup intentions and tombstones commit before deletion; `reconcile()` retries 
 pending cleanup. Historical revisions do not expire. Missing, malformed or newer
 state, unsafe ancestors and corrupt files stay visible failures. Object reads verify
 hash and size; media type belongs to the reference.
+
+Explicit profile partitions use `knowledge-notes.ts`: complete ID/revision/file
+assignments, full original histories and immutable prepared identities in an
+owner-only ≤ 64 MiB backup before any body mutation, then one SQL head commit.
+Recovery validates exact originals/history and adopts those same identities;
+rescanned identical destinations create no revisions. Invalid, stale, incomplete,
+excluded or over-bound plans refuse without truncation or inferred classification.
+This is storage recovery, not canonical Changes/undo publication; the
+[Home profile owner](../modules/home/profile.md) owns that audit boundary.

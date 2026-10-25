@@ -2,11 +2,12 @@ import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
+import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { PROVIDER, MODEL_ID, PROFILE_HEADING, report, retireFixtures, holdTerminalWrite, recordCase, Step, fixture, homeActivation, profileResults, profileCall, say, profileSection, latestMaintainerEntryId, profileNotes, noteAt, maintainer, command, listed, itemText, history, change, undo } from "../../test-support/home-profile-fixture.js";
+import { PROVIDER, MODEL_ID, PROFILE_HEADING, readProfilePage, profileReadResult, report, retireFixtures, holdTerminalWrite, recordCase, Step, fixture, homeActivation, profileResults, profileCall, say, profileSection, latestMaintainerEntryId, profileNotes, noteAt, maintainer, command, listed, itemText, history, change, undo } from "../../test-support/home-profile-fixture.js";
 
 describe("Tron Home learned profile", () => {
-  it("F1/F2: learn writes one unconfirmed, tagged note with its evidence, and the next activation carries it verbatim", async () => {
+  it("F1/F2: learn preserves evidence; the next activation indexes it and an explicit read carries it verbatim", async () => {
     const f = await fixture("learn");
     const turn = await homeActivation(f, "Please remember: I prefer short replies.", [
       profileCall({ action: "learn", kind: "preference", text: "I prefer short replies." }, "call-learn-1"),
@@ -23,7 +24,7 @@ describe("Tron Home learned profile", () => {
     expect(note!.scope).toBe("personal");
     expect(note!.content.title).toBe("I prefer short replies.");
     expect(note!.content.confirmed).toBe(false);
-    expect(note!.content.tags).toEqual(["home-profile", "kind-preference"]);
+    expect(note!.content.tags).toEqual(["home-profile", "kind-preference", "home-file-core"]);
     expect(note!.provenance).toEqual({
       actor: "agent",
       source: "home",
@@ -34,9 +35,10 @@ describe("Tron Home learned profile", () => {
     const next = await homeActivation(f, "What do you know about me?", [say("Short.")]);
     const section = profileSection(next.first.systemPrompt);
     expect(section.startsWith(PROFILE_HEADING)).toBe(true);
-    expect(section).toContain(`note ${note!.id}`);
-    expect(section).toContain("preference, inferred");
-    expect(section).toContain("I prefer short replies.");
+    expect(section).not.toContain(note!.id);
+    expect(section).not.toContain("I prefer short replies.");
+    const read = await readProfilePage(f);
+    expect(read.items).toEqual([expect.objectContaining({ id: note!.id, revisionId: note!.revisionId, kind: "preference", confirmed: false, status: "active", text: "I prefer short replies.", provenance: note!.provenance })]);
     recordCase("learn-and-next-activation", { noteId: note!.id, tags: note!.content.tags });
   }, 120_000);
 
@@ -58,7 +60,7 @@ describe("Tron Home learned profile", () => {
     recordCase("prompt-stability", { stableWhileUnchanged: true, movesOnChange: true });
   }, 120_000);
 
-  it("F3: refine keeps the prior revision and replaces the injected text; supersede and retire leave injection", async () => {
+  it("F3: refine preserves history; explicit reads distinguish active, superseded and retired records", async () => {
     const f = await fixture("lifecycle");
     await homeActivation(f, "remember a", [
       profileCall({ action: "learn", kind: "preference", text: "Use metric units." }, "call-life-1"),
@@ -77,12 +79,12 @@ describe("Tron Home learned profile", () => {
     expect(refined.revisionId).not.toBe(originalRevision);
     expect(refined.content.title).toBe("Use metric units everywhere.");
     expect(refined.content.confirmed).toBe(false);
-    expect(refined.content.tags).toEqual(["home-profile", "kind-preference"]);
+    expect(refined.content.tags).toEqual(["home-profile", "kind-preference", "home-file-core"]);
     expect((await noteAt(f, original!.id, originalRevision)).content.title).toBe("Use metric units.");
     const afterRefine = await homeActivation(f, "after refine", [say("ok")]);
     const refinedSection = profileSection(afterRefine.first.systemPrompt);
-    expect(refinedSection).toContain("Use metric units everywhere.");
-    expect(refinedSection.split(original!.id).length - 1).toBe(1);
+    expect(refinedSection).not.toContain("Use metric units everywhere.");
+    expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: original!.id, text: "Use metric units everywhere.", status: "active" })]);
 
     const supersede = await homeActivation(f, "replace it", [
       profileCall({ action: "supersede", id: original!.id, kind: "preference", text: "Use metric units, and state conversions." }, "call-life-3"),
@@ -92,7 +94,8 @@ describe("Tron Home learned profile", () => {
     expect(replaced).toMatchObject({ status: "saved", action: "supersede", supersededId: original!.id, previousText: "Use metric units everywhere." });
     const afterSupersede = await homeActivation(f, "after supersede", [say("ok")]);
     expect(afterSupersede.first.systemPrompt).not.toContain(`note ${original!.id}`);
-    expect(afterSupersede.first.systemPrompt).toContain("Use metric units, and state conversions.");
+    expect(afterSupersede.first.systemPrompt).not.toContain("Use metric units, and state conversions.");
+    expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: original!.id, status: "superseded" }), expect.objectContaining({ id: (replaced as { id: string }).id, text: "Use metric units, and state conversions.", status: "active" })]);
     const replacement = await noteAt(f, (replaced as { id: string }).id);
     expect(replacement.relations).toEqual([{ type: "supersedes", recordId: original!.id, revisionId: refined.revisionId }]);
     // The superseded record stays readable as history.
@@ -116,7 +119,8 @@ describe("Tron Home learned profile", () => {
     const retired = await noteAt(f, replacement.id);
     expect(retired.content.retired).toBe(true);
     expect(retired.provenance.reason).toBe("The maintainer changed topic.");
-    recordCase("refine-supersede-retire", { refinedRevisionKept: true, supersededLeftInjection: true, retiredLeftInjection: true });
+    expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: original!.id, status: "superseded" }), expect.objectContaining({ id: replacement.id, status: "retired" })]);
+    recordCase("refine-supersede-retire", { refinedRevisionKept: true, supersededStatusRead: true, retiredStatusRead: true });
   }, 120_000);
 
   it("F4: a retired item cannot be refined, and a superseded item cannot be superseded again", async () => {
@@ -176,9 +180,9 @@ describe("Tron Home learned profile", () => {
       record: { kind: "note", scope: item!.scope, provenance: item!.provenance, relations: item!.relations, content: { ...typedContent, confirmed: true } },
     } });
     const next = await homeActivation(f, "after confirm", [say("ok")]);
-    expect(next.first.systemPrompt).toContain(`note ${item!.id}`);
-    expect(next.first.systemPrompt).toContain("delegation-default, confirmed");
-    expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default"]);
+    expect(next.first.systemPrompt).not.toContain(item!.id);
+    expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: item!.id, kind: "delegation-default", confirmed: true, status: "active" })]);
+    expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default", "home-file-core"]);
 
     // A native correction, from the same typed model, keeps the item too, now corrected.
     const confirmed = await noteAt(f, item!.id);
@@ -192,13 +196,13 @@ describe("Tron Home learned profile", () => {
       relation: { type: "corrects", recordId: item!.id, revisionId: confirmed.revisionId },
     } });
     const corrected = await homeActivation(f, "after correction", [say("ok")]);
-    expect(corrected.first.systemPrompt).toContain("Delegate reviews to a cheaper model, by default.");
-    expect(corrected.first.systemPrompt.split(item!.id).length - 1).toBe(1);
-    expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default"]);
-    recordCase("native-confirm-keeps-profile", { injectedMarkedConfirmed: true, correctionKeepsProfile: true });
+    expect(corrected.first.systemPrompt).not.toContain("Delegate reviews to a cheaper model, by default.");
+    expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: item!.id, text: "Delegate reviews to a cheaper model, by default.", confirmed: true, status: "active" })]);
+    expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default", "home-file-core"]);
+    recordCase("native-confirm-keeps-profile", { readMarkedConfirmed: true, correctionKeepsProfile: true });
   }, 120_000);
 
-  it("F5: an over-bound profile is not injected at all, and the section tells Home to consolidate", async () => {
+  it("F5: a large file is metadata-only at activation and every record remains available in explicit pages", async () => {
     const f = await fixture("bound");
     const ids: string[] = [];
     for (let index = 0; index < 40; index += 1) {
@@ -213,18 +217,25 @@ describe("Tron Home learned profile", () => {
     }
     const next = await homeActivation(f, "over the bound", [say("ok")]);
     const section = profileSection(next.first.systemPrompt);
-    expect(section).toContain("consolidate");
-    for (const word of ["refine", "supersede", "retire"]) expect(section).toContain(word);
+    const pages = [];
+    let offset: number | undefined = 0;
+    while (offset !== undefined) {
+      const page = await readProfilePage(f, "core", offset);
+      pages.push(...page.items);
+      offset = page.nextOffset;
+    }
+    expect(pages.map(item => item.id).sort()).toEqual([...ids].sort());
+    expect(pages.every(item => item.text.startsWith("Bound item") && item.status === "active")).toBe(true);
     // No item text, whole or partial, is injected over the bound.
     expect(section).not.toContain("Bound item");
     expect(section).not.toContain("xxxxxxxxxx");
-    // The notice names items by ID so Home can consolidate them, within the same bound.
-    expect(ids.some((id) => section.includes(id))).toBe(true);
+    // Discovery is bounded metadata; all exact records were read above, not dropped.
+    expect(ids.some((id) => section.includes(id))).toBe(false);
     expect(Buffer.byteLength(section, "utf8")).toBeLessThan(16 * 1024);
     recordCase("over-bound-refused", { items: ids.length, sectionBytes: Buffer.byteLength(section, "utf8") });
   }, 120_000);
 
-  it("F9: a delegated worker receives the brief, which cites the profile item it applied", async () => {
+  it("F9: Home reads and chooses brief content; the worker receives precisely that chosen context", async () => {
     const f = await fixture("delegate");
     await homeActivation(f, "remember", [
       profileCall({ action: "learn", kind: "delegation-default", text: "Prefer the cheaper model for reviews." }, "call-deleg-1"),
@@ -234,12 +245,13 @@ describe("Tron Home learned profile", () => {
     // The worker's replies are queued before the delegating activation can start it.
     f.worker.push(() => fauxAssistantMessage(fauxToolCall("report", { resultId: "profile-result-0001", outcome: "final", text: "Reviewed.", evidence: ["checked"] }, { id: "worker-report-0001" }), { stopReason: "toolUse" }));
     f.worker.push(say("done"));
-    // The model composes the brief from the injected profile, as the operating
-    // context instructs: this script lists each applied item in the brief.
+    // The faux Home makes its own choice from an explicit read, not an injected
+    // instruction or Gateway classifier. Keeping a citation here is its choice.
     const delegate: Step = (context) => {
-      const cited = profileSection(context.systemPrompt).split("\n").filter((line) => line.includes(`note ${item!.id}`));
+      expect(profileSection(context.systemPrompt)).not.toContain(item!.content.title);
+      const cited = profileReadResult(context.messages, "delegation-profile-read").items.filter(note => note.id === item!.id);
       expect(cited).toHaveLength(1);
-      const intent = ["Review the change.", "", "Preferences applied:", ...cited.map((line) => `- ${line.replace(/^- /, "")}`)].join("\n");
+      const intent = ["Review the change.", "", "Preferences applied:", ...cited.map(note => `- note ${note.id}: ${note.text}`)].join("\n");
       return fauxAssistantMessage(fauxToolCall("delegate", { taskId: "profile-task-0001", intent, target: f.project }, { id: "delegate-call-0001" }), { stopReason: "toolUse" });
     };
     // The delegated task's terminal store write is held at the Home task store boundary, so it is live when
@@ -247,7 +259,7 @@ describe("Tron Home learned profile", () => {
     const terminal = holdTerminalWrite(f.registry);
     let teardown: Promise<void> | undefined;
     try {
-      await homeActivation(f, "review it", [delegate, say("delegated")]);
+      await homeActivation(f, "review it", [profileCall({ action: "read", file: "core" }, "delegation-profile-read"), delegate, say("delegated")]);
       // The canonical initiating chapter retains the exact result even if a fast
       // worker has already woken another chapter or its provider view is folded.
       const admission = f.slot.canonicalSessionEntries().flatMap(entry => entry.type === "message"
@@ -313,7 +325,7 @@ describe("Tron Home learned profile", () => {
     const noteB = await noteAt(f, b.id);
     expect(noteB.id).toBe(b.id);
     expect(noteB.content).toMatchObject({ title: "The office is in Lisbon, where I work.", confirmed: true });
-    expect(noteB.content.tags).toEqual(["home-profile", "kind-preference"]);
+    expect(noteB.content.tags).toEqual(["home-profile", "kind-preference", "home-file-core"]);
 
     // c. supersede a: one group of two entries; the old item is superseded, the new one active and confirmed.
     const a2 = await itemText(f, "I prefer short replies.");
@@ -361,11 +373,15 @@ describe("Tron Home learned profile", () => {
     // Knowledge drops the cleared flag rather than storing false; the note is no longer retired.
     expect((await noteAt(f, b.id)).content.retired).toBeFalsy();
 
-    // g. the next activation carries a and b as they now stand, and not the superseding text.
+    // g. no automatic insertion; an explicit read preserves both active and retired states.
     const next = await homeActivation(f, "What do you know about me?", [say("ok")]);
     const section = profileSection(next.first.systemPrompt);
-    expect(section.split("\n")).toContain(`- note ${a.id} (preference, confirmed): I prefer short replies.`);
-    expect(section.split("\n")).toContain(`- note ${b.id} (preference, confirmed): The office is in Lisbon, where I work.`);
+    expect(section).not.toContain("I prefer short replies.");
+    expect(section).not.toContain("The office is in Lisbon, where I work.");
+    const readAfterUndo = await readProfilePage(f);
+    expect(readAfterUndo.items.find(item => item.id === a.id)).toMatchObject({ text: "I prefer short replies.", kind: "preference", confirmed: true, status: "active" });
+    expect(readAfterUndo.items.find(item => item.id === b.id)).toMatchObject({ text: "The office is in Lisbon, where I work.", kind: "preference", confirmed: true, status: "active" });
+    expect(readAfterUndo.items.find(item => item.id === replacementId)).toMatchObject({ status: "retired" });
     expect(section).not.toContain("I prefer short, plain replies.");
     expect(section).not.toContain(replacementId);
     recordCase("maintainer-journey", { confirmed: a.id, refined: b.id, superseded: { old: a.id, replacement: replacementId, group: supersedeEntries[0]!.group },
@@ -457,12 +473,14 @@ describe("Tron Home learned profile", () => {
     expect(entry).toMatchObject({ key: "home.profile.item", after: { confirmed: false, state: "active", text: "I like dry humour." },
       presentation: { label: "Profile item", actor: "Home" } });
     const before = await homeActivation(f, "still there?", [say("ok")]);
-    expect(profileSection(before.first.systemPrompt)).toContain(`note ${learnedId} (preference, inferred): I like dry humour.`);
+    expect(profileSection(before.first.systemPrompt)).not.toContain("I like dry humour.");
+    expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: learnedId, text: "I like dry humour.", kind: "preference", confirmed: false, status: "active" })]);
 
     const undone = await undo(f, entry!.changeId, "undo-home-learn");
     expect(undone).toMatchObject({ status: "applied" });
     const after = await homeActivation(f, "and now?", [say("ok")]);
     expect(profileSection(after.first.systemPrompt)).not.toContain(learnedId);
+    expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: learnedId, text: "I like dry humour.", status: "retired" })]);
     expect((await noteAt(f, learnedId)).content.retired).toBe(true);
     recordCase("home-change-recorded-and-undone", { note: learnedId, historyActor: "Home" });
   }, 120_000);

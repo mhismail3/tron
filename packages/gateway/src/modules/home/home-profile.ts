@@ -1,10 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { profileFile, profileFileTags, type ProfileFile } from "../../knowledge/knowledge-notes.js";
+import { profileIndex, PROFILE_SECTION_HEADING } from "./home-profile-hierarchy.js";
+import { randomUUID } from "node:crypto";
 import { formatProfileValue } from "../../admin/settings-presentation.js";
 import type { SettingsChangePath, SubjectContext, SubjectWrite, ChangeContext } from "../../kernel/settings/settings-change.js";
 import type { ChangeEntry } from "../../kernel/settings/settings-record.js";
 import type { ChangeResult } from "../../kernel/settings/tool-contract.js";
-import { Type, type TSchema } from "../../kernel/pi/ai.js";
-import type { ExtensionToolContext, ToolDefinition } from "../../kernel/pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
 import type { KnowledgeListResponse, KnowledgeProvenance, KnowledgeRecord, KnowledgeRelation, NoteContent } from "../../knowledge/knowledge-contract.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
@@ -13,13 +13,13 @@ import type { KnowledgeMutationResult } from "../../knowledge/knowledge-store.js
 /*
  * Tron Home's learned profile (#731): the maintainer's durable preferences,
  * standing decisions, delegation defaults and facts, kept as personal Knowledge
- * notes. Home writes them through the `profile` tool and reads them back into its
- * own instructions on every activation. The Knowledge owner stays the only
- * authority: this module holds no state of its own.
+ * notes. Home writes them through the `profile` tool. Activations carry a metadata
+ * index; explicit reads carry exact content/provenance, never Gateway relevance
+ * choices or mandatory worker copying. Knowledge stays the only record authority.
  *
  * Membership is the `home-profile` tag alone, never provenance: provenance changes
  * when the maintainer edits a note natively. A profile item's kind is its one
- * `kind-*` label, so its order and its brief line never depend on prose.
+ * `kind-*` label. File labels are mechanical organization, not binding authority.
  */
 
 /** The label that makes a personal note a Home profile item. */
@@ -34,20 +34,16 @@ const KIND_ROLE: Record<HomeProfileKind, NoteContent["role"]> = {
   fact: "fact",
 };
 
-/** The profile's injected size bound, in UTF-8 bytes of its item lines. Eight KiB is about
- * two thousand tokens, paid on every Home turn, and holds several dozen one-sentence items.
- * Past it Home must consolidate the profile instead of carrying a truncated or growing one. */
+/** Metadata-index admission headroom; note bodies are read explicitly, never inserted here. */
 export const HOME_PROFILE_BOUND_BYTES = 8 * 1_024;
 const PROFILE_PAGE_LIMIT = 50;
-/** The section heading. Stable text: the cached prompt head changes only with the items. */
-const HOME_PROFILE_HEADING = "## Learned profile";
-
 export type HomeProfileStatus = "active" | "superseded" | "retired";
 export type ProfileNote = KnowledgeRecord & { kind: "note" };
 
 export interface HomeProfileItem {
   id: string;
   revisionId: string;
+  file: ProfileFile | undefined;
   kind: HomeProfileKind;
   text: string;
   confirmed: boolean;
@@ -61,7 +57,7 @@ export interface HomeProfileItem {
 
 export interface HomeProfileRead {
   items: HomeProfileItem[];
-  /** Profile-tagged notes that carry no single valid kind label; they are not applied. */
+  /** Profile-tagged notes without one valid kind label; reads must disclose incompleteness. */
   unclassified: number;
 }
 
@@ -96,7 +92,7 @@ export async function readHomeProfile(knowledge: KnowledgeService): Promise<Home
     const by = supersededBy.get(note.id);
     const status: HomeProfileStatus = note.content.retired ? "retired" : by ? "superseded" : "active";
     const supersedes = note.relations.find(relation => relation.type === "supersedes" && profileIds.has(relation.recordId))?.recordId;
-    items.push({ id: note.id, revisionId: note.revisionId, kind: kinds[0]!, text: note.content.title, confirmed: note.content.confirmed, status,
+    items.push({ id: note.id, revisionId: note.revisionId, file: profileFile(tags), kind: kinds[0]!, text: note.content.title, confirmed: note.content.confirmed, status,
       ...(supersedes ? { supersedes } : {}), ...(by ? { supersededBy: by } : {}), record: note });
   }
   items.sort((left, right) => HOME_PROFILE_KINDS.indexOf(left.kind) - HOME_PROFILE_KINDS.indexOf(right.kind)
@@ -108,71 +104,19 @@ function kindTag(kind: HomeProfileKind): string {
   return `kind-${kind}`;
 }
 
-const INTRO = [
-  "Learned from the maintainer's messages to Home and saved as Knowledge notes. A confirmed item is binding; an inferred item is your default until the maintainer confirms it. Apply every item to each turn and to each delegated brief, and list the note IDs you applied under \"Preferences applied\" in the brief.",
-  "Change an item with profile refine, supersede or retire; never learn a duplicate. Profile changes apply from the next activation.",
-].join("\n");
-
-/** The section Home's instructions carry for the current profile. It depends only on the
- * Knowledge owner's state, so an unchanged profile yields byte-identical text. */
-function renderHomeProfileSection(read: HomeProfileRead): string {
-  const active = read.items.filter((item) => item.status === "active");
-  const lines = active.map((item) => `- ${itemLabel(item)}: ${item.text}`);
-  const unclassified = read.unclassified > 0
-    ? `${read.unclassified} profile note(s) without exactly one kind label are not applied; refine or retire them.`
-    : undefined;
-  const bytes = lines.reduce((total, line) => total + Buffer.byteLength(`${line}\n`, "utf8"), 0);
-  if (active.length === 0) {
-    const empty = read.items.length === 0
-      ? "No items yet. Save a durable preference, standing decision, delegation default or fact the maintainer states with profile learn."
-      : "No active items: every item is superseded or retired.";
-    return [HOME_PROFILE_HEADING, INTRO, empty, ...(unclassified ? [unclassified] : [])].join("\n");
-  }
-  if (bytes > HOME_PROFILE_BOUND_BYTES) {
-    // Over the bound no item text is injected, whole or partial: a truncated preference
-    // is worse than none. The notice names items by ID so Home can consolidate them.
-    const listed: string[] = [];
-    let listedBytes = 0;
-    for (const item of active) {
-      const line = `- note ${item.id} (${item.kind}, ${item.confirmed ? "confirmed" : "inferred"})`;
-      const cost = Buffer.byteLength(`${line}\n`, "utf8");
-      if (listedBytes + cost > HOME_PROFILE_BOUND_BYTES) break;
-      listed.push(line);
-      listedBytes += cost;
-    }
-    const omitted = active.length - listed.length;
-    return [
-      HOME_PROFILE_HEADING,
-      `The profile holds ${active.length} active items (${bytes} bytes), over its ${HOME_PROFILE_BOUND_BYTES}-byte bound, so none is applied in this instruction. Home must consolidate it before relying on it: read the items with knowledge, then use profile refine, supersede or retire to merge duplicates and retire what no longer holds.`,
-      ...listed,
-      ...(omitted > 0 ? [`- and ${omitted} more`] : []),
-      ...(unclassified ? [unclassified] : []),
-    ].join("\n");
-  }
-  return [HOME_PROFILE_HEADING, INTRO, ...lines, ...(unclassified ? [unclassified] : [])].join("\n");
-}
-
-function itemLabel(item: HomeProfileItem): string {
-  return `note ${item.id} (${item.kind}, ${item.confirmed ? "confirmed" : "inferred"})`;
-}
-
-/** The section for one activation's system prompt. Unavailability is said, never shown as
- * an empty profile: Home must not assume it has no preferences when it could not read them. */
-/** The learned-profile section and how many active notes it lists (`notes` is 0 when the
- * section could not be read: no item is applied then). */
 export async function homeProfileSection(knowledge: () => KnowledgeService | undefined): Promise<{ text: string; notes: number }> {
   const owner = knowledge();
   if (!owner) return { text: unavailableSection("Knowledge is not available on this Gateway"), notes: 0 };
   try {
     const read = await readHomeProfile(owner);
-    return { text: renderHomeProfileSection(read), notes: read.items.filter((item) => item.status === "active").length };
+    return { text: profileIndex(read), notes: read.items.filter((item) => item.status === "active").length };
   } catch (error) {
     return { text: unavailableSection(`reading Knowledge failed (${error instanceof Error ? error.message.slice(0, 200) : "unknown error"})`), notes: 0 };
   }
 }
 
 function unavailableSection(reason: string): string {
-  return [HOME_PROFILE_HEADING, `Unavailable: ${reason}. No item is applied in this instruction, and the profile is not known to be empty.`].join("\n");
+  return [PROFILE_SECTION_HEADING, `Unavailable: ${reason}. No item is applied in this instruction, and the profile is not known to be empty.`].join("\n");
 }
 
 // ---- profile changes: one implementation for Home and the maintainer ------------
@@ -185,7 +129,7 @@ function unavailableSection(reason: string): string {
 // maintainer confirms them, and the maintainer's own edits are confirmed by definition.
 
 /** The record subject of a profile change: one instance per note, qualified by `note`. */
-const HOME_PROFILE_ACTIONS = ["learn", "refine", "supersede", "retire"] as const;
+export const HOME_PROFILE_ACTIONS = ["learn", "refine", "supersede", "retire"] as const;
 export type HomeProfileAction = (typeof HOME_PROFILE_ACTIONS)[number];
 /** The maintainer's actions; `confirm` is his alone. */
 export const HOME_PROFILE_MAINTAINER_ACTIONS = ["confirm", "refine", "supersede", "retire"] as const;
@@ -194,7 +138,7 @@ export type HomeProfileChangeAction = HomeProfileAction | "confirm";
 /** One requested change. `expectedRevision` is the revision the requester read: a note
  * changed since is refused with a conflict rather than overwritten. */
 export type HomeProfileOp =
-  | { action: "learn"; kind: HomeProfileKind; text: string }
+  | { action: "learn"; kind: HomeProfileKind; text: string; file?: ProfileFile }
   | { action: "confirm"; id: string; expectedRevision?: string }
   | { action: "refine"; id: string; text?: string; kind?: HomeProfileKind; reason?: string; expectedRevision?: string }
   | { action: "supersede"; id: string; kind: HomeProfileKind; text: string; reason?: string; expectedRevision?: string }
@@ -245,8 +189,8 @@ export function profileListItem(item: HomeProfileItem) {
 }
 
 const SINGLE_LINE = /[\u0000-\u001f\u007f\u2028\u2029]/;
-const TEXT_MAX = 512;
-const REASON_MAX = 2_000;
+export const PROFILE_TEXT_MAX = 512;
+export const PROFILE_REASON_MAX = 2_000;
 
 /** The one validation every actor's request passes. */
 function validateProfileOp(op: HomeProfileOp, author: HomeProfileAuthor["kind"]): string | undefined {
@@ -254,9 +198,9 @@ function validateProfileOp(op: HomeProfileOp, author: HomeProfileAuthor["kind"])
   if (op.action === "refine" && op.text === undefined && op.kind === undefined) return "refine requires text or kind";
   if (op.action === "retire" && author === "home" && op.reason === undefined) return "retire requires reason";
   const text = "text" in op ? op.text : undefined;
-  if (text !== undefined && (typeof text !== "string" || text.trim() === "" || text.length > TEXT_MAX || SINGLE_LINE.test(text))) return "text must be one non-empty line";
+  if (text !== undefined && (typeof text !== "string" || text.trim() === "" || text.length > PROFILE_TEXT_MAX || SINGLE_LINE.test(text))) return "text must be one non-empty line";
   const reason = "reason" in op ? op.reason : undefined;
-  if (reason !== undefined && (typeof reason !== "string" || reason.trim() === "" || reason.length > REASON_MAX || SINGLE_LINE.test(reason))) return "reason must be one non-empty line";
+  if (reason !== undefined && (typeof reason !== "string" || reason.trim() === "" || reason.length > PROFILE_REASON_MAX || SINGLE_LINE.test(reason))) return "reason must be one non-empty line";
   const kind = "kind" in op ? op.kind : undefined;
   if (kind !== undefined && !HOME_PROFILE_KINDS.includes(kind)) return "kind is not a profile kind";
   return undefined;
@@ -381,6 +325,12 @@ export class HomeProfileItems {
     const owner = this.owner();
     const confirmed = author.kind === "maintainer";
     const before = await readHomeProfile(owner);
+    const existing = "id" in op ? before.items.find(item => item.id === op.id) : undefined;
+    // The previous contract made confirmed standing rules binding. Home may propose
+    // a new inferred item, but cannot rewrite or retire that existing authority.
+    if (author.kind === "home" && existing?.confirmed && existing.kind !== "fact") {
+      throw new GatewayError("invalid_request", "An existing confirmed standing rule needs maintainer review; Home cannot weaken or rewrite it");
+    }
     const result = await this.write(owner, op, author, confirmed, before, commandId);
     const after = await readHomeProfile(owner);
     const ids = result.supersededId ? [result.supersededId, result.id] : [result.id];
@@ -394,7 +344,7 @@ export class HomeProfileItems {
       const { record } = await owner.invoke({ operation: "knowledge.note.create", request: {
         commandId, ...(confirmed ? { confirmedByUser: true } : {}),
         record: { kind: "note", scope: "personal", provenance: provenance(author, reason), relations,
-          content: { title: text, role: KIND_ROLE[kind], confirmed, tags: [HOME_PROFILE_TAG, kindTag(kind)] } },
+          content: { title: text, role: KIND_ROLE[kind], confirmed, tags: profileFileTags([HOME_PROFILE_TAG, kindTag(kind)], op.action === "learn" ? op.file ?? "core" : "core") } },
       } }) as KnowledgeMutationResult;
       return record;
     };
@@ -490,123 +440,7 @@ export class HomeProfileItems {
   }
 }
 
-// ---- the profile tool -----------------------------------------------------------
-
-const PROFILE_PARAMETERS = Type.Object({
-  action: Type.Union(HOME_PROFILE_ACTIONS.map((action) => Type.Literal(action)), { description: "learn a new item; refine an item's text or kind; supersede an item with a replacement; retire an item." }),
-  kind: Type.Optional(Type.Union(HOME_PROFILE_KINDS.map((kind) => Type.Literal(kind)), { description: "learn and supersede: the item's kind. refine: a new kind, when it changes." })),
-  text: Type.Optional(Type.String({ minLength: 1, maxLength: TEXT_MAX, description: "learn, refine and supersede: one line of the item's text, as the maintainer states it." })),
-  id: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "refine, supersede and retire: the profile note ID shown in the Learned profile section." })),
-  reason: Type.Optional(Type.String({ minLength: 1, maxLength: REASON_MAX, description: "Why the change is made. Required for retire; recorded in the ledger." })),
-}, { additionalProperties: false });
-
-/** Tool-result details: the saved revision, or the typed reason a change was refused. */
-export type HomeProfileToolDetails =
-  | HomeProfileSaved
-  | { status: "refused"; action: HomeProfileAction; reason: string }
-  | { status: "unavailable"; action: HomeProfileAction };
-
-type ProfileRequest = {
-  action: HomeProfileAction;
-  kind?: HomeProfileKind;
-  text?: string;
-  id?: string;
-  reason?: string;
-};
-
-/** Which fields each action takes. Anything else is refused, never silently ignored. */
-const ACTION_FIELDS: Record<HomeProfileAction, { required: Array<keyof ProfileRequest>; allowed: Array<keyof ProfileRequest> }> = {
-  learn: { required: ["kind", "text"], allowed: ["kind", "text"] },
-  refine: { required: ["id"], allowed: ["id", "text", "kind", "reason"] },
-  supersede: { required: ["id", "kind", "text"], allowed: ["id", "kind", "text", "reason"] },
-  retire: { required: ["id", "reason"], allowed: ["id", "reason"] },
-};
-
 /** What the Home runtime gives the tool: the change path, as Home. */
 export interface HomeProfileChangeAccess {
   change(ops: HomeProfileOp[], input: { toolCallId: string; web: boolean; author: HomeProfileAuthor; commandId: string; reason?: string }): Promise<{ saved: HomeProfileSaved[] }>;
-}
-
-/**
- * The `profile` tool. It writes nothing itself: each call is one change through the
- * settings change path, which applies it with `HomeProfileItems` and records it.
- */
-export function homeProfileTool(access: () => HomeProfileChangeAccess | undefined, webMark: () => boolean): ToolDefinition<TSchema, HomeProfileToolDetails> {
-  return {
-    name: "profile",
-    // docs/settings-model.md 5.4: declares it reads no open-world content.
-    annotations: { openWorldHint: false },
-    label: "Profile",
-    description: "Change the learned profile of the maintainer: learn a durable preference, standing decision, delegation default or fact; refine an item's text or kind; supersede an item with a replacement; or retire an item with a reason. Every change is saved unconfirmed (inferred) until the maintainer confirms it, is shown in Changes where he can undo it, and applies from the next activation. Learn only what the maintainer stated durably.",
-    parameters: PROFILE_PARAMETERS,
-    executionMode: "sequential",
-    execute: async (toolCallId, parameters, _signal, _update, context) => {
-      const request = parameters as ProfileRequest;
-      const changes = access();
-      if (!changes) return answer({ status: "unavailable", action: request.action }, "Knowledge is unavailable on this Gateway, so the profile cannot change.");
-      const refusal = validateRequest(request);
-      if (refusal) return refused(request.action, refusal);
-      const citation = triggeringMessage(context);
-      if (!citation) return refused(request.action, "no maintainer message in this chat to cite as evidence");
-      const op = request.action === "learn" ? { action: "learn" as const, kind: request.kind!, text: request.text! }
-        : request.action === "refine" ? { action: "refine" as const, id: request.id!, ...(request.text ? { text: request.text } : {}), ...(request.kind ? { kind: request.kind } : {}), ...(request.reason ? { reason: request.reason } : {}) }
-          : request.action === "supersede" ? { action: "supersede" as const, id: request.id!, kind: request.kind!, text: request.text!, ...(request.reason ? { reason: request.reason } : {}) }
-            : { action: "retire" as const, id: request.id!, reason: request.reason! };
-      let saved: HomeProfileSaved;
-      try {
-        [saved] = (await changes.change([op], {
-          toolCallId, web: webMark(), author: { kind: "home", ...citation }, commandId: commandId(citation.sessionId, toolCallId),
-          ...(request.reason ? { reason: request.reason.trim() } : {}),
-        })).saved as [HomeProfileSaved];
-      } catch (error) {
-        if (error instanceof GatewayError && error.code === "unsupported") return answer({ status: "unavailable", action: request.action }, "Knowledge is unavailable on this Gateway, so the profile cannot change.");
-        if (error instanceof GatewayError && (error.code === "conflict" || error.code === "invalid_request")) return refused(request.action, error.message);
-        throw error;
-      }
-      return answer(saved, savedText(saved, request));
-    },
-  };
-}
-
-function savedText(saved: HomeProfileSaved, request: ProfileRequest): string {
-  const text = request.text?.trim();
-  switch (saved.action) {
-    case "learn": return `Saved profile item note ${saved.id} (${saved.kind}, inferred until you confirm it): ${text}`;
-    case "refine": return `Refined profile item note ${saved.id} (${saved.kind}, inferred until you confirm it): ${text ?? saved.previousText}. Revision ${saved.previousRevisionId} is kept in its history.`;
-    case "supersede": return `Superseded profile item note ${saved.supersededId} with note ${saved.id} (${saved.kind}, inferred until you confirm it): ${text}.`;
-    default: return `Retired profile item note ${saved.id}: ${saved.previousText}. It no longer applies. Reason: ${request.reason?.trim()}`;
-  }
-}
-
-function answer(details: HomeProfileToolDetails, text: string) {
-  return { content: [{ type: "text" as const, text }], details };
-}
-
-function refused(action: HomeProfileAction, reason: string) {
-  const trimmed = reason.replace(/\.$/u, "");
-  return answer({ status: "refused", action, reason: trimmed }, `Profile ${action} refused: ${trimmed}.`);
-}
-
-function validateRequest(request: ProfileRequest): string | undefined {
-  const fields = ACTION_FIELDS[request.action];
-  for (const field of fields.required) if (request[field] === undefined) return `${request.action} requires ${field}`;
-  for (const field of ["kind", "text", "id", "reason"] as const) {
-    if (request[field] !== undefined && !fields.allowed.includes(field)) return `${request.action} does not take ${field}`;
-  }
-  if (request.action === "refine" && request.text === undefined && request.kind === undefined) return "refine requires text or kind";
-  if (request.text !== undefined && (request.text.trim() === "" || SINGLE_LINE.test(request.text))) return "text must be one non-empty line";
-  if (request.reason !== undefined && (request.reason.trim() === "" || SINGLE_LINE.test(request.reason))) return "reason must be one non-empty line";
-  return undefined;
-}
-
-/** The maintainer message the current turn answers: the last user message on this chat's
- * branch. Its canonical entry is the evidence every profile revision cites. */
-function triggeringMessage(context: ExtensionToolContext): { sessionId: string; entryId: string } | undefined {
-  const entry = context.sessionManager.getBranch().filter((candidate) => candidate.type === "message" && candidate.message.role === "user").at(-1);
-  return entry ? { sessionId: context.sessionManager.getSessionId(), entryId: entry.id } : undefined;
-}
-
-/** Idempotency: a replayed tool call maps to the same command, and so to the same receipt. */
-function commandId(sessionId: string, toolCallId: string): string {
-  return `profile-${createHash("sha256").update(`${sessionId}\0${toolCallId}`).digest("hex").slice(0, 48)}`;
 }
