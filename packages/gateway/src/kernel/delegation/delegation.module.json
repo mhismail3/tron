@@ -29,6 +29,7 @@
     "task-subagents.ts",
     "task-worker-extension.ts",
     "worker-contract.ts",
+    "worker-control.ts",
     "worker-settlement.ts",
     "subagent-control.ts"
   ],

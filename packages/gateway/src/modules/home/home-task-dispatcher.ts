@@ -1,4 +1,6 @@
 import type { TaskWorkerControl, TaskControlRefusalReason, TaskWorkerDiagnostic } from "../../kernel/delegation/worker-contract.js";
+import { interruptTaskWorker, stopTaskWorker, steerTaskWorker } from "../../kernel/delegation/worker-control.js";
+import { interruptToolCalls, ToolCallInterrupt } from "../../kernel/run/bounded-tool-cancellation.js";
 import { isUsageLimitError, type QueueModelState } from "../../providers/model-queue-extension.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { AssistantMessage, ImageContent } from "../../kernel/pi/ai.js";
@@ -799,7 +801,7 @@ export class HomeTaskDispatcher {
       if (!this.running.has(task.taskId)) throw new GatewayError("conflict", "Task has no live worker; stop settles it");
       if (typeof control.text !== "string" || !control.text.trim() || Buffer.byteLength(control.text) > 65536) throw new GatewayError("invalid_request", "Invalid task steering text");
       const slot = await this.sessions.acquire(task.sessionId!);
-      await slot.steerHomeTask(control, control.text);
+      await steerTaskWorker(control, control.text, input => slot.prompt(...input));
     });
   }
 
@@ -814,7 +816,12 @@ export class HomeTaskDispatcher {
         throw new GatewayError("invalid_request", "Invalid task steering text");
       }
       const slot = await this.sessions.acquire(task.sessionId!);
-      return { taskId: task.taskId, interrupted: await slot.interruptHomeTask(control, by, control.text) };
+      const text = control.text;
+      // Temporary native I/O binding: DelegationOperations will own acquisition and
+      // this binding. The K5 fence runs before native targets are captured.
+      return { taskId: task.taskId, interrupted: await interruptTaskWorker(slot.taskWorker, control,
+        () => interruptToolCalls(slot.runtime.session, new ToolCallInterrupt(by),
+          text === undefined ? undefined : async () => { await steerTaskWorker(control, text, input => slot.prompt(...input)); })) };
     });
     this.diagnostic?.({ event: "home.task.control", taskHash: hash(interrupted.taskId), operationHash: hash(control.operationId), action: "interrupt", disposition: "accepted", calls: interrupted.interrupted.length });
     return { interrupted: interrupted.interrupted };
@@ -893,7 +900,7 @@ export class HomeTaskDispatcher {
       return;
     }
     // No session mutation lane here: Stop must be able to cancel its admission.
-    await this.refusingControl("stop", control, async () => (await this.sessions.acquire(task.sessionId!)).stopHomeTask(control));
+    await this.refusingControl("stop", control, async () => stopTaskWorker((await this.sessions.acquire(task.sessionId!)).taskWorker, control));
   }
 
   /** One task as Home's `task` tool shows it: its state, the operation a control would act on and

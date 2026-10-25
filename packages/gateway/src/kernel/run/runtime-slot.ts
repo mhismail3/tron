@@ -1,6 +1,6 @@
 import { WorkerSettlement } from "../delegation/worker-settlement.js";
 import { controlSubagentRun } from "../delegation/subagent-control.js";
-import type { TaskWorkerControl, TaskWorkerDiagnostic } from "../delegation/worker-contract.js";
+import type { TaskWorkerDiagnostic } from "../delegation/worker-contract.js";
 import * as activityProjection from "../projection/activity.js";
 import * as sessionPages from "../projection/session-pages.js";
 import { SnapshotProjection } from "../projection/snapshot.js";
@@ -51,7 +51,7 @@ import { type CommandReplacement } from "./run-invocations.js";
 import { RunOperations } from "./run-operations.js";
 import { successfulAssistantCompletion, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "./completion-facts.js";
 import { RunRequestPipeline } from "./request-pipeline.js";
-import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
+import { boundToolCancellation } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "./compaction-policy.js";
 import type { RequestPolicy } from "../host/request-policy.js";
 import type { SessionLineagePolicy } from "../host/session-lineage.js";
@@ -5697,34 +5697,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       this.lastPublishedSummary = summary;
       this.hooks.summaryChanged(summary);
     }
-  }
-
-  async steerHomeTask(control: TaskWorkerControl, text: string) {
-    return this.prompt(text, [], "steer", undefined, undefined, {
-      operationId: randomUUID(), taskFence: structuredClone(control),
-      origin: { kind: "gateway", ownerId: control.taskId, title: "Home steering", confidence: "boundary" }, onTerminal: () => {},
-    });
-  }
-
-  async stopHomeTask(control: TaskWorkerControl): Promise<void> {
-    if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
-      || this.taskWorker.identity.operationId !== control.operationId) {
-      throw new GatewayError("conflict", "Task operation changed before Stop");
-    }
-    await this.taskWorker.stop();
-  }
-
-  /** Interrupts only the task worker's in-flight tool calls (#1189): each ends with a result
-   * naming `by`, and the worker's turn continues with the optional steering `text`. Returns the
-   * interrupted tools' names. */
-  async interruptHomeTask(control: TaskWorkerControl, by: string, text?: string): Promise<string[]> {
-    if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
-      || this.taskWorker.identity.operationId !== control.operationId) {
-      throw new GatewayError("conflict", "Task operation changed before Interrupt");
-    }
-    // The steer is queued before the abort, so the worker reads it right after the interrupted results.
-    return await interruptToolCalls(this.runtime.session, new ToolCallInterrupt(by),
-      text === undefined ? undefined : async () => { await this.steerHomeTask(control, text); });
   }
 
   /** Task cancellation follows the root prompt owner, not its disposable

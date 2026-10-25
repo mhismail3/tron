@@ -17,6 +17,7 @@ import { UploadStore } from "../../machine/upload-store.js";
 import { EpisodicMemoryError } from "../../errors.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { RunMarkerStore } from "../../kernel/run/run-markers.js";
+import { stopTaskWorker, taskWorkerSteeringInput } from "../../kernel/delegation/worker-control.js";
 import { SessionCatalog } from "../../sessions/session-catalog.js";
 import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch, type OwnedSessionDispatchOver } from "../../kernel/delegation/owned-session-dispatch.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
@@ -1472,7 +1473,7 @@ describe("Home task production dispatch", () => {
       expect(f.signals.filter(record => record.event === "home.task.control" && record.action === "steer")).toHaveLength(2);
       expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home first", "Maintainer second"]);
       await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, operationId: "stale-operation", text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
-      await expect(slot.steerHomeTask({ ...control, operationId: "stale-operation" }, "stale slot control")).rejects.toThrow(/stale|changed|conflict/i);
+      await expect(slot.prompt(...taskWorkerSteeringInput({ ...control, operationId: "stale-operation" }, "stale slot control"))).rejects.toThrow(/stale|changed|conflict/i);
       // The removed controller generation is an unknown RPC parameter, refused before any Stop intent is written.
       const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
         receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
@@ -1526,7 +1527,7 @@ describe("Home task production dispatch", () => {
       await waitFor(() => entered, "SDK preflight barrier");
       const control = { taskId: run.taskId, operationId: run.operationId };
       await expect(homeOwnerOf(f.registry).stopTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
-      await expect(slot.stopHomeTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
+      await expect(stopTaskWorker(slot.taskWorker, { ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
       expect(cancelled).toBe(false);
       const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
         receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
@@ -1592,7 +1593,7 @@ describe("Home task production dispatch", () => {
     const slot = await f.registry.acquire(run.sessionId);
     try {
       await waitFor(() => entered, "task provider running before queued Stop");
-      const first = await slot.steerHomeTask({ taskId: run.taskId, operationId: run.operationId }, "not delivered Home steer");
+      const first = await slot.prompt(...taskWorkerSteeringInput({ taskId: run.taskId, operationId: run.operationId }, "not delivered Home steer"));
       const second = await slot.prompt("not delivered maintainer steer", [], "steer");
       expect(slot.snapshot().queuedItems.map(item => item.id)).toEqual([first.operationId, second.operationId]);
       if (surface === "taskRPC") await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });

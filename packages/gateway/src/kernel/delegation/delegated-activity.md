@@ -16,6 +16,11 @@ operation-deadline/disposal-grace join. Native publications address that owner d
 they retain no parallel waiters. `subagent-control.ts` executes the exact installed
 controller against the actual SDK session, retaining the provider's rejection semantics.
 
+`worker-control.ts` owns the exact task-operation fences and steering input.
+Steering still enters native prompt admission; interruption still uses K2's per-call
+cancellation. HomeTaskDispatcher temporarily binds those native primitives after the
+K5 fence; DelegationOperations replaces that consumer binding when it owns acquisition.
+
 ## Session subagent activity
 
 - `process-activity.v1` projects only structured synchronous and asynchronous subagents with

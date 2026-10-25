@@ -12,6 +12,9 @@ unaffected by every rule here.
 Home composes K5's `TaskWorkerControl`, `TaskControlRefusalReason` and
 `TaskWorkerDiagnostic` contracts. Its broader diagnostic union retains authorization,
 store, transition, inbox and pressure policy records; native frames use only K5 records.
+HomeTaskDispatcher calls K5 worker controls and temporarily binds actual native prompt/
+per-tool interruption I/O. Real DelegationOperations removes that binding from Home
+when it takes worker acquisition; no Slot compatibility control methods remain.
 
 - **Designation and chapters:** `home-owner.ts` (record, ledger, profile changes, wake
   scheduler), `home-chapter-state.ts`, `home-chapter-contents.ts`, `home-session-*.ts`.
