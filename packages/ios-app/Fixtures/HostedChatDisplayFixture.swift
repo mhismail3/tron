@@ -456,7 +456,6 @@ private actor HostedHomeShellGateway {
     /// The background model queue the fixture's last accepted change set, `provider/id` in order.
     private var configuredModels: [String] = HostedSettingsReviewSchema.scopeReview
         ? ["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"] : []
-    private var workerThinking = "sameAsHome"
     private var foreground = HostedForegroundSheetScenario()
     private var taskRedelivered = false
     private var scopeRevoked = false
@@ -749,9 +748,8 @@ private actor HostedHomeShellGateway {
             return (foreground.providers(.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
                 "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(3)])])])), nil)
         case "model.list":
-            return (.object(["models": .array(sheetState == "empty-models" ? [] : [anthropicModel("claude-opus-5-5", name: "Claude Opus 5.5", window: 1_000_000),
-                anthropicModel("claude-haiku-5-5", name: "Claude Haiku 5.5", window: 200_000), model("memory-a", name: "Memory Model A"),
-                model("memory-b", name: "Memory Model B"), model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
+            return (.object(["models": .array([anthropicModel("claude-opus-5-5", name: "Claude Opus 5.5", window: 1_000_000),
+                anthropicModel("claude-haiku-5-5", name: "Claude Haiku 5.5", window: 200_000), model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
         case "model.recent": return (.object(["models": .array([])]), nil)
         case "settings.history":
             seedHomeProfileEntry()
@@ -909,9 +907,9 @@ private actor HostedHomeShellGateway {
             return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
         case "settings.resolve":
             if sheetState == "delayed-status", !configuredModels.isEmpty { try? await Task.sleep(for: .seconds(4)) }
-            return (foreground.settings(homeSettingsResolution()), nil)
+            return (homeSettingsResolution(), nil)
         case "settings.options":
-            return (homeSettingsOptions(params), nil)
+            return (try homeSettingsOptions(params), nil)
         case "settings.approvals":
             return (.object(["requests": .array(approvals)]), nil)
         case "settings.decide":
@@ -941,20 +939,12 @@ private actor HostedHomeShellGateway {
                 homeTools = memoryChange?["value"]?.arrayValue?.compactMap(\.stringValue) ?? Self.defaultHomeTools
                 return (fixtureSettingsChangeResult(key: "tools.active"), nil)
             }
-            if method == "settings.change", memoryChange?["key"]?.stringValue == "model.thinking[role=worker]" {
-                guard memoryChange?["layer"]?.stringValue == "session" else { return taskRefusal() }
-                workerThinking = memoryChange?["value"]?.stringValue ?? "sameAsHome"
-                return (fixtureSettingsChangeResult(key: "model.thinking[role=worker]"), nil)
-            }
             if method == "settings.change", memoryChange?["key"]?.stringValue != "model.queue[role=background]" { return (nil, nil) }
-            if method == "settings.change", sheetState == "configure-refused" {
-                return (nil, .object(["code": .string("conflict"), "message": .string("Memory configuration refused"), "retryable": .bool(false)]))
-            }
             if method == "home.pauseMemory" { paused = true; if phase != "active" { phase = "paused" } }
             if method == "home.resumeMemory" { paused = false; phase = "ready" }
             if method == "settings.change" {
-                configured = true; phase = "ready"
-                configuredModels = memoryChange?["value"]?.arrayValue?.compactMap(\.stringValue) ?? []
+                guard memoryChange?["op"]?.stringValue == "unset" else { return taskRefusal() }
+                configuredModels = []
             }
             if method == "home.disable" { designated = false; phase = "disabled" }
             let result = method == "settings.change"
@@ -1069,33 +1059,6 @@ private actor HostedHomeShellGateway {
                 "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
                 "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
         ])
-        let thinkingLabel = workerThinking == "sameAsHome" ? "Same as Home" : workerThinking.capitalized
-        let choices: [JSONValue] = [
-            ("sameAsHome", "Same as Home"), ("off", "Off"), ("low", "Low"),
-            ("medium", "Medium"), ("high", "High"),
-        ].map { .object(["value": $0.0 == "sameAsHome" ? .object(["sameAs": .string("home")]) : .string($0.0), "label": .string($0.1)]) }
-        let workerThinkingKey: JSONValue = .object([
-            "key": .string("model.thinking[role=worker]"), "qualifiers": .object(["role": .string("worker")]),
-            "group": .string("workers"),
-            "value": workerThinking == "sameAsHome" ? .object(["sameAs": .string("home")]) : .string(workerThinking),
-            "display": .string(thinkingLabel), "layer": .string(workerThinking == "sameAsHome" ? "global" : "session"),
-            "applied": .bool(true), "badges": .array([.object(["kind": .string("source"), "label": .string(workerThinking == "sameAsHome" ? "Tron default" : "Set in Home profile")])]),
-            "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")])]),
-            "presentation": .object(["label": .string("Worker thinking"), "help": .string("Thinking level for Home task workers."),
-                "sessionOverridable": .bool(true), "projectSettable": .bool(false), "editable": .bool(true),
-                "order": .number(41), "importance": .string("essential"), "control": .string("choice"),
-                "options": .array(choices)]),
-        ])
-        let contextWindowKey: JSONValue = .object([
-            "key": .string("model.contextWindow"), "qualifiers": .object(["model": .string("anthropic/\(settingsModelOverridden ? "claude-opus-5-5" : "claude-haiku-5-5")")]),
-            "group": .string("model"), "value": .number(200_000), "display": .string("200,000 tokens"),
-            "layer": .string("global"), "applied": .bool(true), "badges": .array([]),
-            "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")]), .object(["layer": .string("global")])]),
-            "presentation": .object(["label": .string("Context window"), "help": .string("How many tokens the model receives."),
-                "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true),
-                "order": .number(30), "importance": .string("essential"), "control": .string("number"),
-                "optionsSource": .object(["name": .string("catalog.contextWindow"), "dependsOn": .array([])])]),
-        ])
         let memoryName = configuredModels.isEmpty ? "Subagent queue" : "\(configuredModels.count) model\(configuredModels.count == 1 ? "" : "s")"
         let memoryKey: JSONValue = .object([
             "key": .string("model.queue[role=background]"), "qualifiers": .object(["role": .string("background")]),
@@ -1106,9 +1069,7 @@ private actor HostedHomeShellGateway {
             "layers": .array([.object(["layer": .string("session"), "value": configuredModels.isEmpty ? .null : .array(configuredModels.map(JSONValue.string))]), .object(["layer": .string("global")]), .object(["layer": .string("global")])]),
             "presentation": .object(["label": .string("Background models"), "help": .string("The models for memory and Knowledge calls, in order. Empty uses the subagent models."),
                 "sessionOverridable": .bool(true), "projectSettable": .bool(false), "editable": .bool(true),
-                "order": .number(44), "importance": .string("essential"), "control": .string("list"), "valueKind": .string("stringList"),
-                "entry": .object(["hint": .string("A provider/model ID. Tron uses the first available model in this order."), "example": .string("anthropic/claude-haiku-5-5")]),
-                "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])]),
+                "order": .number(44), "importance": .string("essential"), "valueKind": .string("stringList")]),
         ])
         let homeKeys = HostedSettingsReviewSchema.additionalKeys.filter {
             !["model.thinking[role=chat]", "tools.active"].contains($0.objectValue?["key"]?.stringValue ?? "")
@@ -1121,7 +1082,7 @@ private actor HostedHomeShellGateway {
         }
         // The reported Home: overridden model and every model queue (#1651).
         let reviewKeys = HostedSettingsReviewSchema.scopeReview ? [HostedSettingsReviewSchema.key("model.queue[role=subagent]", "workers", "Subagent models",
-            .array(["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"].map(JSONValue.string)), "3 models", "list",
+            .array(["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"].map(JSONValue.string)), "3 models",
             order: 42, essential: true, layer: "session")] : []
         // Match the negotiated production ordered-choice contract, including alternatives.
         var thinkingKey = HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
@@ -1131,13 +1092,13 @@ private actor HostedHomeShellGateway {
         var thinkingPresentation = thinkingKey["presentation"]!.objectValue!
         thinkingPresentation["valueKind"] = .string("orderedChoice")
         thinkingKey["presentation"] = .object(thinkingPresentation)
-        let profileKeys = reviewKeys + [modelKey, workerThinkingKey, contextWindowKey, memoryKey, .object(thinkingKey),
+        let profileKeys = reviewKeys + (configuredModels.isEmpty ? [] : [memoryKey]) + [modelKey, .object(thinkingKey),
             HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "session")
         ] + homeKeys
         return .object(["keys": .array(profileKeys), "sections": .array(HostedSettingsReviewSchema.sections)])
     }
 
-    private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {
+    private func homeSettingsOptions(_ params: [String: JSONValue]) throws -> JSONValue {
         if params["key"]?.stringValue == "tools.active" {
             // Match Home's real catalog: identity belongs to the option, and its
             // detail is the first sentence of the live chapter's tool definition.
@@ -1154,28 +1115,15 @@ private actor HostedHomeShellGateway {
             }
             return .object(["key": params["key"]!, "source": .string("catalog.models"), "dependsOn": .array([]), "options": .array(options)])
         }
-        if params["key"]?.stringValue == "model.queue[role=background]" {
-            let options: [JSONValue] = sheetState == "empty-models" ? [] : [("memory-a", "Memory Model A"), ("memory-b", "Memory Model B")].map { id, name in
-                .object(["value": .object(["provider": .string("fixture"), "id": .string(id)]), "label": .string(name)])
-            }
-            return .object(["key": params["key"]!, "source": .string("catalog.models"), "dependsOn": .array([]), "options": .array(options)])
-        }
-        return .object(["key": params["key"] ?? .string("model.contextWindow"),
-            "source": .string("catalog.contextWindow"), "dependsOn": .array([]), "options": .array([]),
-            "range": .object(["min": .number(1_024), "max": .number(200_000), "unit": .string("tokens")])])
+        throw GatewayFailure(code: "invalid_request", message: "Unknown editor options", retryable: false, details: nil)
     }
 
     private func settingsChangePreview(_ params: [String: JSONValue]) -> JSONValue {
         let change = params["changes"]?.arrayValue?.first?.objectValue ?? [:]
         let value = change["value"] ?? .null
-        if change["key"]?.stringValue == "model.queue[role=background]", sheetState == "configure-refused" {
-            return .object(["changes": .array([.object(["error": .object([
-                "code": .string("conflict"), "message": .string("Memory configuration refused"),
-            ])])])])
-        }
         return .object(["dryRun": .bool(true), "status": .string("applied"), "tier": .string("notify"),
             "changes": .array([.object(["key": change["key"] ?? .string(""), "layer": change["layer"] ?? .string("session"),
-                "status": .string("applied"), "tier": .string("notify"), "before": .string(workerThinking), "after": value])])])
+                "status": .string("applied"), "tier": .string("notify"), "before": .null, "after": value])])])
     }
 
     /// One pending Global change as `settings.approvals` serves it (gateway approvalProjection).

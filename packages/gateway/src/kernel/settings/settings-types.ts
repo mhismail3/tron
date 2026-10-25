@@ -95,7 +95,7 @@ export function maxTier(...tiers: Tier[]): Tier {
 export type Writer = "ui" | "home" | "worker" | "agent";
 export type Timing = "fixed" | "live";
 export type Effect = "next-turn" | "next-request" | "new-chat" | "reload" | "restart" | "next-memory-pass" | "next-compaction" | "next-change" | "delegate";
-export const CONTROLS = ["toggle", "choice", "number", "text", "secret", "list", "checklist", "catalog", "readOnly"] as const;
+export const CONTROLS = ["toggle", "choice", "text", "secret", "list", "checklist", "catalog", "readOnly"] as const;
 export type Control = typeof CONTROLS[number];
 /** The renderer contract the Gateway speaks (doc 7.5). A client names the
  * controls it implements and its version; anything else falls back. */

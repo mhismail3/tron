@@ -6,13 +6,8 @@ import XCTest
 final class TronForegroundCaptureUITests: XCTestCase {
     @MainActor func testHomeMemoryRetainsNativeStackAndPageLight() throws { try captureHome(dark: false) }
     @MainActor func testHomeMemoryRetainsNativeStackAndPageDark() throws { try captureHome(dark: true) }
-    @MainActor func testHomeSettingsRefreshWithoutNativeReplayLight() throws { try captureHomeSettings(dark: false) }
-    @MainActor func testHomeSettingsRefreshWithoutNativeReplayDark() throws { try captureHomeSettings(dark: true) }
-    @MainActor func testRemovedSettingsRetiresOnlyInvalidChildDark() throws { try captureHomeSettings(dark: true, removed: true) }
     @MainActor func testProvidersRefreshWithoutNativeReplayLight() throws { try captureProviders(dark: false) }
     @MainActor func testProvidersRefreshWithoutNativeReplayDark() throws { try captureProviders(dark: true) }
-    @MainActor func testSessionSettingsRefreshWithoutNativeReplayLight() throws { try captureSessionSettings(dark: false) }
-    @MainActor func testSessionSettingsRefreshWithoutNativeReplayDark() throws { try captureSessionSettings(dark: true) }
     @MainActor func testQueuedEditorKeepsDraftAndValidatesRemovalLight() throws { try captureQueuedEditor(dark: false) }
     @MainActor func testQueuedEditorKeepsDraftAndValidatesRemovalDark() throws { try captureQueuedEditor(dark: true) }
 
@@ -46,39 +41,6 @@ final class TronForegroundCaptureUITests: XCTestCase {
         XCTAssertTrue(ready.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.descendants(matching: .any)["fixture.foreground-native"].firstMatch.waitForExistence(timeout: 5))
         return app
-    }
-
-    @MainActor private func captureHomeSettings(dark: Bool, removed: Bool = false) throws {
-        continueAfterFailure = false
-        let app = try launch(dark, arguments: ["-foreground-settings-change"] + (removed ? ["-foreground-settings-removed"] : []))
-        defer { app.terminate() }
-        let initial = try observation(app)
-        app.buttons["home-pinned-row"].tap()
-        XCTAssertTrue(app.buttons["session-context-button"].waitForExistence(timeout: 20))
-        app.buttons["session-context-button"].tap()
-        let settings = app.descendants(matching: .any)["home-manage-settings"].firstMatch
-        reveal(settings, in: app); settings.tap()
-        let models = app.buttons["settings-section-model-open"]
-        XCTAssertTrue(models.waitForExistence(timeout: 20), app.debugDescription)
-        reveal(models, in: app); models.tap()
-        let thinking = app.buttons.matching(NSPredicate(format: "label == %@", "Worker thinking")).firstMatch
-        XCTAssertTrue(thinking.waitForExistence(timeout: 20), app.debugDescription)
-        reveal(thinking, in: app); thinking.tap()
-        XCTAssertTrue(app.buttons["settings-option-Low"].waitForExistence(timeout: 20), app.debugDescription)
-        try capture(app, name: "home-settings-\(removed ? "removed" : "choice")-\(dark ? "dark" : "light")",
-                    reads: ["settings.resolve": 1, "settings.options": 2],
-                    forbidden: ["session.open", "session.sync", "session.list", "provider.list", "home.context", "home.taskList"],
-                    retiringTop: removed)
-        if removed {
-            XCTAssertFalse(app.buttons["settings-option-Low"].exists, "A removed schema row cannot retain its editor")
-        } else {
-            XCTAssertEqual(app.buttons["settings-option-High"].value as? String, "Selected", "The same mounted editor installs current server data")
-        }
-        for layer in (removed ? ["home-settings", "manage"] : ["models", "home-settings", "manage"]) {
-            closeTop(app); markReveal(app, name: "\(layer)-\(dark ? "dark" : "light")")
-        }
-        app.buttons["home-sheet-done-manage"].tap(); app.buttons["Back"].tap()
-        try finish(app, initial: initial, name: "settings-stack-retired")
     }
 
     @MainActor private func captureHome(dark: Bool) throws {
@@ -132,31 +94,6 @@ final class TronForegroundCaptureUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Fixture Refreshed"].exists, "The visible owner refreshes the catalog: \(app.debugDescription)")
         closeTop(app); app.buttons["settings-done"].tap(); app.buttons["Back"].tap()
         try finish(app, initial: initial, name: "providers-stack-retired")
-    }
-
-    @MainActor private func captureSessionSettings(dark: Bool) throws {
-        continueAfterFailure = false
-        let app = try launch(dark); defer { app.terminate() }
-        let initial = try observation(app)
-        let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
-        XCTAssertTrue(ordinary.waitForExistence(timeout: 20)); ordinary.tap()
-        XCTAssertTrue(app.buttons["session-context-button"].waitForExistence(timeout: 20))
-        app.buttons["session-context-button"].tap()
-        let settings = app.buttons["chat-settings-link"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 20)); reveal(settings, in: app); settings.tap()
-        let connection = app.buttons["settings-section-advanced-open"]
-        XCTAssertTrue(connection.waitForExistence(timeout: 20), app.debugDescription)
-        reveal(connection, in: app); connection.tap()
-        let transport = app.buttons.matching(NSPredicate(format: "label == %@", "Transport")).firstMatch
-        XCTAssertTrue(transport.waitForExistence(timeout: 20), app.debugDescription)
-        reveal(transport, in: app); transport.tap()
-        XCTAssertTrue(app.buttons["settings-option-Automatic"].waitForExistence(timeout: 20), app.debugDescription)
-        try capture(app, name: "session-settings-choice-\(dark ? "dark" : "light")",
-                    reads: ["session.open": 1, "session.sync": 1, "settings.resolve": 1, "settings.options": 2],
-                    forbidden: ["provider.list", "session.list", "home.context", "home.taskList"])
-        for _ in 0..<4 { closeTop(app) }
-        app.buttons["Back"].tap()
-        try finish(app, initial: initial, name: "session-settings-stack-retired")
     }
 
     @MainActor private func captureQueuedEditor(dark: Bool) throws {

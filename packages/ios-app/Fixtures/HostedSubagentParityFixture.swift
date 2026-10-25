@@ -92,6 +92,14 @@ struct HostedSubagentParityFixture: View {
             snapshot.transcriptTotal = snapshot.transcript.count
             snapshot.processActivities = []
         }
+        if let index = arguments.firstIndex(of: "-tool-summary-tint"), arguments.indices.contains(index + 1) {
+            let scenario = arguments[index + 1]
+            snapshot.name = "Home"
+            snapshot.transcript = Self.toolSummaryTintTranscript(scenario)
+            snapshot.transcriptTotal = snapshot.transcript.count
+            snapshot.processActivities = []
+            snapshot.phase = scenario.hasPrefix("active-") ? .running : .idle
+        }
         if arguments.contains("-history-grouping") {
             // A session that never ran a subagent: no mounted runs and an empty canonical page.
             snapshot.processActivities = arguments.contains("-history-empty") || arguments.contains("-history-long") ? [] : Self.historyProcesses(sequence: 1,

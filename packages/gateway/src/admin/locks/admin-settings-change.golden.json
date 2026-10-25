@@ -274,20 +274,13 @@
               ],
               "overridden": true,
               "presentation": {
-                "control": "readOnly",
                 "editable": true,
                 "effect": "next-request",
                 "help": "How many times a failed request is retried.",
                 "importance": "essential",
                 "label": "Retries",
-                "note": "Update Tron to edit",
                 "order": 40,
                 "projectSettable": true,
-                "range": {
-                  "max": 20,
-                  "min": 0,
-                  "unit": "retries"
-                },
                 "sessionOverridable": true,
                 "timing": "live",
                 "valueKind": "integer"
@@ -304,7 +297,7 @@
           },
           "sections": [
             {
-              "description": "Transport, timeouts, delivery, and retries",
+              "description": "Proxy and retained overrides",
               "id": "<id>",
               "order": 50,
               "title": "Connection"
@@ -389,20 +382,13 @@
               ],
               "overridden": true,
               "presentation": {
-                "control": "readOnly",
                 "editable": true,
                 "effect": "next-request",
                 "help": "How many times a failed request is retried.",
                 "importance": "essential",
                 "label": "Retries",
-                "note": "Update Tron to edit",
                 "order": 40,
                 "projectSettable": true,
-                "range": {
-                  "max": 20,
-                  "min": 0,
-                  "unit": "retries"
-                },
                 "sessionOverridable": true,
                 "timing": "live",
                 "valueKind": "integer"
@@ -419,7 +405,7 @@
           },
           "sections": [
             {
-              "description": "Transport, timeouts, delivery, and retries",
+              "description": "Proxy and retained overrides",
               "id": "<id>",
               "order": 50,
               "title": "Connection"
@@ -474,20 +460,13 @@
               ],
               "overridden": false,
               "presentation": {
-                "control": "readOnly",
                 "editable": true,
                 "effect": "next-request",
                 "help": "How many times a failed request is retried.",
                 "importance": "essential",
                 "label": "Retries",
-                "note": "Update Tron to edit",
                 "order": 40,
                 "projectSettable": true,
-                "range": {
-                  "max": 20,
-                  "min": 0,
-                  "unit": "retries"
-                },
                 "sessionOverridable": true,
                 "timing": "live",
                 "valueKind": "integer"
@@ -506,7 +485,7 @@
           },
           "sections": [
             {
-              "description": "Transport, timeouts, delivery, and retries",
+              "description": "Proxy and retained overrides",
               "id": "<id>",
               "order": 50,
               "title": "Connection"
