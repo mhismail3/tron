@@ -50,6 +50,43 @@ final class TronComposerUploadUITests: XCTestCase {
         keepEvidence(app, "916-lost-staging-reupload")
     }
 
+    /// A new app process must restore actual user input from the real draft store,
+    /// not a remounted view or a fixture seed. The UUID root belongs to this test.
+    @MainActor func testDraftTextSurvivesColdProcessRelaunch() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-composer-upload-fixture", "-composer-durable-token", UUID().uuidString,
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer {
+            if app.state != .notRunning {
+                app.buttons["fixture.draft-cleanup"].tap()
+                let cleaned = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'cleaned'"),
+                    object: app.staticTexts["fixture.draft-phase"])
+                XCTAssertEqual(XCTWaiter.wait(for: [cleaned], timeout: 20), .completed)
+            }
+            app.terminate()
+        }
+        waitConnected(app)
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 20), app.debugDescription)
+        let originalPID = app.staticTexts["fixture.draft-pid"].label
+        let text = "Unsent relaunch draft \(UUID().uuidString)"
+        composer.tap(); composer.typeText(text)
+        app.buttons["fixture.draft-checkpoint"].tap()
+        let checkpointed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'checkpointed'"),
+            object: app.staticTexts["fixture.draft-phase"])
+        XCTAssertEqual(XCTWaiter.wait(for: [checkpointed], timeout: 20), .completed)
+        keepEvidence(app, "1792-before-process-relaunch")
+        app.terminate(); app.launch()
+        waitConnected(app)
+        XCTAssertTrue(composer.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertNotEqual(app.staticTexts["fixture.draft-pid"].label, originalPID, "must be a different process")
+        let restored = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", text), object: composer)
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 20), .completed,
+                       "Cold process lost unsent draft; actual: \(String(describing: composer.value))")
+        keepEvidence(app, "1792-after-process-relaunch")
+    }
+
     @MainActor private func launch(_ scenario: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-composer-upload-fixture", "-composer-upload-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]

@@ -62,7 +62,9 @@ folder and [`Kernel`](../Kernel/) through [`state.module.json`](../state.module.
   ≤ 256 KiB text plus the 10-item / 25 MiB attachment budget under a 24-draft / 256 MiB disk LRU
   (metadata manifest, digest-verified payload files, atomic swap). Text above the Gateway's
   192 KiB limit is rejected before any clearing. Staged upload IDs survive remount and reconnect to
-  the same Mac (#916) and are never persisted.
+  the same Mac (#916) and are never persisted. The hosted composer upload journey verifies
+  exact user-entered text after an awaited checkpoint and a new app process, using a UUID-owned
+  filesystem root rather than an initial-text seed.
 - **Submission.** Admission installs one outgoing row synchronously; a definite rejection restores
   the exact draft; a possibly-sent outcome keeps the row and receipt; a runtime replacement before
   canonical delivery restores the draft for review and never replays.

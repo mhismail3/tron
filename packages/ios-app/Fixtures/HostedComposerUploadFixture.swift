@@ -19,6 +19,8 @@ struct HostedComposerUploadFixture: View {
     @State private var chatOpening = 0
     @State private var counters = "starting"
     private let gateway: ComposerUploadGateway
+    private let durableRoot: URL?
+    @State private var durablePhase = "idle"
     private let profile = GatewayProfile(id: "composer-upload", label: "Upload fixture", host: "upload.example.test", port: 9847, machineId: "upload-machine")
 
     init() {
@@ -29,7 +31,10 @@ struct HostedComposerUploadFixture: View {
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(profile, token: "fixture-only-token")
-        let root = FileManager.default.temporaryDirectory.appending(path: "composer-upload-fixture-\(UUID().uuidString)")
+        // Only the relaunch journey opts into a stable, UUID-scoped root.
+        let token = args.drop(while: { $0 != "-composer-durable-token" }).dropFirst().first.flatMap(UUID.init(uuidString:))
+        let root = FileManager.default.temporaryDirectory.appending(path: "composer-upload-fixture-\((token ?? UUID()).uuidString)")
+        durableRoot = token == nil ? nil : root
         _model = State(initialValue: AppModel(
             client: GatewayClient(socketFactory: GatewaySocketFactory { _ in ComposerUploadSocket(gateway: gateway) }),
             profiles: profiles,
@@ -42,6 +47,29 @@ struct HostedComposerUploadFixture: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                if let durableRoot {
+                    Text(String(ProcessInfo.processInfo.processIdentifier)).accessibilityIdentifier("fixture.draft-pid")
+                    Text(durablePhase).accessibilityIdentifier("fixture.draft-phase")
+                    HStack {
+                        Button("Checkpoint draft") {
+                            Task {
+                                await model.composerDrafts.checkpointDrafts().value
+                                durablePhase = "checkpointed"
+                            }
+                        }.accessibilityIdentifier("fixture.draft-checkpoint")
+                        Button("Clean draft fixture") {
+                            Task {
+                                await model.composerDrafts.removeProfile(profile.id).value
+                                do {
+                                    if FileManager.default.fileExists(atPath: durableRoot.path) {
+                                        try FileManager.default.removeItem(at: durableRoot)
+                                    }
+                                    durablePhase = "cleaned"
+                                } catch { durablePhase = "cleanup-error: \(error)" }
+                            }
+                        }.accessibilityIdentifier("fixture.draft-cleanup")
+                    }
+                }
                 if ready { ChatView(sessionID: "upload-session").id(chatOpening) }
                 // Leaving and reopening the chat revokes and remounts its
                 // presentation, the retry the old upload error asked for.
