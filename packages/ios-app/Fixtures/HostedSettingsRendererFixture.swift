@@ -431,6 +431,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             "target": .object(["kind": .string("global")]), "layer": .string("global"),
             "key": .string("run.retry.maxRetries"), "op": .string("set"),
             "before": .number(4), "after": .number(6), "tier": .string("quiet"), "status": .string("applied"),
+            "reason": ProcessInfo.processInfo.arguments.contains("-settings-changes-long-reason")
+                ? .string("Keep the profile focused on durable preferences rather than temporary task details. This explanation is deliberately long enough to wrap across several lines, so the Reason must reserve its full height between When and Tier without covering either neighboring row or drawing through a separator.")
+                : .null,
             "tierBasis": .object(["direction": .string("widen"), "floor": .string("quiet"), "floorSource": .string("code"),
                 "web": .bool(false), "risk": .string("quiet"),
                 "riskEvaluation": .object(["status": .string("assessed"), "rationale": .string("The deterministic floor is sufficient.")])]),
