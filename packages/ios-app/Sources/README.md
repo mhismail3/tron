@@ -31,7 +31,13 @@ module.
   The shipping icon's light-only material specialization disables specular lighting and reduces
   shadow and translucency to 0.2 while retaining glass. Base material values remain unchanged
   for dark, tinted and clear renditions; the development/test icon is independent.
-  The existing xcconfig icon names select these bundles; there is no duplicate flat app-icon set.
+  `AppIcon` (Emerald), `AppIconBurgundy` and `AppIconOliveGold` use the canonical
+  `UI/Theme/ThemeColor.swift` light/dark primary ink. Regenerate their bundles and
+  `Configuration/ThemeIcons.xcconfig` with `packages/ios-app/scripts/generate-theme-icons.sh`
+  from the repository root. The generator compiles the same enum as the app and copies
+  `AppIcon.icon`'s original silhouette, placement, backgrounds and materials; edit those only
+  in the primary bundle. There is no duplicate flat app-icon set. The independent beta
+  icon remains the development/test default until an explicit theme selection.
   Mac icons remain independent and unchanged.
 - Directory sources exclude `**/*.module.json` and `**/README.md`, so manifests and owner docs never
   reach the bundle (`project.yml`).

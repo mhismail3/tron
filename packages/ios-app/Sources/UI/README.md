@@ -32,7 +32,13 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
 - Fonts are built from descriptors and reused, bounded, by every input that shapes them; adaptive
   palette colors parse their hex once and select by interface style only when resolved.
 - Appearance stores the app's primary identity in `AppearanceSettings.themeColor`: Emerald,
-  Deep Burgundy or Olive Gold. `Color.tronPrimary` reads that observable owner; ink, title,
+  Deep Burgundy or Olive Gold. The same `ThemeColor` enum owns bundled app-icon names and
+  light/dark ink; `scripts/generate-theme-icons.sh` compiles it to generate Icon Composer
+  variants and alternate-icon build settings. `AppearanceSettings.selectTheme` persists the
+  explicit selection and requests its bundled icon through UIKit, serializing that operation.
+  It never changes icons on restoration, foregrounding or color-mode switches. An icon failure
+  preserves the selected in-app theme and allows an explicit retry; no second saved icon choice.
+  `Color.tronPrimary` reads that observable owner; ink, title,
   icon, container and pill tint share the adaptive ink without recreating navigation or chats.
   Dark Burgundy separates saturated purple-leaning `tronPrimary` ink from deep-wine
   `tronPrimarySurface` glass tint. Home dashboard surfaces and the Home/settings sheet family
