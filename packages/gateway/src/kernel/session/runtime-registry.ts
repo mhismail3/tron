@@ -751,7 +751,6 @@ export class RuntimeRegistry implements SessionOperations {
 
   get moduleHost(): ModuleHost { return this.options.modules; }
   /** The installed K6 owner, read late by session and composition consumers. */
-  get settings() { return this.settingsOwners; }
 
   /** Publish a change to session-list membership without creating another index. */
   noteSessionListChanged(): void {
@@ -4334,6 +4333,9 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   private async disposeSharedStores(): Promise<void> {
+    // The installed approval engine joins deadline effects before native stores
+    // or Home's workspace lifetime are released; the same owner serves Run.
+    await this.settingsOwners?.changes.dispose();
     // Home's memory owns capability state inside the workspace, so lifecycle
     // owners release before the workspace that owns those files (and so a later
     // Gateway authority in this process can open the same store again).
