@@ -172,14 +172,14 @@ describe("settings approval outcomes", () => {
   it("Home cannot decide its own request, and settings names keys by one id rule", async () => {
     const f = await gateway();
     const held = await f.settingsChanges.change({ kind: "global" }, [RETRIES(6) as never],
-      { actor: { kind: "home", id: f.home.sessionId, sessionId: f.home.sessionId }, reason: "Flaky provider", request: true });
+      { actor: { kind: "home", id: f.home.id, sessionId: f.home.id }, reason: "Flaky provider", request: true });
     const [request] = await f.approvals();
     expect(request!.requestId).toBe(held.approval!.requestId);
     // The tool offers no decision, and the decision owner refuses any actor but the maintainer.
     const decided = await f.homeSays("Approve it yourself", "settings", { action: "decide", requestId: request!.requestId });
     expect(decided.isError).toBe(true);
     await expect(f.settingsChanges.decide(request!.requestId, { digest: request!.digest, approved: true,
-      decidedBy: { kind: "home", id: f.home.sessionId, sessionId: f.home.sessionId } })).rejects.toMatchObject({ code: "invalid_request", message: expect.stringMatching(/Only the maintainer decides/) });
+      decidedBy: { kind: "home", id: f.home.id, sessionId: f.home.id } })).rejects.toMatchObject({ code: "invalid_request", message: expect.stringMatching(/Only the maintainer decides/) });
     expect(await f.approvals()).toHaveLength(1);
 
     // resolve returns `model.thinking[role=chat]`; the plain id is refused with that id named, by resolve, dry run and change alike.
@@ -194,5 +194,43 @@ describe("settings approval outcomes", () => {
     const contradicted = await f.homeSays("Change worker thinking via chat id", "settings", { action: "change", reason: "Cheaper", dryRun: true,
       changes: [{ key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low", qualifiers: { role: "worker" } }] });
     expect(contradicted.text).toContain("role=worker is a different setting");
+  }, 90_000);
+  it("an approval action shares the queue: its preview is approved exactly, applies once, is told, supersedes on a moved state and is never undone", async () => {
+    const f = await gateway();
+    let state = "absent";
+    const applied: unknown[] = [];
+    f.settingsChanges.registerAction("project.test", {
+      plan: async params => ({ title: `Create project ${(params as { name: string }).name}`, target: { kind: "global" },
+        items: [{ label: "Folder", value: `~/Workspace/${(params as { name: string }).name}` }, { label: "Now", value: state }] }),
+      apply: async params => { applied.push(params); state = "present"; return { summary: "Created the folder and ran git init on main" }; },
+    });
+    expect(() => f.settingsChanges.registerAction("project.test", { plan: async () => { throw new Error("unused"); }, apply: async () => ({ summary: "" }) })).toThrow(/already declared/);
+    const actor = { kind: "home" as const, id: f.home.id, sessionId: f.home.id };
+    const asked = await f.settingsChanges.requestAction("project.test", { name: "demo" }, { actor, reason: "The maintainer asked for a demo project" });
+    expect(asked).toMatchObject({ status: "pending", tier: "approve", changes: [], action: { title: "Create project demo" } });
+    const listed = (await f.service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<Record<string, unknown> & { requestId: string; digest: string }> }).requests;
+    expect(listed).toEqual([expect.objectContaining({ requestId: asked.approval!.requestId, requester: "Home", changes: [],
+      action: { subject: "project.test", title: "Create project demo", items: [{ label: "Folder", value: "~/Workspace/demo" }, { label: "Now", value: "absent" }] } })]);
+    await expect(f.decide(listed[0]!.requestId, listed[0]!.digest, true)).resolves.toMatchObject({ status: "approved", action: { title: "Create project demo" } });
+    expect(applied).toEqual([{ name: "demo" }]);
+    await f.homeSays("Anything new?", "settings", { action: "resolve", keys: ["run.retry.maxRetries"] });
+    expect(f.outcomes().at(-1)!.details.requests).toEqual([expect.objectContaining({ status: "approved", items: [],
+      action: { subject: "project.test", title: "Create project demo", summary: "Created the folder and ran git init on main" } })]);
+    expect(f.outcomes().at(-1)!.content).toContain("Create project demo was approved by the maintainer and applied (Created the folder and ran git init on main)");
+
+    // The state the preview showed moved before the tap: superseded, never applied.
+    state = "absent";
+    const again = await f.settingsChanges.requestAction("project.test", { name: "demo" }, { actor, reason: "Again" });
+    state = "present";
+    await expect(f.decide(again.approval!.requestId, again.approval!.digest, true)).rejects.toMatchObject({ code: "conflict", message: expect.stringMatching(/superseded/) });
+    expect(applied).toHaveLength(1);
+    const entries = (await f.settingsChanges.history({ key: "project.test" })).entries;
+    expect(entries.map(entry => entry.status).sort()).toEqual(["approved", "pending", "pending", "superseded"]);
+    expect(entries.find(entry => entry.status === "approved")).toMatchObject({ refersTo: asked.approval!.requestId, action: true });
+    // The Changes log names the action by its preview title.
+    const logged = (await f.service.invoke(phone(), "settings.history", { key: "project.test" }) as unknown as { entries: Array<{ status: string; presentation: { label: string; display: { after: string } } }> }).entries;
+    expect(logged.find(entry => entry.status === "approved")!.presentation).toMatchObject({ label: "Create project demo", display: { after: "Done" } });
+    await expect(f.settingsChanges.undo(asked.approval!.requestId, { actor: { kind: "ui", id: "phone" } })).rejects.toMatchObject({ code: "conflict", message: expect.stringMatching(/not undoable/) });
+    transcript.push({ case: "approval action", steps: [{ asked, listed: listed[0]!, entries: entries.map(entry => entry.status) }] });
   }, 90_000);
 });
