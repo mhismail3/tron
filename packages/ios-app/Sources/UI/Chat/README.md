@@ -172,6 +172,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 
 ## Verify
 
+`TronWorkerToolRegressionTests` exercises custom worker report outcomes/Markdown/evidence,
+check-in attention/Next, friendly transcript chips, aggregate navigation and extension/MCP
+humanization. `TronWorkerToolPreviewTests` captures light/dark native review surfaces only.
+
 `TronSixSmallUIRegressionTests` exercises scoped row ordering, primary toast ink, model ID/type
 metrics and retained search/selection, workspace path/status separation at standard/narrow/accessibility
 sizes, and check-in receipt content. `TronSixSmallUIPreviewTests` captures native light/dark design

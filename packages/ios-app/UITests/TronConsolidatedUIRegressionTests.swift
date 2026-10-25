@@ -12,7 +12,7 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         expand(app, done: "home-sheet-done-memory")
         let result = element(app, "home-memory-row-38"); reveal(app, result)
         XCTAssertTrue(result.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(result.label.contains("Read File") && result.label.contains("Completed"), result.label)
+        XCTAssertTrue(result.label.contains("Read file") && result.label.contains("Completed"), result.label)
         XCTAssertFalse(result.label.contains("import") || result.label.contains("interface"), "Rows never expose arbitrary output")
         tap(app, "home-memory-row-38")
         XCTAssertTrue(element(app, "home-memory-detail").waitForExistence(timeout: 5))
