@@ -117,7 +117,9 @@ struct HostedSettingsRendererFixture: View {
         NavigationStack {
             if ready {
                 Group {
-                    if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
+                    if ProcessInfo.processInfo.arguments.contains("-theme-icon-boundary") {
+                        HostedThemeIconFixture()
+                    } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
                        ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
                         let surface = ProcessInfo.processInfo.arguments[index + 1]
                         if surface.hasPrefix("worker-") {

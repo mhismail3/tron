@@ -118,6 +118,12 @@ None.
 
 ## Verify
 
+`TronMobileUITests/TronThemeIconUITests/testThemeSelectionAppliesBundledIconsAndRestoresSilently`
+uses the production Appearance view, the built iPhone/iPad icon declarations and UIKit's native
+selected icon (read by a hosted-only fixture); it selects all three themes and relaunches the app.
+`TronThemeIconPreviewUITests` captures the dashboard mark and Appearance in every theme/mode
+for visual review. These are not physical-device or notification-icon guarantees.
+
 Activity primary ink is checked against the rendered primary title/plus across all themes,
 light/dark, dashboard working dots and composer active/recent/extension states:
 `TronMobileUITests/TronActivityPrimaryColorUITests/testActivityInkFollowsPrimaryThemeLightAndDark`.
