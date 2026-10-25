@@ -7,14 +7,14 @@ import { xPostIdentity } from "./x-public-post.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { sourceAdmissionIsDecided, type KnowledgeStore } from "./knowledge-store.js";
-import { CONNECTOR_CREDENTIAL_SERVICE, isConnectorCredentialReference, type ConnectorCredentialStore, type WritableConnectorCredentialStore } from "./connector-credentials.js";
+import { isConnectorCredentialReference, type ConnectorCredentialStore, type WritableConnectorCredentialStore } from "./connector-credentials.js";
 import { currentInvocationContext } from "../kernel/host/extension-execution-context.js";
 import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";
 import { JEV_DEFAULT_MODEL } from "./jev-client.js";
-import type { ConnectionOwner } from "../integrations/connection-owner.js";
+import { CONNECTOR_CREDENTIAL_SERVICE, type ConnectionAccess, type ConnectionInstance, type ProviderAdmissionObservation } from "../modules/integrations/contract.js";
 import type { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 import { availablePaidBudgetCents, hasOpenPaidBudgetAttempt, markPaidBudgetDispatch, paidBudgetMonth, reconcilePaidBudgetAttempt, releaseUndispatchedPaidBudgetAttempt, reservePaidBudgetAttempt, rollPaidBudget, settlePaidBudgetAttempt } from "./paid-budget-ledger.js";
-import { normalizeProviderDisplayName, validateConnectionPolicy, type ConnectionInstance, type ProviderAdmissionObservation } from "../integrations/connection-contract.js";
+import { normalizeProviderDisplayName, validateConnectionPolicy } from "../integrations/connection-contract.js";
 import { FixedHostBodyTooLarge, requestFixedHost } from "./fixed-host-transport.js";
 
 function isPublicXPost(url: string): boolean {
@@ -39,7 +39,7 @@ interface KnowledgeConnectorOptions {
   /** Queues owned summary work after a source's save-time and extraction recovery; never awaited by intake. */
   queueSummary?: (source: KnowledgeRecord & { kind: "source" }) => void;
   /** Generic account owner. When present, connector configuration requires a connectionId. */
-  connections?: ConnectionOwner;
+  connections?: Pick<ConnectionAccess, "execute" | "resolveInstance" | "recordProviderObservation">;
   /** Shared Knowledge-owned monthly Jev ledger for both tagging and intake assessment. */
   jevBudget?: KnowledgeTaggingBudget;
 }

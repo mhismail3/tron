@@ -28,7 +28,7 @@ import {
 import { KnowledgeCatalog, type KnowledgeTable, type RecallRank } from "./knowledge-catalog.js";
 import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../protocol/json-budget.js";
-import type { ConnectionInstance } from "../integrations/connection-contract.js";
+import type { ConnectionInstance } from "../modules/integrations/contract.js";
 
 function isDecisionProducer(producer: SourceCurationProducer | undefined): boolean {
   return producer?.actor === "user" || producer?.actor === "agent";

@@ -906,7 +906,7 @@ export interface KnowledgeConnectorConfigurationRequest {
 
 export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; connectionId?: string; }
 export interface KnowledgeConnectorBudgetReconcileRequest { commandId: string; connector: "x"; connectionId: string; attemptId: string; }
-export interface KnowledgeXOAuthStartRequest { commandId: string; instanceId: string; clientId: string; redirectUri: string; policy: import("../integrations/connection-contract.js").ConnectionPolicy; }
+export interface KnowledgeXOAuthStartRequest { commandId: string; instanceId: string; clientId: string; redirectUri: string; policy: import("../modules/integrations/contract.js").ConnectionPolicy; }
 export interface KnowledgeXOAuthCompleteRequest { commandId: string; operationId: string; callbackUrl?: string; code?: string; state?: string; }
 export interface KnowledgeXCreditsRequest { connectionId: string; }
 export interface KnowledgeConnectorDiscoverRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; limit?: number; sourceCollection?: string; }

@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { CONNECTOR_CREDENTIAL_SERVICE } from "../knowledge/connector-credentials.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { GatewayError } from "../errors.js";
 import {
-  CONNECTION_STATE_SCHEMA_VERSION,
+  CONNECTION_STATE_SCHEMA_VERSION, CONNECTOR_CREDENTIAL_SERVICE,
+  type ConnectionAccess,
   type ConnectionAction,
   type ConnectionCapabilityStatus,
   type ConnectionCommand,
@@ -20,6 +20,8 @@ import {
   type ConnectionSetupOperation,
   type ProviderAdmissionObservation,
   type IntegrationDefinition,
+} from "../modules/integrations/contract.js";
+import {
   assertConnectionId,
   assertDefinitionId,
   assertCredentialReference,
@@ -128,7 +130,7 @@ function resultForInstance(instance: ConnectionInstance): Record<string, unknown
   return { id: instance.id, definitionId: instance.definitionId, implementation: instance.implementation, providerAccountId: instance.providerAccountId, ...(instance.scope ? { scope: instance.scope } : {}), ...(instance.raindropCollections ? { raindropCollections: copy(instance.raindropCollections) } : {}), ...(instance.providerDisplayName ? { providerDisplayName: instance.providerDisplayName } : {}), policy: instance.policy, health: instance.health, createdAt: instance.createdAt, updatedAt: instance.updatedAt, setupRevision: instance.setupRevision, ...(instance.lastError ? { lastError: instance.lastError } : {}) };
 }
 
-export class ConnectionOwner {
+export class ConnectionOwner implements ConnectionAccess {
   private readonly mutex = new AsyncMutex();
   private readonly definitions: IntegrationDefinition[];
   constructor(

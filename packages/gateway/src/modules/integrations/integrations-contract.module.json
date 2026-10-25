@@ -1,0 +1,13 @@
+{
+  "layer": "L1",
+  "owns": [
+    "contract.ts",
+    "integrations-contract.module.json"
+  ],
+  "dependsOn": [
+    "gateway/protocol"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/integrations/tests/connections.lifecycle.lock.integration.test.ts src/knowledge/knowledge.store.lock.integration.test.ts src/protocol/protocol.wire.lock.integration.test.ts"
+  ]
+}

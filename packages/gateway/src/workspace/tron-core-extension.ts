@@ -5,7 +5,7 @@ import type { TronWorkspaceDescriptor } from "../kernel/resources/resource-root.
 import { KNOWLEDGE_TOOL_PARAMETERS, type KnowledgeService, type KnowledgeToolParameters } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import { createJevExtension } from "../knowledge/jev-extension.js";
-import type { ConnectionOwner } from "../integrations/connection-owner.js";
+import type { ConnectionAccess } from "../modules/integrations/contract.js";
 
 const CONNECTIONS_TOOL_PARAMETERS = Type.Object({ action: Type.Literal("list") }, { additionalProperties: false });
 
@@ -46,7 +46,7 @@ function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescriptor):
 
 /** The SDK rebuilds the base prompt for each run. Never append a canonical
  * message, load workspace documents, change cwd, or replace project context. */
-export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe">, knowledge?: KnowledgeService, jev?: JevDecisionClient, connections?: ConnectionOwner): ExtensionFactory {
+export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe">, knowledge?: KnowledgeService, jev?: JevDecisionClient, connections?: Pick<ConnectionAccess, "snapshot">): ExtensionFactory {
   return (pi) => {
     if (jev) createJevExtension(jev)(pi);
     if (knowledge) {
