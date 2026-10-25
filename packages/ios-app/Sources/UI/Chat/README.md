@@ -86,6 +86,15 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   tap. Compaction, branch, configuration and extension status share one notification-pill language;
   command pills never show arguments. `custom_message` is right-aligned context; worker results
   read **Worker · task title**; subagent messages use the seafoam **Subagent** chip.
+- **Provider errors.** The projection kernel joins all adjacent assistant-error occurrences,
+  including mixed types. Every visible non-error row (user Continue, model change, assistant
+  content or tool activity) splits a run; empty error text parts do not. The first presentation
+  identity stays stable as a live tail joins and settles; cold/history uses the same assembler.
+  Gateway `errorInfo` owns friendly classification; there is no provider mapping in Swift.
+  One compact error pill shows the uniform message or Provider errors and a ×N count.
+  The existing transcript notification route keeps its sheet live above lazy rows. Shared
+  list rows show totals, distinct breakdown and first/last times; native disclosure groups
+  reveal each occurrence's metadata and selectable code-block JSON (or verbatim text).
 - **Error design canvas.** Hosted `-tron-chat-errors-preview` renders synthetic single/grouped
   error pills and detail canvases using the shared compact-pill, list-row and code-block
   components. `TronChatErrorsPreviewTests` captures light/dark design review only; it does not

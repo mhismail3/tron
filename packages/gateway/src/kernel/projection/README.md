@@ -21,6 +21,13 @@ the attributed tool-result boundary with its exact provenance and load token;
 the module closes over its live-view owner. No default validator or legacy
 projection path bypasses the policy.
 
+Assistant errors project redacted `errorMessage` plus disposable `errorInfo` (friendly
+message, category, provider message, type/request ID/HTTP status when supplied).
+`util/upstream-error` is the shared upstream classification/redaction cut used by
+live and cold/history projection; canonical SDK records are not rewritten.
+`providers/provider-error-presentation.integration.test.ts` exercises this cut
+through a real Pi session and persisted history.
+
 The attention lock runs through the real Gateway/Pi boundary. Reconnect,
 run-event and delegation locks also protect this owner's wire projections.
 Run selected validation with `scripts/tron verify --module gateway/projection`

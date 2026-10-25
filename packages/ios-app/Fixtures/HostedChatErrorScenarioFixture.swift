@@ -12,7 +12,8 @@ enum HostedChatErrorScenarioFixture {
                                        "category": .string(mixed ? "timeout" : "overloaded")]
         if !mixed { info["type"] = .string("overloaded_error"); info["requestId"] = .string("req_\(id)") }
         return .object(["id": .string(id), "presentationId": .string(id), "timestamp": .string("2026-01-01T10:42:18Z"),
-                        "kind": .string("message"), "role": .string("assistant"), "content": .array([]),
+                        "kind": .string("message"), "role": .string("assistant"),
+                        "content": .array([.object(["id": .string("\(id)-empty"), "ordinal": .number(0), "type": .string("text"), "text": .string("")])]),
                         "provider": .string(mixed ? "openai" : "anthropic"), "modelId": .string(mixed ? "gpt-fixture" : "claude-fixture"),
                         "stopReason": .string("error"), "errorMessage": .string(raw), "errorInfo": .object(info)])
     }

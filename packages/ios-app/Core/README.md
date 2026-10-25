@@ -60,6 +60,10 @@ the hosted test targets link.
 - **Models.** Model identity is always `(provider, id)`. Cross-file references are plain value
   composition; no model is a second cache or reducer.
 
+`UpstreamErrorInfo` decodes disposable Gateway error classification beside the
+redacted raw assistant error. Swift does not classify provider/HTTP failures;
+missing metadata uses raw text as its last-resort presentation.
+
 ## Invariants
 
 - Signpost and diagnostic metadata is limited to result codes, counts and bytes: never

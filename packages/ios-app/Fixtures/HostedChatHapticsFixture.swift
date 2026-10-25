@@ -45,6 +45,7 @@ struct HostedChatHapticsFixture: View {
                         Button("Live error") { Task { await gateway.liveError() } }
                         Button("Settle error") { Task { await gateway.settleError() } }
                         Button("Mixed error") { Task { await gateway.providerError(mixed: true) } }
+                        Button("Delayed error") { Task { await gateway.delayedError() } }
                         Button("Continue boundary") { Task { await gateway.errorBoundary() } }
                     } else {
                         Button("Deliver worker") { Task { await gateway.deliverWorkerResult() } }
@@ -185,6 +186,10 @@ private actor ChatHapticsGateway {
     func providerError(mixed: Bool) async {
         transcript.append(HostedChatErrorScenarioFixture.error(nextID("error"), mixed: mixed))
         await deliver()
+    }
+    func delayedError() async {
+        try? await Task.sleep(for: .seconds(3))
+        await providerError(mixed: false)
     }
     func errorBoundary() async {
         transcript.append(Self.message(nextID("user"), "user", "Continue"))

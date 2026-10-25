@@ -57,7 +57,7 @@ struct ChatNotificationView: View {
     }
 
     private var resolvedMaterial: ChatNotificationMaterial {
-        showsDetailAction ? .glass : presentation.material
+        presentation.errorRun != nil ? .flat : (showsDetailAction ? .glass : presentation.material)
     }
 
     var body: some View {
@@ -80,7 +80,8 @@ struct ChatNotificationView: View {
                 action: detailAction
             )
             .allowsHitTesting(showsDetailAction)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: presentation.errorRun == nil ? .center : .leading)
+            .accessibilityIdentifier(presentation.errorRun.map { "chat-error-run-\($0.occurrences[0].id)" } ?? "")
             .contentTransition(.interpolate)
             // A runtime notification that stops showing progress is the one
             // notification change that animates. The transcript row renders
@@ -125,7 +126,8 @@ struct ChatNotificationView: View {
         ChatCompactPillSurface(
             tone: presentation.tone,
             material: resolvedMaterial,
-            interactive: showsDetailAction
+            interactive: showsDetailAction,
+            cornerRadiusOverride: presentation.errorRun == nil ? nil : ChatToolChipShapePolicy.cornerRadius
         ) {
             ChatCompactPillLabel(
                 icon: presentation.icon,
@@ -133,14 +135,21 @@ struct ChatNotificationView: View {
                 detail: presentation.detail,
                 tone: presentation.tone,
                 showsProgress: presentation.showsProgress,
-                titleWeight: .semibold,
+                titleWeight: presentation.errorRun == nil ? .semibold : .bold,
                 detailStyle: presentation.hasDetailSheet ? .summary : .status
-            )
+            ) {
+                if let run = presentation.errorRun, run.occurrences.count > 1 {
+                    Text("×\(run.occurrences.count)")
+                        .font(TronTypography.secondaryCodeDescription)
+                        .foregroundStyle(presentation.tone.primaryColor)
+                }
+            }
         }
     }
 
     private var accessibilityLabel: String {
-        [presentation.title, presentation.detail].compactMap { $0 }.joined(separator: ", ")
+        let count = presentation.errorRun.map { "\($0.occurrences.count) \($0.occurrences.count == 1 ? "error" : "errors")" }
+        return [presentation.title, presentation.detail, count].compactMap { $0 }.joined(separator: ", ")
     }
 
 }
@@ -157,6 +166,9 @@ struct ChatNotificationDetailSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if let run = presentation.errorRun {
+                        ChatProviderErrorDetails(run: run)
+                    }
                     if let detail = presentation.detail {
                         Text(detail)
                             .font(TronTypography.bodySM)
@@ -181,7 +193,7 @@ struct ChatNotificationDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: presentation.title, accent: presentation.tone.surfaceColor)
+                    TronSheetTitle(title: presentation.errorRun?.sheetTitle ?? presentation.title, accent: presentation.tone.surfaceColor)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {

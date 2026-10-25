@@ -518,7 +518,9 @@ enum ChatTranscriptProjectionKernel {
             return false
         }) else { return nil }
 
-        let hasFooter = !(item.errorMessage ?? "").isEmpty
+        // Errors must join the adjacent canonical run in the global assembler.
+        guard (item.errorMessage ?? "").isEmpty else { return nil }
+        let hasFooter = false
         let rendered: [ChatTranscriptRenderItem]
         if parts.isEmpty, !hasFooter {
             rendered = []
@@ -1014,6 +1016,16 @@ enum ChatTranscriptProjectionKernel {
         var pendingTools: [PreparedTool] = []
 
         func appendRendered(_ item: ChatTranscriptRenderItem, origin: ChatTranscriptRowOrigin) {
+            // The sole error grouping cut: every other rendered row is a barrier.
+            // Keep the first identity while the run grows, including live handoff.
+            if case .notification(let incoming) = item, let next = incoming.errorRun,
+               case .notification(let previous)? = rendered.last, let prior = previous.errorRun {
+                rendered[rendered.count - 1] = .notification(
+                    ChatProviderErrorRun(occurrences: prior.occurrences + next.occurrences).notification
+                )
+                if origin == .live { renderedOrigins[renderedOrigins.count - 1] = .live }
+                return
+            }
             rendered.append(item)
             renderedOrigins.append(origin)
         }
@@ -1206,18 +1218,19 @@ enum ChatTranscriptProjectionKernel {
             )
             var content: [ChatMessagePart] = []
             var slice = 0
-            var renderedFooter = false
 
             func flushContent(showsFooter: Bool) {
                 guard !content.isEmpty else { return }
                 flushTools()
                 appendMessage(item, parts: content, streaming: streaming, slice: slice, showsFooter: showsFooter)
-                renderedFooter = renderedFooter || showsFooter
                 slice += 1
                 content.removeAll(keepingCapacity: true)
             }
 
             for part in fragment.messageParts {
+                // Empty provider text is not visible content and cannot split an error run.
+                if item.errorMessage != nil, case .content(let value) = part, value.type == .text,
+                   value.attachment == nil, (value.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
                 if case .content(let canonical) = part, canonical.type == .toolCall,
                    let tool = toolsByID[canonical.toolCallId ?? canonical.id] {
                     flushContent(showsFooter: false)
@@ -1228,9 +1241,10 @@ enum ChatTranscriptProjectionKernel {
                 }
             }
             flushContent(showsFooter: true)
-            if !renderedFooter, !(item.errorMessage ?? "").isEmpty {
+            if let error = ChatProviderErrorOccurrence(item) {
                 flushTools()
-                appendMessage(item, parts: [], streaming: streaming, slice: slice, showsFooter: true)
+                appendRendered(.notification(ChatProviderErrorRun(occurrences: [error]).notification),
+                               origin: streaming ? .live : .canonical)
             }
             // Only exact Gateway segment identity may continue into a later
             // assistant fragment. Legacy groups remain locally bounded.
@@ -1499,6 +1513,15 @@ enum ChatTranscriptProjectionKernel {
                     semanticID: notification.semanticID ?? item.id,
                     origin: origin
                 )
+                for occurrence in notification.errorRun?.occurrences ?? [] {
+                    if origin == .canonical {
+                        renderedIDBySemanticID[occurrence.semanticID] = item.id
+                        renderedIDBySemanticID[occurrence.id] = item.id
+                    } else {
+                        renderedIDBySemanticIDLive[occurrence.semanticID] = item.id
+                        renderedIDBySemanticIDLive[occurrence.id] = item.id
+                    }
+                }
             }
         }
         // `canonicalRendered`/`liveRendered` intentionally use the same

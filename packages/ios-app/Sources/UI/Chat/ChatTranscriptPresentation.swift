@@ -849,20 +849,6 @@ struct ChatTranscriptPageRequest: Equatable {
     }
 }
 
-enum ChatProviderErrorPresentation {
-    static let unspecifiedNotFound = "The model provider returned an unspecified Not Found error. Check the selected model and provider connection, then try again."
-
-    static func message(_ raw: String) -> String {
-        let normalized = raw
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: ":", with: "")
-        return normalized == "error not found" || normalized == "not found"
-            ? unspecifiedNotFound
-            : raw
-    }
-}
-
 struct ChatStreamingResponseSignature: Equatable {
     let itemID: String
     let parts: [ChatMessagePart]
@@ -876,7 +862,7 @@ struct ChatStreamingResponseSignature: Equatable {
         }
         let visibleError = (item.errorMessage ?? "").isEmpty
             ? nil
-            : item.errorMessage.map(ChatProviderErrorPresentation.message)
+            : item.errorMessage
         guard !visibleParts.isEmpty || visibleError != nil else { return nil }
         itemID = item.id
         parts = visibleParts
@@ -1317,6 +1303,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
     /// Compaction summaries remain interactive, but their long-form sheet
     /// content keeps the rounded container with flat rather than glass styling.
     let detailUsesGlassSurface: Bool
+    let errorRun: ChatProviderErrorRun?
 
     init(
         id: String,
@@ -1328,7 +1315,8 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         tone: ChatNotificationTone,
         material: ChatNotificationMaterial,
         expandsOnTruncation: Bool = false,
-        detailUsesGlassSurface: Bool = true
+        detailUsesGlassSurface: Bool = true,
+        errorRun: ChatProviderErrorRun? = nil
     ) {
         self.id = id
         self.semanticID = semanticID
@@ -1340,9 +1328,10 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         self.material = material
         self.expandsOnTruncation = expandsOnTruncation
         self.detailUsesGlassSurface = detailUsesGlassSurface
+        self.errorRun = errorRun
     }
 
-    var hasDetailSheet: Bool { material == .glass && body?.isEmpty == false }
+    var hasDetailSheet: Bool { errorRun != nil || (material == .glass && body?.isEmpty == false) }
     var showsProgress: Bool {
         semanticID == nil && (
             id == "runtime-working"

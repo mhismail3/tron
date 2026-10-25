@@ -291,16 +291,6 @@ struct TranscriptRow: View, Equatable {
                         }
                     }
                 }
-                if showsMessageFooter, let error = item.errorMessage, !error.isEmpty {
-                    TranscriptNotice(
-                        title: ChatProviderErrorPresentation.message(error),
-                        detailBody: error,
-                        icon: "exclamationmark.triangle.fill",
-                        tone: .error,
-                        expandsOnTruncation: true,
-                        animatesEntrance: streaming
-                    )
-                }
                 if let modelAttribution {
                     Text(modelAttribution)
                         .font(TronFont.mono(10))

@@ -1,9 +1,10 @@
-import { redactCredentials } from "./credential-redaction.js";
+import { redact, redactCredentials } from "./credential-redaction.js";
 
 /** Transport-independent classification of an upstream failure. Queue policy,
  * account-usage reads and transcript presentation consume these same facts. */
 export interface UpstreamErrorInfo {
   message: string;
+  providerMessage: string;
   category: "overloaded" | "rate-limit" | "usage-limit" | "authentication" | "entitlement" | "forbidden" | "unavailable" | "network" | "timeout" | "aborted" | "not-found" | "unknown";
   type?: string;
   requestId?: string;
@@ -29,11 +30,11 @@ export function redactedUpstreamError(raw: string): string {
       const value: unknown = JSON.parse(raw.slice(start));
       const clean = JSON.stringify(value, (key, entry: unknown) =>
         /^(?:authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|password|secret|credential)$/iu.test(key)
-          ? "[REDACTED]" : typeof entry === "string" ? redactCredentials(entry) : entry);
+          ? "[REDACTED]" : typeof entry === "string" ? redactCredentials(redact(entry)) : entry);
       return redactCredentials(raw.slice(0, start)) + clean;
     } catch { /* Non-JSON diagnostics keep their original layout. */ }
   }
-  return redactCredentials(raw);
+  return redactCredentials(redact(raw));
 }
 
 export function upstreamErrorInfo(raw: string, provider: string): UpstreamErrorInfo {
@@ -65,5 +66,5 @@ export function upstreamErrorInfo(raw: string, provider: string): UpstreamErrorI
   }
   else if (httpStatus && httpStatus >= 500) { category = "unavailable"; friendly = `${name} is temporarily unavailable`; }
   else if (httpStatus === 404 || /^(?:error\s*:?\s*)?not found\s*:?$/iu.test(message.trim())) { category = "not-found"; friendly = `The selected model was not found by ${name}`; }
-  return { message: friendly, category, ...(type ? { type } : {}), ...(requestId ? { requestId } : {}), ...(httpStatus ? { httpStatus } : {}) };
+  return { message: friendly.slice(0, 512), providerMessage: message.slice(0, 2_048), category, ...(type ? { type: type.slice(0, 256) } : {}), ...(requestId ? { requestId: requestId.slice(0, 256) } : {}), ...(httpStatus ? { httpStatus } : {}) };
 }
