@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatch, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
 import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT } from "../../../test-support/home-task-subagent-child.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON } from "../../kernel/delegation/task-worker-extension.js";
+import * as subagentSettlement from "../../kernel/delegation/subagent-settlement.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { closeSubagentFixtures, bound, childModel, launchResults, asyncState, holdingWorkflowLaunch, workflowChildRunId, holdingAsyncLaunch, waitBetweenTurns, toolResultText, entryText, launchedAsyncDir, type FauxContext } from "../../../test-support/home-task-subagents-support.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
@@ -70,7 +71,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     await waitFor(() => child.heldRequests() === 1, "async child live", bound);
     await waitBetweenTurns(slot);
     // The settlement's join fails before any stop: the task reconciles from its canonical file at once (#1166).
-    vi.spyOn(slot, "settleTaskSubagents").mockRejectedValue(new Error("injected settlement interruption"));
+    vi.spyOn(subagentSettlement, "settleTaskSubagents").mockRejectedValue(new Error("injected settlement interruption"));
     await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     await expect(run.completion).resolves.toMatchObject({ lifecycle: "terminal",
       terminalEvidence: { outcome: "unknown", reason: "detached-work-outlived-task", detail: "injected settlement interruption" } });
@@ -105,7 +106,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     await waitFor(() => child.heldRequests() === 1, "detached child live", bound);
     await waitBetweenTurns(slot);
     // The settlement fails before any stop: the task reconciles from its canonical file at once (#1166).
-    vi.spyOn(slot, "settleTaskSubagents").mockRejectedValue(new Error("injected settlement interruption"));
+    vi.spyOn(subagentSettlement, "settleTaskSubagents").mockRejectedValue(new Error("injected settlement interruption"));
     await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     await expect(run.completion).resolves.toMatchObject({ lifecycle: "terminal",
       terminalEvidence: { outcome: "unknown", reason: "detached-work-outlived-task", detail: "injected settlement interruption" } });

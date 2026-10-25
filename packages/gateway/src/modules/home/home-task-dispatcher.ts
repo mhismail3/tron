@@ -1,5 +1,6 @@
 import type { TaskWorkerControl, TaskControlRefusalReason, TaskWorkerDiagnostic } from "../../kernel/delegation/worker-contract.js";
 import { interruptTaskWorker, stopTaskWorker, steerTaskWorker } from "../../kernel/delegation/worker-control.js";
+import { settleTaskSubagents } from "../../kernel/delegation/subagent-settlement.js";
 import { interruptToolCalls, ToolCallInterrupt } from "../../kernel/run/bounded-tool-cancellation.js";
 import { isUsageLimitError, type QueueModelState } from "../../providers/model-queue-extension.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -644,7 +645,7 @@ export class HomeTaskDispatcher {
         try { await reports.joinStop(); } catch { reportStopFailed = true; }
         // Async runs the task started are stopped and joined before the evidence cut,
         // so the cut records every stop and the outcome reads the join's result.
-        const settled = await slot.settleTaskSubagents(operationId, deadline!.signal);
+        const settled = await settleTaskSubagents(slot, operationId, deadline!.signal);
         // Share cold recovery's durable file cut before publishing any terminal
         // references/outbox or acknowledging the operation. SDK append visibility
         // alone cannot guarantee the worker evidence survives a power loss.

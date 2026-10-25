@@ -31,7 +31,8 @@
     "worker-contract.ts",
     "worker-control.ts",
     "worker-settlement.ts",
-    "subagent-control.ts"
+    "subagent-control.ts",
+    "subagent-settlement.ts"
   ],
   "dependsOn": [
     "gateway/pi",

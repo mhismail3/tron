@@ -25,6 +25,12 @@ Worker resume acquires the canonical native lease here, invokes the native lane/
 rebuild operation, and releases that same lease on failure. Registry supplies only
 its actual persisted-session acquisition; it has no resume forwarding route.
 
+`subagent-settlement.ts` owns the actual task-end stop/join/notice/receipt algorithm.
+Its structural backend view is the actual native runtime: no copied context or token
+index. Canonical append and work handles remain native; the same operation owner is
+passed to the append after the live notice join. Native exposes its existing atomic
+activity/controller projections and the single K5 waiter owner.
+
 ## Session subagent activity
 
 - `process-activity.v1` projects only structured synchronous and asynchronous subagents with

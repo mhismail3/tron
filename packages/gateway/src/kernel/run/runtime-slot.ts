@@ -57,7 +57,7 @@ import type { RequestPolicy } from "../host/request-policy.js";
 import type { SessionLineagePolicy } from "../host/session-lineage.js";
 import type { CanonicalAppendContext } from "../host/canonical-append.js";
 import { createHomeTaskWorkerExtension } from "../delegation/task-worker-extension.js";
-import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../delegation/task-subagents.js";
+import type { HomeTaskSubagentRun } from "../delegation/task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../delegation/task-report.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
@@ -485,7 +485,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** Bounded, disposable extension-owned run projections retain completed work
    * for Manage Session while the owning tool carries the live copy. */
   private readonly extensionActivities = new Map<string, ExtensionRunActivity>();
-  private readonly workerSettlement = new WorkerSettlement(DEFAULT_RUNTIME_DISPOSAL_GRACE_MS);
+  readonly workerSettlement = new WorkerSettlement(DEFAULT_RUNTIME_DISPOSAL_GRACE_MS);
   /** Monotonic lifecycle projection ordering and terminal latches are runtime
    * facts; producer timestamps are display evidence only. */
   private readonly extensionActivitySequences = new Map<string, number>();
@@ -3630,7 +3630,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
    * projection. Pi can reload a package through its resolved local path,
    * so the opaque installed-owner identity—not the mutable source label—is the
    * authority boundary. */
-  private trustedSubagentController(): ToolDefinition | undefined {
+  trustedSubagentController(): ToolDefinition | undefined {
     const session = this.runtime?.session;
     if (!session) return undefined;
     return trustedDelegatedController({
@@ -5588,55 +5588,11 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return typeof runId === "string" && await this.ownsSubagentRun(runId);
   }
 
-  /** Task-end settlement of this worker's async subagent runs. Every live async run is
-   * stopped through the provider's own stop control, then the join waits until no run
-   * is live, bounded by the operation deadline or the stop-join bound, whichever comes
-   * first, and one disposal grace after it. The
-   * fact is appended only when the task launched async runs, so an absent fact proves
-   * zero Gateway stops. `stoppedAtEnd` is null unless every stop was accepted and the
-   * join completed. Before the fact, the join also waits for each async run's completion
-   * notice to be recorded, bounded the same way; `noticesUndelivered` counts those still
-   * missing at the bound, which never changes the outcome (the run itself is terminal). */
-  async settleTaskSubagents(operationId: string, deadline: AbortSignal): Promise<{ stoppedAtEnd: number | null; noticesUndelivered: number }> {
-    if (this.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
-    const launched = homeTaskSubagentLaunches(this.canonicalSessionEntries());
-    const targets = this.asyncStopTargets();
-    if (targets.length === 0 && launched.every(launch => launch.asyncDir === undefined)) return { stoppedAtEnd: 0, noticesUndelivered: 0 };
-    const tool = this.trustedSubagentController();
-    const stops = await Promise.allSettled(targets.map(async runId => {
-      if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
-      await controlSubagentRun(this.runtime.session, tool, { action: "stop", id: runId });
-    }));
-    // The join is also bounded once stops are requested: a run whose stop never lands
-    // must not hold the sealed task open for the rest of its 24-hour deadline.
-    const stopJoin = new AbortController();
-    const stopJoinTimer = setTimeout(() => stopJoin.abort(), HOME_TASK_SUBAGENT_STOP_JOIN_MS);
-    const bound = AbortSignal.any([deadline, stopJoin.signal]);
-    let joined: boolean;
-    let noticesUndelivered: number;
-    try {
-      joined = await this.workerSettlement.until("detached", () => !this.hasDetachedDashboardWork(), bound);
-      // A run's completion notice is written after the run is terminal, so it can land after
-      // the report. It is canonical evidence of the run, so settlement records it before the fact
-      // and the evidence cut. A notice still missing at the bound is counted, not waited for.
-      const runIds = launched.flatMap(launch => launch.asyncDir ? [basename(launch.asyncDir)] : []);
-      const undelivered = (): string[] => undeliveredSubagentNotices(this.canonicalSessionEntries(), runIds);
-      await this.workerSettlement.until("delivery", () => undelivered().length === 0, bound);
-      noticesUndelivered = undelivered().length;
-    } finally {
-      clearTimeout(stopJoinTimer);
-    }
-    const stoppedAtEnd = joined && stops.every(stop => stop.status === "fulfilled") ? stops.length : null;
-    await this.persistCanonicalCustomEntry(HOME_TASK_SUBAGENTS,
-      { receiptId: subagentsReceiptId(operationId), operationId, stoppedAtEnd }, subagentsReceiptId(operationId), this.runWork.get(operationId));
-    return { stoppedAtEnd, noticesUndelivered };
-  }
-
   /** The run ids settlement stops through the provider. A live run is stopped as itself,
    * and a workflow's stop reaches its children. A run that completed while runner-backed
    * children stay live cannot be stopped by its own state, so each live child is named by
    * its run id from the run's status. */
-  private asyncStopTargets(): string[] {
+  asyncStopTargets(): string[] {
     // Selection has no awaits: a refresh cannot reorder the map mid-selection,
     // and Stop cannot disagree with status by re-reading a different artifact.
     return this.liveExtensionActivities().flatMap(activity => {

@@ -17,6 +17,9 @@ control execution is K5-owned; native admission and canonical receipt ordering r
 K5 owns resumed-worker lease/bind/failure-release orchestration. Native
 `bindTaskWorker` remains the actual lane-protected validation/rebuild/publication
 backend; Registry has no worker-resume wrapper.
+K5 also owns canonical subagent settlement. Its runtime port reads the actual
+native canonical/activity/controller projections and work owner, then calls native
+canonical append; no Slot settlement wrapper or duplicate token index exists.
 Worker steering packets and Stop/Interrupt identity fences are K5-owned as well; the
 former Slot-specific control methods are absent. Generic per-tool interruption stays Run-owned.
 Ordinary extension registration reads the composition-configured order on the
