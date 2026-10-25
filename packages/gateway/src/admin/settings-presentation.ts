@@ -1,7 +1,6 @@
 import { HOME_PROFILE_SUBJECT, SECTIONS, keyForHome, recordSubject, type SettingsSchema, type EntryGuidance, type KeyDeclaration } from "../kernel/settings/settings-schema.js";
 import type { ResolvedKey, Resolution } from "../kernel/settings/tool-contract.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
-import { formatProfileValue } from "../modules/home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type ValueType } from "../kernel/settings/settings-types.js";
 import { scopeAdmitted } from "../kernel/settings/scope-resolution.js";
 
@@ -103,6 +102,20 @@ export function requesterLabel(actor: Actor): string {
 
 export function actorLabel(actor: Actor): string {
   return actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : actor.kind === "outside" ? "Outside Tron" : "You";
+}
+
+const KIND_LABELS = {
+  preference: "preference", "standing-decision": "standing decision", "delegation-default": "delegation default", fact: "fact",
+} as const;
+
+/** How Changes shows a recorded profile value. Read-only presentation of audit. */
+export function formatProfileValue(value: unknown): string {
+  if (value === null || value === undefined) return "Not in the profile";
+  const item = value as Record<string, unknown> & { kind?: keyof typeof KIND_LABELS };
+  if (item.state === "retired") return `Retired: ${item.text ?? ""}`.trim();
+  if (item.state === "superseded") return `Superseded: ${item.text ?? ""}`.trim();
+  const kind = item.kind && KIND_LABELS[item.kind] ? KIND_LABELS[item.kind] : "item";
+  return `${item.confirmed ? "Confirmed" : "Inferred"} ${kind}: ${item.text ?? ""}`;
 }
 
 /** History is a disposable projection of permanent audit, not another schema or

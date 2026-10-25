@@ -1,7 +1,6 @@
 {
   "comment": "Shrink-only: scripts/tron layers --update removes fixed entries; new violations are never added (tools/layers/README.md).",
   "violations": [
-    "two-way gateway/admin <-> gateway/home",
     "two-way gateway/admin <-> gateway/transport",
     "two-way gateway/episodic <-> gateway/home",
     "two-way gateway/extension-activity <-> gateway/projection",

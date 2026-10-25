@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { formatProfileValue } from "../../admin/settings-presentation.js";
 import type { SettingsChangePath, SubjectContext, SubjectWrite, ChangeContext } from "../../kernel/settings/settings-change.js";
 import type { ChangeEntry } from "../../kernel/settings/settings-record.js";
 import type { ChangeResult } from "../../kernel/settings/tool-contract.js";
@@ -235,20 +236,6 @@ export function profileValue(item: HomeProfileItem | undefined): HomeProfileValu
   if (!item) return null;
   return { kind: item.kind, text: item.text, confirmed: item.confirmed, state: item.status, revisionId: item.revisionId,
     ...(item.supersedes ? { supersedes: item.supersedes } : {}), ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}) };
-}
-
-const KIND_LABELS: Record<HomeProfileKind, string> = {
-  preference: "preference", "standing-decision": "standing decision", "delegation-default": "delegation default", fact: "fact",
-};
-
-/** How Changes shows a recorded profile value. Read-only presentation of audit. */
-export function formatProfileValue(value: unknown): string {
-  if (value === null || value === undefined) return "Not in the profile";
-  const item = value as Partial<HomeProfileValue>;
-  if (item.state === "retired") return `Retired: ${item.text ?? ""}`.trim();
-  if (item.state === "superseded") return `Superseded: ${item.text ?? ""}`.trim();
-  const kind = item.kind && KIND_LABELS[item.kind] ? KIND_LABELS[item.kind] : "item";
-  return `${item.confirmed ? "Confirmed" : "Inferred"} ${kind}: ${item.text ?? ""}`;
 }
 
 /** The list projection of an item (`home.profileList` and the change answer). */

@@ -34,6 +34,9 @@ Durable stores: `<tronHome>/gateway/settings/` (`changes/`, `approvals.json`,
 `settings-module.ts` owns the settings extension descriptor. Its request/result
 vocabulary is the [kernel settings contract](../kernel/settings/README.md); the
 session resolves its actor and settings owner at every call.
+`settings-presentation.ts` owns the profile audit-value formatter. History need
+not load Home's profile implementation; Home calls the same formatter for its
+stale-edit answer. Profile admission, records and mutation policy stay Home-owned.
 
 Project diagnostics: file/key/reason only; ≤32 entries, ≤1,024 visited fields, ≤256-character paths (ellipsis when shortened); unknown objects are not traversed.
 The full settings contract (foundations, layers, the generated key table,
