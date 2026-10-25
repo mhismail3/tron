@@ -9,7 +9,7 @@ import WebSocket from "ws";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { DeviceStore } from "../security/device-store.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { SessionSearchIndex } from "../sessions/session-search-index.js";
 import { SessionSearchService } from "../sessions/session-search-service.js";
 import { CommandReceiptStore } from "./command-receipts.js";

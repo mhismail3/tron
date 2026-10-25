@@ -11,9 +11,9 @@ same ordering, sync/async shape and failure handling.
 
 | Fact | Evidence |
 |---|---|
-| `RuntimeSlot` (11,165 lines) builds the Pi runtime, module host, Home profile, request pipeline and task-worker role in one closure | `sessions/runtime-slot.ts:2212-2608` (`runtimeFactory`) |
-| Slot dependencies: 60 fields (18 `home*`, plus `validateTaskMarker`); hooks: 10 (3 Home); 14 more branches on `liveProfile()` | `sessions/runtime-slot.ts:522-635`, `:455-486`, `:1290-10431` |
-| The registry (5,030 lines) is also a composition root: it builds Swift apps, display, workspace, model queues and `HomeOwner`, and passes itself to Home | `sessions/runtime-registry.ts:762-866` (`taskSessions: this` `:865`) |
+| `RuntimeSlot` (11,165 lines) builds the Pi runtime, module host, Home profile, request pipeline and task-worker role in one closure | `kernel/run/runtime-slot.ts:2212-2608` (`runtimeFactory`) |
+| Slot dependencies: 60 fields (18 `home*`, plus `validateTaskMarker`); hooks: 10 (3 Home); 14 more branches on `liveProfile()` | `kernel/run/runtime-slot.ts:522-635`, `:455-486`, `:1290-10431` |
+| The registry (5,030 lines) is also a composition root: it builds Swift apps, display, workspace, model queues and `HomeOwner`, and passes itself to Home | `kernel/session/runtime-registry.ts:762-866` (`taskSessions: this` `:865`) |
 | Home and automations reach the concrete registry | `modules/home/home-owner.ts:162`, `modules/home/home-task-dispatcher.ts:217`, `modules/home/home-session-read.ts:29`, `sessions/owned-session-dispatch.ts:20` |
 | The module host is one interface carrying every module's service | `extensions/tron-modules.ts:32-80` (`TronModuleHost`), lists `:102-224`, `:236-301` |
 | Upward edges in the layer ratchet | `gateway/run` → 13 L3/L4 modules, `gateway/extensions` → 11, `gateway/projection` → display (`packages/gateway/layer-baseline.json`) |

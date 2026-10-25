@@ -30,7 +30,7 @@ import { HookResources } from "./admin/hook-resources.js";
 import { AuthBroker } from "./admin/auth-broker.js";
 import { MacKeychainMcpCredentialOwner, McpAdminService } from "./admin/mcp-admin-service.js";
 import { GlobalProviderResources } from "./admin/global-provider-resources.js";
-import { RuntimeRegistry } from "./sessions/runtime-registry.js";
+import { RuntimeRegistry } from "./kernel/session/runtime-registry.js";
 import { startGatewayModules } from "./main/modules.js";
 import { GatewayWorkRegistry } from "./kernel/run/gateway-work-registry.js";
 import { logUnresolvedDrainOwners, RestartDrainProgress } from "./sessions/restart-drain.js";

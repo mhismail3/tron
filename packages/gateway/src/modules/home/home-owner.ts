@@ -4,7 +4,7 @@ import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvi
 import { visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
-import type { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import type { HomeTaskPolicy } from "./home-task-worker-choice.js";
 import { HomeChapterMaterializer } from "./home-chapter-materialization.js";
 import { HomeGlobalResources } from "./home-global-resources.js";

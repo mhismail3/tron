@@ -15,7 +15,7 @@ import { HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "./home-task-dispatcher.js"
 import { HomeMemoryRefusal } from "./home-request-policy.js";
 import { UploadStore } from "../../machine/upload-store.js";
 import { EpisodicMemoryError } from "../../errors.js";
-import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { RunMarkerStore } from "../../kernel/run/run-markers.js";
 import { SessionCatalog } from "../../sessions/session-catalog.js";
 import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch, type OwnedSessionDispatchOver } from "../../kernel/delegation/owned-session-dispatch.js";

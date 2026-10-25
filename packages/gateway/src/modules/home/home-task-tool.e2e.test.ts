@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type Context } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
-import type { RuntimeSlot } from "../../sessions/runtime-slot.js";
+import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 import { disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
 

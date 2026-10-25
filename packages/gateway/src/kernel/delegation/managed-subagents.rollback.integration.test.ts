@@ -11,7 +11,7 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
 import { TrustService } from "../resources/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
-import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../session/runtime-registry.js";
 import { delegatedProviderEnvironment } from "./delegated-provider.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { copyPayload, refuseUnjoinedFixture, retainedFiles } from "../../../test-support/nested-vitest-payload.js";

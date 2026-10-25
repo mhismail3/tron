@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import type { JsonValue, ProcessTranscriptLease } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
-import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 
 const MAX_LEASES_PER_CLIENT = 8;

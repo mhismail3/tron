@@ -10,8 +10,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "./trust-service.js";
 import { GatewayError } from "../../errors.js";
 import { waitFor } from "../../../test-support/wait-for.js";
-import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
-import type { RuntimeSlot } from "../../sessions/runtime-slot.js";
+import { RuntimeRegistry } from "../session/runtime-registry.js";
+import type { RuntimeSlot } from "../run/runtime-slot.js";
 
 /**
  * The Project layer is the worktree root's `.pi/` (settings-model decision 31),

@@ -20,7 +20,7 @@ import { EPISODIC_DEFAULTS } from "../src/episodic/episodic-contract.js";
 import { EpisodicMemory } from "../src/episodic/episodic-memory.js";
 import { EpisodicStore } from "../src/episodic/episodic-store.js";
 import { KnowledgeService } from "../src/knowledge/knowledge-service.js";
-import type { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../src/kernel/session/runtime-registry.js";
 import { episodicHostAssigned, singleChapterSource } from "./episodic-chapter-source.js";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";

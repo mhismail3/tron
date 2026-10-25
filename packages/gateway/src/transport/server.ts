@@ -10,7 +10,7 @@ import type { JsonValue } from "../protocol/types.js";
 import type { DeviceIdentity, DeviceStore } from "../security/device-store.js";
 import { RateLimiter } from "../security/rate-limiter.js";
 import type { UploadStore } from "../machine/upload-store.js";
-import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import type { DisplayOwner } from "../display/display-modules.js";
 import type { BlobByteRange } from "../sessions/blob-store.js";
 import type { AuthBroker } from "../admin/auth-broker.js";

@@ -1,7 +1,7 @@
 import { opendir, open, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import type { ExtensionArtifactDiscoveryOutcome } from "./runtime-slot.js";
+import type { ExtensionArtifactDiscoveryOutcome } from "../kernel/run/runtime-slot.js";
 import {
   MAX_EXTENSION_ARTIFACT_BYTES,
   MAX_EXTENSION_LIFECYCLE_HEADER_BYTES,

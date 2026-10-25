@@ -1,8 +1,8 @@
-import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
-import { ORDINARY_SESSION_PROFILE } from "../kernel/host/session-profile.js";
-import type { LineageRuntimePort, SessionLineagePolicy } from "../kernel/host/session-lineage.js";
-import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../kernel/host/kernel-lifecycle.js";
-import type { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
+import type { SettingsSchema } from "../settings/settings-schema.js";
+import { ORDINARY_SESSION_PROFILE } from "../host/session-profile.js";
+import type { LineageRuntimePort, SessionLineagePolicy } from "../host/session-lineage.js";
+import type { KernelLifecycleObserver, TaskLedgerPolicy } from "../host/kernel-lifecycle.js";
+import type { ManagedSubagents } from "../delegation/managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
 import { realpathSync } from "node:fs";
@@ -16,8 +16,8 @@ import {
   type FileEntry,
   type SessionEntry,
   SettingsManager,
-} from "../kernel/pi/coding-agent.js";
-import { GatewayError } from "../errors.js";
+} from "../pi/coding-agent.js";
+import { GatewayError } from "../../errors.js";
 import type {
   AdministrativeDrainBlockerCategory,
   AdministrativeDrainBlockerSummary,
@@ -27,19 +27,19 @@ import type {
   SessionCreationOrigin,
   SessionSummary,
   SessionSummaryUpdate,
-} from "../protocol/types.js";
-import { SessionAttentionStore, type SessionAttentionProjection } from "../kernel/projection/session-attention-store.js";
-import { SessionArchiveStore } from "./session-archive-store.js";
+} from "../../protocol/types.js";
+import { SessionAttentionStore, type SessionAttentionProjection } from "../projection/session-attention-store.js";
+import { SessionArchiveStore } from "../../sessions/session-archive-store.js";
 import {
   SessionPresentationPresenceRegistry,
   type SessionPresentationPresenceProjection,
-} from "../kernel/projection/session-presentation-presence.js";
-import { QueuedWorkGate } from "../util/queued-work-gate.js";
-import { abortableRead } from "../util/abortable-read.js";
-import { currentRequestSpan, RequestSpanLane, stage } from "../util/request-span.js";
-import type { ResourceRecorder, ResourceRuntimeEntry } from "../util/resource-recorder.js";
-import type { TrustService } from "../kernel/resources/trust-service.js";
-import { BlobStore } from "./blob-store.js";
+} from "../projection/session-presentation-presence.js";
+import { QueuedWorkGate } from "../../util/queued-work-gate.js";
+import { abortableRead } from "../../util/abortable-read.js";
+import { currentRequestSpan, RequestSpanLane, stage } from "../../util/request-span.js";
+import type { ResourceRecorder, ResourceRuntimeEntry } from "../../util/resource-recorder.js";
+import type { TrustService } from "../resources/trust-service.js";
+import { BlobStore } from "../../sessions/blob-store.js";
 import {
   SESSION_EXPORT_MAX_ITEM_BYTES,
   SESSION_EXPORT_MAX_ITEMS,
@@ -47,35 +47,35 @@ import {
   SESSION_EXPORT_MAX_READERS,
   SESSION_EXPORT_MINIMUM_FREE_BYTES,
   SESSION_EXPORT_MAX_TOTAL_BYTES,
-} from "./session-export.js";
-import { RunMarkerStore, type RunMarkerEvidence } from "../kernel/run/run-markers.js";
+} from "../../sessions/session-export.js";
+import { RunMarkerStore, type RunMarkerEvidence } from "../run/run-markers.js";
 import {
   RuntimeSlot,
   type SessionBroadcast,
   type RuntimeSlotDependencies,
-} from "./runtime-slot.js";
-import { completionOwnedByMarker, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "../kernel/run/completion-facts.js";
-import { ExtensionActivityRecency } from "./extension-activity-recency.js";
-import { ProcessActivityRecency } from "../kernel/projection/process-activity-recency.js";
-import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
-import type { ResourceRoot } from "../kernel/resources/resource-root.js";
-import type { ModuleHost } from "../kernel/host/module-host.js";
-import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import { readCanonicalSessionFile } from "../kernel/session/canonical-reader.js";
-import { syncDurably } from "../util/durable-json.js";
-import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../kernel/resources/prompt-bounds.js";
+} from "../run/runtime-slot.js";
+import { completionOwnedByMarker, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "../run/completion-facts.js";
+import { ExtensionActivityRecency } from "../../sessions/extension-activity-recency.js";
+import { ProcessActivityRecency } from "../projection/process-activity-recency.js";
+import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "../../sessions/extension-artifact-discovery.js";
+import type { ResourceRoot } from "../resources/resource-root.js";
+import type { ModuleHost } from "../host/module-host.js";
+import { GatewayWorkRegistry } from "../run/gateway-work-registry.js";
+import { readCanonicalSessionFile } from "./canonical-reader.js";
+import { syncDurably } from "../../util/durable-json.js";
+import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
 import {
   invocationProjection,
   invocationReceipts,
   type InvocationProjection,
-} from "../kernel/run/invocation-receipts.js";
-import { projectTranscriptPage, type TranscriptPage } from "../kernel/projection/projection.js";
+} from "../run/invocation-receipts.js";
+import { projectTranscriptPage, type TranscriptPage } from "../projection/projection.js";
 import {
   CatalogMetadataIndex,
   type CatalogMetadataIndexFailure,
   type CatalogMetadataIndexSummary,
-} from "./catalog-metadata-index.js";
-import { branchFromParsedSession, validateSearchBranch, type SessionSearchForkBoundary } from "./session-branch.js";
+} from "../../sessions/catalog-metadata-index.js";
+import { branchFromParsedSession, validateSearchBranch, type SessionSearchForkBoundary } from "../../sessions/session-branch.js";
 import {
   SessionCatalog,
   SUBAGENT_RUN_DIRECTORY,
@@ -85,10 +85,10 @@ import {
   type SessionCatalogReconcileOutcome,
   type SessionCatalogSource,
   type SessionCatalogWatcherReset,
-} from "./session-catalog.js";
-import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
-import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
-import { modelQueueKey } from "../kernel/settings/tool-contract.js";
+} from "../../sessions/session-catalog.js";
+import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "../../sessions/fork-boundary.js";
+import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../delegation/task-subagents.js";
+import { modelQueueKey } from "../settings/tool-contract.js";
 import {
   CatalogDiscovery,
   DEFAULT_CATALOG_DISCOVERY_LIMITS,
@@ -97,7 +97,7 @@ import {
   type CatalogHeaderIdentity,
   type CatalogSessionInfo,
   type DelegatedSessionTopology,
-} from "./catalog-discovery.js";
+} from "../../sessions/catalog-discovery.js";
 
 /** A read-only child observer may page only canonical sessions that fit this
  * explicit parse budget. The parser needs the selected branch graph, so it
@@ -341,7 +341,7 @@ async function readOpenedSessionEntries(
   handle: Awaited<ReturnType<typeof open>>,
   byteCount: number,
   signal?: AbortSignal,
-): Promise<import("../kernel/pi/coding-agent.js").FileEntry[] | undefined> {
+): Promise<import("../pi/coding-agent.js").FileEntry[] | undefined> {
   if (!Number.isSafeInteger(byteCount) || byteCount < 0) return undefined;
   if (byteCount > MAX_READ_ONLY_SUBAGENT_SESSION_BYTES) {
     throw new GatewayError(
@@ -524,7 +524,7 @@ export class RuntimeRegistry implements SessionOperations {
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
   private readonly workspace: ResourceRoot;
-  private settingsOwners: Readonly<{ model: import("../kernel/settings/settings-model.js").SettingsModel; changes: import("../kernel/settings/settings-change.js").SettingsChangePath }> | undefined;
+  private settingsOwners: Readonly<{ model: import("../settings/settings-model.js").SettingsModel; changes: import("../settings/settings-change.js").SettingsChangePath }> | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
@@ -675,13 +675,13 @@ export class RuntimeRegistry implements SessionOperations {
        * of its roots, with the counts it spent. A directory past the stop is
        * examined by a later pass; the report keeps the stop visible. */
       artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
-      extensionArtifactWarning?: (warning: { reason: import("../kernel/projection/extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
+      extensionArtifactWarning?: (warning: { reason: import("../projection/extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
       /** The Gateway-wide user-scope runtime, where user provider packages (for
        * example CortexKit's `anthropic` override) are registered. Home's chat runs
        * on it (#480). Only a registry without a Gateway, as in tests, omits it;
        * Home then gets a runtime of its own, as an ordinary session does. */
       gatewayModelRuntime?: ModelRuntime;
-      homeTaskDiagnostic?: (record: import("../modules/home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
+      homeTaskDiagnostic?: (record: import("../../modules/home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
     },
   ) {
     this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);
@@ -745,7 +745,7 @@ export class RuntimeRegistry implements SessionOperations {
 
   /** Installs the settings model and its change path for the `settings` tool.
    * Both are built over this registry, so slots read them late-bound. */
-  setSettings(model: import("../kernel/settings/settings-model.js").SettingsModel, changes: import("../kernel/settings/settings-change.js").SettingsChangePath): void {
+  setSettings(model: import("../settings/settings-model.js").SettingsModel, changes: import("../settings/settings-change.js").SettingsChangePath): void {
     if (this.settingsOwners && this.settingsOwners.changes !== changes) throw new Error("Settings are already installed");
     this.settingsOwners = { model, changes };
   }
@@ -1821,7 +1821,7 @@ export class RuntimeRegistry implements SessionOperations {
 
   /** The leased worker of a task resumed in place (#929). Viewing the session never blocks
    * this: an open slot keeps its subscribers and is rebound, not replaced. */
-  async resumeTaskWorker(sessionId: string, report: import("../kernel/delegation/task-report.js").HomeTaskReportOwner, exceptWorkToken?: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
+  async resumeTaskWorker(sessionId: string, report: import("../delegation/task-report.js").HomeTaskReportOwner, exceptWorkToken?: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
     const lease = await this.acquireOwnedSessionLease(sessionId);
     try {
       await lease.slot.bindTaskWorker(report, exceptWorkToken);
@@ -1898,7 +1898,7 @@ export class RuntimeRegistry implements SessionOperations {
     this.options.sessionListChanged();
   }
 
-  private async catalogStructureEvidence(): Promise<import("./catalog-discovery.js").CatalogStructureEvidence> {
+  private async catalogStructureEvidence(): Promise<import("../../sessions/catalog-discovery.js").CatalogStructureEvidence> {
     // The catalog owner's scan is the only whole-folder walk left. It goes
     // through this one seam, which counts it and says whether a request started
     // it: the request path's "zero catalog walks" criterion (G-1c) is readable
@@ -2580,7 +2580,7 @@ export class RuntimeRegistry implements SessionOperations {
     return own.length > 0 || role !== "background" ? own : value(keys[1]!);
   }
 
-  async create(cwdInput: string, profile: string = ORDINARY_SESSION_PROFILE.name, taskWorker?: import("../kernel/delegation/task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {
+  async create(cwdInput: string, profile: string = ORDINARY_SESSION_PROFILE.name, taskWorker?: import("../delegation/task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {
     let trust!: { cwd: string; projectDir: string };
     return this.startRuntime<RuntimeSlot>({
       reason: "create",
@@ -4409,7 +4409,7 @@ export class RuntimeRegistry implements SessionOperations {
     return this.blobs.registerData(data, mimeType);
   }
 
-  async acquireBlob(id: string, range?: import("./blob-store.js").BlobByteRange, signal?: AbortSignal) {
+  async acquireBlob(id: string, range?: import("../../sessions/blob-store.js").BlobByteRange, signal?: AbortSignal) {
     try {
       return await this.blobs.acquire(id, range, signal);
     } catch (error) {

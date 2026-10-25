@@ -28,7 +28,7 @@ import type { HomeMemoryEvidencePage, HomeMemoryView, HomeStatus } from "../prot
 import type { GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 
 const PROVIDER = "tron-home-scale";
 const MODEL = { provider: PROVIDER, id: "chat" };

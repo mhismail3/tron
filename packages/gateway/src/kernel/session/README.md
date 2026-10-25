@@ -18,6 +18,8 @@ producer-derived default line budget. Neither reader mirrors module policy.
 
 The existing session-catalog manifest at `src/session-catalog.module.json` owns
 these readers and the catalog files still under `sessions/`.
+`runtime-registry.ts` is the actual K1 runtime authority, logically owned by
+[`gateway/run`](../run/README.md); it is not part of the catalog parser module.
 
 ## Verify
 

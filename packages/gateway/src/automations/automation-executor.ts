@@ -2,7 +2,7 @@ import { GatewayError, isUncertainOutcome } from "../errors.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { canonicalResourceName } from "../sessions/resource-invocation.js";
-import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { OwnedSessionDispatch, type OwnedSessionDispatchOver } from "../kernel/delegation/owned-session-dispatch.js";
 import type { OwnedOperationTerminal } from "../kernel/run/invocation-receipts.js";
 import {

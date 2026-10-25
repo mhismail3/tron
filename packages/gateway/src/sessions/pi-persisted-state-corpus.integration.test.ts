@@ -40,7 +40,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../kernel/resources/trust-service.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import {
   CORPUS_DIR,
   CORPUS_MCP_SERVERS,

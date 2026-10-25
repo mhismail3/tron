@@ -24,7 +24,7 @@ import { TrustService } from "../../kernel/resources/trust-service.js";
 import { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { HomeOwner } from "./home-owner.js";
 import { homeTaskPolicy } from "./home-task-worker-choice.js";
-import type { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
 const roots: string[] = [];
 afterEach(async () => {

@@ -11,7 +11,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "../kernel/delegation/delegated-provider.js";
-import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 
 /** Real Gateway -> pinned role -> real Pi child -> shared socket -> local HTTP.
  * Only model responses and external endpoints are controlled. */

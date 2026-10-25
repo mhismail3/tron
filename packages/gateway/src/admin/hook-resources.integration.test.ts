@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { HookResources } from "./hook-resources.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { GatewayError } from "../errors.js";
 import { NaturalLanguageEmbeddingClient } from "./session-search-embedding.js";
-import type { RuntimeRegistry } from "./runtime-registry.js";
+import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import {
   boundedQuery,
   boundedResults,

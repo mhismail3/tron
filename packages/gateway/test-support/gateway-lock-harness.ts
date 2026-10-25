@@ -22,7 +22,7 @@ import { MacTerminalKeys } from "../src/security/mac-terminal.js";
 import { DeviceStore } from "../src/security/device-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
 import { TerminalService } from "../src/machine/terminal-service.js";
-import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../src/sessions/runtime-registry.js";
+import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../src/kernel/session/runtime-registry.js";
 import type { NotificationService } from "../src/notifications/notification-service.js";
 import { GatewayAutomationExecutor } from "../src/automations/automation-executor.js";
 import { AutomationScheduler } from "../src/automations/automation-scheduler.js";

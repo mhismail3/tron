@@ -1,14 +1,14 @@
-import * as activityProjection from "../kernel/projection/activity.js";
-import * as sessionPages from "../kernel/projection/session-pages.js";
-import { SnapshotProjection } from "../kernel/projection/snapshot.js";
-import { createSettingsManager } from "../kernel/settings/settings-sdk-manager.js";
-import { applyModelAdmission, compactionAdmission } from "../kernel/settings/settings-admission.js";
-import { managedProviderSettingsView, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
+import * as activityProjection from "../projection/activity.js";
+import * as sessionPages from "../projection/session-pages.js";
+import { SnapshotProjection } from "../projection/snapshot.js";
+import { createSettingsManager } from "../settings/settings-sdk-manager.js";
+import { applyModelAdmission, compactionAdmission } from "../settings/settings-admission.js";
+import { managedProviderSettingsView, type ManagedSubagents } from "../delegation/managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
-import type { SessionConfigurationBlocker } from "../protocol/types.js";
-import { boundedSummaryText } from "./summary-text.js";
-import { catalogActivityTimestamp } from "./catalog-metadata-index.js";
-import { historyPage, historyEntry, type HistoryCursor } from "../kernel/projection/history.js";
+import type { SessionConfigurationBlocker } from "../../protocol/types.js";
+import { boundedSummaryText } from "../../sessions/summary-text.js";
+import { catalogActivityTimestamp } from "../../sessions/catalog-metadata-index.js";
+import { historyPage, historyEntry, type HistoryCursor } from "../projection/history.js";
 import {
   DELEGATED_PROVIDER_TOOL_NAME,
   DELEGATED_SUPERVISOR_TOOL_NAME,
@@ -17,16 +17,16 @@ import {
   delegatedProviderToolVersion,
   isInstalledDelegatedTool,
   trustedDelegatedController,
-} from "../kernel/delegation/delegated-provider.js";
-import type { AgentMessage, AgentTurnDecision, ThinkingLevel } from "../kernel/pi/agent-core.js";
-import { SESSION_SETTINGS_ENTRY, changeSessionSetting, readSessionSettings, readSessionRequestPins, readSessionFixedSettings, readSessionToolChoice } from "./session-settings.js";
+} from "../delegation/delegated-provider.js";
+import type { AgentMessage, AgentTurnDecision, ThinkingLevel } from "../pi/agent-core.js";
+import { SESSION_SETTINGS_ENTRY, changeSessionSetting, readSessionSettings, readSessionRequestPins, readSessionFixedSettings, readSessionToolChoice } from "../../sessions/session-settings.js";
 import { constants, existsSync, lstatSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { type ImageContent, type Model } from "../kernel/pi/ai.js";
-import { bindRuntimeSession, guardCanonicalAppend } from "../kernel/pi/adapters.js";
+import { type ImageContent, type Model } from "../pi/ai.js";
+import { bindRuntimeSession, guardCanonicalAppend } from "../pi/adapters.js";
 import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
@@ -41,28 +41,28 @@ import {
   SessionManager,
   SettingsManager,
   type FileEntry,
-} from "../kernel/pi/coding-agent.js";
-import { GatewayError, asUncertainOutcome } from "../errors.js";
-import { CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS } from "../kernel/run/run-persistence.js";
-import { type CommandReplacement } from "../kernel/run/run-invocations.js";
-import { RunOperations } from "../kernel/run/run-operations.js";
-import { successfulAssistantCompletion, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "../kernel/run/completion-facts.js";
-import { RunRequestPipeline } from "../kernel/run/request-pipeline.js";
-import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "../kernel/run/bounded-tool-cancellation.js";
-import { CompactionOperationPolicy } from "../kernel/run/compaction-policy.js";
-import type { RequestPolicy } from "../kernel/host/request-policy.js";
-import type { SessionLineagePolicy } from "../kernel/host/session-lineage.js";
-import type { CanonicalAppendContext } from "../kernel/host/canonical-append.js";
-import { createHomeTaskWorkerExtension } from "../kernel/delegation/task-worker-extension.js";
-import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../kernel/delegation/task-subagents.js";
-import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
-import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../kernel/host/session-profile.js";
-import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../kernel/settings/settings-change.js";
-import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
-import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
-import type { Actor } from "../kernel/settings/settings-record.js";
-import { piBuiltinExtensions } from "../kernel/host/pi-builtins.js";
-import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../kernel/host/extension-adapters.js";
+} from "../pi/coding-agent.js";
+import { GatewayError, asUncertainOutcome } from "../../errors.js";
+import { CanonicalCustomEntryConflictError, DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS } from "./run-persistence.js";
+import { type CommandReplacement } from "./run-invocations.js";
+import { RunOperations } from "./run-operations.js";
+import { successfulAssistantCompletion, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "./completion-facts.js";
+import { RunRequestPipeline } from "./request-pipeline.js";
+import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
+import { CompactionOperationPolicy } from "./compaction-policy.js";
+import type { RequestPolicy } from "../host/request-policy.js";
+import type { SessionLineagePolicy } from "../host/session-lineage.js";
+import type { CanonicalAppendContext } from "../host/canonical-append.js";
+import { createHomeTaskWorkerExtension } from "../delegation/task-worker-extension.js";
+import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../delegation/task-subagents.js";
+import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../delegation/task-report.js";
+import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
+import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
+import type { SessionSettingsSource, SettingsModel } from "../settings/settings-model.js";
+import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../settings/tool-contract.js";
+import type { Actor } from "../settings/settings-record.js";
+import { piBuiltinExtensions } from "../host/pi-builtins.js";
+import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../host/extension-adapters.js";
 import type {
   ChatOrigin,
   ChatSemanticMetadata,
@@ -81,12 +81,12 @@ import type {
   SessionTreeNode,
   ToolExecutionState,
   NestedToolExecutionState,
-} from "../protocol/types.js";
-import { AsyncMutex } from "../util/async-mutex.js";
-import { stage } from "../util/request-span.js";
-import type { ResourceRecorder } from "../util/resource-recorder.js";
-import type { TrustService } from "../kernel/resources/trust-service.js";
-import type { BlobStore } from "./blob-store.js";
+} from "../../protocol/types.js";
+import { AsyncMutex } from "../../util/async-mutex.js";
+import { stage } from "../../util/request-span.js";
+import type { ResourceRecorder } from "../../util/resource-recorder.js";
+import type { TrustService } from "../resources/trust-service.js";
+import type { BlobStore } from "../../sessions/blob-store.js";
 import {
   SESSION_EXPORT_MAX_ITEM_BYTES,
   copyCanonicalSessionCut,
@@ -94,11 +94,11 @@ import {
   requireSessionExportDiskCapacity,
   writeSessionProjectionCut,
   type CanonicalSessionFileCut,
-} from "./session-export.js";
-import { SemanticUIBroker, type ExtensionNotificationInput } from "../kernel/host/semantic-ui-broker.js";
-import { ExtensionPresentationStore } from "../kernel/host/presentation/extension-presentation-store.js";
-import { ExtensionLifecycleCoordinator } from "../kernel/host/extension-lifecycle-coordinator.js";
-import { RemotePiExtensionHost } from "../kernel/host/presentation/remote-pi-extension-host.js";
+} from "../../sessions/session-export.js";
+import { SemanticUIBroker, type ExtensionNotificationInput } from "../host/semantic-ui-broker.js";
+import { ExtensionPresentationStore } from "../host/presentation/extension-presentation-store.js";
+import { ExtensionLifecycleCoordinator } from "../host/extension-lifecycle-coordinator.js";
+import { RemotePiExtensionHost } from "../host/presentation/remote-pi-extension-host.js";
 import {
   admitCommandCatalog,
   boundCommandContent,
@@ -117,42 +117,42 @@ import {
   safeJson,
   type ToolProjectionMetadata,
   type TranscriptPage,
-} from "../kernel/projection/projection.js";
-import type { ForkBoundaryAnchor } from "./fork-boundary.js";
-import { type RunMarkerStore } from "../kernel/run/run-markers.js";
-import { attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand } from "../kernel/host/extension-registration.js";
-import { currentExtensionOwner, currentInvocationContext } from "../kernel/host/extension-execution-context.js";
-import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../kernel/delegation/managed-producer.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
-import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "../kernel/delegation/child-session-admission.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "./extension-activity-history.js";
-import { makeContextDeliveryReceipt } from "../kernel/run/context-delivery-receipts.js";
-import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "../kernel/run/invocation-receipts.js";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, type InputTrigger } from "../kernel/host/input-admission.js";
-import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
-import { userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
-import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
-import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "../kernel/projection/process-activity-recency.js";
+} from "../projection/projection.js";
+import type { ForkBoundaryAnchor } from "../../sessions/fork-boundary.js";
+import { type RunMarkerStore } from "./run-markers.js";
+import { attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand } from "../host/extension-registration.js";
+import { currentExtensionOwner, currentInvocationContext } from "../host/extension-execution-context.js";
+import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../delegation/managed-producer.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../projection/extension-run-projection.js";
+import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "../delegation/child-session-admission.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "../../sessions/extension-activity-history.js";
+import { makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "./invocation-receipts.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, type InputTrigger } from "../host/input-admission.js";
+import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "../../sessions/extension-notification-receipts.js";
+import { userFacingPromptPreview, type ResourceExpansionCatalog } from "../../sessions/resource-invocation.js";
+import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "../../sessions/extension-activity-recency.js";
+import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "../projection/process-activity-recency.js";
 import {
   processHistoryDetail,
   subagentAbortRoute,
   subagentProcessId,
   subagentProcessesFromActivity,
-} from "../kernel/projection/process-activity.js";
-import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import type { ResourceRoot } from "../kernel/resources/resource-root.js";
-import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
-import type { ToolDisplayProjection, ToolReferences } from "../kernel/projection/tool-result.js";
-import { trustedExtensionOriginKind } from "../kernel/projection/extension-origin.js";
-import { DirectBashProcessOwner } from "../kernel/run/direct-bash-process-owner.js";
-import type { ContextPolicy, ModuleHost, SessionContext } from "../kernel/host/module-host.js";
-import { projectHookRegistrations } from "../kernel/projection/hook-projection.js";
-import { resourceDistribution } from "./resource-distribution.js";
-import { skillTitle } from "./skill-title.js";
-import { boundedUtf8Prefix } from "../util/bounded-text.js";
-import { availableSubagentRow, loadSubagentCatalog, subagentDetail, type SubagentCatalog, type SubagentDetail } from "../kernel/delegation/subagent-catalog.js";
-import type { SessionStore } from "../kernel/settings/settings-types.js";
-import { hasCompactionApplier, type SettingsSchema } from "../kernel/settings/settings-schema.js";
+} from "../projection/process-activity.js";
+import type { GatewayWorkHandle, GatewayWorkRegistry } from "./gateway-work-registry.js";
+import type { ResourceRoot } from "../resources/resource-root.js";
+import { projectAgentInstructions, type AgentInstructions } from "../../sessions/agent-instructions.js";
+import type { ToolDisplayProjection, ToolReferences } from "../projection/tool-result.js";
+import { trustedExtensionOriginKind } from "../projection/extension-origin.js";
+import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
+import type { ContextPolicy, ModuleHost, SessionContext } from "../host/module-host.js";
+import { projectHookRegistrations } from "../projection/hook-projection.js";
+import { resourceDistribution } from "../../sessions/resource-distribution.js";
+import { skillTitle } from "../../sessions/skill-title.js";
+import { boundedUtf8Prefix } from "../../util/bounded-text.js";
+import { availableSubagentRow, loadSubagentCatalog, subagentDetail, type SubagentCatalog, type SubagentDetail } from "../delegation/subagent-catalog.js";
+import type { SessionStore } from "../settings/settings-types.js";
+import { hasCompactionApplier, type SettingsSchema } from "../settings/settings-schema.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -321,7 +321,7 @@ export interface RuntimeSlotDependencies {
     taskId: string; sessionId: string; operationId: string | null; state: string; resolvedFrom?: string; slot: RuntimeSlot;
   }>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
-  homeTaskDiagnostic?: (record: import("../modules/home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
+  homeTaskDiagnostic?: (record: import("../../modules/home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
@@ -1848,7 +1848,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   /** Home’s explicit launch policy is canonical worker state, not a live Home
    * inheritance layer. Cold opens read the same branch-local fixed evidence. */
-  async setHomeTaskModelQueues(queues: import("../kernel/settings/tool-contract.js").TaskModelQueues): Promise<void> {
+  async setHomeTaskModelQueues(queues: import("../settings/tool-contract.js").TaskModelQueues): Promise<void> {
     return this.lane.run(async () => {
       this.assertConfigurationIdle();
       if (!this.taskWorker) throw new GatewayError("invalid_request", "Only an admitted Home task owns task queue launch inputs");
@@ -5430,7 +5430,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return sessionPages.transcriptPageAfter(this.pageSource(), after, expectedPreviousEntryId, expectedRuntimeGeneration, expectedLeafEntryId);
   }
 
-  transcriptPage(before?: number, expectedNextEntryId?: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string, branchCut?: import("../kernel/pi/coding-agent.js").SessionEntry[]): TranscriptPage {
+  transcriptPage(before?: number, expectedNextEntryId?: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string, branchCut?: import("../pi/coding-agent.js").SessionEntry[]): TranscriptPage {
     return sessionPages.transcriptPage(this.pageSource(), before, expectedNextEntryId, expectedRuntimeGeneration, expectedLeafEntryId, branchCut);
   }
 
@@ -5760,14 +5760,14 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }
   }
 
-  async steerHomeTask(control: import("../modules/home/home-task-dispatcher.js").HomeTaskControlRequest, text: string) {
+  async steerHomeTask(control: import("../../modules/home/home-task-dispatcher.js").HomeTaskControlRequest, text: string) {
     return this.prompt(text, [], "steer", undefined, undefined, {
       operationId: randomUUID(), taskFence: structuredClone(control),
       origin: { kind: "gateway", ownerId: control.taskId, title: "Home steering", confidence: "boundary" }, onTerminal: () => {},
     });
   }
 
-  async stopHomeTask(control: import("../modules/home/home-task-dispatcher.js").HomeTaskControlRequest): Promise<void> {
+  async stopHomeTask(control: import("../../modules/home/home-task-dispatcher.js").HomeTaskControlRequest): Promise<void> {
     if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
       || this.taskWorker.identity.operationId !== control.operationId) {
       throw new GatewayError("conflict", "Task operation changed before Stop");
@@ -5778,7 +5778,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** Interrupts only the task worker's in-flight tool calls (#1189): each ends with a result
    * naming `by`, and the worker's turn continues with the optional steering `text`. Returns the
    * interrupted tools' names. */
-  async interruptHomeTask(control: import("../modules/home/home-task-dispatcher.js").HomeTaskControlRequest, by: string, text?: string): Promise<string[]> {
+  async interruptHomeTask(control: import("../../modules/home/home-task-dispatcher.js").HomeTaskControlRequest, by: string, text?: string): Promise<string[]> {
     if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
       || this.taskWorker.identity.operationId !== control.operationId) {
       throw new GatewayError("conflict", "Task operation changed before Interrupt");

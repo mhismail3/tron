@@ -4,15 +4,20 @@
 
 Gateway-owned execution primitives layered on Pi's session loop.
 
-The legacy native Registry implements `SessionOperations` directly: one canonical
+The K1 native Registry (`../session/runtime-registry.ts`) implements `SessionOperations` directly: one canonical
 map/construction/mutation authority, shared synchronous `liveRuntime` read and
 mutex-ordered `orderedRuntime` read. Profile modules supply domain recipes over
-those operations; no Registry-produced Home provider exists. Registry/Slot's
-physical relocation and worker binding/control transfer remain separate work.
+those operations; no Registry-produced Home provider exists. The actual K2 frame is
+`runtime-slot.ts`; the runtime pair retains the `gateway/run` logical owner.
+Worker binding/control transfer remains separate from physical native ownership.
 Ordinary extension registration reads the composition-configured order on the
 actual K3 host; native frames do not select product modules or keep another list.
 
 ## Owns
+
+- `../session/runtime-registry.ts`: actual K1 runtime membership, acquisition,
+  mutation lanes, eviction and disposal; catalog parsing has its separate owner.
+- `runtime-slot.ts`: actual K2 Pi/native frame, extending the same `RunOperations`.
 
 - `run-operations.ts`: shared run state, peer lifetimes, public admission/queue/Stop/
   compaction routes, configuration/idle admission gates and actual model/thinking/context/tools/bash algorithms.

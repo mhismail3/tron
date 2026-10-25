@@ -1,4 +1,4 @@
-import type { RuntimeSlot } from "../../sessions/runtime-slot.js";
+import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 
 /** The executable ceiling and unconfigured tool selection for Home's isolated
  * runtime. Shared by runtime admission and settings declarations: ordinary Mac

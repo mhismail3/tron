@@ -12,7 +12,7 @@ import { GatewayLogger } from "../../transport/logger.js";
 import { TrustService } from "../resources/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
-import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../session/runtime-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
 /** Real Gateway/SDK execution; only the external model output is scripted.

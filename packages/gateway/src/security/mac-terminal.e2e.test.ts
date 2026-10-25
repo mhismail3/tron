@@ -16,7 +16,7 @@ import { SettingsChangeRecord } from "../kernel/settings/settings-record.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { DeviceStore } from "./device-store.js";
 import { MAC_TERMINAL_SOURCES, MacTerminalHost, MacTerminalKeys, type MacTerminalStatus } from "./mac-terminal.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 

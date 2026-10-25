@@ -8,7 +8,7 @@ import { fauxAssistantMessage, type Credential, type CredentialInfo, type Creden
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 
 class SessionCredentials implements CredentialStore {
   constructor(

@@ -42,7 +42,7 @@ import { HomeTaskStore, type HomeTaskRecord } from "../modules/home/home-task-st
 import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { SettingsStoreAdapter } from "../admin/settings-model.js";
 import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";

@@ -46,7 +46,7 @@ import { TrustService } from "../../src/kernel/resources/trust-service.js";
 import { UploadStore } from "../../src/machine/upload-store.js";
 import type { JsonValue } from "../../src/protocol/types.js";
 import { DeviceStore } from "../../src/security/device-store.js";
-import { RuntimeRegistry } from "../../src/sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../../src/kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../src/transport/command-receipts.js";
 import { GatewayService, type GatewayServiceDependencies } from "../../src/transport/gateway-service.js";
 import {

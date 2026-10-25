@@ -17,7 +17,7 @@ import { createDisplayModule, createNativeCaptureModule, type DisplayOwner } fro
 import { createScheduleModule } from "../automations/schedule-module.js";
 import { createNotifyModule } from "../notifications/notify-module.js";
 import { createHomeModules, type HomeComposition } from "../modules/home/home-module.js";
-import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { SessionSearchService } from "../sessions/session-search-service.js";

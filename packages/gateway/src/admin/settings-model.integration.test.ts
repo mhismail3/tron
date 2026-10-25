@@ -22,7 +22,7 @@ import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from ".
 import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "../kernel/settings/settings-types.js";
 import { ScopeToolCatalog } from "./tool-catalog.js";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 

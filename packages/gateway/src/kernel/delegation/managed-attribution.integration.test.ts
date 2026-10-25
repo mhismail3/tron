@@ -9,7 +9,7 @@ import { expect, it } from "vitest";
 import { TrustService } from "../resources/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
-import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../session/runtime-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { managedProducerAPI } from "./managed-producer.js";
 import { producerIdentity } from "../host/extension-registration.js";

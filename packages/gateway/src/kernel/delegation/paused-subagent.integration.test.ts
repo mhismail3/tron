@@ -7,8 +7,8 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { TrustService } from "../resources/trust-service.js";
 import type { ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../../protocol/types.js";
-import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
-import type { RuntimeSlot } from "../../sessions/runtime-slot.js";
+import { RuntimeRegistry } from "../session/runtime-registry.js";
+import type { RuntimeSlot } from "../run/runtime-slot.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable

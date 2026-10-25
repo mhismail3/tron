@@ -5,7 +5,7 @@ import type { BrowserLiveViewRegistry } from "../src/display/browser-live-view.j
 import { ModelQueueOwner, modelQueueProjectionPath, type ModelQueueOptions } from "../src/providers/model-queue.js";
 import { ProviderUsageOwner } from "../src/providers/provider-usage.js";
 import type { RecentModelStore } from "../src/providers/recent-models.js";
-import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../src/kernel/session/runtime-registry.js";
 import type { ModelRuntime } from "../src/kernel/pi/coding-agent.js";
 import { createProviderModelRuntime } from "../src/providers/provider-runtime.js";
 import { OpenAIModelEligibility, sessionRuntimeView } from "../src/providers/openai-model-eligibility.js";

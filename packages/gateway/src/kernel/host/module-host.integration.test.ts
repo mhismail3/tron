@@ -6,7 +6,7 @@ import { TrustService } from "../resources/trust-service.js";
 import { TEST_SETTINGS_SCHEMA } from "../../../test-support/settings-schema.js";
 import { DisplayOwner } from "../../display/display-modules.js";
 import { DisplayArtifactStore } from "../../display/display-artifact-store.js";
-import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../session/runtime-registry.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { OpenAIModelEligibility } from "../../providers/openai-model-eligibility.js";
 import { createProviderModelRuntime } from "../../providers/provider-runtime.js";

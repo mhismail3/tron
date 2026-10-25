@@ -12,7 +12,7 @@ import type { GatewayWorkRegistry } from "../src/kernel/run/gateway-work-registr
 import type { ResourceRecorder } from "../src/util/resource-recorder.js";
 import type { SessionCatalog, SessionCatalogReconcileOutcome } from "../src/sessions/session-catalog.js";
 import type { ExtensionArtifactDiscoveryCounts } from "../src/sessions/extension-artifact-discovery.js";
-import { RuntimeRegistry, type CapacityShedRecord, type RuntimeLifecycleRecord } from "../src/sessions/runtime-registry.js";
+import { RuntimeRegistry, type CapacityShedRecord, type RuntimeLifecycleRecord } from "../src/kernel/session/runtime-registry.js";
 
 /** Shared cold-start RuntimeRegistry fixture for the runtime-registry journeys. Each caller owns
  * the registry array it passes in: disposal and PI_CODING_AGENT_DIR restoration stay in that

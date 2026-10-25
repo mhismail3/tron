@@ -29,7 +29,8 @@
     "sessions/session-catalog.store.lock.integration.test.ts",
     "sessions/session-catalog.ts",
     "sessions/session-export.ts",
-    "kernel/session/**"
+    "kernel/session/canonical-reader.ts",
+    "kernel/session/README.md"
   ],
   "dependsOn": [
     "gateway/pi",

@@ -38,9 +38,9 @@ import {
   RuntimeRegistry,
   type CapacityShedRecord,
   type RuntimeLifecycleRecord,
-} from "./runtime-registry.js";
+} from "../kernel/session/runtime-registry.js";
 import type { ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
-import { RuntimeSlot } from "./runtime-slot.js";
+import { RuntimeSlot } from "../kernel/run/runtime-slot.js";
 import { invocationReceipts } from "../kernel/run/invocation-receipts.js";
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "../kernel/run/run-markers.js";
 import { toolSegmentId } from "../kernel/projection/projection.js";

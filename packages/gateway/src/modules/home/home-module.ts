@@ -32,7 +32,7 @@ import type { HomeMemoryDiagnostic } from "./home-memory.js";
 import type { HomeRequestRecord } from "./home-request-policy.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
-import type { RuntimeRegistry, SessionOperations } from "../../sessions/runtime-registry.js";
+import type { RuntimeRegistry, SessionOperations } from "../../kernel/session/runtime-registry.js";
 import type { ModelRuntime } from "../../kernel/pi/coding-agent.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";

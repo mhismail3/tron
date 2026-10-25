@@ -4,7 +4,7 @@ import { GatewayError } from "../../errors.js";
 import type { SessionEntry } from "../../kernel/pi/coding-agent.js";
 import { SessionManager } from "../../kernel/pi/coding-agent.js";
 import type { TrustService } from "../../kernel/resources/trust-service.js";
-import type { RuntimeSlot } from "../../sessions/runtime-slot.js";
+import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 import { branchFromSessionEntries } from "../../sessions/session-branch.js";
 import { appendChatSettingsSnapshot } from "../../sessions/session-settings.js";
 import { appendContextWindowSnapshot } from "../../providers/context-window-policy.js";

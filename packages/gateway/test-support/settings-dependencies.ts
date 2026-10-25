@@ -10,7 +10,7 @@ import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js"
 import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import type { TrustService } from "../src/kernel/resources/trust-service.js";
 import type { HomeOwner } from "../src/modules/home/home-owner.js";
-import type { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../src/kernel/session/runtime-registry.js";
 import { HomeProfileItems } from "../src/modules/home/home-profile.js";
 import type { KnowledgeService } from "../src/knowledge/knowledge-service.js";
 import { homeOwnerOf } from "./gateway-registry.js";

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 const installedFork = process.env.TRON_P99_17_BROWSER_FORK_COPY;

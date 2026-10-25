@@ -59,7 +59,7 @@ import { HOME_MEMORY_VIEW_MARKER } from "../modules/home/home-memory.js";
 import type { HomeRecord } from "../modules/home/home-owner.js";
 import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason, type HomeRequestRecord } from "../modules/home/home-request-policy.js";
 import { ModuleHost } from "../kernel/host/module-host.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 
 const PROVIDER = "tron-home-seam";
 const MODEL_ID = "fixture";

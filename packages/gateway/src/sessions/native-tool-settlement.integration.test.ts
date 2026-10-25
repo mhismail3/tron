@@ -9,7 +9,7 @@ import { InMemoryCredentialStore, fauxAssistantMessage, fauxProvider, fauxToolCa
 import { describe, expect, it } from "vitest";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS } from "../../test-support/wait-for.js";
 
 function deferred<T>() {

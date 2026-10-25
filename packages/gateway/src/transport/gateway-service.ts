@@ -26,9 +26,9 @@ import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } fr
 import { maxTier } from "../kernel/settings/settings-types.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
-import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import type { DisplayOwner } from "../display/display-modules.js";
-import type { RuntimeSlot } from "../sessions/runtime-slot.js";
+import type { RuntimeSlot } from "../kernel/run/runtime-slot.js";
 import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
 import { SESSION_ARCHIVE_CAPABILITY } from "../sessions/session-archive-store.js";
 import {

@@ -10,7 +10,8 @@ settlement. Other session modules have their own manifests here; projection live
 
 ## Owns
 
-`runtime-registry.ts` (`RuntimeRegistry`), `runtime-slot.ts` (native frame extending kernel `RunOperations`),
+[`kernel/session/runtime-registry.ts`](../kernel/session/runtime-registry.ts) (`RuntimeRegistry`),
+[`kernel/run/runtime-slot.ts`](../kernel/run/runtime-slot.ts) (actual native frame extending `RunOperations`),
 [`kernel/run`](../kernel/run/README.md) receipts, markers, per-operation work, held/SDK queues, serialized queue edits, serialized prompt admission/completion, SDK run transitions, manual compaction, durable terminals/observers, attention, task waits, write fences and cancellation;
 `restart-drain.ts`
 and the rest of `../run.module.json`. State: Gateway-owned

@@ -6,7 +6,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { expect, it, vi } from "vitest";
 import { createTestRegistry, displayOwnerOf, displayStoreOf } from "../../test-support/gateway-registry.js";
-import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
 

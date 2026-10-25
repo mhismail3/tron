@@ -29,7 +29,7 @@ import { type Resolution } from "../kernel/settings/tool-contract.js";
 import { type KeyDeclaration } from "../kernel/settings/settings-schema.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { PresentedResolution } from "./settings-presentation.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
