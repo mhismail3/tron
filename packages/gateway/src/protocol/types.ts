@@ -1,4 +1,5 @@
 import type { DisplayProjection } from "../modules/display/contract.js";
+import type { UpstreamErrorInfo } from "../util/upstream-error.js";
 
 // Tron protocol v5 is a typed, bounded mobile contract. Pi objects must be
 // projected into these values rather than serialized directly; Pi JSONL and
@@ -172,6 +173,7 @@ export type TranscriptItem =
       thinkingLevel?: string;
       stopReason?: string;
       errorMessage?: string;
+      errorInfo?: UpstreamErrorInfo;
       toolCallId?: string;
       toolName?: string;
       /** Extension-authored human-readable label from the mounted runtime. */
