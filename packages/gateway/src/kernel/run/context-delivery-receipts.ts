@@ -6,6 +6,7 @@ import { GatewayError } from "../../errors.js";
 import type { ContextDeliveryMetadata, ExtensionToolOrigin } from "../../protocol/types.js";
 
 import { invocationProjection, invocationReceipts } from "./invocation-receipts.js";
+import { SETTINGS_OUTCOME_MESSAGE } from "../settings/tool-contract.js";
 import { classifyCapturedExtensionOwner } from "../../sessions/extension-activity-history.js";
 
 export async function deliverPromptInput(
@@ -18,9 +19,11 @@ export async function deliverPromptInput(
   const entry = session.sessionManager.getLeafEntry();
   if (entry?.type !== "custom_message" || entry.customType !== message.customType
     || (entry.details as { eventId?: string })?.eventId !== message.details.eventId) throw new GatewayError("conflict", "Home task message lost its exact canonical identity");
+  const settings = message.customType === SETTINGS_OUTCOME_MESSAGE;
+  const source = settings ? "gateway:settings" : "gateway:home-task";
   await context.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
-    safeJson(makeContextDeliveryReceipt(entry.id, "stored", { source: "gateway:home-task",
-      owner: { id: message.details.taskId, title: "Home task", source: "gateway:home-task" } })), entry.id);
+    safeJson(makeContextDeliveryReceipt(entry.id, "stored", { source,
+      owner: { id: message.details.taskId, title: settings ? "Settings" : "Home task", source } })), entry.id);
 }
 
 const HISTORICAL_CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.session-input.v1";

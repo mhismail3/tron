@@ -6,7 +6,10 @@ It never opens the SDK's repairing/migrating SessionManager.
 - `readCanonicalSession` returns the last complete branch and reports a torn tail;
   a source parse failure is translated only when its snapshot changed.
 - `visitCanonicalSessionEntries` uses `O_NOFOLLOW`, streams the initial byte cut,
-  refuses an incomplete tail and retains the visitor's error.
+  refuses an incomplete tail and retains the visitor's error. With `durable: true`,
+  it synchronizes the same file handle and parent directory after reading, then
+  checks the stable snapshot and pathname identity. Callers use visited entries
+  only after completion; failed proof cannot acknowledge a delivery outbox.
 - `readCanonicalSessionFile` uses `O_NOFOLLOW`, requires current-format complete
   file-wide evidence with ordered parents and a matching final snapshot.
 - Prefix and line digests are the shared SHA-256 rules used by Home's incremental
