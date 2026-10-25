@@ -963,6 +963,11 @@
             },
             {
               "content": [],
+              "errorInfo": {
+                "category": "aborted",
+                "message": "Request cancelled",
+                "providerMessage": "Request was aborted"
+              },
               "errorMessage": "Request was aborted",
               "id": "<id>",
               "kind": "message",
@@ -1265,6 +1270,10 @@
         "snapshot.transcript[].content[].text:string",
         "snapshot.transcript[].content[].type:string",
         "snapshot.transcript[].content[]:object",
+        "snapshot.transcript[].errorInfo.category:string",
+        "snapshot.transcript[].errorInfo.message:string",
+        "snapshot.transcript[].errorInfo.providerMessage:string",
+        "snapshot.transcript[].errorInfo:object",
         "snapshot.transcript[].errorMessage:string",
         "snapshot.transcript[].id:string",
         "snapshot.transcript[].kind:string",
@@ -1435,6 +1444,10 @@
         "transcript[].content[].text:string",
         "transcript[].content[].type:string",
         "transcript[].content[]:object",
+        "transcript[].errorInfo.category:string",
+        "transcript[].errorInfo.message:string",
+        "transcript[].errorInfo.providerMessage:string",
+        "transcript[].errorInfo:object",
         "transcript[].errorMessage:string",
         "transcript[].id:string",
         "transcript[].kind:string",
@@ -4060,6 +4073,11 @@
       },
       {
         "content": [],
+        "errorInfo": {
+          "category": "aborted",
+          "message": "Request cancelled",
+          "providerMessage": "Request was aborted"
+        },
         "errorMessage": "Request was aborted",
         "id": "<id>",
         "kind": "message",
