@@ -132,6 +132,14 @@ export function presentHistoryEntry(schema: SettingsSchema, entry: ChangeEntry) 
       display: { before: formatProfileValue(entry.before), after: formatProfileValue(entry.after) },
     } };
   }
+  if (entry.action) {
+    // An approval action (#1985) records its preview, not a stored value: show what was asked and how it ended.
+    const title = (entry.after as { title?: unknown } | undefined)?.title;
+    return { ...entry, presentation: {
+      label: typeof title === "string" ? title : entry.key, actor: requesterLabel(entry.actor), layer: LAYER_LABELS[entry.layer],
+      display: { before: "Requested", after: entry.status === "approved" ? "Done" : entry.status === "pending" ? "Waiting" : entry.status[0]!.toUpperCase() + entry.status.slice(1) },
+    } };
+  }
   const key = schema.KEYS.find(key => key.id === entry.key);
   const subject = key ? undefined : recordSubject(entry.key);
   const redacted = entry.redacted || key?.redacted;
@@ -192,5 +200,7 @@ export function approvalProjection(schema: SettingsSchema, request: ApprovalRequ
         ...(key.confirm ? { confirm: key.confirm } : {}),
       };
     }),
+    // An action request (#1985) shows its registered subject and the exact preview approval binds.
+    ...(request.action ? { action: { subject: request.action.subject, title: request.action.preview.title, items: request.action.preview.items } } : {}),
   };
 }

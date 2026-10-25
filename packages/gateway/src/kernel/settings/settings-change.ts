@@ -255,7 +255,8 @@ export class SettingsChangePath {
     return this.mutexFor(preview.target).run(async () => {
       const { request } = await this.approvals.create({ target: preview.target, actor: context.actor, reason: context.reason!, changes: [],
         action: { subject, params: params ?? null, preview } }, this.now());
-      await this.record.append([{ ...this.actionEntry(request, context.commandId), status: "pending" }]);
+      // The pending entry is keyed by the request, so every later fact refers to it.
+      await this.record.append([{ ...this.actionEntry(request, context.commandId), changeId: request.requestId, status: "pending" }]);
       this.observer?.approvals({ kind: "pending", request });
       void this.armExpiry().catch(() => undefined);
       return { status: "pending", tier: "approve", changes: [], action: preview,
