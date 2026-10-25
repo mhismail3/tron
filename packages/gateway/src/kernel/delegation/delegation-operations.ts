@@ -1,4 +1,5 @@
 import type { HomeTaskReportOwner } from "./task-report.js";
+import { homeTaskSubagentRunsSettled } from "./task-subagents.js";
 import type { TaskWorkerControl } from "./worker-contract.js";
 import { interruptTaskWorker, stopTaskWorker, steerTaskWorker, taskWorkerSteeringInput } from "./worker-control.js";
 
@@ -16,16 +17,13 @@ type OwnedSession = {
 };
 type InterruptWorkerTools<Session> = (slot: Session, by: string, before?: () => Promise<void>) => Promise<string[]>;
 /** The session runtime's owned-session operations (RuntimeRegistry implements them). The
- * run owner imports delegation, so the session handle and recovery evidence stay its types. */
-export interface OwnedSessions<Session extends OwnedSession, Evidence> {
+ * run owner imports delegation, so the session handle stays its type. */
+export interface OwnedSessions<Session extends OwnedSession> {
   acquire(sessionId: string): Promise<Session>;
   create(cwd: string, profile: "ordinary", report: HomeTaskReportOwner): Promise<Session>;
   acquireOwnedSessionLease(sessionId: string): Promise<OwnedLease<Session>>;
-  ownedOperationRecoveryEvidence(sessionId: string, operationId: string): Promise<Evidence>;
   clearOwnedOperationMarker(sessionId: string, operationId: string): Promise<void>;
 }
-/** The dispatch over one implementer, for a field typed before construction. */
-export type DelegationOperationsOver<Sessions> = Sessions extends OwnedSessions<infer Session, infer Evidence> ? DelegationOperations<Session, Evidence> : never;
 type OperationHandle<T> = {
   operationId: string;
   completion: Promise<T>;
@@ -36,7 +34,7 @@ export interface OwnedOperationDeadline { readonly signal: AbortSignal; readonly
 
 /** One kernel service owns worker lease/control/deadline orchestration. Native
  * session/run authorities keep their lane, canonical evidence and work tokens. */
-export class DelegationOperations<Session extends OwnedSession, Evidence> {
+export class DelegationOperations<Session extends OwnedSession> {
   /** Catalog attribution, not the live report-owner binding. A resumed task keeps
    * the session\'s first attribution; native catalog/attention reads this owner. */
   private readonly workerAttribution = new Map<string, string>();
@@ -50,8 +48,16 @@ export class DelegationOperations<Session extends OwnedSession, Evidence> {
     return true;
   }
 
-  constructor(private readonly sessions: OwnedSessions<Session, Evidence>,
-    private readonly interruptTools: InterruptWorkerTools<Session>) {}
+  constructor(private readonly sessions: OwnedSessions<Session>,
+    private readonly interruptTools: InterruptWorkerTools<Session>,
+    private readonly resources: { readonly delegatedArtifactRoot?: string }) {}
+
+  /** Read the admitted resource root at recovery, not at service construction.
+   * The structural view is the actual native options object, never a copied root. */
+  subagentRunsSettled(asyncDirs: readonly string[]): Promise<boolean> {
+    const root = this.resources.delegatedArtifactRoot;
+    return root === undefined ? Promise.resolve(asyncDirs.length === 0) : homeTaskSubagentRunsSettled(asyncDirs, root);
+  }
 
   async steerWorker(sessionId: string, control: TaskWorkerControl, text: string): Promise<void> {
     const slot = await this.sessions.acquire(sessionId);
@@ -84,25 +90,9 @@ export class DelegationOperations<Session extends OwnedSession, Evidence> {
     } catch (error) { lease.release(); throw error; }
   }
 
-  lease(sessionId: string): Promise<OwnedLease<Session>> {
-    return this.sessions.acquireOwnedSessionLease(sessionId);
-  }
-
-  recoveryEvidence(sessionId: string, operationId: string): Promise<Evidence> {
-    return this.sessions.ownedOperationRecoveryEvidence(sessionId, operationId);
-  }
-
-  admit<Args extends unknown[], Admission>(slot: Session & { prompt(...args: Args): Admission }, ...args: Args): Admission {
-    return slot.prompt(...args);
-  }
-
   async acknowledge(sessionId: string, operationId: string, lease: OwnedLease<Session>): Promise<void> {
     await this.sessions.clearOwnedOperationMarker(sessionId, operationId);
     lease.release();
-  }
-
-  clearRecoveryMarker(sessionId: string, operationId: string): Promise<void> {
-    return this.sessions.clearOwnedOperationMarker(sessionId, operationId);
   }
 
   /** Arms the fixed deadline of one opted-in operation. The caller disarms it only

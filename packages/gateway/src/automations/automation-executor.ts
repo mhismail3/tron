@@ -3,7 +3,6 @@ import type { NotificationService } from "../notifications/notification-service.
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { canonicalResourceName } from "../sessions/resource-invocation.js";
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import type { DelegationOperationsOver } from "../kernel/delegation/delegation-operations.js";
 import type { OwnedOperationTerminal } from "../kernel/delegation/owned-operation-terminal.js";
 import {
   AutomationAdmissionError,
@@ -38,16 +37,12 @@ function terminalResult(terminal: OwnedOperationTerminal): AutomationExecutionRe
 }
 
 export class GatewayAutomationExecutor implements AutomationExecutor {
-  private readonly dispatch: DelegationOperationsOver<RuntimeRegistry>;
-
   constructor(
     private readonly sessions: RuntimeRegistry,
     private readonly workRegistry: GatewayWorkRegistry,
     private readonly notifications: NotificationService | undefined,
     private readonly machineId: string | undefined,
-  ) {
-    this.dispatch = sessions.delegation;
-  }
+  ) {}
 
   async start(record: AutomationRecord, run: AutomationRun, signal?: AbortSignal): Promise<AutomationExecutionHandle> {
     signal?.throwIfAborted();
@@ -83,7 +78,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
         slot = leased.slot;
         releaseLease = leased.release;
       } else {
-        const leased = await this.dispatch.lease(sessionId);
+        const leased = await this.sessions.acquireOwnedSessionLease(sessionId);
         slot = leased.slot;
         releaseLease = leased.release;
       }
@@ -149,7 +144,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
       const cancelAdmission = () => { void slot.abort("agent", operationId).catch(() => {}); };
       signal?.addEventListener("abort", cancelAdmission, { once: true });
       try {
-        admission = await this.dispatch.admit(slot,
+        admission = await slot.prompt(
           run.actionSnapshot.text,
           [],
           undefined,
@@ -177,7 +172,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
             completion: Promise.resolve(observedResult),
             cancel: async () => {},
             acknowledgeTerminal: async () => {
-              await this.dispatch.acknowledge(sessionId, operationId, { slot, release: releaseLease! });
+              await this.sessions.delegation.acknowledge(sessionId, operationId, { slot, release: releaseLease! });
               work.settle();
             },
           };
@@ -204,7 +199,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
           }
         },
         acknowledgeTerminal: async () => {
-          await this.dispatch.acknowledge(sessionId, operationId, { slot, release: releaseLease! });
+          await this.sessions.delegation.acknowledge(sessionId, operationId, { slot, release: releaseLease! });
           work.settle();
         },
       };
@@ -237,7 +232,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
 
   async recover(record: AutomationRecord, run: AutomationRun): Promise<AutomationRecoveryResult> {
     if (!run.operationId) return { state: "outcomeUnknown", reason: "operation-identity-missing" };
-    const evidence = await this.dispatch.recoveryEvidence(run.executionSessionId, run.operationId);
+    const evidence = await this.sessions.ownedOperationRecoveryEvidence(run.executionSessionId, run.operationId);
     const invocation = evidence.invocation;
     const marker = evidence.marker;
     if (marker?.assistantCompletionId) {
@@ -286,6 +281,6 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
   }
 
   async acknowledgeRecovery(record: AutomationRecord, run: AutomationRun): Promise<void> {
-    if (run.operationId) await this.dispatch.clearRecoveryMarker(run.executionSessionId, run.operationId);
+    if (run.operationId) await this.sessions.clearOwnedOperationMarker(run.executionSessionId, run.operationId);
   }
 }

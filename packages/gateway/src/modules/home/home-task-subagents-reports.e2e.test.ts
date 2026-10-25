@@ -288,7 +288,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagentRuns: { total: 0, runs: [] }, subagents: { started: 1, stoppedAtEnd: 0 } });
     // Reconciliation must agree with the live report gate, including paused process proof.
-    expect(await f.registry.taskSubagentRunsSettled([seen.workflowDir!])).toBe(true);
+    expect(await f.registry.delegation.subagentRunsSettled([seen.workflowDir!])).toBe(true);
   }, 60_000);
 
   it("cold settlement accepts a real completed workflow status larger than 64KiB", async () => {
@@ -313,7 +313,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     await f.registry.dispose();
     await f.registry.administrativeWorkRegistry.waitUntilSettled();
     const cold = await f.restart();
-    expect(await cold.taskSubagentRunsSettled([workflowDir])).toBe(true);
+    expect(await cold.delegation.subagentRunsSettled([workflowDir])).toBe(true);
     expect((await homeOwnerOf(cold).taskResult(run.taskId)).terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     await mkdir("test-results", { recursive: true });
     await writeFile("test-results/large-workflow-cold-settlement.json", JSON.stringify({ bytes, settled: true }, null, 2));

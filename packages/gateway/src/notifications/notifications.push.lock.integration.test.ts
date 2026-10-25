@@ -203,7 +203,7 @@ describe("gateway/notifications push lock", () => {
     const dispatch = gateway.registry.delegation;
     const lease = await dispatch.createWorker(gateway.cwd, report);
     const workerTerminal = new Promise<unknown>((resolve) => {
-      void dispatch.admit(lease.slot, "do the lock task", [], undefined, undefined, undefined, {
+      void lease.slot.prompt("do the lock task", [], undefined, undefined, undefined, {
         operationId, signal: report.signal, origin: { kind: "gateway", ownerId: "lock-task", title: "Home task", confidence: "boundary" },
         onTerminal: resolve,
       });

@@ -37,8 +37,11 @@ policy, not native tool-interruption wiring or a second delegation instance.
 Home receives the canonical native `SessionOperations` implementation, not a
 Registry-produced Home adapter. Home assembles its domain session recipe; native
 operations retain maps, mutation/construction mutexes, catalog cuts and retirement.
+One actual native input supplies canonical file reads, mutation ordering, runtime
+projections and worker I/O; Home keeps no forwarding callbacks or duplicate worker input.
+The same registry-owned K5 service owns worker orchestration and cold artifact proof;
+Home computes its subagent projection from the selected native cut through K5's reader.
 Composition supplies the same late K6 settings, Knowledge and raw model owners.
-The worker API still comes from Registry until actual K5 delegation takes it over.
 
 - **Record.** `<tronHome>/gateway/home/home.json` (`0600`, atomic durable publish): `version`
   `2`, `homeId`, ordered `chapters` (`{ sessionId, ordinal, state: active | sealed | reserved

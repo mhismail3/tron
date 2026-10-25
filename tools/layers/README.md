@@ -94,9 +94,9 @@ It only shrinks:
   committed increase is caught. The base must exist (exit 2 otherwise), and a
   deleted baseline cannot be rebuilt by `--update` while the base has one.
 
-Today's baselines: Gateway 23 upward and 26 two-way pairs; iOS 7 upward and 13
-two-way pairs plus the 18 unindexed files. They shrink with each slice that
-removes one.
+The committed Gateway and iOS `layer-baseline.json` files are the authority for
+permitted pairs and unindexed files. The checker reports the observed graph;
+allowances shrink with each slice that removes one, rather than being copied here.
 
 ## Verify
 

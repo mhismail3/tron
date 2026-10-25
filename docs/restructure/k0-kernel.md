@@ -196,27 +196,25 @@ Automations already use the worker-session boundary (`automations/automation-exe
 
 | `kernel/delegation` (generic) | `modules/home` (policy) |
 |---|---|
-| `delegation-operations.ts`: `createWorker`, `resumeWorker`, `lease`, `admit`, `acknowledge`, `clearRecoveryMarker`, `recoveryEvidence`, `armDeadline`, `enforceDeadline` (`:22-92`); its `HomeTaskReportOwner` import (`:3`) becomes K5's `ReportOwner` | `home-owner.ts` (designation, chapters, publication; `homePublicationUncertain`, `runtime-registry.ts:574`, moves with it), `home-chapter-*`, `home-session-recovery.ts` |
+| `delegation-operations.ts`: `createWorker`, `resumeWorker`, `acknowledge`, `subagentRunsSettled`, `armDeadline`, `enforceDeadline`; its `HomeTaskReportOwner` import (`:3`) becomes K5's `ReportOwner` | `home-owner.ts` (designation, chapters, publication; `homePublicationUncertain`, `runtime-registry.ts:574`, moves with it), `home-chapter-*`, `home-session-recovery.ts` |
 | Registry worker paths: `create(cwd, profile, report)` `runtime-registry.ts:3016`; K5 owns resumed-worker lease/bind/failure release over the actual native lane/rebuild backend (no Registry resume wrapper); leases/evidence/markers `:2128-2169`, task-worker evidence `:4478-4646`, the actual attribution index now in `DelegationOperations` (first-registration-wins, not live role state; native attention/catalog reads and batch publication stay C1, wire `homeTaskId` unchanged) | `home-task-dispatcher.ts` (what to delegate, when, to whom), `home-task-authorization.ts`, `home-task-worker-choice.ts`, `home-task-spend.ts`, `home-task-store.ts` (Home's task ledger; D4) |
 | K5 `worker-control.ts`: steering input and Stop/Interrupt identity fences; `worker-settlement.ts`: live join/wake owner; `subagent-control.ts`: actual provider I/O; `subagent-settlement.ts`: canonical stop/join/notice/receipt algorithm over actual native I/O. K5 `worker-turn-boundary.ts` owns actual turn-boundary report/budget/reminder policy; Slot installs it over the same native frame and SDK runtime. K5 `OwnedTurnOwner` owns the actual observer map, held-task/wake state and cancellation algorithm over the same native frame. Slot retains `bindTaskWorker`, worker tools and native I/O. Native prompt/per-tool cancellation stay K2; the actual shared registry-owned DelegationOperations acquires workers and binds native interruption in kernel composition. Home and automations use that same service, not per-dispatch adapters. | `home-wake-inbox.ts` (D4), `home-request-policy.ts`, `home-memory*.ts`, `home-profile.ts`, `home-research-tools.ts`, `tron-home-extension.ts` (`HOME_OPERATING_CONTEXT`, used for headroom `runtime-slot.ts:8844`, comes through `requestPolicy`) |
 | `home-task-report.ts`, `home-task-checkin.ts`, `task-subagents.ts`, `home-task-worker-extension.ts` (the worker prompt at `:55` is model-visible text and moves byte-identical) | Profile `home`, hooks `profileDecision`, `requestPolicy`, `inputAdmission`, `appendGuard`, `runSettled` |
 | Subagents: `managed-subagents.ts`, `child-session-admission.ts`, `delegated-provider.ts`, `subagent-catalog.ts`, artifact tracking `runtime-slot.ts:5560-7100`, run control `:7927-8116` | `HomeOwner` construction leaves `runtime-registry.ts:796-866` for Home's `start` |
 
-`HomeOwner`'s ports today are `HomeSessionPort` (`modules/home/home-owner.ts:90`: `createHomeSession`,
-`currentSessionModel`, `applySessionModel`, `sessionPresent`, `sessionFile`, `hasLiveRuntime`,
-`waitingForUser`, `homeChaptersChanged`, `serializeSessionMutation`, `chapterMetrics`,
-`hasConversation`, `replaceRuntimeForProfile`, `beginHomePublicationReconciliation`,
-`retireHomeRuntimes`, `wakeHome`) and `taskSessions: RuntimeRegistry` (`:162`). The first is
-implemented on `SessionOperations` (the last three by Home over K1 `replaceRuntime` and
-`retire`); the second becomes `DelegationOperations` (`acquire` `:265`, `readTaskEvidence`
-`:510`, recovery, `admitTaskWorkerChoice` `runtime-registry.ts:3012`).
-The current shared service is `RuntimeRegistry.delegation`; the §3 `GatewayHost`
-operations sketch remains a target, not the current platform/contract-only host.
-Home's dispatcher still uses the concrete Registry for native evidence/projection
-and admission access. Its native frame composes the sole K5 `OwnedTurnOwner` for
-held-turn state and terminal observers; canonical terminal classification, receipts and
-abort I/O remain native. No second facade or compatibility state stands in for the
-remaining concrete Registry seam.
+`HomeOwner` receives one actual `SessionOperations` authority for canonical evidence,
+leases, runtime reads and mutation ordering. The duplicate `taskSessions` input and
+`HomeNativeOwners.workers` field are absent. `HomeSessionPort` holds only substantive
+Home chapter/model/wake policy: creation recipe, saved model choice, chapter metrics,
+conversation proof, uncertain-publication retirement and wake admission. Native reads
+and publications have no Home callback facade. Home calls K5's projection reader on the
+same selected native cut; K5 owns cold artifact proof and its late admitted-root guard.
+The current shared orchestration service is `RuntimeRegistry.delegation`; ordinary
+native leases, prompts, recovery evidence and marker I/O are addressed directly, not
+through K5 passthroughs. The §3 `GatewayHost` operations sketch remains a target, not the
+current platform/contract-only host. The native frame composes the sole K5
+`OwnedTurnOwner` for held-turn state and terminal observers; canonical terminal
+classification, receipts and abort I/O remain native.
 
 Persisted names never change in Phase 2: custom entry types (`HOME_TASK_MARKER`,
 `HOME_TASK_REPORT`, `tron.home-task-report-reminder.v1`), receipt types and store paths keep
@@ -256,7 +254,7 @@ lands, a slice runs the named locks and the full Gateway suite directly. Locks s
 
 Order: wiring first (E1-E3), then read-only projection (E4), the behavior core (E5),
 delegation, which depends on run ownership (E6), and the registry, which depends on all
-(E7). E7 closed (maintainer, 2026-10-23) once the registry no longer constructed or called Home; its remaining items moved to E8. Net lines and deleted concepts are metrics, not slice or phase/E8 exit gates. Temporary plumbing is permitted for coherent responsibility transfers; acceptance requires one canonical owner, narrow explicit dependencies, preserved behavior, and removal of superseded parallel/forwarding paths. Actual-consumer bridges name their consumer, removal condition and follow-up in #1348’s short simplification ledger; E8 exit states remaining consolidation debt and its concrete deletion path. Safe dead code is removed when unnecessary. Home leaves the registry through `sessionLineage` (§2.1; decision A, maintainer 2026-10-23): the kernel asks Home only for lineage facts, never through a HomeOwner mirror, and the registry's Home procedures (reserved-successor materialization, publication retirement, task recovery and dispatch) move to Home over K1 operations. The rest of §5's left column follows E7 (maintainer, 2026-10-22): while `gateway/run` owns the slot
+(E7). E7 closed (maintainer, 2026-10-23) once the registry no longer constructed or called Home; its remaining items moved to E8. Net lines and deleted concepts are metrics, not slice or phase/E8 exit gates. Temporary forwarding, mirror and compatibility plumbing is not a way to close a slice: move actual consumers and delete superseded routes in the same change, including multi-file migrations. Acceptance requires one canonical owner, narrow explicit dependencies and preserved behavior. A retained seam must have a genuine blocker, actual consumer, removal issue and concrete exit condition in #1348’s simplification ledger; filing a follow-up alone is not a blocker. The exit review states deleted/remaining mechanisms and net lines, distinguishes enduring ownership contracts from temporary debt, and removes unnecessary dead code. Home leaves the registry through `sessionLineage` (§2.1; decision A, maintainer 2026-10-23): the kernel asks Home only for lineage facts, never through a HomeOwner mirror, and the registry's Home procedures (reserved-successor materialization, publication retirement, task recovery and dispatch) move to Home over K1 operations. The rest of §5's left column follows E7 (maintainer, 2026-10-22): while `gateway/run` owns the slot
 and registry, which import delegation, a delegation→run import is a hard two-way pair (#1348 layers probe). E2 before E3-E7 keeps moved files from being re-touched for imports (D1). K4 and K6 are
 file moves on disjoint files that may run beside E3-E7 (`admin-settings-change`,
 `settings-approvals`, `admin.store`, `run-prompt-stream`). Each step is several slices of one
