@@ -19,3 +19,13 @@ export function redactCredentials(value: string): string {
     // this also covers the `authorization` header written as prose.
     .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/giu, "$1[REDACTED]");
 }
+
+/** Log/export policy, distinct from credential-only content projection above.
+ * Writers and diagnostic raw-text copies apply these same rules at their boundary. */
+export function redact(value: string): string {
+  return value
+    .replace(/\bBearer\s+[^\s,;]+/giu, "Bearer [REDACTED]")
+    .replace(/((?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret)\s*[:=]\s*)[^\s,;]+/giu, "$1[REDACTED]")
+    .replace(/\/Users\/[^\s'"]+/gu, "[USER_PATH]")
+    .replace(/\/private\/var\/[^\s'"]+/gu, "[PRIVATE_PATH]");
+}

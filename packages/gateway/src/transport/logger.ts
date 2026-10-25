@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
+import { redact } from "../util/credential-redaction.js";
 import type { HomeHardBoundary } from "../modules/home/home-diagnostic.js";
 import type { CommandReceiptRouteCategory } from "./command-receipts.js";
 
@@ -224,17 +225,6 @@ const MAX_COUNT_FIELDS = 16;
  * anything but letters and digits, so only its length needs bounding. */
 const MAX_COUNT_NAME_CHARS = 32;
 const PERSISTED_LEVELS: ReadonlySet<LogLevel> = new Set(["info", "warning", "error"]);
-
-/** The one redaction rule set. Every writer applies it at its write boundary,
- * and readers that copy raw text (the diagnostic bundle) apply the same rules so
- * a token cannot reach a shared artifact through a path the writers never saw. */
-export function redact(value: string): string {
-  return value
-    .replace(/\bBearer\s+[^\s,;]+/giu, "Bearer [REDACTED]")
-    .replace(/((?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret)\s*[:=]\s*)[^\s,;]+/giu, "$1[REDACTED]")
-    .replace(/\/Users\/[^\s'"]+/gu, "[USER_PATH]")
-    .replace(/\/private\/var\/[^\s'"]+/gu, "[PRIVATE_PATH]");
-}
 
 function boundedBytes(value: string, maximum: number): string {
   const bytes = Buffer.from(value, "utf8");

@@ -97,7 +97,7 @@ measured volume; measurements are kept in issues, not here.
   credentials, or full device identifiers. Identity appears only as a stable
   hash.
 - Redaction runs at the write boundary of every stream:
-  `redact` in `packages/gateway/src/transport/logger.ts`, `TronLog.redact` in
+  `redact` in `packages/gateway/src/util/credential-redaction.ts`, `TronLog.redact` in
   `packages/mac-app/Sources/Support/TronLog.swift`, and the bounded sanitizers
   in the iOS stores. The diagnostic
   collector reuses the Gateway's rule set on every copied line, so raw stream
