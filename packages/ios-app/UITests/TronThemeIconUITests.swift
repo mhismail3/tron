@@ -12,9 +12,9 @@ import XCTest
         XCTAssertTrue(initial.contains("primary=AppIconBeta"), initial)
         let alternates = Set(initial.components(separatedBy: "alternates=").last!.split(separator: ",").map(String.init))
         XCTAssertEqual(alternates, ["AppIcon", "AppIconBurgundy", "AppIconOliveGold"], initial)
-        let choices = initial.contains("icon=AppIcon;")
-            ? [("burgundy", "AppIconBurgundy"), ("oliveGold", "AppIconOliveGold"), ("emerald", "AppIcon")]
-            : [("emerald", "AppIcon"), ("burgundy", "AppIconBurgundy"), ("oliveGold", "AppIconOliveGold")]
+        // Finish at the hosted suite's default identity rather than leaking a
+        // selected theme into later visual locks in this shared test app.
+        let choices = [("burgundy", "AppIconBurgundy"), ("oliveGold", "AppIconOliveGold"), ("emerald", "AppIcon")]
         for (theme, icon) in choices {
             app.buttons["theme-icon-open-appearance"].tap()
             let row = app.buttons["theme-color-\(theme)"]
@@ -38,6 +38,9 @@ import XCTest
         lightMode.tap()
         XCTAssertTrue(lightMode.isSelected)
         XCTAssertFalse(iconChangeAlert(app).waitForExistence(timeout: 3), "Color mode must not change the app icon")
+        let darkMode = app.buttons.matching(identifier: "Color Mode").element(boundBy: 1)
+        darkMode.tap()
+        XCTAssertTrue(darkMode.isSelected)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertEqual(readNative(app), settled)
         app.terminate()
