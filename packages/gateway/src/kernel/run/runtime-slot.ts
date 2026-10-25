@@ -63,7 +63,9 @@ import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTas
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
 import type { SessionSettingsSource, SettingsModel } from "../settings/settings-model.js";
-import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../settings/tool-contract.js";
+import { SETTINGS_OUTCOME_MESSAGE, settingsOutcomeRequestIds, type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../settings/tool-contract.js";
+import { visitCanonicalSessionEntries } from "../session/canonical-reader.js";
+import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
 import type { Actor } from "../settings/settings-record.js";
 import { piBuiltinExtensions } from "../host/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../host/extension-adapters.js";
@@ -603,7 +605,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   private explicitProfile: { sessionId: string; profile: SessionProfile } | undefined;
   public readonly canonicalAppendContext: CanonicalAppendContext;
   /** The Home wake whose trigger is being sent: its canonical binding and receipt follow its message_end. */
-  private homeWakeTrigger: { eventId: string; taskId: string; operationId: string } | undefined;
+  private homeWakeTrigger: { input: InputTrigger; operationId: string } | undefined;
   /** Whether the admitted operation is a wake, so the activation's idle notice names it. */
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
@@ -934,6 +936,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
             // effect through the same in-turn appliers as an ordinary chat's.
             ...(this.usesHomeSettings ? { homeChapter: { ...this.settingsSource(), sessionId: this.id, mutate: operation => operation({ appliers: source().appliers }) } } : {}),
             ...(input.dryRun ? { dryRun: true } : {}),
+            ...(input.request ? { request: true } : {}),
           });
         }
         const { task, slot, target: workerTarget } = await worker(input.taskId, "change");
@@ -942,10 +945,33 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId, taskId: task.taskId },
           reason: input.reason, web: input.web, session: slot.taskWorkerSettingsSession(),
           ...(input.dryRun ? { dryRun: true } : {}),
+          ...(input.request ? { request: true } : {}),
         });
         return { ...result, worker: { ...task, ...slot.taskWorkerSettingsState() } };
       },
-      takeOutcomes: () => owners.changes.takeOutcomes(this.id),
+      takeOutcomes: async delivered => {
+        // Pi runs before-agent-start before appending this admitted trigger. Its
+        // actual input, not a second outbox selection, owns the wake's message.
+        if (this.homeWakeTrigger?.input.message.customType === SETTINGS_OUTCOME_MESSAGE) return undefined;
+        const path = this.sessionFile;
+        if (!path) return delivered?.length ? undefined : owners.changes.takeOutcomes(this.id, []);
+        const durable = new Set<string>();
+        try {
+          await visitCanonicalSessionEntries({ path, sessionId: this.id, maxLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES, durable: true,
+            visit: entry => { for (const id of settingsOutcomeRequestIds([entry.raw])) durable.add(id); } });
+        } catch (error) {
+          // A new conversation has no file until its first prompt is saved. It
+          // can select an untold outcome, but cannot acknowledge any delivery.
+          if ((error as NodeJS.ErrnoException).code === "ENOENT" && !delivered?.length) return owners.changes.takeOutcomes(this.id, []);
+          // An unreadable or unsynchronized cut proves nothing. Keep the outbox
+          // pending, without refusing this prompt or appending a duplicate.
+          return undefined;
+        }
+        // A wake's trigger can already be SDK-visible before its append reaches
+        // this cut. Do not reselect it as a second before-agent-start message.
+        if (delivered?.some(id => !durable.has(id))) return undefined;
+        return owners.changes.takeOutcomes(this.id, delivered ?? [...durable]);
+      },
     };
   }
 
@@ -3431,7 +3457,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           // returns. A wake's trigger is persisted by its run, so its receipts must
           // exist before the run's reply can complete the operation.
           const trigger = this.homeWakeTrigger;
-          if (trigger && (event.message.details as { eventId?: unknown } | undefined)?.eventId === trigger.eventId) this.bindHomeWakeTrigger(trigger);
+          if (trigger && (event.message.details as { eventId?: unknown } | undefined)?.eventId === trigger.input.message.details.eventId) this.bindHomeWakeTrigger(trigger.input, trigger.operationId);
         } else if (event.message.role === "custom") {
           // Custom callbacks are serial. Stored sends already exposed their
           // exact canonical ID at message_start; triggered sends append as soon
@@ -5667,7 +5693,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   private async sendHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger): Promise<void> {
     const eventId = trigger.message.details.eventId;
     this.inboxAttributedMessages.add(eventId);
-    this.homeWakeTrigger = { eventId, taskId: trigger.taskId, operationId };
+    this.homeWakeTrigger = { input: trigger, operationId };
     try {
       await session.sendCustomMessage(trigger.message, { triggerTurn: true });
       if (!this.hasCanonicalCustomMessage(eventId)) throw new GatewayError("conflict", "Home wake trigger was not persisted");
@@ -5687,12 +5713,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   /** Persists the wake's canonical binding (its invocation to the trigger result) and the
    * trigger's delivery receipt. Both are lane work, so they precede the reply's terminal receipt. */
-  private bindHomeWakeTrigger(trigger: { eventId: string; taskId: string; operationId: string }): void {
+  private bindHomeWakeTrigger(trigger: InputTrigger, operationId: string): void {
     void this.lane.run(async () => {
       const candidate = this.sessionManager.getBranch().find(entry => entry.type === "custom_message"
-        && (entry.details as { eventId?: unknown } | undefined)?.eventId === trigger.eventId);
+        && (entry.details as { eventId?: unknown } | undefined)?.eventId === trigger.message.details.eventId);
       if (!candidate) throw new Error("canonical Home wake trigger is unavailable");
-      const invocation = this.runInvocations.invocationForOperation(trigger.operationId);
+      const invocation = this.runInvocations.invocationForOperation(operationId);
       if (!invocation) throw new Error("canonical invocation start receipt is unavailable");
       await this.persistCanonicalCustomEntry(
         INVOCATION_RECEIPT_TYPE,
@@ -5701,7 +5727,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           receiptId: `binding:${invocation.invocationId}`,
           receiptKind: "binding",
           invocationId: invocation.invocationId,
-          operationId: trigger.operationId,
+          operationId,
           sessionId: this.id,
           source: "homeWake",
           canonicalEntryId: candidate.id,
@@ -5709,11 +5735,13 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           createdAt: new Date().toISOString(),
         })),
         `binding:${invocation.invocationId}`,
-        this.runWork.get(trigger.operationId),
+        this.runWork.get(operationId),
       );
+      const settings = candidate.type === "custom_message" && candidate.customType === SETTINGS_OUTCOME_MESSAGE;
+      const source = settings ? "gateway:settings" : "gateway:home-task";
       await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
-        safeJson(makeContextDeliveryReceipt(candidate.id, "stored", { source: "gateway:home-task",
-          owner: { id: trigger.taskId, title: "Home task", source: "gateway:home-task" } })), candidate.id);
+        safeJson(makeContextDeliveryReceipt(candidate.id, "stored", { source,
+          owner: { id: trigger.taskId, title: settings ? "Settings" : "Home task", source } })), candidate.id);
     });
   }
 

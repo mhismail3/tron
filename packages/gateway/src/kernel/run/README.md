@@ -58,6 +58,10 @@ actual K3 host; native frames do not select product modules or keep another list
 
 - `invocation-receipts.ts` and `context-delivery-receipts.ts`: canonical receipt
   parsing, folding, owned terminal facts and canonical inbox delivery; persisted bytes remain stable.
+  Settings wakes bind the actual admitted input and use `gateway:settings` attribution.
+  Their before-agent-start hook never reselects the same trigger before Pi appends it.
+  Ordinary outcome acknowledgement requires the bounded canonical reader's durable
+  file-and-directory proof; failed proof defers without refusing the prompt.
 - `run-markers.ts`: durable per-operation crash/interruption evidence.
 - `run-persistence.ts`: sole pending-receipt join and durable-write fence, bounded
   retry/retention, conflicts and actual SDK stop/diagnostic cuts through the native frame.
