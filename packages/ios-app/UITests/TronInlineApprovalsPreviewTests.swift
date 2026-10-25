@@ -6,6 +6,16 @@ final class TronInlineApprovalsPreviewTests: XCTestCase {
     func testCaptureInlineApprovalsInLightAndDark() throws {
         let surfaces = ["chat", "request-worker", "request-single", "request-grant", "request-approved",
                         "outcome-applied", "outcome-denied", "outcome-failed", "outcome-expired"]
+        try capture(surfaces: surfaces)
+    }
+
+    @MainActor
+    func testCaptureActionAndBatchedOutcomesInLightAndDark() throws {
+        try capture(surfaces: ["chat", "request-worker", "request-grant", "request-action", "outcome-action-interrupted", "outcome-batch"])
+    }
+
+    @MainActor
+    private func capture(surfaces: [String]) throws {
         for appearance in ["light", "dark"] {
             for surface in surfaces {
                 let app = XCUIApplication()
@@ -14,7 +24,8 @@ final class TronInlineApprovalsPreviewTests: XCTestCase {
                 app.launch()
                 let ready = surface == "chat"
                     ? app.descendants(matching: .any)["preview-request-chip"]
-                    : app.buttons["Done"]
+                    : surface.hasPrefix("request-") && surface != "request-approved"
+                        ? app.buttons["preview-approve"] : app.buttons["Done"]
                 guard ready.waitForExistence(timeout: 20) else {
                     XCTFail("Preview \(surface) did not open: \(app.debugDescription)"); app.terminate(); return
                 }

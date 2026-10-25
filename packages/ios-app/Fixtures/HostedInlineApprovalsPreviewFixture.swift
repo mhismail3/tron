@@ -45,6 +45,7 @@ struct HostedInlineApprovalsPreview: View {
                 TronMarkdownView(text: "Switching a worker's model and thinking needs your approval. I've asked below; the worker keeps its current settings until you decide.", streaming: false)
                 PreviewChip(state: .waiting, title: "Model, Thinking", detail: "Waiting for you · 2 changes")
                     .accessibilityIdentifier("preview-request-chip")
+                PreviewChip(state: .waiting, title: "Create project demo", detail: "Waiting for you · 1 action")
                 Divider().padding(.vertical, 4)
                 Text("Outcome events (each starts its own Home turn)")
                     .font(TronTypography.secondaryDescription)
@@ -55,6 +56,8 @@ struct HostedInlineApprovalsPreview: View {
                 PreviewChip(state: .failed, title: "Thinking", detail: "Failed · worker busy")
                 PreviewChip(state: .expired, title: "Context window", detail: "Expired · 24 h")
                 PreviewChip(state: .superseded, title: "Tools", detail: "Superseded")
+                PreviewChip(state: .interrupted, title: "Create project demo", detail: "Interrupted · effects uncertain")
+                PreviewChip(state: .superseded, title: "Settings outcomes", detail: "3 requests · mixed outcomes")
                 TronMarkdownView(text: "You approved the model switch; the worker uses GPT-6.1 Sol from its next request.", streaming: false)
             }
             .padding(.horizontal, 16)
@@ -78,11 +81,14 @@ struct HostedInlineApprovalsPreview: View {
         switch surface {
         case "request-single": RequestSheet(request: .trust, decided: nil)
         case "request-grant": RequestSheet(request: .grant, decided: nil)
+        case "request-action": RequestSheet(request: .project, decided: nil)
         case "request-approved": RequestSheet(request: .worker, decided: .applied)
         case "outcome-applied": OutcomeSheet(outcome: .applied)
         case "outcome-denied": OutcomeSheet(outcome: .denied)
         case "outcome-failed": OutcomeSheet(outcome: .failed)
         case "outcome-expired": OutcomeSheet(outcome: .expired)
+        case "outcome-action-interrupted": OutcomeSheet(outcome: .interrupted)
+        case "outcome-batch": OutcomeBatchSheet()
         default: RequestSheet(request: .worker, decided: nil)
         }
     }
@@ -91,14 +97,14 @@ struct HostedInlineApprovalsPreview: View {
 // MARK: - Shared preview vocabulary
 
 private enum PreviewState {
-    case waiting, applied, denied, failed, expired, superseded
+    case waiting, applied, denied, failed, expired, superseded, interrupted
 
     var icon: String {
         switch self {
         case .waiting: "checkmark.shield"
         case .applied: "checkmark.circle.fill"
         case .denied: "hand.raised.fill"
-        case .failed: "exclamationmark.triangle.fill"
+        case .failed, .interrupted: "exclamationmark.triangle.fill"
         case .expired: "clock.badge.xmark"
         case .superseded: "arrow.triangle.2.circlepath"
         }
@@ -108,7 +114,7 @@ private enum PreviewState {
         switch self {
         case .waiting: .warning
         case .applied: .accent
-        case .failed: .error
+        case .failed, .interrupted: .error
         case .denied, .expired, .superseded: .neutral
         }
     }
@@ -117,7 +123,7 @@ private enum PreviewState {
         switch self {
         case .waiting: .tronWarning
         case .applied: .tronEmerald
-        case .failed: .tronError
+        case .failed, .interrupted: .tronError
         case .denied, .expired, .superseded: .tronSlate
         }
     }
@@ -151,17 +157,32 @@ private struct PreviewChange: Identifiable {
     let affects: String
 }
 
-private struct PreviewRequest {
+private struct PreviewAction {
     let title: String
+    let items: [(label: String, value: String)]
+
+    static let project = PreviewAction(title: "Create project demo", items: [
+        ("Folder", "~/Workspace/demo"),
+        ("Git", "New repository · main branch"),
+        ("Trust", "Not changed by this action"),
+    ])
+}
+
+private struct PreviewRequest {
     let requester: String
     let reason: String
     let target: String
     let expires: String
     let changes: [PreviewChange]
     var grant: (intent: String, project: String)? = nil
+    var action: PreviewAction? = nil
+
+    static let project = PreviewRequest(
+        requester: "Tron Home",
+        reason: "You asked for a separate demo project. This creates its folder and Git repository; it does not grant project trust.",
+        target: "This Mac · ~/Workspace/demo", expires: "in 24 h · Fri 9:12 AM", changes: [], action: .project)
 
     static let worker = PreviewRequest(
-        title: "Approve 2 changes",
         requester: "Tron Home",
         reason: "The migration step needs stronger reasoning; back to defaults when it reports.",
         target: "Worker · Settings three-layer simplify",
@@ -176,7 +197,6 @@ private struct PreviewRequest {
         ])
 
     static let trust = PreviewRequest(
-        title: "Approve 1 change",
         requester: "Tron Home",
         reason: "You asked me to fix the website build; the project is not trusted yet.",
         target: "This Mac · every chat in the project",
@@ -188,7 +208,6 @@ private struct PreviewRequest {
         ])
 
     static let grant = PreviewRequest(
-        title: "Approve a task",
         requester: "Tron Home",
         reason: "Delegating the website build fix; the project is outside the standing scope.",
         target: "One task · ~/Workspace/tron-website",
@@ -273,12 +292,12 @@ private struct RequestSheet: View {
                             PreviewRow(icon: "info.circle", title: "What it affects", value: "A worker runs in this project with its trusted resources. The standing scope is unchanged.", accent: accent)
                         }
                     }
+                    if let action = request.action { ActionGroup(action: action, accent: accent) }
                     ForEach(request.changes) { ChangeGroup(change: $0, accent: accent, tookEffect: decided == .applied, outcome: decided) }
                     note
                 }
                 .padding(18)
             }
-            .safeAreaInset(edge: .bottom) { actions }
             .tronScrollEdgeChrome()
             .tronToolDetailNavigationChrome()
             .toolbar {
@@ -286,13 +305,26 @@ private struct RequestSheet: View {
                     TronSheetInfoButton(accessibilityLabel: "Technical details", accent: accent) {}
                 }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: decided == nil ? request.title : "Approved", accent: accent, icon: decided?.icon ?? "checkmark.shield")
+                    TronSheetTitle(title: decided == nil ? "Approve" : "Approved", accent: accent, icon: decided?.icon)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if decided == nil {
+                        Button(role: .destructive) {} label: {
+                            Image(systemName: "xmark").font(TronTypography.buttonSM).tronToolbarAction(role: .destructive)
+                        }
+                        .accessibilityLabel("Deny request")
+                        .accessibilityIdentifier("preview-deny")
+                        Button {} label: {
+                            Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronSuccess)
+                        }
+                        .accessibilityLabel(request.changes.count > 1 ? "Approve \(request.changes.count) changes" : "Approve request")
+                        .accessibilityIdentifier("preview-approve")
+                    } else {
+                        Button { dismiss() } label: {
+                            Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
+                        }
+                        .accessibilityLabel("Done")
                     }
-                    .accessibilityLabel("Done")
                 }
             }
         }
@@ -323,6 +355,7 @@ private struct RequestSheet: View {
 
     private var note: some View {
         Text(decided != nil ? "Tron Home was told in its own turn. Undo either change from Settings › Changes."
+             : request.action != nil ? "Approving runs exactly this action once. It is not undoable from Settings › Changes. Only your tap decides; Tron Home cannot approve itself."
              : request.grant != nil ? "Approving mints one grant for exactly this task. Only your tap decides; \(request.requester) cannot approve its own request."
              : "Approving applies exactly these values. Only your tap decides; \(request.requester) cannot approve its own request. Undo any change from Settings › Changes.")
             .font(TronTypography.secondaryDescription)
@@ -330,21 +363,6 @@ private struct RequestSheet: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Pinned so the decision stays reachable however many changes the request holds.
-    @ViewBuilder private var actions: some View {
-        if decided == nil {
-            HStack(spacing: 10) {
-                Button("Deny", role: .destructive) {}.buttonStyle(TronActionButtonStyle(role: .destructive, accent: .tronError))
-                    .accessibilityIdentifier("preview-deny")
-                Button(request.changes.count > 1 ? "Approve \(request.changes.count)" : "Approve") {}
-                    .buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronSuccess))
-                    .accessibilityIdentifier("preview-approve")
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .background(.bar)
-        }
-    }
 }
 
 // MARK: - Outcome sheet
@@ -358,6 +376,7 @@ private struct OutcomeSheet: View {
         case .applied: "Settings applied"
         case .denied: "Request denied"
         case .failed: "Change failed"
+        case .interrupted: "Action interrupted"
         case .expired: "Request expired"
         default: "Settings outcome"
         }
@@ -368,13 +387,14 @@ private struct OutcomeSheet: View {
         case .applied: "You approved Tron Home's request. Both changes are in effect for the worker."
         case .denied: "You denied Tron Home's request. Nothing changed."
         case .failed: "You approved it, but applying failed. Nothing changed; Tron Home can ask again."
+        case .interrupted: "Execution began, but its result could not be confirmed. The action may have completed. Inspect the project before asking again."
         case .expired: "No decision within 24 hours. Nothing changed; Tron Home was told."
         default: ""
         }
     }
 
     private var changes: [PreviewChange] {
-        outcome == .denied ? PreviewRequest.trust.changes : outcome == .expired ? [PreviewChange(
+        outcome == .interrupted ? [] : outcome == .denied ? PreviewRequest.trust.changes : outcome == .expired ? [PreviewChange(
             label: "Context window", qualifier: "for Claude Opus 5.5", before: "200K", after: "1M",
             scope: "Home override", effect: "Next model request", why: "", affects: "How much conversation fits before compaction. Larger windows cost more per request.")]
             : PreviewRequest.worker.changes
@@ -384,21 +404,32 @@ private struct OutcomeSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: TronSpacing.section) {
-                    ToolStaticChip(icon: outcome.icon, text: summary, accent: outcome.accent)
+                    if outcome == .interrupted {
+                        TronSettingsGroup("Outcome", accent: outcome.accent) {
+                            PreviewRow(icon: outcome.icon, title: "Effects uncertain", value: summary, accent: outcome.accent)
+                        }
+                    } else {
+                        ToolStaticChip(icon: outcome.icon, text: summary, accent: outcome.accent)
+                    }
                     if outcome == .failed {
                         TronSettingsGroup("Why it failed", accent: outcome.accent) {
                             PreviewRow(icon: "exclamationmark.triangle", title: "Worker busy",
                                        value: "The worker was compacting its context. Its settings change between requests; nothing was written.", accent: outcome.accent)
                         }
                     }
+                    if outcome == .interrupted {
+                        ActionGroup(action: .project, accent: outcome.accent)
+                        TronSettingsCaption("The same approval will not run this action again. Check the folder and repository before requesting another action.")
+                    }
                     ForEach(changes) { ChangeGroup(change: $0, accent: outcome.accent, tookEffect: outcome == .applied, outcome: outcome) }
                     TronSettingsGroup("Request", accent: outcome.accent) {
-                        PreviewRow(icon: "person.crop.circle", title: "Asked by", value: "Tron Home · for Worker · Settings three-layer simplify", accent: outcome.accent)
+                        PreviewRow(icon: "person.crop.circle", title: "Asked by", value: outcome == .interrupted ? "Tron Home" : "Tron Home · for Worker · Settings three-layer simplify", accent: outcome.accent)
                         TronSettingsDivider(accent: outcome.accent)
-                        PreviewRow(icon: "text.quote", title: "Reason", value: "The migration step needs stronger reasoning; back to defaults when it reports.", accent: outcome.accent)
+                        PreviewRow(icon: "text.quote", title: "Reason", value: outcome == .interrupted ? PreviewRequest.project.reason : PreviewRequest.worker.reason, accent: outcome.accent)
                         TronSettingsDivider(accent: outcome.accent)
                         PreviewRow(icon: "clock", title: "Timeline", value: outcome == .expired
                                    ? "Asked Wed 4:31 PM · expired Thu 4:31 PM"
+                                   : outcome == .interrupted ? "Asked 4:02 PM · approved 4:12 PM · interrupted 4:13 PM"
                                    : "Asked 4:02 PM · \(outcome == .denied ? "denied" : "approved") by you 4:12 PM", accent: outcome.accent)
                     }
                 }
@@ -418,6 +449,54 @@ private struct OutcomeSheet: View {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: outcome.accent)
                     }
                     .accessibilityLabel("Done")
+                }
+            }
+        }
+    }
+}
+
+private struct ActionGroup: View {
+    let action: PreviewAction
+    let accent: Color
+
+    var body: some View {
+        TronSettingsGroup(action.title, accent: accent) {
+            ForEach(Array(action.items.enumerated()), id: \.offset) { index, item in
+                if index > 0 { TronSettingsDivider(accent: accent) }
+                PreviewRow(icon: index == 0 ? "folder" : "info.circle", title: item.label, value: item.value, accent: accent)
+            }
+        }
+    }
+}
+
+private struct OutcomeBatchSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: TronSpacing.section) {
+                    ToolStaticChip(icon: "slider.horizontal.3", text: "Three requests settled while Home was busy. Home hears them together in one turn.", accent: .tronSlate)
+                    TronSettingsGroup("Retries", accent: .tronSuccess) {
+                        PreviewRow(icon: "checkmark.circle.fill", title: "Approved · applied", value: "Global · 3 retries → 5 retries", accent: .tronSuccess)
+                    }
+                    TronSettingsGroup("Trust project", accent: .tronSlate) {
+                        PreviewRow(icon: "hand.raised.fill", title: "Denied", value: "Nothing changed · ~/Workspace/tron-website", accent: .tronSlate)
+                    }
+                    TronSettingsGroup("Create project demo", accent: .tronError) {
+                        PreviewRow(icon: "exclamationmark.triangle.fill", title: "Interrupted · effects uncertain", value: "Inspect the folder and repository before asking again. This approval will not execute twice.", accent: .tronError)
+                    }
+                }
+                .padding(18)
+            }
+            .tronScrollEdgeChrome()
+            .tronToolDetailNavigationChrome()
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { TronSheetInfoButton(accessibilityLabel: "Technical details", accent: .tronSlate) {} }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Settings outcomes", accent: .tronSlate, icon: "slider.horizontal.3") }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronSlate) }
+                        .accessibilityLabel("Done")
                 }
             }
         }

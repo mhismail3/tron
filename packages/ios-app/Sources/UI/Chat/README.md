@@ -190,6 +190,11 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 check-in attention/Next, friendly transcript chips, aggregate navigation and extension/MCP
 humanization. `TronWorkerToolPreviewTests` captures light/dark native review surfaces only.
 
+`TronInlineApprovalsPreviewTests` captures synthetic request/outcome canvases in light/dark:
+settings, one-use grants, registered actions, interrupted effects and mixed batches. Pending
+canvases use title Approve and top-right red X/green check without a footer bar. These static
+captures are design review only; they do not prove decisions, dismissal, delivery or durability.
+
 `TronSixSmallUIRegressionTests` exercises scoped row ordering, primary toast ink, model ID/type
 metrics and retained search/selection, workspace path/status separation at standard/narrow/accessibility
 sizes, and check-in receipt content. `TronSixSmallUIPreviewTests` captures native light/dark design
