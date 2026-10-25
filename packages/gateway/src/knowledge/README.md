@@ -16,8 +16,10 @@ connector details: [contract](contract.md).
 
 ## Contract
 
-- **Storage.** One owner per resolved `TronWorkspace`. Construction and reads never
-  initialize or migrate. The first deliberate mutation builds the namespace in a
+- **Storage.** One owner per resolved `TronWorkspace`. The store consumes only the
+  existing K4 root description and Knowledge feature-initialization read/mark
+  operations; composition passes the same workspace object, also its mutex key.
+  Construction and reads never initialize or migrate. The first deliberate mutation builds the namespace in a
   temporary sibling under `state/` and renames it into place, then records
   `gateway/workspace-state/initialized.json`; a failed build publishes nothing.
 

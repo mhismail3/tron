@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import type { TronWorkspace } from "../workspace/tron-workspace.js";
+import type { ResourceRoot } from "../kernel/resources/resource-root.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, durableRemove, syncDurably } from "../util/durable-json.js";
@@ -619,13 +619,18 @@ async function readSecureBytes(path: string, maximumBytes: number): Promise<Uint
  * transactional authority for heads, coverage, suppression and receipts. */
 export type KnowledgeConnectorEnvelopeResolver = (connectionId: string) => Promise<Pick<ConnectionInstance, "providerAccountId" | "scope" | "credentialRef" | "policy"> | undefined>;
 
+interface KnowledgeWorkspace extends Pick<ResourceRoot, "describe"> {
+  featureInitialized(feature: "knowledge"): Promise<boolean>;
+  markFeatureInitialized(feature: "knowledge"): Promise<void>;
+}
+
 export class KnowledgeStore {
-  private static readonly workspaceLocks = new WeakMap<TronWorkspace, AsyncMutex>();
+  private static readonly workspaceLocks = new WeakMap<KnowledgeWorkspace, AsyncMutex>();
   private readonly mutex: AsyncMutex;
   private readonly connectorContext = new AsyncLocalStorage<string | undefined>();
   /** Command-scoped summary generations that are already in flight. */
   private readonly summaryInFlight = new Map<string, Promise<KnowledgeMutationResult>>();
-  constructor(private readonly workspace: TronWorkspace, private readonly onChanged?: (change: KnowledgeChange) => void, private readonly connectorEnvelope?: KnowledgeConnectorEnvelopeResolver) {
+  constructor(private readonly workspace: KnowledgeWorkspace, private readonly onChanged?: (change: KnowledgeChange) => void, private readonly connectorEnvelope?: KnowledgeConnectorEnvelopeResolver) {
     this.mutex = KnowledgeStore.workspaceLocks.get(workspace) ?? new AsyncMutex(); KnowledgeStore.workspaceLocks.set(workspace, this.mutex);
   }
 
