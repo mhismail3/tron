@@ -96,13 +96,13 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   children. Reproduce load in-process; if slow, check swap and report foreign hogs.
 
 ## Validation and landing
-
-Workers run relevant tests directly. No hosted check, gate, queue, admission, receipt,
-post-merge checker or auto-revert; none without measured benefit and maintainer approval.
-
-1. Commit in your own worktree (`git config rerere.enabled true`); `git fetch origin && git
-   rebase origin/main`; run `scripts/tron verify --changed`, only what the change can break
-   ([tools/verify](tools/verify/README.md)); a failure also on base never blocks (cite that run).
+Run `scripts/tron verify --plan`: **none** = no executable tests (docs/static checks remain);
+**partial** = affected owner/consumer checks; unchanged serial tests go to the batch.
+**full** = those checks now + broad coverage in an explicit Mac `verify --batch` after landing.
+Manifests, layers, file kinds and risk determine it ([rule/batches](tools/verify/README.md));
+no queue, gate or auto-revert.
+1. Commit in your own worktree (`git config rerere.enabled true`); fetch/rebase `origin/main`,
+   then `scripts/tron verify`. A failure also on base never blocks; cite that base run.
 2. `git push origin HEAD:main`; on non-fast-forward repeat step 1, rerunning tests only if
    integration changed their dependencies. Never force-push main.
 3. Close the issue with the change, actual commands and results, and residual risk;
@@ -128,9 +128,9 @@ post-merge checker or auto-revert; none without measured benefit and maintainer 
 - [Plan](docs/restructure/plan.md) §4.2/§8 govern, aiming at its goals G1–G6 (§3). One slice =
   one issue, worktree and owner module, files announced in its module issue first; one
   change type per commit, never move and change together.
-- **Lock before touch:** refactors need the module's locks passing on base; a golden change needs
-  maintainer review of the intended before/after beside the actual diff. **Hard checks:** upward,
-  two-way and Pi-seam pairs only shrink; one owner per file; no new production file > 800 lines.
+- **Lock before touch:** affected non-deferred locks pass on base; serial locks follow batch rules.
+  Golden changes need maintainer before/after review beside the actual diff. **Hard checks:**
+  upward/two-way/Pi-seam pairs only shrink; one owner per file; no new production file > 800 lines.
 - **Feature pause for every worker:** no new features in `RuntimeSlot`, `RuntimeRegistry`,
   `GatewayService`, `GatewayServer`, `gateway-main`, `protocol/types.ts`, `projection.ts`,
   `AppModel`, `SessionPresentationStore`, `ChatView`, `GatewayClient` until their target

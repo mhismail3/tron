@@ -24,7 +24,6 @@ import { TrustService } from "../../kernel/resources/trust-service.js";
 import { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { HomeOwner } from "./home-owner.js";
 import { homeTaskPolicy } from "./home-task-worker-choice.js";
-import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -47,19 +46,20 @@ describe("Home durable publication reconciliation", () => {
       tronHome,
       trust: new TrustService(join(root, "agent")),
       workspace,
-      // Publication recovery never dispatches a task, so the task namespace is never read.
-      taskSessions: {} as RuntimeRegistry, runtimes: {} as never, agentDir: "/nonexistent-agent-dir",
-      sessions: {
-        createHomeSession: async () => "session-1",
+      // These native operations are the only ones publication recovery uses.
+      runtimes: {
         sessionFile: async () => join(root, "sessions", "session-1.jsonl"),
         sessionPresent: async () => true,
-        hasLiveRuntime: () => false,
+        serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
+        replaceRuntimeForProfile: async (_sessionId: string, commit: () => Promise<void>) => commit(),
+        noteSessionListChanged: () => {},
+        liveRuntime: () => undefined,
+      } as never, agentDir: "/nonexistent-agent-dir",
+      sessions: {
+        createHomeSession: async () => "session-1",
         homeModel: async () => undefined, chooseHomeModel: async () => {},
         chapterMetrics: async () => ({ bytes: 0, entries: 0, quiescent: true }),
         hasConversation: async () => false,
-        serializeSessionMutation: async (_id, commit) => commit(),
-        replaceRuntimeForProfile: async (_sessionId, commit) => commit(),
-        currentSessionModel: () => null,
         retireHomeRuntimes: async () => { retirementStarted(); await retirementBlocked; retired.push("all"); },
       },
       taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
@@ -95,19 +95,20 @@ describe("Home durable publication reconciliation", () => {
       tronHome,
       trust: new TrustService(join(root, "agent")),
       workspace,
-      // Publication recovery never dispatches a task, so the task namespace is never read.
-      taskSessions: {} as RuntimeRegistry, runtimes: {} as never, agentDir: "/nonexistent-agent-dir",
-      sessions: {
-        createHomeSession: async () => "session-1",
+      // These native operations are the only ones publication recovery uses.
+      runtimes: {
         sessionFile: async () => join(root, "sessions", "session-1.jsonl"),
         sessionPresent: async () => true,
-        hasLiveRuntime: () => false,
+        serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
+        replaceRuntimeForProfile: async (_sessionId: string, commit: () => Promise<void>) => commit(),
+        noteSessionListChanged: () => {},
+        liveRuntime: () => undefined,
+      } as never, agentDir: "/nonexistent-agent-dir",
+      sessions: {
+        createHomeSession: async () => "session-1",
         homeModel: async () => undefined, chooseHomeModel: async () => {},
         chapterMetrics: async () => ({ bytes: 0, entries: 0, quiescent: true }),
         hasConversation: async () => false,
-        serializeSessionMutation: async (_id, commit) => commit(),
-        replaceRuntimeForProfile: async (_sessionId, commit) => commit(),
-        currentSessionModel: () => null,
         retireHomeRuntimes: async () => {},
       },
       taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),

@@ -31,6 +31,15 @@ Worker resume acquires the canonical native lease here, invokes the native lane/
 rebuild operation, and releases that same lease on failure. Registry supplies only
 its actual persisted-session acquisition; it has no resume forwarding route.
 
+Native Session/Run owns ordinary leases, prompt admission and canonical recovery/marker
+I/O. Home and Automation call those authorities directly rather than forwarding through
+K5. The shared service retains actual worker orchestration and clear-before-release
+acknowledgement; it has no passthrough admission, lease or recovery methods.
+It also owns cold subagent artifact proof and the optional-root refusal policy. The
+resource view is the actual native options object, preserving the late root read;
+there is no copied root or Registry proof wrapper. Home calls K5's projection reader
+on the same native selected-branch evidence cut, without a native projection wrapper.
+
 `worker-turn-boundary.ts` owns actual task report/budget/reminder finish-turn policy
 over the existing native frame and created SDK runtime. It awaits the SDK boundary
 first and preserves late canonical/queue/diagnostic reads and exact queued-input Stop.

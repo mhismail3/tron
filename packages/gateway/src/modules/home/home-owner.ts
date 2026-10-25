@@ -5,7 +5,7 @@ import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvi
 import { visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
-import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import type { SessionOperations } from "../../kernel/session/runtime-registry.js";
 import type { HomeTaskPolicy } from "./home-task-worker-choice.js";
 import { HomeChapterMaterializer } from "./home-chapter-materialization.js";
 import { HomeGlobalResources } from "./home-global-resources.js";
@@ -87,44 +87,19 @@ export interface HomeRecord {
  * profile argument applies. */
 export type HomeSessionProfile = "home" | "ordinary" | "unnamed";
 
-/** The session operations Home needs from the runtime owner. Kept narrow so the
- * Home record's authority is never a second session owner. */
+/** Home chapter/model policy. Canonical session operations use the actual
+ * native runtime authority directly, never callbacks forwarding into it. */
 export interface HomeSessionPort {
   /** Create one session whose very first runtime already has the Home profile. */
   createHomeSession(cwd: string): Promise<string>;
-  /** Read the model actually selected by the live runtime, without reacquiring
-   * a session whose Home designation is not committed yet. */
-  currentSessionModel(sessionId: string): ModelRef | null;
   /** Home's model as its saved settings resolve it now. */
   homeModel(): Promise<ModelRef | undefined>;
   /** Save an explicit choice as Home's model, its one model authority. */
   chooseHomeModel(sessionId: string, model: ModelRef): Promise<void>;
-  /** Whether the session exists at all: a live runtime, or a canonical session
-   * the catalog or disk still holds. */
-  sessionPresent(sessionId: string): Promise<boolean>;
-  /** The canonical session JSONL for one session id, when this installation can
-   * name it. Resolved per memory open, because a session exists before its file
-   * does and a runtime may be evicted while its memory stays open. */
-  sessionFile(sessionId: string): Promise<string | undefined>;
-  /** Whether the session currently holds a live runtime. */
-  hasLiveRuntime(sessionId: string): boolean;
-  /** Whether a live runtime is blocked on a semantic user interaction. Optional
-   * because only the runtime owner holds interaction state. */
-  waitingForUser?(sessionId: string): boolean;
-  /** The record's chapter set changed, so the dashboard's Home rule changed: clients
-   * must re-list. Optional because only the runtime owner publishes list changes. */
-  homeChaptersChanged?(): void;
-  /** Registry owns session mutation ordering. Seal enters it before taking the
-   * Home recordMutex, so admitted attention/archive/delete work settles first. */
-  serializeSessionMutation<T>(sessionId: string, commit: () => Promise<T>): Promise<T>;
   /** Quiescent canonical size used to seal a chapter at its soft boundary. */
   chapterMetrics(sessionId: string): Promise<{ bytes: number; entries: number; quiescent: boolean }>;
   /** Whether the exact current SDK file has a complete durable conversation message. */
   hasConversation(sessionId: string, expectedPath: string): Promise<boolean>;
-  /** Replace the session's live runtime in place after `commit` changes the
-   * profile decision for it, so the next prompt uses the new profile. A busy
-   * session refuses retryably before `commit` runs. */
-  replaceRuntimeForProfile(sessionId: string, commit: () => Promise<void>): Promise<void>;
   /** Retire every live Home slot after uncertain publication; next admission
    * rebuilds from the record reloaded by this owner. */
   retireHomeRuntimes(): Promise<void>;
@@ -148,8 +123,8 @@ export interface HomeOwnerOptions {
   agentDir: string;
   trust: TrustService;
   sessions: HomeSessionPort;
-  /** K1 runtime operations the reserved-successor procedure is built on. */
-  runtimes: ConstructorParameters<typeof HomeChapterMaterializer>[1];
+  /** The actual K1 authority: lineage, canonical reads, mutation ordering and workers. */
+  runtimes: SessionOperations;
   diagnostic?: HomeDiagnostic;
   /** The Tron internal workspace whose capability state holds Home's memory. */
   workspace: TronWorkspace;
@@ -164,7 +139,6 @@ export interface HomeOwnerOptions {
   /** Where Home's request seam reports one record per activation and per
    * refusal: the effective size of a turn and the readiness wait it took. */
   requestDiagnostic?: (record: HomeRequestRecord) => void;
-  taskSessions: RuntimeRegistry;
   taskPolicy: HomeTaskPolicy;
   notifications?: NotificationService;
   machineId?: string;
@@ -256,7 +230,7 @@ export class HomeOwner {
     this.resources = new HomeGlobalResources({ agentDir: options.agentDir, diagnostic: record => this.options.diagnostic?.(record),
       homeSlot: () => { try { return options.runtimes.liveRuntime(this.routeBinding().physicalSessionId); } catch { return undefined; } } });
     this.materializer = new HomeChapterMaterializer(this, options.runtimes, options.trust, options.diagnostic);
-    this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox, options.taskPolicy);
+    this.tasks = new HomeTaskDispatcher(store, authorization, options.runtimes, options.taskDiagnostic, this.inbox, options.taskPolicy);
   }
 
   /** Delegate authority is sampled for the exact enabled Home, never a fork or
@@ -278,7 +252,7 @@ export class HomeOwner {
   /** Read the live session, not designation-time defaults or a learned note. The
    * dispatcher admits this choice through its existing worker configuration path. */
   private async currentChatChoice(sessionId: string) {
-    const snapshot = (await this.options.taskSessions.acquire(sessionId)).snapshot();
+    const snapshot = (await this.options.runtimes.acquire(sessionId)).snapshot();
     const thinking = HOME_TASK_THINKING_LEVELS.find(level => level === snapshot.thinkingLevel);
     if (!snapshot.model || thinking === undefined) throw new GatewayError("conflict", "Home chat model is unavailable");
     return { model: { provider: snapshot.model.provider, id: snapshot.model.id }, thinking };
@@ -523,7 +497,7 @@ export class HomeOwner {
   private async immutableTaskReport(taskId: string): Promise<{ task: import("./home-task-store.js").HomeTaskRecord; title: string; text: string; subagents: HomeTaskSubagents }> {
     const task = await this.tasks.result(taskId);
     const report = task.reportRef;
-    const entries = report && task.sessionId ? await this.options.taskSessions.readTaskEvidence(task.sessionId) : [];
+    const entries = report && task.sessionId ? await this.options.runtimes.readTaskEvidence(task.sessionId) : [];
     const entry = report && entries.find(entry => entry.id === report.entryId);
     return { task, title: (await this.tasks.display(task)).title, subagents: await this.tasks.subagents(task),
       text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };
@@ -620,7 +594,7 @@ export class HomeOwner {
     if (!(await this.inbox.pendingTasks(record.homeId)).length) { this.lastWakeDelivered = false; return "done"; }
     // An attempt runs after recovery, so the task namespace and the session catalog are settled here.
     // A Home that never wrote its conversation has no session to run; a wake materializes a reserved successor (#1518).
-    const refusal = this.reservedChapter(sessionId) === undefined && !(await this.options.sessions.sessionPresent(sessionId)) ? "unavailable" : await this.homeRefusal(record);
+    const refusal = this.reservedChapter(sessionId) === undefined && !(await this.options.runtimes.sessionPresent(sessionId)) ? "unavailable" : await this.homeRefusal(record);
     if (refusal) {
       this.lastWakeDelivered = false;
       this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: refusal });
@@ -684,7 +658,7 @@ export class HomeOwner {
    * that is not part of this Home yields none, so its delivery is unproven. */
   private async inboxEvidence(scope: HomeWakeEvidenceScope): Promise<HomeWakeEvidence[]> {
     if (!this.record?.chapters.some(chapter => chapter.sessionId === scope.sessionId)) return [];
-    const path = await this.options.sessions.sessionFile(scope.sessionId);
+    const path = await this.options.runtimes.sessionFile(scope.sessionId);
     if (!path) return [];
     // SDK append proves visibility, not power-loss durability. The inbox may
     // retire only after canonical bytes and their directory entry are synced.
@@ -736,11 +710,11 @@ export class HomeOwner {
     };
     const sessionId = homeSessionId(record);
     const currentChapter = record.chapters.at(-1)!;
-    const live = this.options.sessions.hasLiveRuntime(sessionId);
-    const sessionPresent = await this.options.sessions.sessionPresent(sessionId);
+    const live = this.options.runtimes.liveRuntime(sessionId) !== undefined;
+    const sessionPresent = await this.options.runtimes.sessionPresent(sessionId);
     const openable = openableChapter(record);
     const openSessionPresent = openable === undefined ? false
-      : openable === currentChapter ? sessionPresent : await this.options.sessions.sessionPresent(openable.sessionId);
+      : openable === currentChapter ? sessionPresent : await this.options.runtimes.sessionPresent(openable.sessionId);
     const openSessionId = openable !== undefined && openSessionPresent ? openable.sessionId : undefined;
     // Missing-session recovery is a status, never zero-valued admission metrics.
     const activeMetrics = sessionPresent && currentChapter.state === "active"
@@ -775,7 +749,7 @@ export class HomeOwner {
       routeGeneration: record.routeGeneration,
       live,
       sessionPresent,
-      waitingForUser: openSessionId !== undefined && (this.options.sessions.waitingForUser?.(openSessionId) ?? false),
+      waitingForUser: openSessionId !== undefined && (this.options.runtimes.liveRuntime(openSessionId)?.catalogWaitingForUser ?? false),
       memory,
       chapter: {
         count: record.chapters.length,
@@ -815,7 +789,7 @@ export class HomeOwner {
     const topics = await this.chapterTopics(record);
     const chapters: HomeChapterSummary[] = [];
     for (const chapter of record.chapters) {
-      const sessionPresent = await this.options.sessions.sessionPresent(chapter.sessionId);
+      const sessionPresent = await this.options.runtimes.sessionPresent(chapter.sessionId);
       let bytes = chapter.sizeAtSeal;
       let entries = chapter.entriesAtSeal;
       if (chapter.state === "active" && sessionPresent) {
@@ -824,7 +798,7 @@ export class HomeOwner {
         entries = metrics.entries;
       }
       const counts = await this.chapterContents.counts(chapter.sessionId,
-        await this.options.sessions.sessionFile(chapter.sessionId), chapter.state === "reserved");
+        await this.options.runtimes.sessionFile(chapter.sessionId), chapter.state === "reserved");
       chapters.push({
         sessionId: chapter.sessionId,
         ordinal: chapter.ordinal,
@@ -1132,7 +1106,7 @@ export class HomeOwner {
     if (chapter.state !== "active") return;
     // Registry session ordering is outermost; remeasure after admitted
     // mutations settle, then take recordMutex only for the final ledger write.
-    const rolled = await this.options.sessions.serializeSessionMutation(sessionId, async () => {
+    const rolled = await this.options.runtimes.serializeSessionMutation(sessionId, async () => {
       const metrics = await this.options.sessions.chapterMetrics(sessionId);
       if (!metrics.quiescent || (metrics.bytes < HOME_SOFT_BYTES && metrics.entries < HOME_SOFT_ENTRIES
         && metrics.bytes < HOME_HARD_BYTES && metrics.entries < HOME_HARD_ENTRIES)) return undefined;
@@ -1169,7 +1143,7 @@ export class HomeOwner {
       const chapter = current?.chapters.find(candidate => candidate.sessionId === sessionId);
       if (!current || !current.enabled || chapter?.state !== "materializing"
         || chapter.attemptId !== attemptId || chapter.expectedPath !== expectedPath) return false;
-      const currentPath = await this.options.sessions.sessionFile(sessionId);
+      const currentPath = await this.options.runtimes.sessionFile(sessionId);
       const observed = currentPath === expectedPath && await this.options.sessions.hasConversation(sessionId, expectedPath);
       if (!currentPath || currentPath !== expectedPath || !observed) return false;
       const now = new Date().toISOString();
@@ -1250,7 +1224,7 @@ export class HomeOwner {
   }
 
   private async commitMemoryPause(record: HomeRecord, paused: boolean): Promise<void> {
-    await this.options.sessions.serializeSessionMutation(homeSessionId(record), () => this.recordMutex.run(async () => {
+    await this.options.runtimes.serializeSessionMutation(homeSessionId(record), () => this.recordMutex.run(async () => {
       const current = await this.requireEnabledMemory();
       if (current.homeId !== record.homeId) throw new GatewayError("conflict", "Tron Home changed during memory control");
       if (Boolean(current.memory?.paused) === paused) return;
@@ -1457,7 +1431,7 @@ export class HomeOwner {
     // After a Gateway restart the record still holds the configuration; the
     // first activation opens the store from it.
     const chapter = record.chapters.at(-1)!;
-    const path = await this.options.sessions.sessionFile(chapter.sessionId);
+    const path = await this.options.runtimes.sessionFile(chapter.sessionId);
     const present = path ? await stat(path).then(() => true, error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }) : false;
     if (!present && chapter.activationStarted) throw new HomeMemoryRefusal("memory-unavailable", "A started Home chapter has lost its canonical file");
     await owner.configure({ models });
@@ -1488,7 +1462,7 @@ export class HomeOwner {
     for (const chapter of record.chapters) {
       if (chapter.state !== "sealed" && chapter.state !== "active" && chapter.state !== "materializing") continue;
       let path: string | undefined;
-      try { path = await this.options.sessions.sessionFile(chapter.sessionId); }
+      try { path = await this.options.runtimes.sessionFile(chapter.sessionId); }
       catch (error) {
         // A retryable refusal (the catalog has no cut yet) stays itself, not a source failure.
         if (chapter.state === "sealed" && !(error instanceof GatewayError)) throw new EpisodicMemoryError("source", `Sealed Home chapter ${chapter.sessionId} cannot be resolved: ${String(error)}`);
@@ -1531,7 +1505,7 @@ export class HomeOwner {
         const chapters = this.record?.chapters ?? [];
         for (let i = chapters.length - 1; i >= 0; i--) {
           const chapter = chapters[i]!;
-          const path = await this.options.sessions.sessionFile(chapter.sessionId);
+          const path = await this.options.runtimes.sessionFile(chapter.sessionId);
           if (path && await stat(path).then(info => info.isFile(), error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; })) return path;
         }
         return undefined;
@@ -1574,7 +1548,7 @@ export class HomeOwner {
       const existingSessionId = existing ? homeSessionId(existing) : undefined;
       if (existing && existingSessionId && (
         (pendingChapter !== undefined && !existing.enabled)
-        || await this.options.sessions.sessionPresent(existingSessionId)
+        || await this.options.runtimes.sessionPresent(existingSessionId)
       )) {
         if (existing.enabled) {
           const current = input.model ? await this.options.sessions.homeModel() : undefined;
@@ -1618,7 +1592,7 @@ export class HomeOwner {
       try {
         // The runtime already resolved Home's saved settings over Global. Only an
         // explicit choice (or a session with no model at all) becomes Home's model.
-        const startupModel = this.options.sessions.currentSessionModel(sessionId);
+        const startupModel = this.options.runtimes.liveRuntime(sessionId)?.snapshot().model ?? null;
         if (input.model || !startupModel) await this.options.sessions.chooseHomeModel(sessionId, input.model ?? defaultModel());
         const now = new Date().toISOString();
         const record: HomeRecord = {
@@ -1645,7 +1619,7 @@ export class HomeOwner {
       } catch (error) {
         // No record names this session, so it must not keep the creation-time
         // Home profile: replace its runtime with what the record now says.
-        await this.options.sessions.replaceRuntimeForProfile(sessionId, async () => {}).catch(() => {});
+        await this.options.runtimes.replaceRuntimeForProfile(sessionId, async () => {}).catch(() => {});
         throw error;
       }
     });
@@ -1687,7 +1661,7 @@ export class HomeOwner {
    * prompt cannot be admitted between the idle check, the write and the rebuild. */
   private async commitProfileChange(sessionId: string, update: (current: HomeRecord) => HomeRecord): Promise<void> {
     try {
-      await this.options.sessions.replaceRuntimeForProfile(sessionId, async () => {
+      await this.options.runtimes.replaceRuntimeForProfile(sessionId, async () => {
         await this.recordMutex.run(async () => {
           const current = this.record;
           if (!current || homeSessionId(current) !== sessionId) throw new GatewayError("conflict", "Tron Home changed during profile update");
@@ -1729,7 +1703,7 @@ export class HomeOwner {
         // Synchronously stale-mark Home slots before any asynchronous reload work.
         this.publicationUncertain = true;
         const reloaded = await this.load(false);
-        this.options.sessions.homeChaptersChanged?.();
+        this.options.runtimes.noteSessionListChanged();
         // Do not await this here: writeLocked may be running inside a slot lane,
         // and Registry retirement queues behind that lane. Keep the owner fenced
         // until the retained retirement completes successfully.
@@ -1752,7 +1726,7 @@ export class HomeOwner {
       throw error;
     }
     this.record = record;
-    if (chapterIdentities(record) !== chaptersBefore) this.options.sessions.homeChaptersChanged?.();
+    if (chapterIdentities(record) !== chaptersBefore) this.options.runtimes.noteSessionListChanged();
   }
 
   private async load(clearAvailability = true): Promise<boolean> {

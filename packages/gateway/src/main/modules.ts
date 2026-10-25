@@ -38,7 +38,7 @@ export interface ModuleOwners extends RecentModelSignals {
  * registry: start only captures them; extension assembly resolves the live owner. */
 export function gatewayModules(owners: () => ModuleOwners) {
   const registry = () => owners().registry;
-  const home = createHomeModules(() => ({ composition: owners().home, sessions: registry(), workers: registry(), search: () => {
+  const home = createHomeModules(() => ({ composition: owners().home, sessions: registry(), search: () => {
     const owner = owners().sessionSearch;
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));

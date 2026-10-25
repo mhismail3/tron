@@ -56,13 +56,17 @@ Commands:
                                     Read-only restructure metrics of a commit's Git
                                     objects to test-results/metrics/<sha>.json;
                                     --compare prints the delta table; never a gate
-  verify --changed [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
-                                    Static checks plus the tests each manifest selects
-                                    (kernel/unowned changes: every lock); live progress,
-                                    fails early, test-results/verify/<sha>.json; zero
-                                    tests fail; iOS lane: one stamped tron-ios-test build
-                                    per commit (reused), layers ios, then the selected
-                                    UI tests; local and worker-owned, never a gate
+  verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
+                                    Mechanical none/partial/full tier; affected checks
+                                    now, broad risk coverage in an explicit batch.
+                                    --plan includes dirty paths and exact commands.
+                                    Live logs and partial test-results/verify/<sha>.json;
+                                    no empty test passes, queue or landing gate.
+  verify --batch [--base <green-sha>] [--plan]
+                                    Explicit serial Mac batch on landed main; first use
+                                    needs --base, then local last-green owns coverage.
+                                    Records commits; reproduces/bisects failures and
+                                    files issues, never blocks/reverts unrelated work.
   mutate <gateway-src-file> [--count N] [--seed S] [--timeout SECONDS]
                                     Seeded sampled mutation of one file against the tests
                                     verify selects for it (lock sensitivity, plan 6.6);

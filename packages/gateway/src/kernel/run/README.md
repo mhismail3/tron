@@ -23,7 +23,9 @@ K5 owns worker report/budget/reminder finish-turn policy and resumed-worker
 lease/bind/failure-release orchestration. Native pipeline installation passes the
 same frame, SDK runtime object and captured report owner, without copied state or
 an early diagnostic-sink read. Native `bindTaskWorker` remains the actual lane-protected validation/rebuild/publication
-backend; Registry has no worker-resume wrapper.
+backend; Registry has no worker-resume wrapper. Home uses the actual SessionOperations
+for canonical worker reads, leases and mutation ordering, with no duplicate worker input.
+K5 owns cold artifact proof; Native supplies the admitted resource input, not a proof wrapper.
 K5 also owns canonical subagent settlement. Its runtime port reads the actual
 native canonical/activity/controller projections and work owner, then calls native
 canonical append; no Slot settlement wrapper or duplicate token index exists.

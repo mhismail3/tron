@@ -1,5 +1,6 @@
 import type { TaskWorkerDiagnostic } from "../delegation/worker-contract.js";
-import { DelegationOperations } from "../delegation/delegation-operations.js";
+import { DelegationOperations, type OwnedSessions } from "../delegation/delegation-operations.js";
+import type { HomeTaskReportOwner } from "../delegation/task-report.js";
 import { interruptToolCalls, ToolCallInterrupt } from "../run/bounded-tool-cancellation.js";
 import type { SettingsSchema } from "../settings/settings-schema.js";
 import { ORDINARY_SESSION_PROFILE } from "../host/session-profile.js";
@@ -90,7 +91,6 @@ import {
   type SessionCatalogWatcherReset,
 } from "../../sessions/session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "../../sessions/fork-boundary.js";
-import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../delegation/task-subagents.js";
 import { modelQueueKey } from "../settings/tool-contract.js";
 import {
   CatalogDiscovery,
@@ -461,8 +461,21 @@ interface IdleEviction {
 
 /** Native session operations: every method executes on the canonical registry.
  * Profile modules receive this view, never an adapter with a second lifecycle. */
-export interface SessionOperations extends LineageRuntimePort<RuntimeSlot> {
-  create(cwd: string, profile?: string): Promise<RuntimeSlot>;
+export type LiveTaskEvidence =
+  | { state: "present"; entries: FileEntry[]; branch: FileEntry[] }
+  | { state: "absent"; operationSettled: boolean };
+
+export interface SessionOperations extends LineageRuntimePort<RuntimeSlot>, OwnedSessions<RuntimeSlot> {
+  create(cwd: string, profile?: string, taskWorker?: HomeTaskReportOwner): Promise<RuntimeSlot>;
+  readonly delegation: DelegationOperations<RuntimeSlot>;
+  readonly administrativeWorkRegistry: GatewayWorkRegistry;
+  readTaskEvidence(sessionId: string): Promise<FileEntry[]>;
+  readLiveTaskEvidence(sessionId: string, operationId: string): Promise<LiveTaskEvidence>;
+  readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]>;
+  recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void;
+  taskWorkerSettled(sessionId: string, taskId: string): Promise<void>;
+  taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined>;
+  taskWorkerName(sessionId: string): Promise<string | undefined>;
   acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot>;
   runtimeEntries(): ReadonlyArray<readonly [string, RuntimeSlot]>;
   retireIdleRuntime(input: {
@@ -483,8 +496,7 @@ export interface SessionOperations extends LineageRuntimePort<RuntimeSlot> {
 export class RuntimeRegistry implements SessionOperations {
   /** One shared K5 owner; the native tool-interruption operation keeps its K2
    * reason identity and target/steer/abort ordering behind this I/O boundary. */
-  readonly delegation: DelegationOperations<RuntimeSlot, Awaited<ReturnType<RuntimeRegistry["ownedOperationRecoveryEvidence"]>>> =
-    new DelegationOperations(this, (slot, by, before) => interruptToolCalls(slot.runtime.session, new ToolCallInterrupt(by), before));
+  readonly delegation: DelegationOperations<RuntimeSlot>;
   private readonly slots = new Map<string, RuntimeSlot>();
   /** Live-only generated sessions are bound to the exact Automation operation
    * until Pi persists their first user or assistant message. Weak ownership cannot outlive
@@ -690,6 +702,8 @@ export class RuntimeRegistry implements SessionOperations {
       homeTaskDiagnostic?: (record: TaskWorkerDiagnostic) => void;
     },
   ) {
+    this.delegation = new DelegationOperations(this,
+      (slot, by, before) => interruptToolCalls(slot.runtime.session, new ToolCallInterrupt(by), before), options);
     this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     const workspace = options.modules.policy("resourceRoot")?.();
@@ -3926,7 +3940,7 @@ export class RuntimeRegistry implements SessionOperations {
    * answers from its slot's canonical entries; a settled one from the same evidence cut
    * recovery reads. Undefined before the worker has recorded a model or has no file. */
   async taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined> {
-    const change = (await this.taskWorkerEntries(sessionId)).findLast(entry => entry.type === "model_change");
+    const change = (await this.readTaskWorkerEntries(sessionId)).findLast(entry => entry.type === "model_change");
     return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
   }
 
@@ -4006,21 +4020,9 @@ export class RuntimeRegistry implements SessionOperations {
     return path ? this.sessionCatalog.row(path)?.name : undefined;
   }
 
-  /** The worker's subagent facts for one operation, read like its model. */
-  async taskWorkerSubagents(sessionId: string, operationId: string): Promise<HomeTaskSubagents> {
-    return homeTaskSubagentsProjection(await this.taskWorkerEntries(sessionId), operationId);
-  }
-
-  /** Cold reconciliation proves a task's async runs ended from their status files.
-   * Without the admitted artifact root nothing is provable, so the runs are live. */
-  taskSubagentRunsSettled(asyncDirs: readonly string[]): Promise<boolean> {
-    const root = this.options.delegatedArtifactRoot;
-    return root === undefined ? Promise.resolve(asyncDirs.length === 0) : homeTaskSubagentRunsSettled(asyncDirs, root);
-  }
-
   /** The live session's branch, or the settled conversation's evidence cut. A worker
    * that never wrote a conversation has no known file, so nothing was recorded. */
-  private async taskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
+  async readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
     const live = this.slots.get(sessionId);
     if (live) return live.canonicalSessionEntries();
     if (await this.sessionFile(sessionId)) return await this.canonicalSessionEvidenceCut(sessionId) ?? [];
@@ -4038,10 +4040,7 @@ export class RuntimeRegistry implements SessionOperations {
 
   /** Registry ordering precedes the slot lane. The live caller is the dispatch
    * closure, never in-lane receipt persistence. Cold inspection stays read-only. */
-  async readLiveTaskEvidence(sessionId: string, operationId: string): Promise<
-    | { state: "present"; entries: FileEntry[]; branch: FileEntry[] }
-    | { state: "absent"; operationSettled: boolean }
-  > {
+  async readLiveTaskEvidence(sessionId: string, operationId: string): Promise<LiveTaskEvidence> {
     return this.serializeSessionMutation(sessionId, async () => {
       const slot = this.slots.get(sessionId);
       if (!slot) throw new GatewayError("conflict", "Task runtime is missing");
