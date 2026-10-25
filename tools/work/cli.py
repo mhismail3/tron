@@ -99,8 +99,11 @@ def main(argv: list) -> int:
     parent_issue = issue_commands.add_parser("parent", help="link an issue under an epic or open tracked maintenance module")
     parent_issue.add_argument("issue", type=int)
     parent_issue.add_argument("--epic", required=True, type=int)
-    parent_issue.add_argument("--replace-parent", action="store_true",
-                              help="move the issue from its current parent to this one")
+    parent_action = parent_issue.add_mutually_exclusive_group()
+    parent_action.add_argument("--replace-parent", action="store_true",
+                               help="move the issue from its current parent to this one")
+    parent_action.add_argument("--remove", action="store_true",
+                               help="detach the issue from the named parent without closing it")
     blocker_issue = issue_commands.add_parser("block", help="add a native blocked-by relationship")
     blocker_issue.add_argument("issue", type=int)
     blocker_issue.add_argument("--blocked-by", required=True, type=int)
@@ -173,7 +176,10 @@ def main(argv: list) -> int:
                 tracking.reopen_issue(gh, root, config, args.issue, args.comment_file)
                 return 0
             if args.issue_command == "parent":
-                tracking.add_parent(gh, root, config, args.issue, args.epic, args.replace_parent)
+                if args.remove:
+                    tracking.remove_parent(gh, args.issue, args.epic)
+                else:
+                    tracking.add_parent(gh, root, config, args.issue, args.epic, args.replace_parent)
                 return 0
             if args.issue_command == "block":
                 tracking.add_blocker(gh, root, config, args.issue, args.blocked_by)

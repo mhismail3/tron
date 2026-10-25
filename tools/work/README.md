@@ -161,7 +161,9 @@ step required to close an issue. Claim metadata is never a check receipt.
   the exact arguments. `parent --epic N` links an issue under an epic or an open `kind:maintenance`
   module whose exact title `Module: <module id>` matches a tracked `*.module.json`
   manifest (ids use the ownership tool). Self-parenting is refused; replacing an
-  existing parent requires `--replace-parent`. Module issues stay maintenance;
+  existing parent requires `--replace-parent`. `parent N --epic P --remove`
+  detaches only that relationship, without changing issue state or content;
+  it cannot combine with `--replace-parent`. Module issues stay maintenance;
   their phase/area epic links are retained. A dependency link is coordination,
   not a landing lock.
 - `work project add|set`: Project membership/status.

@@ -33,6 +33,11 @@ def fixture_gh() -> None:
             state["sub_issue"] = request["variables"]
             write = "sub-issue"
             response = {"data": {"addSubIssue": {"issue": {"id": request["variables"]["epic"]}}}}
+        elif "removeSubIssue" in query:
+            edge = state.pop("sub_issue")
+            assert edge["epic"] == request["variables"]["epic"] and edge["child"] == request["variables"]["child"]
+            write = "remove-sub-issue"
+            response = {"data": {"removeSubIssue": {"issue": {"id": edge["epic"]}}}}
         elif "subIssues(first" in query:
             response = {"data": {"node": {"subIssues": {"nodes": []}, "blockedBy": {"nodes": []}}}}
         elif "addProjectV2ItemById" in query:
@@ -482,6 +487,13 @@ def run() -> None:
             assert "epic parent" in error and not state["writes"]
             state, error = parent("epic under itself refused", False, 50, 50)
             assert "epic parent" in error and not state["writes"]
+
+            reset(sub_issue={"epic": "node-50", "child": "node-52"},
+                  issue_states={"50": "open", "52": "open"}, issue_bodies={"52": "Unfinished backlog work"})
+            state, _ = parent("explicit detach preserves unfinished issue and content", True, 52, 50, "--remove")
+            assert "sub_issue" not in state and state["writes"] == ["remove-sub-issue"]
+            assert state["issue_states"] == {"50": "open", "52": "open"}
+            assert state["issue_bodies"] == {"52": "Unfinished backlog work"}
 
             # Only tracked module identities admit maintenance parents, not arbitrary tasks.
             manifest = repo / "work.module.json"

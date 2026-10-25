@@ -402,6 +402,18 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
     print(f"linked issue #{child_number} under parent #{epic_number}")
 
 
+def remove_parent(gh: Gh, child_number: int, epic_number: int) -> None:
+    owner, name = _repository(gh)
+    child = _issue(gh, f"{owner}/{name}", child_number)
+    epic = _issue(gh, f"{owner}/{name}", epic_number)
+    gh.graphql(
+        "mutation($epic: ID!, $child: ID!) { removeSubIssue(input: "
+        "{issueId: $epic, subIssueId: $child}) { issue { id } } }",
+        epic=epic["node_id"], child=child["node_id"],
+    )
+    print(f"detached issue #{child_number} from parent #{epic_number}")
+
+
 def add_blocker(gh: Gh, repo: Path, config: dict, issue_number: int, blocker_number: int) -> None:
     if issue_number == blocker_number:
         raise TrackingError("an issue cannot block itself")
