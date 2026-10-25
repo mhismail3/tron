@@ -16,6 +16,10 @@ HomeTaskDispatcher uses the actual registry-owned DelegationOperations shared wi
 automations for worker creation/resume and cross-session steer/stop/interrupt. K5
 owns acquisition/control orchestration; Home retains authorization, ledger and wake
 policy, not native tool-interruption wiring or a second delegation instance.
+Root's late composition supplies its actual settings model/change owner directly,
+including outcome wake subscription. Home acknowledges outcomes only after the
+canonical reader completes its durable file-and-directory proof; the approvals
+store remains the sole outbox through refused wakes and process recovery.
 
 - **Designation and chapters:** `home-owner.ts` (record, ledger, profile changes, wake
   scheduler), `home-chapter-state.ts`, `home-chapter-contents.ts`, `home-session-*.ts`.

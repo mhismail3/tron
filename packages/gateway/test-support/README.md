@@ -51,6 +51,13 @@ can kill and reopen it to prove interrupted actions are not replayed.
 - Home task fixtures await an offline model refresh after provider registration,
   before returning either the Gateway-wide or a session runtime. Early refusal tests
   can otherwise delete their root while registration still holds its catalog lock.
+- The task fixture Root constructs one actual settings model/change owner per Registry,
+  supplies it directly to Home and native installation, and starts expiry explicitly.
+  `f.settings` is the initial owner's constructor result, not Registry readback; cold
+  restart constructs the successor owner. Registry disposal joins expiry before stores.
+- `settings-outcome-crash-child.ts` owns the SDK session only after the parent Registry
+  is disposed. Its before/after canonical-append cuts use process loss, not graceful
+  disposal, to test native outcome recovery; the parent stops and joins that child.
 - MCP fixtures join the direct-tool registration boundary before scripting a call
   (runtime creation does not mean HTTP discovery finished). Git cleanup proof is
   `ENOENT` plus the branch decision, never an arbitrary filesystem error.
