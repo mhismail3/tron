@@ -9,7 +9,7 @@ import { piExtensionAliases } from "../pi/packages.js";
 import type { GatewayLogger } from "../../transport/logger.js";
 import { GatewayError } from "../../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
-import { managedProducerAPI, type ManagedInternalWake } from "../../extensions/managed-producer.js";
+import { managedProducerAPI, type ManagedInternalWake } from "./managed-producer.js";
 import { loadSubagentCatalog } from "./subagent-catalog.js";
 import { producerIdentity } from "../../extensions/owner-attribution.js";
 import { withExtensionOwner } from "../host/extension-execution-context.js";

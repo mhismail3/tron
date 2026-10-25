@@ -11,7 +11,7 @@ import type {
   RegisteredTool,
   ToolDefinition,
 } from "../kernel/pi/coding-agent.js";
-import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE, adaptMcpAuthCommandHandler } from "./extension-adapters.js";
+import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE, adaptMcpAuthCommandHandler } from "../kernel/host/extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { BrowserResultObservation } from "../kernel/projection/tool-result.js";

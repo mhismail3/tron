@@ -2,15 +2,15 @@
 
 ## Purpose
 
-How Pi extensions run inside the Gateway: Pi's built-in extension composition, Tron's
-first-party module list, the compatibility inventory of Pi's extension API, extension
-registration attribution and adapters. K3 owns the [generic extension UI host](../kernel/host/README.md).
+Tron's first-party module list, the compatibility inventory of Pi's extension API,
+and product registration admission/attribution. K3 owns [builtin loading, foreign
+extension adapters and the generic UI host](../kernel/host/README.md); K5 owns
+[managed message provenance](../kernel/delegation/delegated-activity.md).
 
 ## Owns
 
-`pi-builtins.ts`, `tron-modules.ts` (ordered profile identities), `compatibility-manifest.ts`,
-`owner-attribution.ts`, `managed-producer.ts`, `extension-adapters.ts`,
-and the `tron-ask-user` extension.
+`tron-modules.ts` (ordered profile identities), `compatibility-manifest.ts`,
+`owner-attribution.ts`, and the `tron-ask-user` extension.
 
 ## Contract
 
@@ -53,8 +53,9 @@ and the `tron-ask-user` extension.
 
 ## Entry points
 
-`piBuiltinExtensions`, composition-configured ordinary and profile recipes via
-`ModuleHost.registrations`; the remote host lives in `kernel/host/presentation/`.
+Composition-configured ordinary and profile recipes via `ModuleHost.registrations`;
+`attributeExtensions` admits product reservations. K3 supplies `piBuiltinExtensions`
+and the remote host in `kernel/host/presentation/`.
 
 ## Signals
 

@@ -33,6 +33,9 @@ semantic interactions and the versioned form capability. `presentation/` owns th
 remote Pi host, component generations, bounded terminal capture and the single
 presentation epoch. `extension-lifecycle-coordinator.ts` derives quiescence from
 that epoch; the runtime replaces its activity source when rotating the host.
+`pi-builtins.ts` assembles the actual SDK factories for runtime and session-free loads.
+`extension-adapters.ts` owns the single MCP authorization context and foreign-package
+semantic form adapters, including their exact audited package admission.
 
 ## Contract
 

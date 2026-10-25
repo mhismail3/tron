@@ -51,7 +51,7 @@ import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { PackageService } from "../admin/package-service.js";
 import type { GlobalProviderResources } from "../admin/global-provider-resources.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
-import { withMcpAuthInteraction } from "../extensions/extension-adapters.js";
+import { withMcpAuthInteraction } from "../kernel/host/extension-adapters.js";
 import type { McpAdminService, McpScope } from "../admin/mcp-admin-service.js";
 import { MAC_REPLACE_CAPABILITY, MacReplaceService } from "../admin/mac-replace-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";

@@ -146,7 +146,7 @@ order, replacing late binding (`setKnowledgeService`, `setSessionSearchService`,
 `runtime-registry.ts:898-920`). Pi extension registration order is model-visible (tool order,
 prompt sections: B2) and is reproduced exactly per profile:
 - ordinary (`runtime-slot.ts:2333-2369`): managed-subagent factories, Pi built-ins
-  (`extensions/pi-builtins.ts`), `TRON_MODULES` in definition order, `tron-model-queue`,
+  (`kernel/host/pi-builtins.ts`), `TRON_MODULES` in definition order, `tron-model-queue`,
   `tron-home-task-worker`;
 - Home (`extensions/tron-modules.ts:288-300`): the kept modules in `TRON_MODULES` order, then
   `tron-home`, then `tron-home-research`; no settlement, built-ins, managed or queue extensions.
@@ -164,7 +164,7 @@ export list is the patch-removal checklist.
 
 | Package | Runtime names at base (production) |
 |---|---|
-| `pi-coding-agent` | `createAgentSessionRuntime`, `createAgentSessionServices`, `createAgentSessionFromServices`, `AgentSessionRuntime` (runtime-slot); `SessionManager` (3 files), `parseSessionEntries`; `SettingsManager` (11, incl. `client/work-owner-status.ts:21`), `ModelRuntime` (3, incl. `gateway-main.ts:181`), `DefaultResourceLoader` (2), `DefaultPackageManager` (3), `ProjectTrustStore`, `hasTrustRequiringProjectResources`, `CredentialSynchronizationError`; `create{Bash,Edit,Find,Grep,Ls,PowerShell,Read,Write}ToolDefinition` (`admin/tool-catalog.ts`, `sessions/direct-bash-process-owner.ts`), `getShellConfig`; `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension` (`extensions/pi-builtins.ts`); `estimateTokens` (3), `stripFrontmatter`, `Theme`, `initTheme` |
+| `pi-coding-agent` | `createAgentSessionRuntime`, `createAgentSessionServices`, `createAgentSessionFromServices`, `AgentSessionRuntime` (runtime-slot); `SessionManager` (3 files), `parseSessionEntries`; `SettingsManager` (11, incl. `client/work-owner-status.ts:21`), `ModelRuntime` (3, incl. `gateway-main.ts:181`), `DefaultResourceLoader` (2), `DefaultPackageManager` (3), `ProjectTrustStore`, `hasTrustRequiringProjectResources`, `CredentialSynchronizationError`; `create{Bash,Edit,Find,Grep,Ls,PowerShell,Read,Write}ToolDefinition` (`admin/tool-catalog.ts`, `sessions/direct-bash-process-owner.ts`), `getShellConfig`; `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension` (`kernel/host/pi-builtins.ts`); `estimateTokens` (3), `stripFrontmatter`, `Theme`, `initTheme` |
 | `pi-ai` | `Type` (17 tool-schema files), `StringEnum` (3), `clampThinkingLevel` (5), `getSupportedThinkingLevels` (3), `getCurrentSystemMessage`, `getCurrentTools`, `isRetryableAssistantError`, `lazyStream`, `normalizeContext` |
 | `pi-tui` | `Box`, `Text`, `TruncatedText`, `truncateToWidth`, `visibleWidth`, `CURSOR_MARKER`, `KeybindingsManager`, `TUI_KEYBINDINGS`, `TuiMainScreen`, `setCapabilities` (`extensions/host/*`, ask-user) |
 | `pi-agent-core` | types only |

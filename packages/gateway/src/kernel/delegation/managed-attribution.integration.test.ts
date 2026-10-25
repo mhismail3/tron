@@ -11,7 +11,7 @@ import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
 import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
-import { managedProducerAPI } from "../../extensions/managed-producer.js";
+import { managedProducerAPI } from "./managed-producer.js";
 import { producerIdentity } from "../../extensions/owner-attribution.js";
 import { withExtensionOwner } from "../host/extension-execution-context.js";
 import { AsyncResource } from "node:async_hooks";

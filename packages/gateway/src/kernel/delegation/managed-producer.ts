@@ -1,6 +1,6 @@
-import type { ExtensionAPI } from "../kernel/pi/coding-agent.js";
-import type { ExtensionOwner, ExtensionToolOrigin } from "../protocol/types.js";
-import { withExtensionOwner } from "../kernel/host/extension-execution-context.js";
+import type { ExtensionAPI } from "../pi/coding-agent.js";
+import type { ExtensionOwner, ExtensionToolOrigin } from "../../protocol/types.js";
+import { withExtensionOwner } from "../host/extension-execution-context.js";
 
 /** The SDK retains content by reference when constructing/queuing appMessage.
  * Metadata shares that message's lifetime, not a slot-wide queue or ID map. */

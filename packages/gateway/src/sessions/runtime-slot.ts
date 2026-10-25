@@ -61,8 +61,8 @@ import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice
 import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../kernel/settings/tool-contract.js";
 import type { Actor } from "../kernel/settings/settings-record.js";
-import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
-import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
+import { piBuiltinExtensions } from "../kernel/host/pi-builtins.js";
+import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../kernel/host/extension-adapters.js";
 import type {
   ChatOrigin,
   ChatSemanticMetadata,
@@ -122,7 +122,7 @@ import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { type RunMarkerStore } from "../kernel/run/run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand } from "../extensions/owner-attribution.js";
 import { currentExtensionOwner, currentInvocationContext } from "../kernel/host/extension-execution-context.js";
-import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
+import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../kernel/delegation/managed-producer.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
 import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "../kernel/delegation/child-session-admission.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "./extension-activity-history.js";
