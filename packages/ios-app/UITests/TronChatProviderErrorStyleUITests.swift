@@ -34,7 +34,7 @@ final class TronChatProviderErrorStyleUITests: XCTestCase {
         XCTAssertTrue(body.waitForExistence(timeout: 10), app.debugDescription)
         app.swipeUp()
         body.press(forDuration: 1.1)
-        let copy = app.buttons["Copy"]
+        let copy = app.menuItems["Copy"]
         XCTAssertTrue(copy.waitForExistence(timeout: 10), "The standard code inset must retain native selection: \(app.debugDescription)")
         keep(app, "selectable-json")
         copy.tap()
