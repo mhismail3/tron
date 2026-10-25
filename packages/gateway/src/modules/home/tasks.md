@@ -2,7 +2,7 @@
 
 Owner: [gateway/home](README.md). Home delegates finite project work through `delegate` into
 ordinary worker sessions; each worker seals an immutable report, and results reach Home through
-the wake inbox. The contract spans the Home owner, RuntimeSlot and `OwnedSessionDispatch`, the
+the wake inbox. The contract spans the Home owner, RuntimeSlot and `DelegationOperations`, the
 managed subagent provider and the iOS task surfaces. Signals: [home module](README.md#signals).
 
 ## Persistence
@@ -65,7 +65,7 @@ Home memory selects its background queue over that same native queue reader.
 Only the enabled Home's active chapter calls `delegate` with a stable `taskId`, bounded
 `intent`, trusted `target` and optional `title` (≤ 80 characters, the worker session name). The
 dispatcher records pending intent, authorizes the snapshot, creates the worker through
-`OwnedSessionDispatch` and binds its operation before prompting; a task ID never replays.
+`DelegationOperations` and binds its operation before prompting; a task ID never replays.
 
 - Each admission step has a 60 s deadline and follows the delegating turn's Stop; a refused
   step fails `delegate` and a pending task settles `unknown` (`admission-cancelled`,
@@ -78,7 +78,7 @@ dispatcher records pending intent, authorizes the snapshot, creates the worker t
 - A worker has project tools plus `report` and a canonical `tron-home-task` marker checked
   before cold construction. A sealed report ends the task at that turn boundary; Stop is
   terminal (`task-stopped-before-delivery` receipts for unconsumed steers);
-  `OwnedSessionDispatch` has a 24-hour ceiling. Individual reply completions update
+  `DelegationOperations` has a 24-hour ceiling. Individual reply completions update
   attention without stamping the task's root run marker. A notice or report reminder
   can continue the same invocation without conflicting with an earlier reply's
   completion. Terminal invocation cleanup or final task acknowledgement retires it.

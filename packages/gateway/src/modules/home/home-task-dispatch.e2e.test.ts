@@ -19,7 +19,7 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { RunMarkerStore } from "../../kernel/run/run-markers.js";
 import { stopTaskWorker, taskWorkerSteeringInput } from "../../kernel/delegation/worker-control.js";
 import { SessionCatalog } from "../../sessions/session-catalog.js";
-import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch, type OwnedSessionDispatchOver } from "../../kernel/delegation/delegation-operations.js";
+import { OWNED_OPERATION_DEADLINE_MS, DelegationOperations, type DelegationOperationsOver } from "../../kernel/delegation/delegation-operations.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayLogger } from "../../transport/logger.js";
@@ -1105,8 +1105,8 @@ describe("Home task production dispatch", () => {
 
   it("settles absent canonical evidence without a durable Stop intent as unknown, never interrupted", async () => {
     const f = await fixture();
-    const create = OwnedSessionDispatch.prototype.createWorker;
-    vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
+    const create = DelegationOperations.prototype.createWorker;
+    vi.spyOn(DelegationOperations.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
       const lease = await create.call(this, cwd, reports);
       vi.spyOn((lease.slot as any).runtime.session, "prompt").mockRejectedValue(new Error("preflight refused"));
       return lease;
@@ -1503,8 +1503,8 @@ describe("Home task production dispatch", () => {
     let providerCalls = 0;
     const gate = new Promise<void>(resolve => { release = resolve; });
     f.faux.setResponses([() => { providerCalls += 1; return fauxAssistantMessage("must not start"); }]);
-    const create = OwnedSessionDispatch.prototype.createWorker;
-    vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
+    const create = DelegationOperations.prototype.createWorker;
+    vi.spyOn(DelegationOperations.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
       const lease = await create.call(this, cwd, reports);
       const session = (lease.slot as any).runtime.session;
       const prompt = session.prompt.bind(session);
@@ -1854,8 +1854,8 @@ describe("Home task production dispatch", () => {
       const restoreEpoch = tasks.store.restoreEpoch.bind(tasks.store);
       vi.spyOn(tasks.store, "restoreEpoch").mockImplementation(() => created() ? hold(restoreEpoch) : restoreEpoch());
     } else {
-      const createWorker = OwnedSessionDispatch.prototype.createWorker;
-      vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(function (this: OwnedSessionDispatchOver<RuntimeRegistry>, ...args) { return hold(() => createWorker.apply(this, args)); });
+      const createWorker = DelegationOperations.prototype.createWorker;
+      vi.spyOn(DelegationOperations.prototype, "createWorker").mockImplementation(function (this: DelegationOperationsOver<RuntimeRegistry>, ...args) { return hold(() => createWorker.apply(this, args)); });
     }
     let workerPrompts = 0; let homeRequests = 0;
     const response = (context: unknown) => {

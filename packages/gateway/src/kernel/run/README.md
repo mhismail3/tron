@@ -14,6 +14,9 @@ Its control identity and shared diagnostics are K5 contracts (`worker-contract.t
 not dependencies on a module's dispatcher. K5's `WorkerSettlement` owns task-end waiters
 and bounded joins; native activity/canonical publications wake that same owner. Provider
 control execution is K5-owned; native admission and canonical receipt ordering remain here.
+The registry composes one real K5 DelegationOperations shared by Home/automations;
+its single native interruption operation preserves K2 abort-reason identity and
+capture/steer/abort ordering. Home has no native control I/O binding.
 K5 owns resumed-worker lease/bind/failure-release orchestration. Native
 `bindTaskWorker` remains the actual lane-protected validation/rebuild/publication
 backend; Registry has no worker-resume wrapper.

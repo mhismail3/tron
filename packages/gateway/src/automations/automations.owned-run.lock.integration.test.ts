@@ -13,7 +13,7 @@ import { waitFor } from "../../test-support/wait-for.js";
  * The real Gateway (`gateway-lock-harness.ts`, option `automations`) runs the
  * production automation store, scheduler, executor and service. The phone
  * runs one turn in a chat, then creates two automations over the socket and runs each now: a session prompt
- * into its open chat (the executor leases it through `OwnedSessionDispatch`)
+ * into its open chat (the executor leases it through `DelegationOperations`)
  * and a workspace prompt (the registry creates an owned session per run). Each
  * run reads a file through a tool, so the owned operation spans a tool round
  * trip. The lock records the client exchanges (command-receipted mutations,

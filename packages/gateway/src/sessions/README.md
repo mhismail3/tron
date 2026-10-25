@@ -117,7 +117,7 @@ metadata, never JSONL, and never implies parallel execution.
 
 - Run admission, queue/Stop/compaction and configuration/bash algorithms: kernel `RunOperations`,
   inherited by `RuntimeSlot` with native SDK/resources/publication; acquisition/eviction: `RuntimeRegistry`.
-- Owned dispatch for Automations and Home tasks: kernel/delegation `OwnedSessionDispatch` over
+- Owned dispatch for Automations and Home tasks: kernel/delegation `DelegationOperations` over
   `RuntimeRegistry`'s leases, recovery evidence and marker acknowledgement (opt-in 24-hour deadline).
 - Notifications use call-time kernel hooks; the slot owns presence, waiting episodes and failure diagnostics.
 

@@ -1,4 +1,6 @@
 import type { TaskWorkerDiagnostic } from "../delegation/worker-contract.js";
+import { DelegationOperations } from "../delegation/delegation-operations.js";
+import { interruptToolCalls, ToolCallInterrupt } from "../run/bounded-tool-cancellation.js";
 import type { SettingsSchema } from "../settings/settings-schema.js";
 import { ORDINARY_SESSION_PROFILE } from "../host/session-profile.js";
 import type { LineageRuntimePort, SessionLineagePolicy } from "../host/session-lineage.js";
@@ -479,6 +481,10 @@ export interface SessionOperations extends LineageRuntimePort<RuntimeSlot> {
 }
 
 export class RuntimeRegistry implements SessionOperations {
+  /** One shared K5 owner; the native tool-interruption operation keeps its K2
+   * reason identity and target/steer/abort ordering behind this I/O boundary. */
+  readonly delegation: DelegationOperations<RuntimeSlot, Awaited<ReturnType<RuntimeRegistry["ownedOperationRecoveryEvidence"]>>> =
+    new DelegationOperations(this, (slot, by, before) => interruptToolCalls(slot.runtime.session, new ToolCallInterrupt(by), before));
   private readonly slots = new Map<string, RuntimeSlot>();
   /** Live-only generated sessions are bound to the exact Automation operation
    * until Pi persists their first user or assistant message. Weak ownership cannot outlive

@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setModelQueue, settingsDependencies } from "../../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Model, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
-import { OwnedSessionDispatch } from "../../kernel/delegation/delegation-operations.js";
+import { DelegationOperations } from "../../kernel/delegation/delegation-operations.js";
 import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../sessions/session-settings.js";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
@@ -408,8 +408,8 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
 
   it("reports no worker model, not an error, when the worker never wrote a conversation", async () => {
     const f = await fixture();
-    const create = OwnedSessionDispatch.prototype.createWorker;
-    vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
+    const create = DelegationOperations.prototype.createWorker;
+    vi.spyOn(DelegationOperations.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
       const lease = await create.call(this, cwd, reports);
       vi.spyOn((lease.slot as any).runtime.session, "prompt").mockRejectedValue(new Error("preflight refused"));
       return lease;

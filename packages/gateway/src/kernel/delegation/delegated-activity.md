@@ -16,11 +16,14 @@ operation-deadline/disposal-grace join. Native publications address that owner d
 they retain no parallel waiters. `subagent-control.ts` executes the exact installed
 controller against the actual SDK session, retaining the provider's rejection semantics.
 
-`worker-control.ts` owns the exact task-operation fences and steering input.
-Steering still enters native prompt admission; interruption still uses K2's per-call
-cancellation. HomeTaskDispatcher temporarily binds those native primitives after the
-K5 fence; DelegationOperations replaces that consumer binding when it owns acquisition.
+`DelegationOperations` is the one registry-owned service shared by Home and
+automations. It acquires the actual worker for steer/stop/interrupt and uses
+`worker-control.ts` for the exact operation fences and steering input. Native prompt
+admission stays K2; one native interruption operation is bound in kernel composition,
+so target capture precedes steering and abort. Home retains no native control binding.
 
+The service also owns worker creation, resume leases, deadline races and settlement
+acknowledgement. It retains no second session, token map or per-operation state.
 Worker resume acquires the canonical native lease here, invokes the native lane/
 rebuild operation, and releases that same lease on failure. Registry supplies only
 its actual persisted-session acquisition; it has no resume forwarding route.

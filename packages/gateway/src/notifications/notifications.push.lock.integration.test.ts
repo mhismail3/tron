@@ -1,7 +1,6 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
-import { OwnedSessionDispatch } from "../kernel/delegation/delegation-operations.js";
 import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
@@ -201,7 +200,7 @@ describe("gateway/notifications push lock", () => {
     gateway.script([() => fauxAssistantMessage("Worker reply without a report."), () => fauxAssistantMessage("Worker still has no report.")]);
     const operationId = "task-lock-operation";
     const report = new HomeTaskReportOwner({ taskId: "lock-task", homeId: "lock-home", generation: 1, operationId }, async () => {});
-    const dispatch = new OwnedSessionDispatch(gateway.registry);
+    const dispatch = gateway.registry.delegation;
     const lease = await dispatch.createWorker(gateway.cwd, report);
     const workerTerminal = new Promise<unknown>((resolve) => {
       void dispatch.admit(lease.slot, "do the lock task", [], undefined, undefined, undefined, {
