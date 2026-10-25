@@ -69,7 +69,11 @@ scripts/tron test tooling scripts/test-work-land.py
 scripts/tron build gateway
 ```
 
-Install dependencies with `scripts/tron-node exec npm --prefix packages/gateway ci`.
+A fresh worktree has no dependencies; `work start` does not copy or share another
+checkout's install. Before Gateway checks, tests or builds, prepare that worktree
+with `scripts/tron-node exec npm --prefix packages/gateway ci --include=dev`.
+The development dependencies contain the repository-pinned TypeScript compiler,
+linter and test runner; a global install is not a substitute.
 Owner-status checks refuse installed Pi/lockfile skew, even with current `dist`.
 Use the pinned Node resolver (`scripts/tron-node exec`) for Node commands.
 The iOS tooling owns cleanup: **one simulator job per worktree at a time**,

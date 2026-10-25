@@ -15,6 +15,25 @@ scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections
 scripts/tron verify ... --plan                  # print the selection and steps only
 ```
 
+## Worktree dependencies
+
+Worktree creation does not install dependencies. Before running a selection that
+uses the Gateway, prepare **that worktree**, including development dependencies:
+
+```bash
+scripts/tron-node exec npm --prefix packages/gateway ci --include=dev
+```
+
+Verify never installs dependencies automatically or borrows another checkout's
+`node_modules`. Before running checks it requires the installed TypeScript version
+to match `packages/gateway/package.json` and npm's local `.bin/tsc` to resolve to
+that package's executable. A missing, stale or broken install fails early (exit 2)
+with the preparation command; a global `tsc` on PATH cannot satisfy it. `tron-node`
+resolves the pinned Node independently of interactive shell setup. `--plan` and
+selections that do not use the Gateway need no Gateway compiler.
+
+## Run output
+
 It reads the committed state: uncommitted or untracked changes are refused
 (exit 2). Each step prints `[i/N] name …` and its live log path when it starts,
 and its result and time when it ends. The first failure stops the run and prints the log tail. Every
