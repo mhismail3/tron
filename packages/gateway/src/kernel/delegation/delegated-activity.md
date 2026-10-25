@@ -28,6 +28,11 @@ Worker resume acquires the canonical native lease here, invokes the native lane/
 rebuild operation, and releases that same lease on failure. Registry supplies only
 its actual persisted-session acquisition; it has no resume forwarding route.
 
+`worker-turn-boundary.ts` owns actual task report/budget/reminder finish-turn policy
+over the existing native frame and created SDK runtime. It awaits the SDK boundary
+first and preserves late canonical/queue/diagnostic reads and exact queued-input Stop.
+K2 installs that policy; it does not duplicate its algorithm.
+
 `subagent-settlement.ts` owns the actual task-end stop/join/notice/receipt algorithm.
 Its structural backend view is the actual native runtime: no copied context or token
 index. Canonical append and work handles remain native; the same operation owner is

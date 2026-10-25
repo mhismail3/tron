@@ -32,7 +32,8 @@
     "worker-control.ts",
     "worker-settlement.ts",
     "subagent-control.ts",
-    "subagent-settlement.ts"
+    "subagent-settlement.ts",
+    "worker-turn-boundary.ts"
   ],
   "dependsOn": [
     "gateway/pi",

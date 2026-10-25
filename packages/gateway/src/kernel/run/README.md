@@ -17,8 +17,10 @@ control execution is K5-owned; native admission and canonical receipt ordering r
 The registry composes one real K5 DelegationOperations shared by Home/automations;
 its single native interruption operation preserves K2 abort-reason identity and
 capture/steer/abort ordering. Home has no native control I/O binding.
-K5 owns resumed-worker lease/bind/failure-release orchestration. Native
-`bindTaskWorker` remains the actual lane-protected validation/rebuild/publication
+K5 owns worker report/budget/reminder finish-turn policy and resumed-worker
+lease/bind/failure-release orchestration. Native pipeline installation passes the
+same frame, SDK runtime object and captured report owner, without copied state or
+an early diagnostic-sink read. Native `bindTaskWorker` remains the actual lane-protected validation/rebuild/publication
 backend; Registry has no worker-resume wrapper.
 K5 also owns canonical subagent settlement. Its runtime port reads the actual
 native canonical/activity/controller projections and work owner, then calls native

@@ -21,7 +21,7 @@ import {
   isInstalledDelegatedTool,
   trustedDelegatedController,
 } from "../delegation/delegated-provider.js";
-import type { AgentMessage, AgentTurnDecision, ThinkingLevel } from "../pi/agent-core.js";
+import type { AgentMessage, ThinkingLevel } from "../pi/agent-core.js";
 import { SESSION_SETTINGS_ENTRY, changeSessionSetting, readSessionSettings, readSessionRequestPins, readSessionFixedSettings, readSessionToolChoice } from "../../sessions/session-settings.js";
 import { constants, existsSync, lstatSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
@@ -57,6 +57,7 @@ import type { RequestPolicy } from "../host/request-policy.js";
 import type { SessionLineagePolicy } from "../host/session-lineage.js";
 import type { CanonicalAppendContext } from "../host/canonical-append.js";
 import { createHomeTaskWorkerExtension } from "../delegation/task-worker-extension.js";
+import { workerFinishTurn } from "../delegation/worker-turn-boundary.js";
 import type { HomeTaskSubagentRun } from "../delegation/task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../delegation/task-report.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
@@ -1753,36 +1754,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           },
         } : {}),
         ...(taskWorker ? {
-          // A sealed report ends the task at its turn boundary, after the SDK's own
-          // boundary handling, so no further model request starts. Steering queued
-          // before the seal would be stranded by a quiet end, so it takes the task's
-          // exact stop, which retires queued input as not delivered.
-          finishTurn: (finishTurn) => async (turn, signal): Promise<AgentTurnDecision | undefined> => {
-            const decision = await finishTurn?.(turn, signal);
-            // A task that reached its budget ends here the same way (settings-model.md 6.1).
-            const ending = taskWorker.reportSealed || await taskWorker.exceedsBudget(this.canonicalSessionEntries());
-            if (!ending) {
-              // A plain reply is not an immutable task result. Repair that omission
-              // once inside the same invocation, before any terminal receipt. Live
-              // children/queued input retain their own continuation and Stop wins.
-              if (!decision && turn.message.stopReason === "stop" && !signal?.aborted
-                && !created.session.agent.hasQueuedMessages() && !this.hasDetachedDashboardWork()
-                && taskWorker.takeReportReminder()) {
-                await created.session.sendCustomMessage({ customType: "tron.home-task-report-reminder.v1",
-                  content: "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report.",
-                  display: false }, { triggerTurn: true });
-                this.dependencies.homeTaskDiagnostic?.({ event: "home.task.report-reminder",
-                  taskHash: createHash("sha256").update(taskWorker.identity.taskId).digest("hex").slice(0, 16),
-                  operationHash: createHash("sha256").update(taskWorker.identity.operationId).digest("hex").slice(0, 16) });
-                return { action: "continue" };
-              }
-              return decision ?? undefined;
-            }
-            if (this.runQueue.queuedMessages.length > 0) {
-              taskWorker.requestStop(() => this.abort("agent", taskWorker.identity.operationId, taskWorker.reportSealed ? "task-report" : "task-budget"));
-            }
-            return { action: "end" };
-          },
+          finishTurn: workerFinishTurn(this, created, taskWorker),
         } : {}),
       });
       this.compactionPolicies.set(created.session, compactionPolicy);
