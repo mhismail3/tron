@@ -53,8 +53,8 @@ can kill and reopen it to prove interrupted actions are not replayed.
   can otherwise delete their root while registration still holds its catalog lock.
 - The task fixture Root constructs one actual settings model/change owner per Registry,
   supplies it directly to Home and native installation, and starts expiry explicitly.
-  `f.settings` is the initial owner's constructor result, not Registry readback; cold
-  restart constructs the successor owner. Registry disposal joins expiry before stores.
+  `f.settings` reads the current Root-created actual owners, not Registry readback;
+  cold restart constructs and exposes the successor. Registry disposal joins expiry before stores.
 - `settings-outcome-crash-child.ts` owns the SDK session only after the parent Registry
   is disposed. Its before/after canonical-append cuts use process loss, not graceful
   disposal, to test native outcome recovery; the parent stops and joins that child.
