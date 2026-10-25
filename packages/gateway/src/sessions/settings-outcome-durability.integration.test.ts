@@ -7,7 +7,7 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
 import { homeOwnerOf } from "../../test-support/gateway-registry.js";
-import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { SettingsApprovals, APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
 import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/settings/tool-contract.js";
@@ -16,21 +16,20 @@ import { INVOCATION_RECEIPT_TYPE } from "../kernel/run/invocation-receipts.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../kernel/host/input-admission.js";
 
 const artifacts: unknown[] = [];
-const owners: Array<{ dispose(): Promise<void> }> = [];
-afterEach(async () => { vi.restoreAllMocks(); await Promise.all(owners.splice(0).map(owner => owner.dispose())); await disposeFixtures(); });
+afterEach(async () => { vi.restoreAllMocks(); await disposeFixtures(); });
 afterAll(async () => {
   const path = fileURLToPath(new URL("../../test-results/settings-outcome-durability.json", import.meta.url));
   await mkdir(dirname(path), { recursive: true }); await writeFile(path, `${JSON.stringify(artifacts, null, 2)}\n`);
 });
 
 async function gateway() {
-  const f = await fixture();
   let clock = Date.now();
   const timers: Array<{ run(): void; cancelled: boolean }> = [];
-  const { settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway,
-    sessions: f.registry, registry: f.registry, home: () => homeOwnerOf(f.registry), now: () => new Date(clock),
-    schedule: run => { const timer = { run, cancelled: false }; timers.push(timer); return { cancel: () => { timer.cancelled = true; } }; } });
-  owners.push(settingsChanges); await settingsChanges.start();
+  const f = await fixture(false, false, undefined, false, undefined, {
+    settingsNow: () => new Date(clock),
+    settingsSchedule: run => { const timer = { run, cancelled: false }; timers.push(timer); return { cancel: () => { timer.cancelled = true; } }; },
+  });
+  const { settingsChanges } = f.settings;
   await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
   f.faux.setResponses(Array.from({ length: 60 }, () => fauxAssistantMessage("Noted.")));
   const slot = await f.registry.create(f.cwd); await slot.setModel(f.model.provider, f.model.id);
@@ -89,7 +88,7 @@ describe("native settings outcome durability", () => {
     const outcome = await f.settingsChanges.takeOutcomes(f.slot.id);
     const input = join(f.root, "outcome-input.json"); const marker = join(f.root, "outcome-cut");
     await writeFile(input, JSON.stringify({ path: f.slot.sessionFile, outcome }));
-    await f.settingsChanges.dispose(); await f.registry.dispose();
+    await f.registry.dispose();
     const program = fileURLToPath(new URL("../../test-support/settings-outcome-crash-child.ts", import.meta.url));
     const preload = fileURLToPath(new URL("../../test-support/home-ledger-crash-preload.mjs", import.meta.url));
     const child = spawn(process.execPath, ["--experimental-transform-types", "--import", pathToFileURL(preload).href, program, input, cut, marker], { stdio: ["pipe", "pipe", "pipe"] });

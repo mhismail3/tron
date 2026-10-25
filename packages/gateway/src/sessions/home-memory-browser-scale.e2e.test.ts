@@ -63,7 +63,9 @@ interface Gateway { registry: RuntimeRegistry; service: GatewayService; receipts
 async function openGateway(root: string, runtime: ModelRuntime): Promise<Gateway> {
   const agentDir = join(root, "agent");
   const tronHome = join(root, "tron");
+  let settings: ReturnType<typeof settingsDependencies> | undefined;
   const registry = await createTestRegistry({
+    settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
     agentDir, tronHome, idleRuntimeMs: 600_000,
     modelRuntimeFactory: async () => runtime,
     trust: new TrustService(agentDir),
@@ -74,10 +76,11 @@ async function openGateway(root: string, runtime: ModelRuntime): Promise<Gateway
   const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { tronHome } as unknown as GatewayConfig,
     modelRuntime: runtime, sessions: registry, home: homeOwnerOf(registry), receipts, broadcast: () => {},
-    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => homeOwnerOf(registry), registry }),
+    ...(settings = settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => homeOwnerOf(registry), registry })),
     trust: new TrustService(agentDir), sessionDeleted: () => {},
     uploads: { acquire: async () => ({ release: () => {} }), materialize: async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 }), removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
+  await settings.settingsChanges.start();
   return { registry, service, receipts };
 }
 

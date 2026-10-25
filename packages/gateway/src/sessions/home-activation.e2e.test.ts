@@ -272,7 +272,9 @@ interface Fixture {
 }
 
 async function openRegistry(f: Fixture): Promise<void> {
+  let settings: ReturnType<typeof settingsDependencies> | undefined;
   const registry = await createTestRegistry({ agentDir: f.agentDir,
+    settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
     tronHome: f.tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => f.runtime,
@@ -294,7 +296,7 @@ async function openRegistry(f: Fixture): Promise<void> {
     home: homeOwnerOf(registry),
     receipts,
     broadcast: () => {},
-    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => homeOwnerOf(registry), registry }),
+    ...(settings = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => homeOwnerOf(registry), registry })),
     trust: new TrustService(f.agentDir),
     sessionDeleted: () => {},
     uploads: f.uploads ?? {
@@ -303,6 +305,7 @@ async function openRegistry(f: Fixture): Promise<void> {
       removeSession: async () => {},
     },
   } as unknown as GatewayServiceDependencies);
+  await settings.settingsChanges.start();
   f.registry = registry;
   f.service = service;
   f.receipts = receipts;

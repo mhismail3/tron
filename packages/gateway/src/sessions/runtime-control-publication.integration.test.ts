@@ -40,10 +40,13 @@ async function fixture(extension = false) {
   runtime.registerNativeProvider(faux.provider);
   const trust = new TrustService(agentDir);
   await trust.set(cwd, true);
+  let settings: ReturnType<typeof settingsDependencies> | undefined;
   const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000, trust, modelRuntimeFactory: async () => runtime,
+    settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
   disposals.push(() => registry.dispose());
-  const settings = settingsDependencies({ agentDir, tronHome, trust, modelRuntime: runtime, registry });
+  settings = settingsDependencies({ agentDir, tronHome, trust, modelRuntime: runtime, registry });
+  await settings.settingsChanges.start();
   await registry.initialize();
   const slot = await registry.create(cwd);
   await slot.setModel(faux.provider.id, "first");

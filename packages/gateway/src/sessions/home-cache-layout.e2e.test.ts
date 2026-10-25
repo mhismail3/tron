@@ -131,7 +131,9 @@ async function fixture(responses = false) {
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
   const records: HomeRequestRecord[] = [];
   const configurations: Array<{ sessionId: string; blocker: unknown }> = [];
+  let settings: ReturnType<typeof settingsDependencies> | undefined;
   const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000,
+    settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
     modelRuntimeFactory: async () => runtime,
     trust: new TrustService(agentDir),
     broadcast: (sessionId: string, topic: string, payload: unknown) => {
@@ -147,9 +149,10 @@ async function fixture(responses = false) {
     config: { tronHome } as unknown as GatewayConfig, modelRuntime: runtime, sessions: registry, home: homeOwnerOf(registry),
     receipts: new CommandReceiptStore(join(tronHome, "receipts")),
     broadcast: () => {},
-    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => homeOwnerOf(registry), registry }),
+    ...(settings = settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => homeOwnerOf(registry), registry })),
     trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
+  await settings.settingsChanges.start();
   await registry.initialize();
   return { ...local, registry, service, records, root, configurations };
 }

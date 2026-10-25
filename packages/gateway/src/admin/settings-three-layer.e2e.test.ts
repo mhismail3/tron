@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
-import { settingsDependencies, setModelQueue } from "../../test-support/settings-dependencies.js";
+import { setModelQueue } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -23,7 +23,7 @@ afterAll(async () => {
 async function setup() {
   const f = await fixture();
   const dependencies = { registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway };
-  const { settingsModel, settingsChanges } = settingsDependencies({ ...dependencies, sessions: f.registry, home: () => homeOwnerOf(f.registry) });
+  const { settingsModel, settingsChanges } = f.settings;
   const service = new GatewayService({ display: displayOwnerOf(f.registry),
     config: { machineId: "settings-machine", machineGroupID: "settings-group", machineName: "Test Mac", agentDir: f.agentDir, tronHome: f.tronHome },
     modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry,

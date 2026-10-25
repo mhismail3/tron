@@ -217,6 +217,7 @@ const settingsModel = new SettingsModel(new SettingsStoreAdapter({
     : target.kind === "home" ? homeToolCatalog(sessions.runtimeEntries(), id => sessions.isLineageMember(id))
     : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
 }));
+let settingsChanges: SettingsChangePath;
 const settingsRecord = new SettingsChangeRecord(config.tronHome);
 // Outside changes (settings-model.md 5.6): reads compare Global/Project with what Tron last saw.
 const outsideSettings = new OutsideChanges(settingsSchema, config.tronHome, config.agentDir, settingsRecord, settingsModel.owner.observedReaders);
@@ -258,7 +259,7 @@ const modelQueue = new ModelQueueOwner({
 });
 const homeComposition: HomeComposition = {
   modelQueue, modelRuntime,
-  settings: () => sessions.settings,
+  settings: () => settingsChanges === undefined ? undefined : { model: settingsModel, changes: settingsChanges },
   knowledge: () => knowledge,
   runtime: async () => ({
     runtime: applyHomeCacheRetention(sessionRuntimeView(modelRuntime)),
@@ -822,7 +823,7 @@ async function runStopDrain(): Promise<void> {
 
 // The one settings change path (settings-model.md 5), for agents' tool and the slots alike.
 const settingsRisk = new SettingsRiskEvaluator(jevClient);
-const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
+settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
   assessRisk: async (input, signal) => {
     try { return await settingsRisk.assess(input, signal); }
     catch (error) {
@@ -942,6 +943,9 @@ await transport.listen(async () => {
   startupCheckpoint("knowledge-storage");
   await sessions.initialize((phase) => transport.setStartupPhase(phase));
   startupCheckpoint("session-registry");
+  // Installed native owners and presentation observers now exist; inspection
+  // alone never arms approval expiry against stores that are still opening.
+  await settingsChanges.start();
   sessionSearchWarmTask = (async () => {
     if (stopping || !sessionSearch) return;
     const warmStartedAt = performance.now();
