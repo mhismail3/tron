@@ -86,6 +86,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   tap. Compaction, branch, configuration and extension status share one notification-pill language;
   command pills never show arguments. `custom_message` is right-aligned context; worker results
   read **Worker · task title**; subagent messages use the seafoam **Subagent** chip.
+- **Error design canvas.** Hosted `-tron-chat-errors-preview` renders synthetic single/grouped
+  error pills and detail canvases using the shared compact-pill, list-row and code-block
+  components. `TronChatErrorsPreviewTests` captures light/dark design review only; it does not
+  exercise provider classification or prove live/history grouping.
 - **Haptics.** Live events only, through `TronHaptics`; `ChatLiveHapticLedger` tells live from restored.
 - **Extension interactions.** The mounted route is the sole sheet owner and presents pending
   interactions only after the first ready frame. Forms (one to four questions) keep a device-local

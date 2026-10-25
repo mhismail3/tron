@@ -50,7 +50,9 @@ struct TronMobileApp: App {
             // Fixtures mount sheet content directly, without `SceneRootView`, so
             // they host the shared sheet-loading pulse at their own root.
             Group {
-            if ProcessInfo.processInfo.arguments.contains("-tron-tool-sheets-polish-fixture") {
+            if ProcessInfo.processInfo.arguments.contains("-tron-chat-errors-preview") {
+                HostedChatErrorsFixture().environment(hostedModel)
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-tool-sheets-polish-fixture") {
                 HostedToolSheetsPolishFixture().environment(hostedModel)
             } else if ProcessInfo.processInfo.arguments.contains("-tron-home-dashboard-fixture") {
                 HostedHomeDashboardFixture()
