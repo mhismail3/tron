@@ -46,7 +46,7 @@ enum HostedDisplayDocumentThemeFixture {
         display["kind"] = kind
         display["title"] = home ? "Home audit report" : "Session summary"
         display["altText"] = "Displayed report"
-        display["eligibleSurfaces"] = ["sheet"]
+        display["eligibleSurfaces"] = authoredHTML ? ["sheet", "floating"] : ["sheet", "inline"]
         display["presentation"] = ["requestedSurface": "sheet", "inlineTapAction": "sheet"]
         display["artifact"] = ["id": "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc40",
                                "name": authoredHTML ? "report.html" : "report.md",
