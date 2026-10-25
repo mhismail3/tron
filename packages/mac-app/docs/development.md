@@ -76,7 +76,8 @@ pipes (`SubprocessTests`, `CodeSignatureProbeTests`, `CuaProcessOwnerTests`,
 (`MenuBarLogReaderTransportTests`), the built launcher and payload trees
 (`GatewayLauncherArgvTests`), the native host in a demand-launched Mach service
 (`NativeHostRetirementTests`), real files (`WizardProgressFilesystemTests`,
-`TronLogFilesystemTests`), and `MacQuitGatewayTests`, which runs the Quit coordinator against
+`TronLogFilesystemTests`, `GatewayNetworkCacheFilesystemTests` for numeric version-1
+admission, Boolean refusal and owner-only writer round trips), and `MacQuitGatewayTests`, which runs the Quit coordinator against
 the signed bundled Gateway in a disposable launchd job with the shipped `KeepAlive` and
 `ExitTimeOut` (clean exit, a held model request past 20 s, caller cancellation, stall recovery
 without relaunch, missing or stale receipts, retry, restart-75). Then run

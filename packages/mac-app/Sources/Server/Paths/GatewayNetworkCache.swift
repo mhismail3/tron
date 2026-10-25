@@ -1,3 +1,4 @@
+import CoreFoundation
 import Darwin
 import Foundation
 
@@ -8,11 +9,14 @@ enum GatewayNetworkCacheReader {
     private static let expectedKeys: Set<String> = ["version", "tailscaleIP", "updatedAt"]
 
     static func tailscaleIP(at path: URL) -> String? {
+        // JSONSerialization bridges true to Int(1), but it is not schema version 1.
         guard let data = OwnerOnlyJSONReader.readData(at: path, maximumBytes: maximumBytes),
               let object = try? JSONSerialization.jsonObject(with: data),
               let document = object as? [String: Any],
               Set(document.keys) == expectedKeys,
-              let version = document["version"] as? Int, version == 1,
+              let rawVersion = document["version"] as? NSNumber,
+              CFGetTypeID(rawVersion) != CFBooleanGetTypeID(),
+              let version = rawVersion as? Int, version == 1,
               let value = document["tailscaleIP"] as? String,
               let updatedAt = document["updatedAt"] as? String,
               isTimestamp(updatedAt) else { return nil }
