@@ -1509,7 +1509,7 @@
       }
     },
     {
-      "step": "settle r4 approved is told and dropped",
+      "step": "settle r4 approved stays until its requester hears it",
       "result": {
         "target": {
           "kind": "session",
@@ -1544,8 +1544,7 @@
         "expiresAt": "2026-01-02T00:00:03.000Z",
         "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
         "status": "approved",
-        "decidedAt": "2026-01-01T00:00:04.000Z",
-        "told": true
+        "decidedAt": "2026-01-01T00:00:04.000Z"
       },
       "files": {
         "gateway/settings/approvals.json": {
@@ -1654,6 +1653,42 @@
               "expiresAt": "2026-01-02T00:00:02.000Z",
               "digest": "bc0aa08ec640d0161c3d3ca2deb39da4a83768e305ab720e78941ecc66db3830",
               "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "session",
+                "sessionId": "s9"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "global",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000004-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:03.000Z",
+              "expiresAt": "2026-01-02T00:00:03.000Z",
+              "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
+              "status": "approved",
+              "decidedAt": "2026-01-01T00:00:04.000Z"
             }
           ]
         }
@@ -1806,6 +1841,42 @@
               "status": "failed",
               "decidedAt": "2026-01-01T00:00:04.000Z",
               "failure": "boom"
+            },
+            {
+              "target": {
+                "kind": "session",
+                "sessionId": "s9"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "global",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000004-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:03.000Z",
+              "expiresAt": "2026-01-02T00:00:03.000Z",
+              "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
+              "status": "approved",
+              "decidedAt": "2026-01-01T00:00:04.000Z"
             }
           ]
         }
@@ -1926,6 +1997,42 @@
               "status": "failed",
               "decidedAt": "2026-01-01T00:00:04.000Z",
               "failure": "boom"
+            },
+            {
+              "target": {
+                "kind": "session",
+                "sessionId": "s9"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "global",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000004-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:03.000Z",
+              "expiresAt": "2026-01-02T00:00:03.000Z",
+              "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
+              "status": "approved",
+              "decidedAt": "2026-01-01T00:00:04.000Z"
             }
           ]
         }
@@ -1973,13 +2080,49 @@
               "status": "failed",
               "decidedAt": "2026-01-01T00:00:04.000Z",
               "failure": "boom"
+            },
+            {
+              "target": {
+                "kind": "session",
+                "sessionId": "s9"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "global",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000004-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:03.000Z",
+              "expiresAt": "2026-01-02T00:00:03.000Z",
+              "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
+              "status": "approved",
+              "decidedAt": "2026-01-01T00:00:04.000Z"
             }
           ]
         }
       }
     },
     {
-      "step": "take s2 outcomes (failed r3)",
+      "step": "take s2 outcomes (failed r3, approved r4)",
       "result": [
         {
           "target": {
@@ -2016,6 +2159,43 @@
           "status": "failed",
           "decidedAt": "2026-01-01T00:00:04.000Z",
           "failure": "boom",
+          "told": true
+        },
+        {
+          "target": {
+            "kind": "session",
+            "sessionId": "s9"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s2",
+            "sessionId": "s2"
+          },
+          "reason": "for s2",
+          "changes": [
+            {
+              "changeId": "change-a.x",
+              "key": "a.x",
+              "layer": "global",
+              "op": "set",
+              "before": false,
+              "after": true,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000004-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:03.000Z",
+          "expiresAt": "2026-01-02T00:00:03.000Z",
+          "digest": "0b00095aff644571c77a2790a71ea340d8e1dc1c9064e12fbad96ae6fba470b0",
+          "status": "approved",
+          "decidedAt": "2026-01-01T00:00:04.000Z",
           "told": true
         }
       ],

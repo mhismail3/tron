@@ -44,11 +44,11 @@ it("settings-approvals-paths: create, supersede, settle, expire, take outcomes a
   await log.step("settle r2 declined", () => approvals.settle(ids[1]!, "declined", new Date()), "result");
   await log.step("settle r2 again is refused", () => approvals.settle(ids[1]!, "approved", new Date()), "refused");
   await log.step("settle a missing request is refused", () => approvals.settle("missing", "approved", new Date()), "refused");
-  await log.step("settle r4 approved is told and dropped", () => approvals.settle(ids[3]!, "approved", new Date()), "result");
+  await log.step("settle r4 approved stays until its requester hears it", () => approvals.settle(ids[3]!, "approved", new Date()), "result");
   await log.step("settle r3 failed keeps its failure", () => approvals.settle(ids[2]!, "failed", new Date(), "boom"), "result");
   await log.step("take s1 outcomes (superseded r1, declined r2)", () => approvals.takeOutcomes("s1"));
   await log.step("take s1 outcomes again is empty", () => approvals.takeOutcomes("s1"));
-  await log.step("take s2 outcomes (failed r3)", () => approvals.takeOutcomes("s2"));
+  await log.step("take s2 outcomes (failed r3, approved r4)", () => approvals.takeOutcomes("s2"));
   await created("create r5 (s3)", "s3", mac, change("c.z", "on"));
   await log.step("take s3 outcomes while r5 is pending is empty", () => approvals.takeOutcomes("s3"));
   await log.step("settle r5 declined", () => approvals.settle(ids[4]!, "declined", new Date()), "result");

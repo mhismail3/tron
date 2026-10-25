@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { GatewayError } from "../../errors.js";
 import { readJson, updateJsonLocked } from "../../util/json.js";
 import type { Actor, TierBasis } from "./settings-record.js";
-import { type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier } from "./tool-contract.js";
+import { type ApprovalActionPreview, type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier } from "./tool-contract.js";
 
 /**
  * Pending settings changes (docs/settings-model.md 5.5, decision 8, Q22).
@@ -47,12 +47,17 @@ export interface ApprovalRequest {
   actor: Actor;
   reason?: string;
   changes: PendingChange[];
+  /** An action request (#1985) has no changes: its registered subject, bounded
+   * parameters and the exact preview the maintainer approves. */
+  action?: { subject: string; params: unknown; preview: ApprovalActionPreview };
   /** What a decision binds to (no approve-then-swap). */
   digest: string;
   status: ApprovalStatus;
   decidedAt?: string;
   failure?: string;
-  /** The requester's next turn named the outcome (Q22). */
+  /** An approved action's own account of what it did (#1985). */
+  summary?: string;
+  /** The requester heard the outcome: its next turn or Home's wake carried it. */
   told?: true;
 }
 
@@ -62,10 +67,11 @@ const EMPTY: ApprovalsDocument = { version: 1, requests: [] };
 /** The digest of a diff: the target and each change's instance, before and after. */
 export function approvalDigest(target: unknown, changes: readonly {
   key: string; qualifiers?: unknown; layer: string; op: string; before?: unknown; after?: unknown; fixedAt?: unknown;
-}[]): string {
+}[], action?: ApprovalRequest["action"]): string {
   return createHash("sha256").update(JSON.stringify({
     target,
     changes: changes.map(change => [change.key, change.qualifiers ?? {}, change.layer, change.op, change.before ?? null, change.after ?? null, change.fixedAt ?? null]),
+    ...(action ? { action: [action.subject, action.params, action.preview] } : {}),
   })).digest("hex");
 }
 
@@ -83,7 +89,7 @@ export class SettingsApprovals {
   async create(input: Omit<ApprovalRequest, "requestId" | "createdAt" | "expiresAt" | "digest" | "status">, now: Date): Promise<{ request: ApprovalRequest; superseded: ApprovalRequest[] }> {
     const request: ApprovalRequest = {
       ...input, requestId: randomUUID(), createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + APPROVAL_TTL_MS).toISOString(),
-      digest: approvalDigest(input.target, input.changes), status: "pending",
+      digest: approvalDigest(input.target, input.changes, input.action), status: "pending",
     };
     const instances = new Set(request.changes.map(change => instanceId(request.target, change)));
     const superseded: ApprovalRequest[] = [];
@@ -127,7 +133,7 @@ export class SettingsApprovals {
   }
 
   /** Settles an open request; refused unless it is still pending. */
-  async settle(requestId: string, status: Exclude<ApprovalStatus, "pending">, now: Date, failure?: string): Promise<ApprovalRequest> {
+  async settle(requestId: string, status: Exclude<ApprovalStatus, "pending">, now: Date, failure?: string, summary?: string): Promise<ApprovalRequest> {
     let settled: ApprovalRequest | undefined;
     await this.update(document => {
       const request = document.requests.find(candidate => candidate.requestId === requestId);
@@ -136,14 +142,30 @@ export class SettingsApprovals {
       request.status = status;
       request.decidedAt = now.toISOString();
       if (failure) request.failure = failure;
-      // An approved change was the requester's own wish; nothing to tell.
-      if (status === "approved") request.told = true;
+      if (summary) request.summary = summary;
       settled = { ...request };
     });
     return settled!;
   }
 
-  /** The requester's untold outcomes, marked told (Q22). */
+  /** Whether the requester has a settled outcome it has not heard. */
+  async hasUntold(sessionId: string): Promise<boolean> {
+    return (await this.read()).requests.some(request => request.actor.sessionId === sessionId && request.status !== "pending" && !request.told);
+  }
+
+  /** Marks outcomes heard by another path (a running worker's steering signal), or
+   * returns taken ones to untold when their delivery never reached the session. */
+  async markTold(requestIds: readonly string[], told: boolean): Promise<void> {
+    const ids = new Set(requestIds);
+    await this.update(document => {
+      for (const request of document.requests) {
+        if (!ids.has(request.requestId) || request.status === "pending") continue;
+        if (told) request.told = true; else delete request.told;
+      }
+    });
+  }
+
+  /** The requester's untold outcomes, marked told. */
   async takeOutcomes(sessionId: string): Promise<ApprovalRequest[]> {
     const untold = (await this.read()).requests.some(request => request.actor.sessionId === sessionId && request.status !== "pending" && !request.told);
     if (!untold) return [];

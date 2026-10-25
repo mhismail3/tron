@@ -170,6 +170,39 @@ export interface ChangeResult {
   approval?: { requestId: string; digest: string; expiresAt: string };
   /** A Home task worker target's signal for its applied Session-scope changes (#1336). */
   signal?: SettingsSignal;
+  /** A pending action request: the exact preview its digest binds (#1985). */
+  action?: ApprovalActionPreview;
+}
+
+/** A maintainer-gated operation that is not a stored setting value (a project
+ * lifecycle step): its preview is display text the digest binds. */
+export interface ApprovalActionItem { label: string; value: string; detail?: string }
+export interface ApprovalActionPreview { title: string; items: ApprovalActionItem[]; target: SettingsTarget }
+
+export const SETTINGS_OUTCOME_MESSAGE = "tron.settings-outcome.v1";
+
+/** One settled approval as its requester hears it (decision 4e6e8f54). Values are
+ * display text; a redacted key carries none. `approved` means approved and applied. */
+export interface SettingsOutcomeRequest {
+  requestId: string;
+  status: "approved" | "declined" | "expired" | "superseded" | "failed";
+  requester: { kind: string; taskId?: string };
+  target: SettingsTarget;
+  createdAt: string;
+  decidedAt?: string;
+  reason?: string;
+  failure?: string;
+  items: Array<{ key: string; label: string; qualifiers?: Qualifiers; layer: LayerId; before?: string; after?: string; redacted?: true }>;
+  action?: { subject: string; title: string; summary?: string };
+}
+
+/** The canonical message a requester hears its outcomes in: on its next turn, or
+ * as the trigger of Home's own wake turn. `taskId` names the delivery for receipts. */
+export interface SettingsOutcomeMessage {
+  customType: typeof SETTINGS_OUTCOME_MESSAGE;
+  content: string;
+  display: true;
+  details: { version: 1; eventId: string; taskId: string; requests: SettingsOutcomeRequest[] };
 }
 
 /** A delegated worker's settings state beside its resolved keys (#1336). */
@@ -194,7 +227,7 @@ export interface TaskWorkerSettingsView extends TaskWorkerSettingsState {
 /** What the session runtime gives the tool: its own target and identity, or Home's worker target. */
 export interface SettingsToolAccess {
   resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;
-  change(changes: ChangeRequest[], input: { reason: string; dryRun?: boolean; toolCallId: string; web: boolean; taskId?: string }): Promise<ChangeResult & { worker?: TaskWorkerSettingsView }>;
-  /** Declined, expired or superseded changes this chat asked for, not yet told (Q22). */
-  takeOutcomes(): Promise<string[]>;
+  change(changes: ChangeRequest[], input: { reason: string; dryRun?: boolean; request?: boolean; toolCallId: string; web: boolean; taskId?: string }): Promise<ChangeResult & { worker?: TaskWorkerSettingsView }>;
+  /** Every settled request this chat asked for and has not heard yet (decision 4e6e8f54). */
+  takeOutcomes(): Promise<SettingsOutcomeMessage | undefined>;
 }
