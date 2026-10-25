@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
-import { open } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
+import { dirname } from "node:path";
+import { syncDurably } from "../../util/durable-json.js";
 import { EpisodicMemoryError } from "../../errors.js";
 import { asRecord } from "../../util/json.js";
 
@@ -180,12 +182,16 @@ export async function readCanonicalSession(options: {
  * time, so the visitor decides what survives: nothing is batched. Refuses what the
  * whole-file reader refuses (header, torn tail, over-long line), and a file that
  * shrinks while it is read. Reads only the bytes present when it began.
+ * Durable consumers must await successful completion before using visited entries:
+ * their exact read cut, file identity and parent entry are synchronized after the
+ * read. A visible SDK append alone cannot retire a durable delivery outbox.
  */
 export async function visitCanonicalSessionEntries(options: {
   path: string;
   sessionId: string;
   maxLineBytes: number;
   visit: (entry: EpisodicCanonicalEntry) => void;
+  durable?: true;
 }): Promise<void> {
   const handle = await open(options.path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -219,6 +225,15 @@ export async function visitCanonicalSessionEntries(options: {
     }
     if (pending.length > 0) throw new EpisodicMemoryError("source", "Canonical session has an incomplete tail");
     if (!headerSeen) throw new EpisodicMemoryError("source", "Canonical session file is empty");
+    if (options.durable) {
+      // Synchronize AFTER reading, on this same handle: syncing the pathname
+      // before a later read could certify an intervening, unsynced append.
+      await syncDurably(handle);
+      const directory = await open(dirname(options.path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      try { await syncDurably(directory); } finally { await directory.close(); }
+      const [end, current] = await Promise.all([handle.stat(), lstat(options.path)]);
+      if (!sameSnapshot(start, end) || !sameSnapshot(end, current)) throw new EpisodicSourceChangedError();
+    }
   } finally { await handle.close(); }
 }
 

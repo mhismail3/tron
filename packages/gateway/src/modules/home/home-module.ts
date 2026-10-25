@@ -95,6 +95,7 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
     const memoryModels = () => sessions.modelQueueOf("background", "home");
     owner = new HomeOwner({
       tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
+      settingsOutcomes: () => composition.settings()?.changes,
       sessions: {
         wakeHome: async sessionId => (await sessions.acquire(sessionId)).admitHomeWake(),
         createHomeSession: async (cwd) => (await sessions.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
