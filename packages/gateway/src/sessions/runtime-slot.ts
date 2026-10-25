@@ -120,7 +120,7 @@ import {
 } from "../kernel/projection/projection.js";
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { type RunMarkerStore } from "../kernel/run/run-markers.js";
-import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand } from "../extensions/owner-attribution.js";
+import { attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand } from "../kernel/host/extension-registration.js";
 import { currentExtensionOwner, currentInvocationContext } from "../kernel/host/extension-execution-context.js";
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../kernel/delegation/managed-producer.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../kernel/projection/extension-run-projection.js";
@@ -1640,9 +1640,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           ...(managedLoaderOptions ?? {}),
           ...profile.resources,
           extensionFactories,
-          extensionsOverride: (base) => attributeExtensions(base,
+          extensionsOverride: (base) => this.dependencies.modules.policy("extensionAdmission")!(base,
             this.dependencies.modules.policy("toolResultProjection")?.().beginBrowserLoad(sessionManager.getSessionId(), this.runtimeGeneration),
-            { requireTronAskUser: true, ...(managedSubagents ? { managedSubagents } : {}) }),
+            managedSubagents),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });

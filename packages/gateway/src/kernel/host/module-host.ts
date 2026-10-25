@@ -1,3 +1,4 @@
+import type { ExtensionAdmission } from "./extension-registration.js";
 import type { SessionLineagePolicy } from "./session-lineage.js";
 import type { ResourceRoot, TronWorkspaceDescriptor } from "../resources/resource-root.js";
 import type { KernelLifecycleObserver, TaskLedgerPolicy } from "./kernel-lifecycle.js";
@@ -124,6 +125,7 @@ export interface RpcHandler {
 export const KERNEL_HOOKS = {
   profileDecision: "policy",
   resourceRoot: "policy",
+  extensionAdmission: "policy",
   operatingContext: "policy",
   requestPolicy: "policy",
   inputAdmission: "policy",
@@ -145,7 +147,8 @@ export const KERNEL_HOOKS = {
 export type HookName = keyof typeof KERNEL_HOOKS;
 type PolicyHook = { [K in HookName]: typeof KERNEL_HOOKS[K] extends "policy" ? K : never }[HookName];
 type ObserverHook = Exclude<HookName, PolicyHook>;
-export type KernelHooks = { [K in Exclude<HookName, "resourceRoot" | "operatingContext" | "toolResultProjection" | "runTerminal" | "interactionRequired" | "sessionNotifications" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision" | "sessionLineage" | "taskLedger" | "kernelLifecycle" | "modelRuntimeInstalled" | "modelUsed" | "sessionRetired">]: (...args: never[]) => unknown } & {
+export type KernelHooks = { [K in Exclude<HookName, "extensionAdmission" | "resourceRoot" | "operatingContext" | "toolResultProjection" | "runTerminal" | "interactionRequired" | "sessionNotifications" | "runSettled" | "requestPolicy" | "appendGuard" | "inputAdmission" | "profileDecision" | "sessionLineage" | "taskLedger" | "kernelLifecycle" | "modelRuntimeInstalled" | "modelUsed" | "sessionRetired">]: (...args: never[]) => unknown } & {
+  extensionAdmission: ExtensionAdmission;
   resourceRoot(): ResourceRoot;
   operatingContext(workspace: TronWorkspaceDescriptor, cwd: string, tools: readonly string[]): string;
   modelRuntimeInstalled(): ModelRuntimePolicy;

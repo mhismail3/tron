@@ -120,6 +120,11 @@ releases its claims.
 
 ## Extension registration ownership
 
+K3 `extension-registration.ts` owns generic callback and registration metadata;
+producer kind is supplied by its actual owner. Product reservations and identity
+classification stay in `extensions/owner-attribution.ts`, supplied to native loads
+through `extensionAdmission`. No Host-to-Delegation classification import is needed.
+
 Callbacks are wrapped through `DefaultResourceLoaderOptions.extensionsOverride` on every load,
 and admission reads the extension's own registration maps, so late `registerTool` and friends
 pass the same policy (the markdown transformer is the one unattributed surface, and nothing

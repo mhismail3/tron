@@ -47,6 +47,7 @@ lists in composition order, because four owners observe session removal today
 
 | Hook | Shape | Replaces (call site today) | Implementer |
 |---|---|---|---|
+| `extensionAdmission` | sync loader admission with live browser observer and actual managed producer admission | product reservation policy supplied at `extensionsOverride`; generic registration maps and late owner lookup stay in K3 | core |
 | `profileDecision` | sync `(sessionId, cwd) → name \| "unrecorded"`; `unrecorded` uses the creation profile given to K1 `create`, once | `homeProfile` + `explicitHomeSessionId` (`runtime-slot.ts:607`, `:997`, `:2199-2205`, cleared `:2273`) | Home |
 | `requestPolicy` | per runtime: `admit`, `deliveryHeadroom`, `settle`, `cancel`, `transferOperation`, `contextEvidence`, `wrapStream` (innermost), `wrapTransformContext`, `wrapPrepareRequest` (outermost) | `HomeRequestPolicy` (`modules/home/home-request-policy.ts:313-521`); calls `runtime-slot.ts:8826`, `:8844`, `:9390`, settle ×4, transfer ×2, wraps `:2551-2568` | Home |
 | `inputAdmission` | async in the lane before SDK admission; may return a wake trigger; `release`, `settle` | `homeInboxAdmission` (`:8833-8858`), `homeInboxRelease` (`:8274`), `homeInboxSettlement` (`:4111`), `admitHomeWake` (`:8230-8320`) | Home |
@@ -54,7 +55,7 @@ lists in composition order, because four owners observe session removal today
 | `runSettled` | `quiescent` (awaited), `idle` (sync) | `homeQuiescent` (`:4487`), `homeIdle` (`:8322`) | Home |
 | `runTerminal` | async, best-effort; skipped for task workers | `notifyAgentTerminal` (`:3752-3779`); failure → `session.diagnostic terminal-notification-failed` | notifications |
 | `interactionRequired` | detached; presence sampled at admission | `userInputRequired` (`:1058-1074`) | notifications |
-| `toolResultProjection` | display projection + browser result observer | `admitToolDisplayProjection` (`display/display-contract.ts:127`; calls `runtime-slot.ts:2145`, `sessions/projection.ts:1368`), `extensions/owner-attribution.ts:17-18` | display |
+| `toolResultProjection` | display projection + browser result observer | `admitToolDisplayProjection` (`display/display-contract.ts:127`; calls `runtime-slot.ts:2145`, `sessions/projection.ts:1368`), `kernel/host/extension-registration.ts` | display |
 | `modelRuntimeInstalled` | sync, owner runtimes only | `openAIModelEligibility.attachRuntime` (`runtime-slot.ts:2243`), Kimi/Jev pricing (`runtime-registry.ts:1827`) | providers |
 | `modelUsed` | sync, off the critical path | `noteModelUsed` (`runtime-slot.ts:4662`) | providers |
 | `sessionRemoval` (observers) | async before delete/rekey; rejection refuses | `beforeSessionDelete/Rekey` (`runtime-registry.ts:682-683`) | automations |

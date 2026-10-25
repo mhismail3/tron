@@ -10,7 +10,9 @@ extension adapters and the generic UI host](../kernel/host/README.md); K5 owns
 ## Owns
 
 `tron-modules.ts` (ordered profile identities), `compatibility-manifest.ts`,
-`owner-attribution.ts`, and the `tron-ask-user` extension.
+`owner-attribution.ts` supplies product reserved-name and producer-title/source
+policy, and the `tron-ask-user` extension. Generic callback wrapping and owner
+lookup live in K3, not a second registry here.
 
 ## Contract
 
