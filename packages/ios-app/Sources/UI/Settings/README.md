@@ -148,10 +148,17 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testSettingsRowInspectionAndActionsStayIndependent \
   --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
 scripts/ios-gateway-e2e-test run-ui \
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testRoutineEditorsDisappearAndExplicitGlobalValueResets \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testSessionSettingsOmitsInheritedRoutineEditors \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testGlobalSettingsServeExposedEditorsAndEditAtGlobalScope \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsExposeReadOnlyOverrides
 ```
+
+`TronSettingsScopeRowsUITests` checks read-only queue values, independent Revert and Project
+inspection. `TronSmokeUITests` keeps direct model/thinking, shared list/numeric-map editing,
+approvals and Changes coverage. The surviving memory/provider/queued-editor journeys in
+`TronForegroundCaptureUITests` own native-stack refresh, draft/focus preservation and invalid-child
+retirement; retired Worker thinking and Transport editor cases do not define that lifecycle.
 
 Hosted values are scripted, not persistence evidence. Real-UI journeys read their key inventory
 from the fixture Gateway's built schema. The [three-layer design](../../../../gateway/docs/settings-three-layer-design.md)

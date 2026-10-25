@@ -235,7 +235,9 @@ is the target's binding/writer capability, not a second client-side permission l
 presence is explicit even for equal/false/zero values. Applied Project values serve their exact
 file/key; ignored fields serve bounded value-free diagnostics. Untrusted/unreadable Project notices
 name their file and never make a Session editor look Project-owned.
-`settings.options` pages options; `dryRun` returns per-key errors and the tier. Changes list
+`settings.options` pages options only for declared controls; a key without an editor has no
+options endpoint. Its canonical type, validation and runtime clamping still apply to changes.
+`dryRun` returns per-key errors and the tier. Changes list
 pending approvals first. Global writes Global, Session the Session scope, Home its saved settings;
 Project is inspection only. Session/Home reuse Global's renderer and editors; Project-owned rows
 have a read-only value and separate Project info pill, explicit overrides have Overridden/Revert,
