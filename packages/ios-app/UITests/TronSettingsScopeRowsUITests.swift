@@ -33,10 +33,9 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         shot("1651-home-settings-\(dark ? "dark" : "light")")
         models.tap()
         expandSheet(app, title: "Models")
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.ref'"))
-            .firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        // The direct model/thinking card belongs to Manage Home, not its delegation sheet.
+        // Direct selection/receipts remain covered by the model and shared-thinking UI journeys.
         shot("1651-home-models-\(dark ? "dark" : "light")")
-        assertOverriddenRow(app, "settings-row-model.ref_role_chat_", title: "Model", value: #"^Claude Opus 5\.5$"#)
         assertOverriddenRow(app, "settings-row-model.queue_role_worker_", title: "Worker models", value: "^2 models$")
         assertOverriddenRow(app, "settings-row-model.queue_role_subagent_", title: "Subagent models", value: "^3 models$")
         // A short drag brings Background models fully on screen, clear of the top bar.
@@ -63,7 +62,7 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let toolsLink = app.buttons["settings-section-tools-open"]
         XCTAssertTrue(toolsLink.waitForExistence(timeout: 8), app.debugDescription)
         shot("1651-session-settings-\(dark ? "dark" : "light")")
-        let content = element(app, "session-settings-content")
+        let content = element(app, "session-project-settings")
         // Global Settings' groups of drill-in rows, not inline editors.
         XCTAssertTrue(content.staticTexts["Agent"].exists, content.debugDescription)
         XCTAssertTrue(content.staticTexts["Tools & Extensions"].exists, content.debugDescription)
