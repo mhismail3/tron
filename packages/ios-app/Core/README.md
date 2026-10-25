@@ -35,6 +35,9 @@ the hosted test targets link.
   owner: no duplicate copies, re-export shims or compatibility typealiases.
 - **Transport.** Epoch ownership, deadlines, the shared ping grid, frame and `JSONValue` ceilings
   and decoding are specified in [Gateway connection and events](../docs/events.md).
+- **Event delivery.** One `GatewayEventHub` owns buffering, coalescing, epoch retirement,
+  cancellation and stream completion for its client lifetime. `GatewayEventStream` construction
+  is Core-internal through its explicit initializer; the backing hub stays file-private.
 - **Requests.** Each request owns its send and timeout tasks through queued → sending → sent;
   failure after send begins is a local, non-Codable possibly-sent error the Gateway cannot forge.
 - **HTTP.** Idempotent bodiless GET/HEAD (media, exports, live-view frames) share one long-lived

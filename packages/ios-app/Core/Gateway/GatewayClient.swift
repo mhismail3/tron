@@ -403,6 +403,10 @@ package struct GatewayEventStream: AsyncSequence, Sendable {
 
     fileprivate let hub: GatewayEventHub
 
+    internal init(hub: GatewayEventHub) {
+        self.hub = hub
+    }
+
     package struct AsyncIterator: AsyncIteratorProtocol {
         fileprivate let hub: GatewayEventHub
 
