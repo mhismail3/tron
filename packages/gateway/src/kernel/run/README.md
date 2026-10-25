@@ -10,6 +10,8 @@ mutex-ordered `orderedRuntime` read. Profile modules supply domain recipes over
 those operations; no Registry-produced Home provider exists. The actual K2 frame is
 `runtime-slot.ts`; the runtime pair retains the `gateway/run` logical owner.
 Worker binding/control transfer remains separate from physical native ownership.
+Its control identity and shared diagnostics are K5 contracts (`worker-contract.ts`),
+not dependencies on a module's dispatcher.
 Ordinary extension registration reads the composition-configured order on the
 actual K3 host; native frames do not select product modules or keep another list.
 

@@ -1,3 +1,4 @@
+import type { TaskWorkerControl, TaskWorkerDiagnostic } from "../delegation/worker-contract.js";
 import * as activityProjection from "../projection/activity.js";
 import * as sessionPages from "../projection/session-pages.js";
 import { SnapshotProjection } from "../projection/snapshot.js";
@@ -321,7 +322,7 @@ export interface RuntimeSlotDependencies {
     taskId: string; sessionId: string; operationId: string | null; state: string; resolvedFrom?: string; slot: RuntimeSlot;
   }>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
-  homeTaskDiagnostic?: (record: import("../../modules/home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
+  homeTaskDiagnostic?: (record: TaskWorkerDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
@@ -5760,14 +5761,14 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }
   }
 
-  async steerHomeTask(control: import("../../modules/home/home-task-dispatcher.js").HomeTaskControlRequest, text: string) {
+  async steerHomeTask(control: TaskWorkerControl, text: string) {
     return this.prompt(text, [], "steer", undefined, undefined, {
       operationId: randomUUID(), taskFence: structuredClone(control),
       origin: { kind: "gateway", ownerId: control.taskId, title: "Home steering", confidence: "boundary" }, onTerminal: () => {},
     });
   }
 
-  async stopHomeTask(control: import("../../modules/home/home-task-dispatcher.js").HomeTaskControlRequest): Promise<void> {
+  async stopHomeTask(control: TaskWorkerControl): Promise<void> {
     if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
       || this.taskWorker.identity.operationId !== control.operationId) {
       throw new GatewayError("conflict", "Task operation changed before Stop");
@@ -5778,7 +5779,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** Interrupts only the task worker's in-flight tool calls (#1189): each ends with a result
    * naming `by`, and the worker's turn continues with the optional steering `text`. Returns the
    * interrupted tools' names. */
-  async interruptHomeTask(control: import("../../modules/home/home-task-dispatcher.js").HomeTaskControlRequest, by: string, text?: string): Promise<string[]> {
+  async interruptHomeTask(control: TaskWorkerControl, by: string, text?: string): Promise<string[]> {
     if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
       || this.taskWorker.identity.operationId !== control.operationId) {
       throw new GatewayError("conflict", "Task operation changed before Interrupt");

@@ -1,3 +1,4 @@
+import type { TaskWorkerControl, TaskControlRefusalReason, TaskWorkerDiagnostic } from "../../kernel/delegation/worker-contract.js";
 import { isUsageLimitError, type QueueModelState } from "../../providers/model-queue-extension.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { AssistantMessage, ImageContent } from "../../kernel/pi/ai.js";
@@ -8,7 +9,7 @@ import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../../kernel/run/invocation-receipts.js";
 import { OwnedSessionDispatch, type OwnedOperationDeadline } from "../../kernel/delegation/owned-session-dispatch.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/run/invocation-receipts.js";
-import { GatewayError, type GatewayErrorCode } from "../../errors.js";
+import { GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
 import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskFailureCause, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
@@ -28,12 +29,9 @@ import { HostPressure, type HostPressureDiagnostic } from "./host-pressure.js";
 /** One shared home.taskList store pass and the readers waiting on it. */
 interface ListFlight { result: Promise<HomeTaskPage>; readers: number; controller: AbortController }
 
-/** Why a Home control was refused: the owner's known refusal, or else the typed error's code. */
-export type HomeTaskControlRefusalReason = "stale-operation" | "no-live-worker" | "invalid-steering-text"
-  | "steer-not-admitted" | "operation-changed" | "operation-guard-mismatch" | "action-unavailable" | "home-generation-changed" | GatewayErrorCode;
 /** Known refusal messages of the control owners, mapped to finite reasons. Their text names no
  * identifier, but a typed error's message is not a privacy boundary, so only these texts pass. */
-const CONTROL_REFUSAL_REASONS: ReadonlyMap<string, HomeTaskControlRefusalReason> = new Map([
+const CONTROL_REFUSAL_REASONS: ReadonlyMap<string, TaskControlRefusalReason> = new Map([
   ["Stale or terminal task operation", "stale-operation"],
   ["Task has no live worker; stop settles it", "no-live-worker"],
   ["Invalid task steering text", "invalid-steering-text"],
@@ -43,22 +41,15 @@ const CONTROL_REFUSAL_REASONS: ReadonlyMap<string, HomeTaskControlRefusalReason>
 ]);
 
 export type HomeTaskDiagnostic =
-  | { event: "home.task.report-reminder"; taskHash: string; operationHash: string }
+  | TaskWorkerDiagnostic
   | HomeTaskAuthorizationDiagnostic
   | HomeTaskStoreDiagnostic
   | HomeWakeDiagnostic
-  | { event: "home.task.producer-refused"; taskHash: string; reason: import("../../kernel/delegation/task-worker-extension.js").HomeTaskProducerRefusal }
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
   | { event: "home.task.subagents"; taskHash: string; operationHash: string; started: number; stoppedAtEnd: number | null; noticesUndelivered: number }
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null; errorCode?: string; failureCause?: HomeTaskFailureCause }
   | { event: "home.task.checkin"; taskHash: string; operationHash: string; revision: number; attention: HomeTaskCheckin["attention"] }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }
-  | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
-  /** The worker session's canonical name changed (#1336); the title itself is never logged. */
-  | { event: "home.task.control"; taskHash: string; operationHash: string | null; action: "rename"; disposition: "accepted" }
-  | { event: "home.task.control"; taskHash: string; operationHash: string; action: "interrupt"; disposition: "accepted"; calls: number }
-  /** A rejected control, not proof cancellation had no effect. An early refusal may have no operation yet. */
-  | { event: "home.task.control"; taskHash: string; operationHash?: string; action: "steer" | "interrupt" | "stop" | "rename"; disposition: "refused"; reason: HomeTaskControlRefusalReason }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
   | { event: "home.task.dispatch-stage"; taskHash: string; stage: HomeTaskDispatchStage; outcome: "slow" | "timeout" | "cancelled"; durationMs: number }
   | HostPressureDiagnostic
@@ -78,7 +69,6 @@ export interface HomeTaskOwnerSettlement {
   markerEntryId: string; terminalEntryId: string; settlementEntryId: string; stoppedAtEnd: number;
 }
 export type HomeTaskStatus = HomeTaskRecord & HomeTaskDisplay & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns; ownerSettlement: HomeTaskOwnerSettlement | null };
-export interface HomeTaskControlRequest { taskId: string; operationId: string }
 /** A task as Home's `task` tool lists it: enough to choose and send the next control. */
 export interface HomeTaskControlRow {
   taskId: string;
@@ -108,7 +98,7 @@ function editDistance(a: string, b: string): number {
   return previous[b.length]!;
 }
 /** Resume a settled task in place: `taskId`/`operationId` name the stopped task's exact operation. */
-export interface HomeTaskResumeRequest extends HomeTaskControlRequest { text?: string }
+export interface HomeTaskResumeRequest extends TaskWorkerControl { text?: string }
 
 /** The one successor of a task: `<base>.resume-<n+1>` for `<base>.resume-<n>`, else `<id>.resume-1`. */
 export function successorTaskId(taskId: string): string {
@@ -802,7 +792,7 @@ export class HomeTaskDispatcher {
     });
   }
 
-  async steer(control: HomeTaskControlRequest & { text: string }): Promise<void> {
+  async steer(control: TaskWorkerControl & { text: string }): Promise<void> {
     await this.refusingControl("steer", control, async () => {
       const task = await this.activeControl(control);
       // A steer would start a fresh turn in a session no task operation owns.
@@ -816,7 +806,7 @@ export class HomeTaskDispatcher {
   /** Interrupts only the running worker's in-flight tool calls (#1189). The optional text is
    * queued as steering before the abort, so the worker reads it right after the interrupted results; the
    * worker, its session and its task keep running. Returns the interrupted tools' names. */
-  async interrupt(control: HomeTaskControlRequest & { text?: string }, by: string): Promise<{ interrupted: string[] }> {
+  async interrupt(control: TaskWorkerControl & { text?: string }, by: string): Promise<{ interrupted: string[] }> {
     const interrupted = await this.refusingControl("interrupt", control, async () => {
       const task = await this.activeControl(control);
       if (!this.running.has(task.taskId)) throw new GatewayError("conflict", "Task has no live worker; stop settles it");
@@ -860,7 +850,7 @@ export class HomeTaskDispatcher {
   /** Both control owners use this at their own rejection boundary. Never log error messages:
    * Home's earlier guards include caller-supplied task and operation IDs in theirs. */
   controlRefusal(action: "steer" | "interrupt" | "stop" | "rename", control: { taskId: string; operationId?: string }, error: GatewayError,
-    reason: HomeTaskControlRefusalReason = CONTROL_REFUSAL_REASONS.get(error.message) ?? error.code): GatewayError {
+    reason: TaskControlRefusalReason = CONTROL_REFUSAL_REASONS.get(error.message) ?? error.code): GatewayError {
     this.diagnostic?.({ event: "home.task.control", taskHash: hash(control.taskId),
       ...(control.operationId === undefined ? {} : { operationHash: hash(control.operationId) }), action, disposition: "refused", reason });
     return error;
@@ -868,7 +858,7 @@ export class HomeTaskDispatcher {
 
   /** Record typed control rejections without changing their error or claiming an unknown failure
    * was a refusal. Cancellation can already have taken partial effect when its owner rejects. */
-  private async refusingControl<T>(action: "steer" | "interrupt" | "stop", control: HomeTaskControlRequest, admit: () => Promise<T>): Promise<T> {
+  private async refusingControl<T>(action: "steer" | "interrupt" | "stop", control: TaskWorkerControl, admit: () => Promise<T>): Promise<T> {
     try {
       return await admit();
     } catch (error) {
@@ -889,7 +879,7 @@ export class HomeTaskDispatcher {
     return latest;
   }
 
-  async stop(control: HomeTaskControlRequest): Promise<void> {
+  async stop(control: TaskWorkerControl): Promise<void> {
     const task = await this.refusingControl("stop", control, () => this.activeControl(control));
     // An active task no launch in this process owns has no worker to stop: its live settlement
     // and that settlement's fallback both failed. The durable intent settles it (#1166).
@@ -948,7 +938,7 @@ export class HomeTaskDispatcher {
     return scored.sort((a, b) => a.score - b.score || b.createdAt - a.createdAt).slice(0, 5).map(item => item.taskId);
   }
 
-  private async activeControl(control: HomeTaskControlRequest): Promise<HomeTaskRecord> {
+  private async activeControl(control: TaskWorkerControl): Promise<HomeTaskRecord> {
     await this.assertAvailable();
     const task = await this.store.read(control.taskId);
     if (!task || task.lifecycle !== "active" || !task.sessionId || task.operationId !== control.operationId) throw new GatewayError("conflict", "Stale or terminal task operation");

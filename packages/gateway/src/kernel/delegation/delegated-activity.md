@@ -7,6 +7,10 @@ Owners: `gateway/delegation` (`delegated-provider.ts`, `child-session-admission.
 and bounded cold artifact proof), `gateway/extension-activity` and `gateway/projection`
 (`process-activity.ts`); RuntimeSlot keeps the exact process-to-child bindings.
 
+`worker-contract.ts` owns the actual control identity, finite refusal reasons and
+shared worker/control diagnostic records. Home's broader business diagnostics compose
+these records; native frames do not import the Home dispatcher for their contracts.
+
 ## Session subagent activity
 
 - `process-activity.v1` projects only structured synchronous and asynchronous subagents with

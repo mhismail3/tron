@@ -27,7 +27,8 @@
     "task-checkin.ts",
     "task-report.ts",
     "task-subagents.ts",
-    "task-worker-extension.ts"
+    "task-worker-extension.ts",
+    "worker-contract.ts"
   ],
   "dependsOn": [
     "gateway/pi",
