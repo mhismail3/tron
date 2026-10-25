@@ -34,7 +34,8 @@
     "subagent-control.ts",
     "subagent-settlement.ts",
     "worker-turn-boundary.ts",
-    "owned-operation-terminal.ts"
+    "owned-operation-terminal.ts",
+    "owned-turn-owner.ts"
   ],
   "dependsOn": [
     "gateway/pi",

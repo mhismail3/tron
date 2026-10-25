@@ -53,7 +53,7 @@ operations: RunOperations<unknown>,
       if (!trust.trusted) throw new GatewayError("trust_required", "Home task target is no longer trusted");
       if (ownership?.operationId === operations.taskWorker.identity.operationId) {
         await operations.persistTaskMarker(operationId);
-      } else if ((ownership?.kind === "subagentWake" || operations.runTerminal.sharedTaskSteering(ownership)) && operations.runTerminal.taskWait && operations.runTerminal.taskWait.wakeOperationId === undefined
+      } else if ((ownership?.kind === "subagentWake" || operations.ownedTurns.sharedTaskSteering(ownership)) && operations.ownedTurns.waitingTask && operations.ownedTurns.waitingTask.wakeOperationId === undefined
         && operations.taskWorker.acceptsSteering && operations.activeOperationId === undefined && operations.operation === undefined && !session.isStreaming) {
         // The provider's wake, or the maintainer's or Home's message (#929), continues the task this
         // operation holds open between turns; its marker stays the first one.
@@ -62,7 +62,7 @@ operations: RunOperations<unknown>,
         // The maintainer and Home share one ordered steering lane per worker (#929): a maintainer
         // message to a running task joins that lane whatever behavior the composer chose.
         if (!ownership && operations.taskWorker.acceptsSteering) behavior = "steer";
-        if (behavior !== "steer" || operations.runTerminal.liveTaskOperationId() !== operations.taskWorker.identity.operationId
+        if (behavior !== "steer" || operations.ownedTurns.liveTaskOperationId() !== operations.taskWorker.identity.operationId
           || !session.isStreaming || !operations.taskWorker.acceptsSteering
           || (fence && (fence.taskId !== operations.taskWorker.identity.taskId || fence.operationId !== operations.taskWorker.identity.operationId))) {
           throw new GatewayError("conflict", "Stale or settled task operation cannot accept steering");
@@ -83,14 +83,14 @@ operations: RunOperations<unknown>,
       operations.contextPolicies.get(session)?.apply();
     }
     let queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
-    if (ownership && operations.runTerminal.ownedTerminalObservers.has(operationId)) {
+    if (ownership && operations.ownedTurns.observers.has(operationId)) {
       throw new GatewayError("conflict", "Automation operation is already registered", true);
     }
     const intent = preparePromptIntent(operations, session, text, images, behavior, queueDisplay, ownership, operationId, redelivery, prepared);
     const { invocationId, invocationSource, invocationName, invocation, queueAdmissionDisplay } = intent;
     if (queuesIntoActiveRun) operations.runQueue.validateAdmission(queueAdmissionDisplay, redelivery);
 
-    if (ownership && ownership.kind !== "subagentWake" && ownership.kind !== "homeWake") operations.runTerminal.ownedTerminalObservers.set(operationId, ownership.onTerminal);
+    if (ownership && ownership.kind !== "subagentWake" && ownership.kind !== "homeWake") operations.ownedTurns.observers.set(operationId, ownership.onTerminal);
     let operationWork!: GatewayWorkHandle;
     let preflightStarted = false;
     // Whether Pi had no run (starting or live) when this input was admitted; a
@@ -166,8 +166,8 @@ operations: RunOperations<unknown>,
         operations.publishSnapshot();
       } else if (!queuesIntoActiveRun) {
         operations.activeOperationId = operationId;
-        if ((ownership?.kind === "subagentWake" || operations.runTerminal.sharedTaskSteering(ownership)) && operations.runTerminal.taskWait && operations.runTerminal.taskWait.wakeOperationId === undefined) {
-          operations.runTerminal.taskWait.wakeOperationId = operationId;
+        if ((ownership?.kind === "subagentWake" || operations.ownedTurns.sharedTaskSteering(ownership)) && operations.ownedTurns.waitingTask && operations.ownedTurns.waitingTask.wakeOperationId === undefined) {
+          operations.ownedTurns.waitingTask.wakeOperationId = operationId;
         }
         // The canonical leaf immediately before Pi sees the input is the exact
         // activation start: the input's own entry is appended inside
@@ -224,8 +224,8 @@ operations: RunOperations<unknown>,
           // must also revoke this exact pending prompt at SDK admission; an
           // aborted summary alone does not prevent Agent.prompt() starting.
           if (ownership?.signal?.aborted || operations.runAbort.abortedOperations.has(operationId)
-            || (operations.taskWorker && operationId !== operations.taskWorker.identity.operationId && operations.runTerminal.taskWait?.wakeOperationId !== operationId
-              && (!operations.taskWorker.acceptsSteering || operations.runTerminal.liveTaskOperationId() !== operations.taskWorker.identity.operationId))) {
+            || (operations.taskWorker && operationId !== operations.taskWorker.identity.operationId && operations.ownedTurns.waitingTask?.wakeOperationId !== operationId
+              && (!operations.taskWorker.acceptsSteering || operations.ownedTurns.liveTaskOperationId() !== operations.taskWorker.identity.operationId))) {
             preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
           } else if (!isExactExtensionCommand && !queuesIntoActiveRun && operations.activeOperationId !== operationId) {
             preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
@@ -284,7 +284,7 @@ operations: RunOperations<unknown>,
           sequence: operations.revision + 1,
           createdAt: new Date().toISOString(),
         }), operationWork);
-        await operations.runTerminal.notifyOwnedTerminal({
+        await operations.ownedTurns.notifyOwnedTerminal({
           lifecycle: "outcomeUnknown",
           operationId,
           invocationId,
@@ -292,7 +292,7 @@ operations: RunOperations<unknown>,
       }
       operations.runInvocations.invocations.delete(invocationId);
       operations.runWork.settleOperationWork(operationId);
-      if (!startPersisted) operations.runTerminal.ownedTerminalObservers.delete(operationId);
+      if (!startPersisted) operations.ownedTurns.observers.delete(operationId);
       // Once the canonical start receipt is durable the prompt may already
       // have reached extension hooks or the provider. Report its failure as an
       // unknown outcome so the idempotency receipt cannot be replayed, matching
@@ -382,7 +382,7 @@ operations: RunOperations<unknown>,
         sequence: operations.revision + 1,
         createdAt: new Date().toISOString(),
       }), operationWork);
-      await operations.runTerminal.notifyOwnedTerminal({
+      await operations.ownedTurns.notifyOwnedTerminal({
         lifecycle: terminalLifecycle,
         operationId,
         invocationId,

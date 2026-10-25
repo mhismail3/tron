@@ -29,6 +29,10 @@ native canonical/activity/controller projections and work owner, then calls nati
 canonical append; no Slot settlement wrapper or duplicate token index exists.
 Worker steering packets and Stop/Interrupt identity fences are K5-owned as well; the
 former Slot-specific control methods are absent. Generic per-tool interruption stays Run-owned.
+The frame composes one K5 `OwnedTurnOwner`: its sole observer map and held-task
+continuation state replace native held-turn ownership. Admission and disposal address
+that owner directly; canonical terminal classification/receipt and SDK abort I/O stay
+native. The Slot has no task-cancellation forwarding route.
 Ordinary extension registration reads the composition-configured order on the
 actual K3 host; native frames do not select product modules or keep another list.
 
@@ -72,7 +76,7 @@ actual K3 host; native frames do not select product modules or keep another list
 - `completion-facts.ts` / `run-attention.ts`: canonical completion evidence,
   runtime ownership lane, full settlement/reconciliation and rebind scope.
 - `run-terminal.ts`: operation observation and the bounded presentation latch,
-  final-run notification, exact terminal observers and held task/wake dispatch.
+  final-run notification and canonical terminal classification. K5 owns held task/wake dispatch.
   A waiting episode is claimed before notification admission suspends, so overlapping
   terminals share it; failed admission releases only its still-current episode.
 - `run-invocations.ts`: live invocation/failure state, canonical terminal dedupe,

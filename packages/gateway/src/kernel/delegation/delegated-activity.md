@@ -42,6 +42,14 @@ index. Canonical append and work handles remain native; the same operation owner
 passed to the append after the live notice join. Native exposes its existing atomic
 activity/controller projections and the single K5 waiter owner.
 
+`OwnedTurnOwner` is the one session-local owned-terminal observer map and held-task
+continuation authority. K2 passes its actual frame, reads this owner for admission,
+registers wake identity at the native admission boundary and reports canonical terminals
+directly. K5 keeps wake-before-own selection, own-before-task callback ordering, selected-
+branch/live-work hold decisions and exact waiting-task Stop; no native wait mirror exists.
+`owned-operation-terminal.ts` defines the canonical terminal contract and waiting-Stop code.
+Native completion classification, receipt persistence and abort I/O remain K2.
+
 ## Session subagent activity
 
 - `process-activity.v1` projects only structured synchronous and asynchronous subagents with

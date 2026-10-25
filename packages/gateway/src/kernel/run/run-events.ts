@@ -213,7 +213,7 @@ export class RunEventsOwner {
                 settledOperationId === completion.operationId ? completion.id : undefined,
               );
               await this.operations.runAttention.beginAttentionSettlement(completion);
-              if (terminal) await this.operations.runTerminal.notifyOwnedTerminal(terminal);
+              if (terminal) await this.operations.ownedTurns.notifyOwnedTerminal(terminal);
               const completionOperationId = completion.operationId ?? this.operations.runTerminal.completionOperationId(completion.id);
               if (completionOperationId) this.operations.runTerminal.retireOperationObservation(completionOperationId);
               this.operations.runTerminal.retireOperationObservation(settledOperationId);

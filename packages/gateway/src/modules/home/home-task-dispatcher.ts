@@ -618,7 +618,7 @@ export class HomeTaskDispatcher {
       const terminal = new Promise<OwnedOperationTerminal>(done => { resolve = done; });
       const cancellation = async (reason = "interrupted") => {
         reports.cancel();
-        await slot.cancelHomeTaskOperation(operationId, reason);
+        await slot.ownedTurns.cancelHomeTaskOperation(operationId, reason);
       };
       // Arm before the first asynchronous prompt preflight; cancellation never
       // queues behind the lane whose blocked admission it must interrupt. The same

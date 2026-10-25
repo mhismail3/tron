@@ -15,6 +15,7 @@ import { RunPersistence } from "./run-persistence.js";
 import { RunWorkOwner } from "./run-work-owner.js";
 import { RunAbortOwner } from "./run-abort-owner.js";
 import { RunTerminalOwner } from "./run-terminal.js";
+import { OwnedTurnOwner } from "../delegation/owned-turn-owner.js";
 import { RunAttentionOwner } from "./run-attention.js";
 import { RunInvocations } from "./run-invocations.js";
 import { ManualCompactionOwner } from "./manual-compaction.js";
@@ -39,6 +40,7 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
   readonly queueCommands = new RunQueueCommands(this);
   readonly heldQueue = new HeldPromptQueue(this);
   readonly runTerminal = new RunTerminalOwner(this);
+  readonly ownedTurns = new OwnedTurnOwner(this);
   readonly runAttention = new RunAttentionOwner(this);
   /** Gateway-owned causal graph. Canonical receipts remain the durable source;
    * these bounded maps are only the live projection used by snapshots. */
@@ -375,8 +377,8 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
     if (!worker?.acceptsSteering || this.disposed || this.shuttingDown || this.trustReloadPending || this.runPersistence.hasBlockedOwnershipWrite) return false;
     if (this.phase === "compacting" || this.activeOperationId !== undefined && this.runAbort.abortedOperations.has(this.activeOperationId)) return false;
     const session = this.runtime.session;
-    if (session.isStreaming) return this.runTerminal.liveTaskOperationId() === worker.identity.operationId;
-    return this.runTerminal.taskWait !== undefined && this.runTerminal.taskWait.wakeOperationId === undefined
+    if (session.isStreaming) return this.ownedTurns.liveTaskOperationId() === worker.identity.operationId;
+    return this.ownedTurns.waitingTask !== undefined && this.ownedTurns.waitingTask.wakeOperationId === undefined
       && this.activeOperationId === undefined && this.operation === undefined;
   }
 

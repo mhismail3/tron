@@ -1695,7 +1695,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         // bash schema is nevertheless the exact SDK definition registered here.
         ...(directBashProcesses ? { customTools: [
           directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
-          ...(this.taskWorker ? [this.taskWorker.checkinTool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.runTerminal.taskTurnOperationId(this.activeOperationId) : undefined), this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.runTerminal.taskTurnOperationId(this.activeOperationId) : undefined,
+          ...(this.taskWorker ? [this.taskWorker.checkinTool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.ownedTurns.taskTurnOperationId(this.activeOperationId) : undefined), this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.ownedTurns.taskTurnOperationId(this.activeOperationId) : undefined,
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
@@ -2098,7 +2098,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       if (this.liveProfile().chapter || this.dependencies.sessionLineage().state(this.id).lineageId) {
         throw new GatewayError("conflict", "A Home chapter cannot run a task");
       }
-      if (this.taskWorker?.controlsActive || this.runTerminal.taskWait || this.activeOperationId !== undefined || this.operation !== undefined
+      if (this.taskWorker?.controlsActive || this.ownedTurns.waitingTask || this.activeOperationId !== undefined || this.operation !== undefined
         || this.catalogHasActiveSubagents || this.isAgentAdmissionSettling) {
         throw new GatewayError("conflict", "The worker session is still running; stop it before resuming");
       }
@@ -5627,12 +5627,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }
   }
 
-  /** Task cancellation follows the root prompt owner, not its disposable
-   * presentation primitive (automatic compaction/retry may have another ID). */
-  cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
-    return this.runTerminal.cancelHomeTaskOperation(operationId, reason);
-  }
-
   /** Starts one Home wake: the inbox's pending results start the run. */
   async admitHomeWake(): Promise<{ delivered: boolean }> {
     let delivered = false;
@@ -6506,12 +6500,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     // An admitted automation must never lose its terminal waiter when runtime
     // teardown wins a callback race. Persist uncertainty while the canonical
     // manager is still writable; recovery can then block instead of replaying.
-    for (const operationId of [...this.runTerminal.ownedTerminalObservers.keys()]) {
+    for (const operationId of [...this.ownedTurns.observers.keys()]) {
       const invocation = this.runInvocations.invocationForOperation(operationId);
       if (invocation) {
         await this.runInvocations.terminalizeInvocation(operationId, "outcomeUnknown", "runtime-disposed");
       } else {
-        await this.runTerminal.notifyOwnedTerminal({
+        await this.ownedTurns.notifyOwnedTerminal({
           lifecycle: "outcomeUnknown",
           operationId,
           invocationId: operationId,

@@ -64,7 +64,7 @@ export class RunAbortOwner {
     // cancellation instead of clearing the persistence fence.
     this.operations.assertAvailable();
     const taskOperationId = this.operations.taskWorker?.identity.operationId;
-    const taskOwnsForeground = taskOperationId !== undefined && this.operations.runTerminal.liveTaskOperationId() === taskOperationId;
+    const taskOwnsForeground = taskOperationId !== undefined && this.operations.ownedTurns.liveTaskOperationId() === taskOperationId;
     const targetsTask = expectedOperationId === taskOperationId
       || (expectedOperationId === undefined && (taskOwnsForeground || !this.operations.operation))
       || (taskOwnsForeground && expectedOperationId === this.operations.operation?.id);

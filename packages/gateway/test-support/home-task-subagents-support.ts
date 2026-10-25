@@ -68,7 +68,7 @@ export const holdingAsyncLaunch = (id: string, task = "HOLD-CHILD background sea
 /** The turn has ended and the task holds its operation open between turns, waiting for its live runs.
  * The hold is recorded when the turn's terminal is, so this does not read `isBusy`, which live runs keep set. */
 export async function waitBetweenTurns(slot: object): Promise<void> {
-  await waitFor(() => (slot as { runTerminal: { taskWait?: unknown } }).runTerminal.taskWait !== undefined, "task waits between turns", bound);
+  await waitFor(() => (slot as { ownedTurns: { waitingTask?: unknown } }).ownedTurns.waitingTask !== undefined, "task waits between turns", bound);
 }
 
 /** The model's context as the faux provider passes it to a scripted response. */

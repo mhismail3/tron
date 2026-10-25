@@ -54,7 +54,7 @@ export class RunInvocations {
     assistantCompletionId?: string,
   ): Promise<void> {
     const terminal = await this.persistInvocationTerminal(operationId, lifecycle, errorCode, owner, assistantCompletionId);
-    if (terminal) await this.operations.runTerminal.notifyOwnedTerminal(terminal);
+    if (terminal) await this.operations.ownedTurns.notifyOwnedTerminal(terminal);
   }
 
   async persistInvocationTerminal(
@@ -124,7 +124,7 @@ export class RunInvocations {
       this.operations.runWork.get(operationId), completionId,
     ).then(async terminal => {
       if (attention) await attention;
-      if (terminal) await this.operations.runTerminal.notifyOwnedTerminal(terminal);
+      if (terminal) await this.operations.ownedTurns.notifyOwnedTerminal(terminal);
       this.operations.runAbort.abortedOperations.delete(operationId);
     }).catch(() => {});
   }
