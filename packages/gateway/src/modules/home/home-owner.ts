@@ -585,7 +585,7 @@ export class HomeOwner {
     if (!owner) return undefined;
     const path = await this.options.runtimes.sessionFile(sessionId);
     const delivered = new Set<string>();
-    if (path) await visitCanonicalSessionEntries({ path, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+    if (path) await visitCanonicalSessionEntries({ path, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes, durable: true,
       visit: entry => { for (const id of settingsOutcomeRequestIds([entry.raw])) delivered.add(id); } });
     return owner.takeOutcomes(sessionId, [...delivered]);
   }
