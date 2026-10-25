@@ -232,9 +232,9 @@ prints the delta table that every slice summarizes in its closing comment, and
 1. **One slice = one issue, one worktree, one owner module.** Claim with
    `scripts/tron work start`. Announce the exact files in the module issue
    before editing.
-2. **Lock before touch.** The module's locks exist and pass on the base before
-   its first refactor slice. If they are missing, the next slice is a *lock
-   slice*.
+2. **Lock before touch.** The module's affected non-deferred locks pass on base;
+   serial integration locks follow the explicit verify batch rule. Missing locks
+   still require a *lock slice*, not missing evidence disguised as a pass.
 3. **Goldens are immutable in refactor slices.** If a golden would change, the
    slice is not a refactor. Stop, then either fix the slice or escalate it as
    a behavior/migration decision.
@@ -293,7 +293,7 @@ prints the delta table that every slice summarizes in its closing comment, and
   their module, and shared test support is small and owned.
 - **D5 Verification is selectable from manifests and conservative.** Unknown
   or unowned files, kernel or contract changes, and config/toolchain changes
-  widen the selection to all locks. This avoids the #1259 selector failure:
+  widen batch coverage to all locks while affected checks run now. This avoids the #1259 selector failure:
   dynamic edges are declared, not inferred.
 
 ### 4.4 Multi-agent-native design principles (product-time)
@@ -784,8 +784,9 @@ No Stable handoff is needed, because there is no runtime change.
    Check `scripts/tron work status` for overlaps.
 3. Post the **announcement** (Appendix C) in the module issue: exact files,
    change type, locks to run, and risk class.
-4. Baseline: `scripts/tron verify --module <m>` on your base. If it fails on
-   base, stop and file a bug. Don't fix unrelated breakage inside the slice.
+4. Baseline: run the affected non-deferred locks on base using the planned files
+   and their existing runners. `verify --module` is a complete scoped diagnostic,
+   not a mandatory per-slice serial run. File baseline failures separately.
 
 ### 8.2 Change
 - One change type per commit (§4.2.4). Prefer a `move` commit followed by a

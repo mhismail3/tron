@@ -128,9 +128,9 @@ no queue, gate or auto-revert.
 - [Plan](docs/restructure/plan.md) §4.2/§8 govern, aiming at its goals G1–G6 (§3). One slice =
   one issue, worktree and owner module, files announced in its module issue first; one
   change type per commit, never move and change together.
-- **Lock before touch:** refactors need the module's locks passing on base; a golden change needs
-  maintainer review of the intended before/after beside the actual diff. **Hard checks:** upward,
-  two-way and Pi-seam pairs only shrink; one owner per file; no new production file > 800 lines.
+- **Lock before touch:** affected non-deferred locks pass on base; serial locks follow batch rules.
+  Golden changes need maintainer before/after review beside the actual diff. **Hard checks:**
+  upward/two-way/Pi-seam pairs only shrink; one owner per file; no new production file > 800 lines.
 - **Feature pause for every worker:** no new features in `RuntimeSlot`, `RuntimeRegistry`,
   `GatewayService`, `GatewayServer`, `gateway-main`, `protocol/types.ts`, `projection.ts`,
   `AppModel`, `SessionPresentationStore`, `ChatView`, `GatewayClient` until their target
