@@ -120,7 +120,7 @@ enforces its executable bit and terminal tests open a real PTY.
 ```bash
 scripts/tron verify --module gateway/machine
 scripts/tron test gateway src/machine/terminal-service.integration.test.ts \
-  src/sessions/project-root.integration.test.ts
+  src/kernel/resources/project-root.integration.test.ts
 cd packages/gateway && npm run test:mac-terminal   # needs the tailnet and Swift 6.2
 ```
 
