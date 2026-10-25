@@ -1,7 +1,7 @@
 import type { TaskWorkerControl, TaskControlRefusalReason } from "../../kernel/delegation/worker-contract.js";
 import type { InputEnvelope, InputDelivery, InputTrigger } from "../../kernel/host/input-admission.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
-import type { SettingsOutcomeMessage } from "../../kernel/settings/tool-contract.js";
+import { settingsOutcomeRequestIds } from "../../kernel/settings/tool-contract.js";
 import type { ImageContent } from "../../kernel/pi/ai.js";
 import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
@@ -148,7 +148,7 @@ export interface HomeOwnerOptions {
   /** Knowledge supplies the learned profile section of Home's system prompt. */
   knowledge: () => KnowledgeService | undefined;
   /** The settings approvals owner: Home's settled requests wake it as their own turn (#1642). */
-  settingsOutcomes?: () => Pick<SettingsChangePath, "hasUntoldOutcomes" | "takeOutcomes" | "returnOutcomes" | "onOutcome"> | undefined;
+  settingsOutcomes?: () => Pick<SettingsChangePath, "takeOutcomes" | "onOutcome"> | undefined;
 }
 
 /** Tron Home's neutral workspace. It is never part of a Project, so project
@@ -209,8 +209,6 @@ export class HomeOwner {
    * asks for another attempt when it ends, so a refused or failed wake cannot
    * retry itself in a loop. */
   private lastWakeDelivered = false;
-  /** Settings outcomes a wake took as its trigger, returned if the trigger never lands. */
-  private readonly settingsTriggers = new Map<string, SettingsOutcomeMessage>();
   private settingsWatch: { owner: object; stop: () => void } | undefined;
 
   constructor(private readonly options: HomeOwnerOptions) {
@@ -555,21 +553,19 @@ export class HomeOwner {
     if (trigger || delivery !== "wake") return trigger;
     // No task result: a settled settings request is the wake's trigger. A task-result wake and
     // a user turn hear the same outcomes from the settings tool's agent start instead.
-    const message = await this.options.settingsOutcomes?.()?.takeOutcomes(sessionId);
+    const message = await this.settingsOutcome(sessionId);
     if (!message) return undefined;
-    this.settingsTriggers.set(message.details.eventId, message);
     return { taskId: message.details.taskId, message };
   }
 
   /** A wake whose trigger never reached the canonical session goes back to pending. */
   async releaseWakeTrigger(taskId: string, operationId: string, eventId: string): Promise<void> {
-    const settings = this.settingsTriggers.get(eventId);
-    if (settings) { this.settingsTriggers.delete(eventId); await this.options.settingsOutcomes?.()?.returnOutcomes(settings); return; }
+    // Selection did not mutate the approvals store; an unappended settings trigger remains untold.
+    if (eventId.startsWith("settings-outcome:")) return;
     await this.inbox.releaseTrigger(taskId, operationId, eventId);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
-    this.settingsTriggers.clear();
     const route = this.wakeRoute(sessionId);
     if (route && await this.inboxAvailable()) await this.inbox.settle(route, operationId);
   }
@@ -580,6 +576,18 @@ export class HomeOwner {
   noteHomeIdle(sessionId: string, by: "user" | "wake"): void {
     if (!this.wakeRoute(sessionId)?.enabled) return;
     if (by === "user" || this.lastWakeDelivered) this.requestWake();
+  }
+
+  /** Reconcile durable delivery proof before selecting a wake. A crash before append
+   * leaves the request untold; a crash after append is acknowledged on recovery. */
+  private async settingsOutcome(sessionId: string) {
+    const owner = this.options.settingsOutcomes?.();
+    if (!owner) return undefined;
+    const path = await this.options.runtimes.sessionFile(sessionId);
+    const delivered = new Set<string>();
+    if (path) await visitCanonicalSessionEntries({ path, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+      visit: entry => { for (const id of settingsOutcomeRequestIds([entry.raw])) delivered.add(id); } });
+    return owner.takeOutcomes(sessionId, [...delivered]);
   }
 
   /** The settings owner nudges Home when a request it made settles; the outcome itself
@@ -623,7 +631,7 @@ export class HomeOwner {
     if (this.unavailable || !record) return "done";
     const sessionId = homeSessionId(record);
     const tasks = await this.inboxAvailable() && (await this.inbox.pendingTasks(record.homeId)).length > 0;
-    if (!tasks && !(await this.options.settingsOutcomes?.()?.hasUntoldOutcomes(sessionId))) { this.lastWakeDelivered = false; return "done"; }
+    if (!tasks && !(await this.settingsOutcome(sessionId))) { this.lastWakeDelivered = false; return "done"; }
     // An attempt runs after recovery, so the task namespace and the session catalog are settled here.
     // A Home that never wrote its conversation has no session to run; a wake materializes a reserved successor (#1518).
     const refusal = this.reservedChapter(sessionId) === undefined && !(await this.options.runtimes.sessionPresent(sessionId)) ? "unavailable" : await this.homeRefusal(record);
@@ -1434,6 +1442,8 @@ export class HomeOwner {
 
   /** Release the memory store and the request seams. */
   async dispose(): Promise<void> {
+    this.settingsWatch?.stop();
+    this.settingsWatch = undefined;
     this.policies.clear();
     const memory = this.memory;
     this.memory = undefined;

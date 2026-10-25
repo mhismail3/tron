@@ -31,8 +31,14 @@ ordered queue summaries, Pi-compatible tool-selection composition and neutral re
 (store snapshots, outside marks, floor overrides, Git state and option/format sources). `settings-record.ts` owns append-only audit
 segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
 approvals (settings changes and registered approval actions), their admission bounds,
-settlement, expiry and untold outcomes; `settings-change.ts` arms one timer for the earliest
-pending deadline and nudges `onOutcome` listeners (Home's wake) when an outcome settles.
+settlement, expiry and untold outcomes; composition calls `settings-change.ts`'s `start()`
+to arm one timer for the earliest pending deadline and `onOutcome` nudges Home when an
+outcome settles. Constructing an inspection-only owner starts no background work.
+Expiry shares each target's decision stripe. `dispose()` cancels/fences arming and joins
+accepted expiry work before composition releases the stores. Outcome selection does not
+consume requests; canonical custom-entry request IDs acknowledge delivery. Approval
+actions claim execution durably before effects; interrupted executions fail with uncertain
+effects instead of replaying.
 `scope-resolution.ts` owns binding admission from declared Session/Project permissions,
 canonical targets, the public/storage scope mapping and the canonical sorted-qualifier
 instance identity used by resolution badges and outside-change observation.
