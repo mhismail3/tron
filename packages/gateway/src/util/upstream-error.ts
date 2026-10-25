@@ -1,4 +1,4 @@
-import { redact, redactCredentials } from "./credential-redaction.js";
+import { redact, redactCredentials, redactCredentialField } from "./credential-redaction.js";
 
 /** Transport-independent classification of an upstream failure. Queue policy,
  * account-usage reads and transcript presentation consume these same facts. */
@@ -28,9 +28,7 @@ export function redactedUpstreamError(raw: string): string {
   if (start >= 0) {
     try {
       const value: unknown = JSON.parse(raw.slice(start));
-      const clean = JSON.stringify(value, (key, entry: unknown) =>
-        /^(?:authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|password|secret|credential)$/iu.test(key)
-          ? "[REDACTED]" : typeof entry === "string" ? redactCredentials(redact(entry)) : entry);
+      const clean = JSON.stringify(value, redactCredentialField);
       return redactCredentials(raw.slice(0, start)) + clean;
     } catch { /* Non-JSON diagnostics keep their original layout. */ }
   }

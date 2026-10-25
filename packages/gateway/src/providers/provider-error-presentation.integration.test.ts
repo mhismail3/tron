@@ -36,6 +36,7 @@ it("projects friendly redacted errors identically through live and persisted rea
       ["other", "Request timed out", "The connection to other timed out", "timeout"],
       ["other", "Request aborted", "Request cancelled", "aborted"],
       ["other", '{"error":{"type":"custom_error","message":"Please try another region"}}', "Please try another region", "unknown"],
+      ["other", '{"error":{"message":"Upstream refused","headers":{"x-api-key":"fixturecredential12345","client_secret":"fixturecredential12345"}}}', "Upstream refused", "unknown"],
       ["other", "A plain upstream failure", "A plain upstream failure", "unknown"],
       ["other", "Not Found", "The selected model was not found by other", "not-found"],
       ["other", '{"error":{"message":"Failed with Bearer fixturecredential12345","api_key":"fixturecredential12345"}}', "Failed with Bearer [REDACTED]", "unknown"],

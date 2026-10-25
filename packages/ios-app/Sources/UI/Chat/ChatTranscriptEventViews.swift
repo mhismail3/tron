@@ -167,7 +167,7 @@ struct ChatNotificationDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if let run = presentation.errorRun {
-                        ChatProviderErrorDetails(run: run)
+                        ChatProviderErrorDetails(run: run).id(detailID)
                     }
                     if let detail = presentation.detail {
                         Text(detail)

@@ -35,9 +35,9 @@ struct ChatProviderErrorDetails: View {
                         details(occurrence)
                     } label: {
                         TronListRow(.init(title: occurrence.title, timestamp: occurrence.timeLabel))
+                            .accessibilityIdentifier("chat-error-occurrence-\(occurrence.id)")
                     }
                     .tint(accent)
-                    .accessibilityIdentifier("chat-error-occurrence-\(occurrence.id)")
                 }
             }
         }
