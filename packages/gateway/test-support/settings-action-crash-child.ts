@@ -35,6 +35,6 @@ let decision: string;
 try {
   decision = (await settingsChanges.decide(request.requestId, { digest: request.digest, approved: true, decidedBy: { kind: "ui", id: "fixture" } })).status;
 } catch (error) { decision = error instanceof Error ? error.message : String(error); }
-const outcome = await settingsChanges.takeOutcomes(actor.sessionId);
+const outcome = await settingsChanges.takeOutcomes([actor.sessionId]);
 process.stdout.write(`RESULT:${JSON.stringify({ decision, outcome, effects: await readFile(join(root, "effects.txt"), "utf8") })}\n`);
 await settingsChanges.dispose();

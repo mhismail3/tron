@@ -208,17 +208,17 @@ describe("settings approval outcomes", () => {
     const actor = { kind: "agent" as const, id: "delivery-requester", sessionId: "delivery-requester" };
     const request = await f.settingsChanges.change({ kind: "global" }, [RETRIES(5) as never], { actor, reason: "Provider recovery", request: true });
     await f.decide(request.approval!.requestId, request.approval!.digest, false);
-    const first = await f.settingsChanges.takeOutcomes(actor.sessionId);
+    const first = await f.settingsChanges.takeOutcomes([actor.sessionId]);
     expect(first!.details.requests.map(item => item.requestId)).toEqual([request.approval!.requestId]);
     // No canonical append occurred: selecting a wake that is refused changes no durable delivery state.
-    expect(await new SettingsApprovals(f.tronHome).hasUntold(actor.sessionId)).toBe(true);
-    expect(await f.settingsChanges.takeOutcomes(actor.sessionId)).toEqual(first);
+    expect(await new SettingsApprovals(f.tronHome).hasUntold([actor.sessionId])).toBe(true);
+    expect(await f.settingsChanges.takeOutcomes([actor.sessionId])).toEqual(first);
     // A different requester cannot acknowledge this request's outcome.
-    await f.settingsChanges.takeOutcomes("other-requester", [request.approval!.requestId]);
-    expect(await new SettingsApprovals(f.tronHome).hasUntold(actor.sessionId)).toBe(true);
+    await f.settingsChanges.takeOutcomes(["other-requester"], [request.approval!.requestId]);
+    expect(await new SettingsApprovals(f.tronHome).hasUntold([actor.sessionId])).toBe(true);
     // The delivery owner supplies IDs from canonical entries after append/recovery.
-    expect(await f.settingsChanges.takeOutcomes(actor.sessionId, [request.approval!.requestId])).toBeUndefined();
-    expect(await new SettingsApprovals(f.tronHome).hasUntold(actor.sessionId)).toBe(false);
+    expect(await f.settingsChanges.takeOutcomes([actor.sessionId], [request.approval!.requestId])).toBeUndefined();
+    expect(await new SettingsApprovals(f.tronHome).hasUntold([actor.sessionId])).toBe(false);
   }, 60_000);
 
   it("a replacement request notifies the superseded requester's outcome listener", async () => {
@@ -231,7 +231,7 @@ describe("settings approval outcomes", () => {
       await f.settingsChanges.change({ kind: "global" }, [RETRIES(6) as never],
         { actor: { kind: "agent", id: "replacement", sessionId: "replacement" }, reason: "New provider recovery", request: true });
       expect(heard).toContain(f.home.id);
-      expect((await f.settingsChanges.takeOutcomes(f.home.id))!.details.requests).toEqual([
+      expect((await f.settingsChanges.takeOutcomes([f.home.id]))!.details.requests).toEqual([
         expect.objectContaining({ requestId: first.approval!.requestId, status: "superseded" }),
       ]);
     } finally { stop(); }
