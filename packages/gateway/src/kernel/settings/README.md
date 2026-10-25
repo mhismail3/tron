@@ -30,7 +30,9 @@ result and worker-state interfaces. `settings-types.ts` owns value validation, f
 ordered queue summaries, Pi-compatible tool-selection composition and neutral resolver inputs
 (store snapshots, outside marks, floor overrides, Git state and option/format sources). `settings-record.ts` owns append-only audit
 segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
-approvals, their admission bounds, settlement, expiry and untold outcomes.
+approvals (settings changes and registered approval actions), their admission bounds,
+settlement, expiry and untold outcomes; `settings-change.ts` arms one timer for the earliest
+pending deadline and nudges `onOutcome` listeners (Home's wake) when an outcome settles.
 `scope-resolution.ts` owns binding admission from declared Session/Project permissions,
 canonical targets, the public/storage scope mapping and the canonical sorted-qualifier
 instance identity used by resolution badges and outside-change observation.
@@ -46,7 +48,7 @@ validation; admin owns the migration transaction, backups and publication.
 ## Contract
 
 `SettingsToolAccess` resolves and changes the current session settings and drains
-its pending outcomes. Admin loads stores, supplies runtime option/format sources
+its pending outcomes as one typed `SettingsOutcomeMessage` (`tool-contract.ts`). Admin loads stores, supplies runtime option/format sources
 and applies concrete store bindings; the kernel owns read/change policy and
 transaction order. The session runtime
 supplies its own identity and appliers. Audit records
