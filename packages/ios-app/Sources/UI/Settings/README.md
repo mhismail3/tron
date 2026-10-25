@@ -9,7 +9,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
-  `SettingsChoiceSlider`, `SettingsNumberSlider`, `SettingsAutosave`.
+  `SettingsChoiceSlider`, `SettingsAutosave`.
 - Audit and approvals: `SettingsChangesView`, `SettingsChangeRow`, `SettingsApprovalsSection`.
 - Agent configuration: `ConfigurationSlider(Surface)`,
   `CustomModelsSettingsView` with `CustomModelDraftTransformation`, `DefaultToolsSettingsSection`.
@@ -28,9 +28,10 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Compaction, Trusted Projects, More Settings), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
   System (slate: Mac Terminal, Push Notifications, Setup, Logs). The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
-  Models includes thinking budgets and offered models beside worker queues. More Settings starts
-  with Agent changes (Agent approvals), then connection, queue and retry controls; there is no
-  Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
+  Models contains direct model/thinking and the task budget. Routine settings have no editor
+  exposure; explicit values retain read-only Reset/Revert and Project inspection. Compaction
+  appears only while retained values need inspection or Revert. More Settings contains Agent
+  changes and the HTTP proxy; there is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
   groups without duplicating them in More Settings.
   Notifications and Changes sit in the toolbar. Dashboard Settings exposes only global scope.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
@@ -42,14 +43,14 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   `TronSettingsSections`, including renderer-driven and conditional groups. Settings subsheets
   opt in with `hidesLoneHeading: true`: one container has no heading, multiple containers retain
   their headings, and explanatory detail remains. Top-level settings keep all group headings.
-- **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `number`, `text`,
+- **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `text`,
   `secret`, `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
   order. An unimplemented control renders its `display` read-only; an
-  undeclared group shows under its id: a value is never hidden. Options come from
+  undeclared group shows under its id. The Gateway declaration owns row exposure. Options come from
   `settings.options`, re-requested when a `dependsOn` key changes; catalog pages fence every
   completion and stop on repeated cursors. Choices open picker sheets of `TronCatalogOptionRow`
-  (native menus fail inside nested sheets, #877); numbers and ordered choices use the shared
-  anchored slider with Gateway-served bounds; a tap anywhere outside it closes and saves it, even
+  (native menus fail inside nested sheets, #877); ordered choices use the shared
+  anchored slider with Gateway-served choices; a tap anywhere outside it closes and saves it, even
   below a short embedded section. Embedded renderers inherit the enclosing sheet's slider host;
   only standalone renderers install one, so the editor uses the sheet viewport rather than its card.
   Session and Home settings place sections in Global's group
@@ -63,7 +64,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView` (scopes:
   Project, Session, Global); Home writes its saved settings, a chat its own Session scope.
   Both reuse Global's renderer and editors. Manage model cards select the three chat-model keys:
-  catalog header/Switch Model, Effort and the current model-qualified Context Window. They use the
+  catalog header/Switch Model, Effort and an explicit model-qualified Context Window for inspection/Revert. They use the
   same writes, approvals and Revert path; changing the card changes no scope semantics. The model
   header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
   Home Settings has one untitled Settings container (Models: workers/delegation only, Tools, More Settings).
@@ -118,7 +119,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 ## Invariants
 
 - No per-key native editors, defaults, placement lists or guidance: the Gateway schema is the
-  single source, and nothing is hidden.
+  single source for editing exposure, retained overrides and Project inspection.
 - Opening or dismissing a sheet never writes.
 - Accepted mutations stay with their receipt owner; presentation reads are disposable and fenced.
 - iOS never handles provider tokens or credential values.
