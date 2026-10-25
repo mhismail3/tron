@@ -10,7 +10,8 @@ the hosted test targets link.
 
 - `Gateway/`: `GatewayClient` (one authenticated WebSocket per connection epoch), protocol
   decoding (`GatewayProtocol`, `GatewayProtocolContract`), `SessionEventSynchronizer`, socket and
-  bounded HTTP transports, pairing profiles and their store, LAN pin and path snapshots.
+  bounded HTTP transports, [`GatewayEventHub`](Gateway/GatewayEventHub.swift) and its event stream,
+  pairing profiles and their store, LAN pin and path snapshots.
 - `Models/`: wire-compatible value types grouped by authority (connection, session catalog,
   transcript, runtime, resources, workspace, terminal, automations, knowledge, notifications…),
   plus `JSONValue` and `ModelDisplayFormatting`.
@@ -72,7 +73,8 @@ the hosted test targets link.
 
 ## Entry points
 
-`Gateway/GatewayClient.swift`, `Gateway/GatewayProtocol.swift`, `Gateway/GatewayProfileStore.swift`,
+`Gateway/GatewayClient.swift`, `Gateway/GatewayEventHub.swift`, `Gateway/GatewayProtocol.swift`,
+`Gateway/GatewayProfileStore.swift`,
 `Support/AppLog.swift`, `Support/ChatInteractionTrace.swift`.
 
 ## Signals
