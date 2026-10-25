@@ -17,10 +17,15 @@ struct TronSafariView: UIViewControllerRepresentable {
         let controller = SFSafariViewController(url: url, configuration: configuration)
         controller.delegate = context.coordinator
         controller.dismissButtonStyle = .close
+        controller.preferredControlTintColor = UIColor(Color.tronPrimary)
         return controller
     }
 
-    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {
+        // Only native browser controls belong to Tron; never inject theme CSS
+        // into the author-owned public page.
+        controller.preferredControlTintColor = UIColor(Color.tronPrimary)
+    }
 
     @MainActor
     final class Coordinator: NSObject, @preconcurrency SFSafariViewControllerDelegate {

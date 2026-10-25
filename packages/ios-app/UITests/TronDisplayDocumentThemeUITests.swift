@@ -38,6 +38,61 @@ import UIKit
         }
     }
 
+    func testMountedReaderUpdatesThemeAndAppearance() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-chat-display-fixture", "-display-document-updates", "-themeColor", "burgundy"]
+        app.launch()
+        defer { app.terminate() }
+        let open = app.buttons["Open theme-change reader"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let link = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Navigation evidence'")).firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        let title = app.navigationBars.staticTexts["Theme change reader"].firstMatch
+        let originalFrame = link.frame
+        for olive in [false, true] {
+            if olive { app.buttons["Switch reader theme"].tap() }
+            for appearanceChange in [false, true] {
+                if appearanceChange { app.buttons["Switch reader appearance"].tap() }
+                for frame in [title.frame, app.buttons["Done"].frame, link.frame] {
+                    let hue = chroma(app, frame)
+                    XCTAssertGreaterThan(hue[0], hue[2] + (olive ? 0.5 : 0.15), "Mounted reader adopts the new theme: \(hue)")
+                    if olive { XCTAssertGreaterThan(hue[1], hue[2] + 0.5) }
+                    else { XCTAssertGreaterThan(hue[0], hue[1] + 0.5) }
+                }
+                XCTAssertEqual(link.frame.minY, originalFrame.minY, accuracy: 1, "Theme changes preserve reader layout")
+            }
+        }
+        capture(app, "mounted-reader-theme-appearance-updated")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(open.isHittable, "The same sheet remains dismissible")
+    }
+
+    func testAuthoredHTMLKeepsLinkWarningAndErrorColors() {
+        for mode in ["light", "dark"] {
+            let app = open(theme: "burgundy", mode: mode, home: true, html: true)
+            defer { app.terminate() }
+            let link = app.links["Authored cyan link"].firstMatch
+            XCTAssertTrue(link.waitForExistence(timeout: 10), app.debugDescription)
+            let cyan = chroma(app, link.frame)
+            XCTAssertGreaterThan(cyan[1], cyan[0] + 0.5)
+            XCTAssertGreaterThan(cyan[2], cyan[0] + 0.5)
+            for label in ["Semantic warning", "Semantic error"] {
+                let text = app.staticTexts[label].firstMatch
+                XCTAssertTrue(text.exists, app.debugDescription)
+                let hue = chroma(app, text.frame)
+                XCTAssertGreaterThan(hue[0], hue[1] + 0.5, "Authored semantic ink remains red/orange: \(hue)")
+                XCTAssertGreaterThan(hue[0], hue[2] + 0.5)
+            }
+            let title = app.navigationBars.staticTexts["Home audit report"].firstMatch
+            let hue = chroma(app, title.frame)
+            XCTAssertGreaterThan(hue[0], hue[1] + 0.5, "Only native HTML sheet chrome is themed")
+            capture(app, "authored-html-\(mode)")
+            app.buttons["Done"].tap()
+            app.terminate()
+        }
+    }
+
     private func open(theme: String, mode: String, home: Bool, html: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -50,7 +105,7 @@ import UIKit
         XCTAssertTrue(chip.waitForExistence(timeout: 20), app.debugDescription)
         chip.tap()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Navigation evidence'")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", html ? "Authored document" : "Navigation evidence")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         return app
     }
 

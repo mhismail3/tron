@@ -56,4 +56,35 @@ enum HostedDisplayDocumentThemeFixture {
         return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
     }
 }
+
+/// Test controls are outside the reader's content. They change the real
+/// appearance owner while the same production document sheet stays mounted.
+struct HostedDisplayDocumentThemeChanges: View {
+    @State private var showingReader = false
+    @State private var dark = true
+
+    var body: some View {
+        Button("Open theme-change reader") { showingReader = true }
+            .tronManagedSheet(isPresented: $showingReader, identity: "fixture.theme-change-reader") {
+                AttachmentFilePreviewSheet(
+                    name: "report.md", mimeType: "text/markdown",
+                    source: .local(id: "theme-change-reader",
+                                   data: Data(HostedDisplayDocumentThemeFixture.markdown.utf8)),
+                    title: "Theme change reader"
+                )
+                .safeAreaInset(edge: .bottom) {
+                    HStack {
+                        Button("Switch reader theme") {
+                            AppearanceSettings.shared.themeColor =
+                                AppearanceSettings.shared.themeColor == .burgundy ? .oliveGold : .burgundy
+                        }
+                        Button("Switch reader appearance") { dark.toggle() }
+                    }
+                    .padding()
+                    .background(.bar)
+                }
+                .preferredColorScheme(dark ? .dark : .light)
+            }
+    }
+}
 #endif

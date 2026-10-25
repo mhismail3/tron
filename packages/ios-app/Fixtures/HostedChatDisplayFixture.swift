@@ -142,7 +142,9 @@ struct HostedChatDisplayFixture: View {
 
     var body: some View {
         NavigationStack {
-            if ready {
+            if ProcessInfo.processInfo.arguments.contains("-display-document-updates") {
+                HostedDisplayDocumentThemeChanges()
+            } else if ready {
                 ChatView(sessionID: snapshot.sessionId,
                          isHomeRoute: HostedDisplayDocumentThemeFixture.enabled && HostedDisplayDocumentThemeFixture.home,
                          hostedProbe: probe)
