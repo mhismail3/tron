@@ -19,10 +19,10 @@ import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/se
 import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { ApprovalRequest } from "../kernel/settings/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
-import { SECTIONS, recordSubject, type SettingsSchema } from "../kernel/settings/settings-schema.js";
+import { SECTIONS, recordSubject } from "../kernel/settings/settings-schema.js";
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileOp } from "../modules/home/home-profile.js";
 import type { ObservedStore } from "../kernel/settings/settings-types.js";
-import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
+import { actorLabel, approvalProjection, presentHistoryEntry, presentResolution } from "../admin/settings-presentation.js";
 import { maxTier } from "../kernel/settings/settings-types.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
@@ -246,24 +246,6 @@ function settingsRendererControls(raw: unknown): string[] {
   rejectUnknownFields(renderer, ["version", "controls"], "renderer");
   integer(renderer.version, "renderer.version", 1, Number.MAX_SAFE_INTEGER);
   return arrayOfStrings(renderer.controls, "renderer.controls", 32);
-}
-
-/** A pending request as the iPhone shows it: the diff it would approve. */
-function approvalProjection(schema: SettingsSchema, request: ApprovalRequest) {
-  return {
-    requestId: request.requestId, digest: request.digest, createdAt: request.createdAt, expiresAt: request.expiresAt,
-    target: request.target, actor: request.actor, requester: requesterLabel(request.actor), ...(request.reason ? { reason: request.reason } : {}),
-    changes: request.changes.map(change => {
-      const key = schema.schemaKey(change.key);
-      const format = (value: unknown) => value === undefined ? "Not set" : key.type.format(value, { modelName: () => undefined });
-      return {
-        changeId: change.changeId, key: change.key, label: key.label, ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}),
-        layer: change.layer, op: change.op, tier: change.tier, tierBasis: change.tierBasis,
-        ...(change.redacted ? { redacted: true } : { before: change.before ?? null, after: change.after ?? null, display: { before: format(change.before), after: format(change.after) } }),
-        ...(key.confirm ? { confirm: key.confirm } : {}),
-      };
-    }),
-  };
 }
 
 function parseSessionSourceControl(value: unknown): SessionSourceControlRequest | undefined {

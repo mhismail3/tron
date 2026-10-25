@@ -1,6 +1,7 @@
 import { HOME_PROFILE_SUBJECT, SECTIONS, keyForHome, recordSubject, type SettingsSchema, type EntryGuidance, type KeyDeclaration } from "../kernel/settings/settings-schema.js";
 import type { ResolvedKey, Resolution } from "../kernel/settings/tool-contract.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
+import type { ApprovalRequest } from "../kernel/settings/settings-approvals.js";
 import { formatStoredSetting, LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type ValueType } from "../kernel/settings/settings-types.js";
 import { scopeAdmitted } from "../kernel/settings/scope-resolution.js";
 
@@ -165,4 +166,22 @@ export function presentResolution(schema: SettingsSchema, resolution: Resolution
       ...(section.chatInline ? { chatInline: true } : {}),
     }] : []);
   return { ...resolution, renderer: { version: RENDERER_CONTRACT_VERSION }, keys, sections };
+}
+
+/** A pending request as the iPhone shows it: the diff it would approve. */
+export function approvalProjection(schema: SettingsSchema, request: ApprovalRequest) {
+  return {
+    requestId: request.requestId, digest: request.digest, createdAt: request.createdAt, expiresAt: request.expiresAt,
+    target: request.target, actor: request.actor, requester: requesterLabel(request.actor), ...(request.reason ? { reason: request.reason } : {}),
+    changes: request.changes.map(change => {
+      const key = schema.schemaKey(change.key);
+      const format = (value: unknown) => value === undefined ? "Not set" : key.type.format(value, { modelName: () => undefined });
+      return {
+        changeId: change.changeId, key: change.key, label: key.label, ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}),
+        layer: change.layer, op: change.op, tier: change.tier, tierBasis: change.tierBasis,
+        ...(change.redacted ? { redacted: true } : { before: change.before ?? null, after: change.after ?? null, display: { before: format(change.before), after: format(change.after) } }),
+        ...(key.confirm ? { confirm: key.confirm } : {}),
+      };
+    }),
+  };
 }
