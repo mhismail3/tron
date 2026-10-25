@@ -1445,6 +1445,48 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
     }
 
+    /// The real Gateway owns row exposure; an existing zero override is recovery,
+    /// not a second numeric editor. Reset must change the real persisted store.
+    @MainActor
+    func testRoutineEditorsDisappearAndExplicitGlobalValueResets() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let file = URL(fileURLWithPath: fixture.agentDirectory).appendingPathComponent("settings.json")
+        var document = try globalSettingsDocument(fixture.agentDirectory)
+        document["retry"] = ["maxRetries": 0]
+        try JSONSerialization.data(withJSONObject: document).write(to: file)
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 30)); gear.tap()
+        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(app.buttons["settings-section-context-open"].exists,
+                       "Inherited routine compaction has no editor or empty destination")
+        app.swipeUp()
+        let more = app.buttons["settings-section-advanced-open"]
+        revealBelowNavigationBar(app, more); more.tap()
+        let row = settingRow(app, key: "run.retry.maxRetries")
+        revealBelowNavigationBar(app, row)
+        XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(row.staticTexts["0 retries"].exists, row.debugDescription)
+        let reset = app.buttons["settings-row-run.retry.maxRetries-reset"]
+        XCTAssertTrue(reset.isHittable, row.debugDescription)
+        XCTAssertEqual(row.buttons.count, 1, "An explicit routine value offers only Reset, never an editor")
+        keepScreenshot(app, name: "1975-zero-override-reset-only")
+        reset.tap()
+        XCTAssertTrue(waitUntil(timeout: 30) {
+            let retry = (try? self.globalSettingsDocument(fixture.agentDirectory))?["retry"] as? [String: Any]
+            return retry?["maxRetries"] == nil
+        }, "Reset removes the explicit value through the real settings change path")
+        XCTAssertTrue(waitForNonExistence(row, timeout: 30), app.debugDescription)
+        XCTAssertTrue(settingRow(app, key: "run.httpProxy").exists, "Connection keeps its safety proxy")
+        keepScreenshot(app, name: "1975-inherited-routine-row-gone")
+    }
+
     @MainActor
     func testSessionSettingsServeEveryKeyAndEditAtSessionScope() throws {
         continueAfterFailure = false
