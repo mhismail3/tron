@@ -583,7 +583,6 @@ export class RuntimeRegistry implements SessionOperations {
    * authority; the dispatcher seeds this from its recovery pass and adds each
    * bind, so the dashboard learns which rows are Home workers from the catalog
    * it already syncs instead of querying the ledger. */
-  private readonly homeTaskWorkers = new Map<string, string>();
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, PendingColdLoad>();
   private reservedSlotStarts = 0;
@@ -1051,7 +1050,7 @@ export class RuntimeRegistry implements SessionOperations {
       ) => this.attentionLane.run(async () => {
         // A Home worker's completions are read by construction (#1003). Startup
         // recovery runs before the worker index is seeded; seeding acknowledges those.
-        const read = (!recovery && observed) || this.homeTaskWorkers.has(sessionId);
+        const read = (!recovery && observed) || this.delegation.hasWorkerAttribution(sessionId);
         const result = await this.attention.complete(sessionId, completion.id, read);
         if (result.changed) await this.publishAttentionSummary(sessionId, result.projection);
       }),
@@ -2401,7 +2400,7 @@ export class RuntimeRegistry implements SessionOperations {
         kind,
         ...(parentSessionId ? { parentSessionId } : {}),
         ...(session.creationOrigin ? { creationOrigin: session.creationOrigin } : {}),
-        ...(this.homeTaskWorkers.has(session.id) ? { homeTaskId: this.homeTaskWorkers.get(session.id)! } : {}),
+        ...(this.delegation.hasWorkerAttribution(session.id) ? { homeTaskId: this.delegation.workerTaskId(session.id)! } : {}),
         createdAt: session.created.toISOString(),
         updatedAt: latest?.updatedAt ?? session.modified.toISOString(),
         ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2436,7 +2435,7 @@ export class RuntimeRegistry implements SessionOperations {
           ...(automationOwner ? {
             creationOrigin: { kind: "automation", automationId: automationOwner.automationId },
           } as const : {}),
-          ...(this.homeTaskWorkers.has(id) ? { homeTaskId: this.homeTaskWorkers.get(id)! } : {}),
+          ...(this.delegation.hasWorkerAttribution(id) ? { homeTaskId: this.delegation.workerTaskId(id)! } : {}),
           createdAt: slot.catalogCreatedAt,
           updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
           ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -3946,8 +3945,7 @@ export class RuntimeRegistry implements SessionOperations {
     let changed = false;
     const acknowledge: string[] = [];
     for (const [sessionId, taskId] of workers) {
-      if (this.homeTaskWorkers.has(sessionId)) continue;
-      this.homeTaskWorkers.set(sessionId, taskId);
+      if (!this.delegation.registerWorkerAttribution(sessionId, taskId)) continue;
       changed = true;
       if (this.attention.hasUnacknowledgedCompletion(sessionId)) acknowledge.push(sessionId);
     }

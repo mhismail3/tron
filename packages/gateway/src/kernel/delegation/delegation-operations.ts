@@ -37,6 +37,19 @@ export interface OwnedOperationDeadline { readonly signal: AbortSignal; readonly
 /** One kernel service owns worker lease/control/deadline orchestration. Native
  * session/run authorities keep their lane, canonical evidence and work tokens. */
 export class DelegationOperations<Session extends OwnedSession, Evidence> {
+  /** Catalog attribution, not the live report-owner binding. A resumed task keeps
+   * the session\'s first attribution; native catalog/attention reads this owner. */
+  private readonly workerAttribution = new Map<string, string>();
+
+  hasWorkerAttribution(sessionId: string): boolean { return this.workerAttribution.has(sessionId); }
+  workerTaskId(sessionId: string): string | undefined { return this.workerAttribution.get(sessionId); }
+
+  registerWorkerAttribution(sessionId: string, taskId: string): boolean {
+    if (this.workerAttribution.has(sessionId)) return false;
+    this.workerAttribution.set(sessionId, taskId);
+    return true;
+  }
+
   constructor(private readonly sessions: OwnedSessions<Session, Evidence>,
     private readonly interruptTools: InterruptWorkerTools<Session>) {}
 

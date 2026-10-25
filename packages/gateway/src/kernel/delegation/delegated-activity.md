@@ -22,8 +22,11 @@ automations. It acquires the actual worker for steer/stop/interrupt and uses
 admission stays K2; one native interruption operation is bound in kernel composition,
 so target capture precedes steering and abort. Home retains no native control binding.
 
-The service also owns worker creation, resume leases, deadline races and settlement
-acknowledgement. It retains no second session, token map or per-operation state.
+The service also owns worker creation, resume leases, deadline races, settlement
+acknowledgement and the one first-registration-wins session→task attribution index.
+That metadata is not a live report-owner binding. Home selects recovery entries;
+native catalog/attention batching reads/registers this owner and keeps its original
+acknowledgement lane and publication ordering. No parallel index or token map exists.
 Worker resume acquires the canonical native lease here, invokes the native lane/
 rebuild operation, and releases that same lease on failure. Registry supplies only
 its actual persisted-session acquisition; it has no resume forwarding route.
