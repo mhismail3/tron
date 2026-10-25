@@ -19,7 +19,7 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { RunMarkerStore } from "../../kernel/run/run-markers.js";
 import { stopTaskWorker, taskWorkerSteeringInput } from "../../kernel/delegation/worker-control.js";
 import { SessionCatalog } from "../../sessions/session-catalog.js";
-import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch, type OwnedSessionDispatchOver } from "../../kernel/delegation/owned-session-dispatch.js";
+import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch, type OwnedSessionDispatchOver } from "../../kernel/delegation/delegation-operations.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayLogger } from "../../transport/logger.js";

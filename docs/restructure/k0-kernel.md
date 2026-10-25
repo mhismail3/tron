@@ -14,7 +14,7 @@ same ordering, sync/async shape and failure handling.
 | `RuntimeSlot` (11,165 lines) builds the Pi runtime, module host, Home profile, request pipeline and task-worker role in one closure | `kernel/run/runtime-slot.ts:2212-2608` (`runtimeFactory`) |
 | Slot dependencies: 60 fields (18 `home*`, plus `validateTaskMarker`); hooks: 10 (3 Home); 14 more branches on `liveProfile()` | `kernel/run/runtime-slot.ts:522-635`, `:455-486`, `:1290-10431` |
 | The registry (5,030 lines) is also a composition root: it builds Swift apps, display, workspace, model queues and `HomeOwner`, and passes itself to Home | `kernel/session/runtime-registry.ts:762-866` (`taskSessions: this` `:865`) |
-| Home and automations reach the concrete registry | `modules/home/home-owner.ts:162`, `modules/home/home-task-dispatcher.ts:217`, `modules/home/home-session-read.ts:29`, `sessions/owned-session-dispatch.ts:20` |
+| Home and automations reach the concrete registry | `modules/home/home-owner.ts:162`, `modules/home/home-task-dispatcher.ts:217`, `modules/home/home-session-read.ts:29`, `sessions/delegation-operations.ts:20` |
 | The module host is one interface carrying every module's service | `extensions/tron-modules.ts:32-80` (`TronModuleHost`), lists `:102-224`, `:236-301` |
 | Upward edges in the layer ratchet | `gateway/run` → 13 L3/L4 modules, `gateway/extensions` → 11, `gateway/projection` → display (`packages/gateway/layer-baseline.json`) |
 | Pi: 50 production files import runtime values (39 more types only), plus 4 `import.meta.resolve` sites | §4 |
@@ -191,12 +191,12 @@ theme set at module load (`sessions/semantic-ui-broker.ts:61`), which becomes an
 ## 5. Home: generic delegation versus Home policy
 
 Automations already use the worker-session boundary (`automations/automation-executor.ts` via
-`sessions/owned-session-dispatch.ts`), so it is generic. Plan §5.2 puts the "generic parts" of
+`sessions/delegation-operations.ts`), so it is generic. Plan §5.2 puts the "generic parts" of
 `home-task-*` in K5; the line below is what is generic.
 
 | `kernel/delegation` (generic) | `modules/home` (policy) |
 |---|---|
-| `owned-session-dispatch.ts`: `createWorker`, `resumeWorker`, `lease`, `admit`, `acknowledge`, `clearRecoveryMarker`, `recoveryEvidence`, `armDeadline`, `enforceDeadline` (`:22-92`); its `HomeTaskReportOwner` import (`:3`) becomes K5's `ReportOwner` | `home-owner.ts` (designation, chapters, publication; `homePublicationUncertain`, `runtime-registry.ts:574`, moves with it), `home-chapter-*`, `home-session-recovery.ts` |
+| `delegation-operations.ts`: `createWorker`, `resumeWorker`, `lease`, `admit`, `acknowledge`, `clearRecoveryMarker`, `recoveryEvidence`, `armDeadline`, `enforceDeadline` (`:22-92`); its `HomeTaskReportOwner` import (`:3`) becomes K5's `ReportOwner` | `home-owner.ts` (designation, chapters, publication; `homePublicationUncertain`, `runtime-registry.ts:574`, moves with it), `home-chapter-*`, `home-session-recovery.ts` |
 | Registry worker paths: `create(cwd, profile, report)` `runtime-registry.ts:3016`; K5 owns resumed-worker lease/bind/failure release over the actual native lane/rebuild backend (no Registry resume wrapper); leases/evidence/markers `:2128-2169`, task-worker evidence `:4478-4646`, `homeTaskWorkers` index (`:625`, read `:1315`, `:2701`, `:2736`; wire field `homeTaskId` unchanged) | `home-task-dispatcher.ts` (what to delegate, when, to whom), `home-task-authorization.ts`, `home-task-worker-choice.ts`, `home-task-spend.ts`, `home-task-store.ts` (Home's task ledger; D4) |
 | K5 `worker-control.ts`: steering input and Stop/Interrupt identity fences; `worker-settlement.ts`: live join/wake owner; `subagent-control.ts`: actual provider I/O; `subagent-settlement.ts`: canonical stop/join/notice/receipt algorithm over actual native I/O. Slot retains `bindTaskWorker`, turn-boundary end/report reminder, worker tools, cancellation and `taskWait`. Native prompt/per-tool cancellation stay K2; HomeDispatcher temporarily binds this I/O until DelegationOperations owns acquisition. | `home-wake-inbox.ts` (D4), `home-request-policy.ts`, `home-memory*.ts`, `home-profile.ts`, `home-research-tools.ts`, `tron-home-extension.ts` (`HOME_OPERATING_CONTEXT`, used for headroom `runtime-slot.ts:8844`, comes through `requestPolicy`) |
 | `home-task-report.ts`, `home-task-checkin.ts`, `task-subagents.ts`, `home-task-worker-extension.ts` (the worker prompt at `:55` is model-visible text and moves byte-identical) | Profile `home`, hooks `profileDecision`, `requestPolicy`, `inputAdmission`, `appendGuard`, `runSettled` |
