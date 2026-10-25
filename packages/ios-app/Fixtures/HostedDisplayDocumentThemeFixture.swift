@@ -39,7 +39,7 @@ enum HostedDisplayDocumentThemeFixture {
         ChatMediaPayload(data: Data((authoredHTML ? html : markdown).utf8),
                          mimeType: authoredHTML ? "text/html" : "text/markdown")
     }
-    static var transcript: [TranscriptItem] {
+    @MainActor static var transcript: [TranscriptItem] {
         var rows = try! JSONSerialization.jsonObject(with: HostedChatDisplayFixture.imageTranscriptData) as! [[String: Any]]
         var display = rows[1]["display"] as! [String: Any]
         let kind = authoredHTML ? "html" : "markdown"
