@@ -91,14 +91,18 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   content or tool activity) splits a run; empty error text parts do not. The first presentation
   identity stays stable as a live tail joins and settles; cold/history uses the same assembler.
   Gateway `errorInfo` owns friendly classification; there is no provider mapping in Swift.
-  One compact error pill shows the uniform message or Provider errors and a ×N count.
-  The existing transcript notification route keeps its sheet live above lazy rows. Shared
-  list rows show totals, distinct breakdown and first/last times; native disclosure groups
-  reveal each occurrence's metadata and selectable code-block JSON (or verbatim text).
+  One centered compact error pill shows the uniform message or Provider errors and a ×N count.
+  The existing transcript notification route keeps its sheet live above lazy rows.
+  `ChatDetailSheet`, shared with nested tool details, owns navigation/Done, medium/large detents,
+  top chrome and insets. Themed standard sections, glass groups and rows show totals, distinct
+  breakdown and first/last times; native disclosures reveal each occurrence's metadata and
+  selectable `ToolDetailCodeBlock` JSON (or verbatim text). Long payload cards use the shared
+  static-surface policy instead of a tall backdrop filter.
 - **Error design canvas.** Hosted `-tron-chat-errors-preview` renders synthetic single/grouped
   error pills and detail canvases using the shared compact-pill, list-row and code-block
   components. `TronChatErrorsPreviewTests` captures light/dark design review only; it does not
-  exercise provider classification or prove live/history grouping.
+  exercise provider classification or prove live/history grouping. `TronChatProviderErrorStyleUITests`
+  also captures actual hosted ChatView/native sheets in both appearances for visual review.
 - **Haptics.** Live events only, through `TronHaptics`; `ChatLiveHapticLedger` tells live from restored.
 - **Extension interactions.** The mounted route is the sole sheet owner and presents pending
   interactions only after the first ready frame. Forms (one to four questions) keep a device-local
