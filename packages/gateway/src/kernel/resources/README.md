@@ -38,7 +38,7 @@ compensation refuses with the existing trust rollback error.
 ## Verify
 
 ```bash
-scripts/tron test gateway src/sessions/project-root.integration.test.ts \
+scripts/tron test gateway src/kernel/resources/project-root.integration.test.ts \
   src/machine/workspace-inspection-service.integration.test.ts
 ```
 

@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -7,11 +7,11 @@ import { dirname, join } from "node:path";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { GatewayError } from "../errors.js";
-import { waitFor } from "../../test-support/wait-for.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
-import type { RuntimeSlot } from "./runtime-slot.js";
+import { TrustService } from "./trust-service.js";
+import { GatewayError } from "../../errors.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import type { RuntimeSlot } from "../../sessions/runtime-slot.js";
 
 /**
  * The Project layer is the worktree root's `.pi/` (settings-model decision 31),

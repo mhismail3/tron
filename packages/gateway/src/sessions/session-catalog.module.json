@@ -17,7 +17,6 @@
     "fork-boundary.ts",
     "legacy-chronicle.integration.test.ts",
     "locks/store-session-archive-attention.golden.json",
-    "project-root.integration.test.ts",
     "project-root.lock.integration.test.ts",
     "locks/project-root-trust.golden.json",
     "project-root-resources.lock.integration.test.ts",
