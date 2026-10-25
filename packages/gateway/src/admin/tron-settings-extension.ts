@@ -1,4 +1,4 @@
-import { type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
+import { settingsOutcomeRequestIds, type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
 import { StringEnum, Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory, ToolInfo } from "../kernel/pi/coding-agent.js";
 
@@ -110,8 +110,8 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
       if (marked) return;
       marked = marksTurn(pi.getAllTools().find(tool => tool.name === event.toolName));
     });
-    pi.on("before_agent_start", async () => {
-      const message = await access()?.takeOutcomes();
+    pi.on("before_agent_start", async (_event, context) => {
+      const message = await access()?.takeOutcomes(settingsOutcomeRequestIds(context.sessionManager.getEntries()));
       return message ? { message } : undefined;
     });
     pi.registerTool({

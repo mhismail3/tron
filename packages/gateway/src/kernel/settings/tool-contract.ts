@@ -205,6 +205,22 @@ export interface SettingsOutcomeMessage {
   details: { version: 1; eventId: string; taskId: string; requests: SettingsOutcomeRequest[] };
 }
 
+/** Delivery proof comes only from canonical custom entries, never model text or tool results. */
+export function settingsOutcomeRequestIds(entries: Iterable<unknown>): string[] {
+  const ids = new Set<string>();
+  for (const value of entries) {
+    if (!value || typeof value !== "object") continue;
+    const entry = value as { type?: unknown; customType?: unknown; details?: unknown };
+    if (entry.type !== "custom_message" || entry.customType !== SETTINGS_OUTCOME_MESSAGE || !entry.details || typeof entry.details !== "object") continue;
+    const details = entry.details as { version?: unknown; requests?: unknown };
+    if (details.version !== 1 || !Array.isArray(details.requests)) continue;
+    for (const request of details.requests) {
+      if (request && typeof request === "object" && typeof request.requestId === "string") ids.add(request.requestId);
+    }
+  }
+  return [...ids];
+}
+
 /** A delegated worker's settings state beside its resolved keys (#1336). */
 export interface TaskWorkerSettingsState {
   /** The worker's task operation is live: a change applies from its next provider request. */
@@ -229,5 +245,5 @@ export interface SettingsToolAccess {
   resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;
   change(changes: ChangeRequest[], input: { reason: string; dryRun?: boolean; request?: boolean; toolCallId: string; web: boolean; taskId?: string }): Promise<ChangeResult & { worker?: TaskWorkerSettingsView }>;
   /** Every settled request this chat asked for and has not heard yet (decision 4e6e8f54). */
-  takeOutcomes(): Promise<SettingsOutcomeMessage | undefined>;
+  takeOutcomes(deliveredRequestIds?: readonly string[]): Promise<SettingsOutcomeMessage | undefined>;
 }

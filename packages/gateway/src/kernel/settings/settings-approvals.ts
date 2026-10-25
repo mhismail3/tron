@@ -55,6 +55,8 @@ export interface ApprovalRequest {
   status: ApprovalStatus;
   decidedAt?: string;
   failure?: string;
+  /** Durable before action effects: an interrupted execution is never replayed. */
+  executionStartedAt?: string;
   /** An approved action's own account of what it did (#1985). */
   summary?: string;
   /** The requester heard the outcome: its next turn or Home's wake carried it. */
@@ -109,13 +111,13 @@ export class SettingsApprovals {
   }
 
   /** Every request past its 24 hours becomes expired (never applied). */
-  async expire(now: Date): Promise<ApprovalRequest[]> {
+  async expire(now: Date, requestId?: string): Promise<ApprovalRequest[]> {
     const expired: ApprovalRequest[] = [];
-    const due = (await this.read()).requests.some(request => request.status === "pending" && Date.parse(request.expiresAt) <= now.getTime());
+    const due = (await this.read()).requests.some(request => (!requestId || request.requestId === requestId) && request.status === "pending" && Date.parse(request.expiresAt) <= now.getTime());
     if (!due) return expired;
     await this.update(document => {
       for (const request of document.requests) {
-        if (request.status !== "pending" || Date.parse(request.expiresAt) > now.getTime()) continue;
+        if ((requestId && request.requestId !== requestId) || request.status !== "pending" || Date.parse(request.expiresAt) > now.getTime()) continue;
         request.status = "expired";
         request.decidedAt = now.toISOString();
         expired.push({ ...request });
@@ -130,6 +132,18 @@ export class SettingsApprovals {
 
   async get(requestId: string): Promise<ApprovalRequest | undefined> {
     return (await this.read()).requests.find(request => request.requestId === requestId);
+  }
+
+  /** Claim action execution durably before effects. Recovery may report an
+   * uncertain failure, but never invokes an action twice for the same request. */
+  async beginAction(requestId: string, now: Date): Promise<void> {
+    await this.update(document => {
+      const request = document.requests.find(candidate => candidate.requestId === requestId);
+      if (!request?.action || request.status !== "pending" || request.executionStartedAt) {
+        throw new GatewayError("conflict", "This approval action is no longer available for execution");
+      }
+      request.executionStartedAt = now.toISOString();
+    });
   }
 
   /** Settles an open request; refused unless it is still pending. */
@@ -153,31 +167,22 @@ export class SettingsApprovals {
     return (await this.read()).requests.some(request => request.actor.sessionId === sessionId && request.status !== "pending" && !request.told);
   }
 
-  /** Marks outcomes heard by another path (a running worker's steering signal), or
-   * returns taken ones to untold when their delivery never reached the session. */
-  async markTold(requestIds: readonly string[], told: boolean): Promise<void> {
+  /** Canonical delivery evidence retires only this requester's settled requests.
+   * Selecting an outcome never consumes it: a refused admission or crash before
+   * append leaves it available, and recovery acknowledges the existing chat entry. */
+  async acknowledge(sessionId: string, requestIds: readonly string[]): Promise<void> {
     const ids = new Set(requestIds);
+    if (!(await this.read()).requests.some(request => request.actor.sessionId === sessionId && ids.has(request.requestId) && request.status !== "pending" && !request.told)) return;
     await this.update(document => {
       for (const request of document.requests) {
-        if (!ids.has(request.requestId) || request.status === "pending") continue;
-        if (told) request.told = true; else delete request.told;
+        if (request.actor.sessionId === sessionId && ids.has(request.requestId) && request.status !== "pending") request.told = true;
       }
     });
   }
 
-  /** The requester's untold outcomes, marked told. */
+  /** The requester's untold outcomes. The delivery owner acknowledges after append. */
   async takeOutcomes(sessionId: string): Promise<ApprovalRequest[]> {
-    const untold = (await this.read()).requests.some(request => request.actor.sessionId === sessionId && request.status !== "pending" && !request.told);
-    if (!untold) return [];
-    const taken: ApprovalRequest[] = [];
-    await this.update(document => {
-      for (const request of document.requests) {
-        if (request.actor.sessionId !== sessionId || request.status === "pending" || request.told) continue;
-        request.told = true;
-        taken.push({ ...request });
-      }
-    });
-    return taken;
+    return (await this.read()).requests.filter(request => request.actor.sessionId === sessionId && request.status !== "pending" && !request.told);
   }
 
   private async read(): Promise<ApprovalsDocument> {

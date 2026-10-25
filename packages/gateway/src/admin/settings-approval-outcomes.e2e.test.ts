@@ -1,10 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { tmpdir } from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type AssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { waitFor } from "../../test-support/wait-for.js";
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { disposeFixtures, fixture as homeTaskFixture } from "../../test-support/home-task-fixture.js";
+import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
@@ -22,7 +27,11 @@ import { SETTINGS_OUTCOME_MESSAGE, type SettingsOutcomeMessage } from "../kernel
  */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-approval-outcomes.json");
 const transcript: Array<{ case: string; steps: Array<Record<string, unknown>> }> = [];
-afterEach(async () => { await disposeFixtures(); });
+const approvalOwners: Array<{ dispose(): Promise<void> }> = [];
+afterEach(async () => {
+  await Promise.all(approvalOwners.splice(0).map(owner => owner.dispose()));
+  await disposeFixtures();
+});
 afterAll(async () => {
   await mkdir(dirname(ARTIFACT), { recursive: true });
   await writeFile(ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
@@ -45,6 +54,8 @@ async function gateway() {
   const { settingsModel, settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway,
     sessions: f.registry, home: () => homeOwnerOf(f.registry), registry: f.registry, now: () => new Date(clock),
     schedule: (run, ms) => { const timer = { run, ms, cancelled: false }; scheduled.push(timer); return { cancel: () => { timer.cancelled = true; } }; } });
+  approvalOwners.push(settingsChanges);
+  await settingsChanges.start();
   await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
   const service = new GatewayService({ display: displayOwnerOf(f.registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
@@ -113,6 +124,124 @@ async function gateway() {
 }
 
 describe("settings approval outcomes", () => {
+  it("deadline processing cannot expire an admitted effect or block an unrelated target", async () => {
+    const f = await gateway();
+    let entered!: () => void;
+    let release!: () => void;
+    const applying = new Promise<void>(resolve => { entered = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    f.settingsChanges.registerAction("fixture.deadline", {
+      plan: async () => ({ title: "Write the marker", target: { kind: "global" }, items: [{ label: "Effect", value: "One marker" }] }),
+      apply: async () => { await writeFile(join(f.cwd, "deadline-effect"), "applied"); entered(); await held; return { summary: "Marker written" }; },
+    });
+    const request = await f.settingsChanges.requestAction("fixture.deadline", {},
+      { actor: { kind: "agent", id: "deadline", sessionId: "deadline" }, reason: "Deadline boundary proof" });
+    const deadline = await waitFor(() => f.scheduled.find(timer => !timer.cancelled), "deadline armed");
+    const deciding = f.decide(request.approval!.requestId, request.approval!.digest, true)
+      .then(value => ({ value }), error => ({ error }));
+    try {
+      await awaitsWithin(applying, "action effect persisted while approval is admitted");
+      f.advance(APPROVAL_TTL_MS + 1);
+      deadline.run();
+      // Global and Home use distinct target stripes. A live Global action must
+      // not turn deadline maintenance into a barrier for the unrelated Home target.
+      const other = await awaitsWithin(f.settingsChanges.change({ kind: "home" }, [RETRIES(9) as never],
+        { actor: { kind: "ui", id: "phone" } }), "unrelated target applies before the Global action is released");
+      expect(other.status).toBe("applied");
+    } finally { release(); }
+    expect(await deciding).toMatchObject({ value: { status: "approved" } });
+    expect((await f.settingsChanges.history({ key: "fixture.deadline" })).entries.map(entry => entry.status).sort()).toEqual(["approved", "pending"]);
+  }, 60_000);
+
+  it("a process crash after an action's effect cannot replay it under a new decision command", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-settings-action-crash-"));
+    const program = fileURLToPath(new URL("../../test-support/settings-action-crash-child.ts", import.meta.url));
+    const preload = fileURLToPath(new URL("../../test-support/home-ledger-crash-preload.mjs", import.meta.url));
+    const children: Array<ReturnType<typeof spawn>> = [];
+    const start = (mode: string) => {
+      const child = spawn(process.execPath, ["--experimental-transform-types", "--import", pathToFileURL(preload).href, program, root, mode], { stdio: ["pipe", "pipe", "pipe"] });
+      children.push(child);
+      let output = "";
+      child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+      child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+      return { child, output: () => output };
+    };
+    try {
+      const first = start("apply");
+      await waitFor(() => {
+        if (first.output().includes("effect-ready")) return true;
+        if (first.child.exitCode !== null) throw new Error(first.output());
+        return undefined;
+      }, "action effect persisted before settlement");
+      const killed = once(first.child, "exit");
+      first.child.kill("SIGKILL");
+      expect((await killed)[1]).toBe("SIGKILL");
+      const recovered = start("recover");
+      const [code] = await once(recovered.child, "exit");
+      const result = JSON.parse(recovered.output().split("RESULT:")[1]!.split("\n")[0]!) as { decision: string; effects: string; outcome: SettingsOutcomeMessage };
+      expect(result.effects).toBe("effect\n");
+      expect(code, recovered.output()).toBe(0);
+      expect(result.decision).toContain("no longer waiting");
+      expect(result.outcome.details.requests).toEqual([expect.objectContaining({ status: "failed", failure: expect.stringContaining("effects may have completed") })]);
+      expect(result.outcome.content).toContain("inspect the operation's state before retrying");
+      expect(result.outcome.content).not.toContain("it was not applied");
+      transcript.push({ case: "action crash before settlement", steps: [result] });
+    } finally {
+      for (const child of children) if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, "exit"); child.kill("SIGKILL"); await exited;
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("disposal cancels and fences a queued expiry callback before its stores are released", async () => {
+    const f = await gateway();
+    const held = await f.settingsChanges.change({ kind: "global" }, [RETRIES(5) as never],
+      { actor: { kind: "agent", id: "retiring", sessionId: "retiring" }, reason: "Provider recovery", request: true });
+    const deadline = await waitFor(() => f.scheduled.find(timer => !timer.cancelled), "deadline armed");
+    await f.settingsChanges.dispose();
+    expect(deadline.cancelled).toBe(true);
+    f.advance(APPROVAL_TTL_MS + 1);
+    // A callback already queued before cancellation must also be inert.
+    deadline.run();
+    expect(await new SettingsApprovals(f.tronHome).get(held.approval!.requestId)).toMatchObject({ status: "pending" });
+    expect((await f.settingsChanges.history({ key: "run.retry.maxRetries" })).entries.map(entry => entry.status)).toEqual(["pending"]);
+  }, 60_000);
+
+  it("selection survives an undelivered attempt and a reopened store; only canonical delivery retires the requester's outcome", async () => {
+    const f = await gateway();
+    const actor = { kind: "agent" as const, id: "delivery-requester", sessionId: "delivery-requester" };
+    const request = await f.settingsChanges.change({ kind: "global" }, [RETRIES(5) as never], { actor, reason: "Provider recovery", request: true });
+    await f.decide(request.approval!.requestId, request.approval!.digest, false);
+    const first = await f.settingsChanges.takeOutcomes(actor.sessionId);
+    expect(first!.details.requests.map(item => item.requestId)).toEqual([request.approval!.requestId]);
+    // No canonical append occurred: selecting a wake that is refused changes no durable delivery state.
+    expect(await new SettingsApprovals(f.tronHome).hasUntold(actor.sessionId)).toBe(true);
+    expect(await f.settingsChanges.takeOutcomes(actor.sessionId)).toEqual(first);
+    // A different requester cannot acknowledge this request's outcome.
+    await f.settingsChanges.takeOutcomes("other-requester", [request.approval!.requestId]);
+    expect(await new SettingsApprovals(f.tronHome).hasUntold(actor.sessionId)).toBe(true);
+    // The delivery owner supplies IDs from canonical entries after append/recovery.
+    expect(await f.settingsChanges.takeOutcomes(actor.sessionId, [request.approval!.requestId])).toBeUndefined();
+    expect(await new SettingsApprovals(f.tronHome).hasUntold(actor.sessionId)).toBe(false);
+  }, 60_000);
+
+  it("a replacement request notifies the superseded requester's outcome listener", async () => {
+    const f = await gateway();
+    const heard: string[] = [];
+    const stop = f.settingsChanges.onOutcome(id => heard.push(id));
+    try {
+      const first = await f.settingsChanges.change({ kind: "global" }, [RETRIES(5) as never],
+        { actor: { kind: "home", id: f.home.id, sessionId: f.home.id }, reason: "First provider recovery", request: true });
+      await f.settingsChanges.change({ kind: "global" }, [RETRIES(6) as never],
+        { actor: { kind: "agent", id: "replacement", sessionId: "replacement" }, reason: "New provider recovery", request: true });
+      expect(heard).toContain(f.home.id);
+      expect((await f.settingsChanges.takeOutcomes(f.home.id))!.details.requests).toEqual([
+        expect.objectContaining({ requestId: first.approval!.requestId, status: "superseded" }),
+      ]);
+    } finally { stop(); }
+  }, 60_000);
+
   it("a chat hears its approved change on its next turn, applied, with readable details", async () => {
     const f = await gateway();
     // The maintainer raised retries' floor, so the chat's change waits for his tap.

@@ -189,6 +189,10 @@ export class SettingsChangePath {
   /** Requesters to nudge when an outcome they have not heard settles (Home's wake). */
   private readonly outcomeListeners = new Set<(sessionId: string) => void>();
   private expiry: { at: number; timer: { cancel(): void } } | undefined;
+  private disposed = false;
+  private started = false;
+  private armWork: Promise<void> = Promise.resolve();
+  private readonly expiryWork = new Map<string, Promise<void>>();
 
   private mutexFor(target: SettingsTarget): AsyncMutex {
     const id = target.kind === "session" ? `session:${target.sessionId}` : target.kind === "project" ? `project:${target.cwd}` : target.kind;
@@ -203,9 +207,14 @@ export class SettingsChangePath {
     private readonly writers: SettingsWriters,
     private readonly now: () => Date = () => new Date(),
     private readonly schedule: ExpiryScheduler = realScheduler,
-  ) {
-    // A request pending across a restart still expires at its deadline.
-    void this.armExpiry().catch(() => undefined);
+  ) {}
+
+  /** Composition activates background work once the actual owner is installed.
+   * Merely opening settings for inspection must never expire or rewrite stores. */
+  async start(): Promise<void> {
+    if (this.disposed) throw new GatewayError("conflict", "Settings approvals are disposed");
+    this.started = true;
+    await this.armExpiry();
   }
 
   registerAction(subject: string, handler: ApprovalActionHandler): void {
@@ -229,18 +238,36 @@ export class SettingsChangePath {
     void this.armExpiry().catch(() => undefined);
   }
 
-  /** One timer for the earliest pending deadline; each expiry re-arms it. */
-  private async armExpiry(): Promise<void> {
-    const pending = await this.approvals.pending();
-    const at = Math.min(...pending.map(request => Date.parse(request.expiresAt)));
-    if (this.expiry?.at === at) return;
+  /** One timer for the earliest pending deadline; serialize reads so an older
+   * asynchronous arm cannot replace a newer deadline or survive disposal. */
+  private armExpiry(): Promise<void> {
+    this.armWork = this.armWork.catch(() => undefined).then(async () => {
+      if (this.disposed || !this.started) return;
+      const pending = await this.approvals.pending();
+      if (this.disposed) return;
+      const at = Math.min(...pending.map(request => request.executionStartedAt ? this.now().getTime() : Date.parse(request.expiresAt)));
+      if (this.expiry?.at === at) return;
+      this.expiry?.timer.cancel();
+      this.expiry = undefined;
+      if (!Number.isFinite(at)) return;
+      this.expiry = { at, timer: this.schedule(() => {
+        if (this.disposed) return;
+        this.expiry = undefined;
+        void this.expireDue().then(() => this.armExpiry()).catch(() => undefined);
+      }, Math.max(0, at - this.now().getTime())) };
+    });
+    return this.armWork;
+  }
+
+  /** Composition stops the timer before releasing its stores; accepted expiry
+   * work is joined, not abandoned against the next installation's owner. */
+  async dispose(): Promise<void> {
+    this.disposed = true;
     this.expiry?.timer.cancel();
     this.expiry = undefined;
-    if (!Number.isFinite(at)) return;
-    this.expiry = { at, timer: this.schedule(() => {
-      this.expiry = undefined;
-      void this.expireDue().then(() => this.armExpiry()).catch(() => undefined);
-    }, Math.max(0, at - this.now().getTime())) };
+    this.outcomeListeners.clear();
+    await Promise.all(this.expiryWork.values());
+    await this.armWork;
   }
 
   /** Asks the maintainer to approve one registered action (#1985). */
@@ -250,8 +277,8 @@ export class SettingsChangePath {
     if (context.actor.kind === "ui") throw new GatewayError("invalid_request", "The maintainer runs his own actions directly");
     if (!context.reason?.trim()) throw new GatewayError("invalid_request", "A reason is required for an approval request");
     if (Buffer.byteLength(JSON.stringify(params ?? null)) > ACTION_PARAMS_BYTES) throw new GatewayError("invalid_request", "Action parameters exceed 16 KiB");
-    await this.expireDue();
     const preview = actionPreview(await handler.plan(params, { actor: context.actor }));
+    await this.expireDue({ target: preview.target });
     return this.mutexFor(preview.target).run(async () => {
       const { request } = await this.approvals.create({ target: preview.target, actor: context.actor, reason: context.reason!, changes: [],
         action: { subject, params: params ?? null, preview } }, this.now());
@@ -283,7 +310,7 @@ export class SettingsChangePath {
     if (requests.length === 0 || requests.length > 50) throw new GatewayError("invalid_request", "A settings change holds 1 to 50 changes");
     if (context.actor.kind !== "ui" && !context.reason?.trim()) throw new GatewayError("invalid_request", "A reason is required for a change not made from the iPhone");
     if (context.request && context.actor.kind === "ui") throw new GatewayError("invalid_request", "The maintainer applies his own changes directly");
-    await this.expireDue();
+    await this.expireDue({ target });
     return this.mutexFor(target).run(async () => {
       const stores = await this.model.owner.stores(target, context.session);
       const runtime = context.session?.modelRuntime ?? this.model.owner.modelRuntime;
@@ -446,12 +473,18 @@ export class SettingsChangePath {
   async decide(requestId: string, input: { digest: string; approved: boolean; decidedBy: Actor; commandId?: string; session?: ChangeContext["session"]; homeChapter?: ChangeContext["homeChapter"] }): Promise<ChangeResult> {
     // Only the maintainer's own client decides; no requester can approve itself (F3).
     if (input.decidedBy.kind !== "ui") throw new GatewayError("invalid_request", "Only the maintainer decides a settings approval");
-    await this.expireDue();
     const found = await this.approvals.get(requestId);
     if (!found) throw new GatewayError("not_found", "No such settings approval");
+    await this.expireDue({ target: found.target });
     return this.mutexFor(found.target).run(async () => {
       const request = await this.approvals.get(requestId);
       if (!request || request.status !== "pending") throw new GatewayError("conflict", `This change is no longer waiting for approval (${request?.status ?? "gone"})`);
+      // This is the serialized decision cut: a request can pass its deadline while
+      // waiting for this stripe, but never expire after its effects are admitted.
+      if (Date.parse(request.expiresAt) <= this.now().getTime()) {
+        await this.expireRequest(request.requestId);
+        throw new GatewayError("conflict", "This change is no longer waiting for approval (expired)");
+      }
       if (input.digest !== request.digest) throw new GatewayError("conflict", "This approval is for a different change than the one waiting");
       if (request.action) return this.decideAction(request, input);
       const context: ChangeContext = {
@@ -500,18 +533,13 @@ export class SettingsChangePath {
         this.settledOutcome(settled);
         throw error;
       }
-      let settled = await this.approvals.settle(requestId, "approved", this.now());
+      const settled = await this.approvals.settle(requestId, "approved", this.now());
       const changes = this.outcomes(applied.filter(done => !done.plan.target), "approved");
       const adopted = this.outcomes(applied.filter(done => done.plan.target), "approved");
       const observerContext = { actor: request.actor, tier: "approve" as const, ...(request.reason ? { reason: request.reason } : {}), approved: true as const };
       await this.observer?.applied(request.target, changes, observerContext);
       if (adopted.length) await this.observer?.applied(applied.find(done => done.plan.target)!.plan.target!, adopted, observerContext);
       const signal = await this.announce(changes, context);
-      // A running worker that asked for its own change heard it in its steering lane.
-      if (signal?.status === "queued" && request.target.kind === "session" && request.target.sessionId === request.actor.sessionId) {
-        await this.approvals.markTold([requestId], true);
-        settled = { ...settled, told: true };
-      }
       this.settledOutcome(settled);
       return { status: "approved" as const, tier: "approve" as const, changes, ...(signal ? { signal } : {}) };
     });
@@ -540,6 +568,7 @@ export class SettingsChangePath {
       await settle("superseded", message);
       throw new GatewayError("conflict", `This action was superseded: ${message}`);
     }
+    await this.approvals.beginAction(request.requestId, this.now());
     let summary: string;
     try { ({ summary } = await handler!.apply(action.params, { actor: request.actor, requestId: request.requestId })); }
     catch (error) {
@@ -569,13 +598,8 @@ export class SettingsChangePath {
 
   /** Whether the requester has a settled outcome it has not heard (Home's wake asks). */
   async hasUntoldOutcomes(sessionId: string): Promise<boolean> {
-    await this.expireDue();
+    await this.expireDue({ sessionId });
     return this.approvals.hasUntold(sessionId);
-  }
-
-  /** Returns taken outcomes to untold when their delivery never reached the session. */
-  async returnOutcomes(message: SettingsOutcomeMessage): Promise<void> {
-    await this.approvals.markTold(message.details.requests.map(request => request.requestId), false);
   }
 
   /**
@@ -583,8 +607,9 @@ export class SettingsChangePath {
    * (decision 4e6e8f54): approved and applied, declined, failed, superseded or expired.
    * The text is for the model; `details` carries the same facts for the chat's chip.
    */
-  async takeOutcomes(sessionId: string): Promise<SettingsOutcomeMessage | undefined> {
-    await this.expireDue();
+  async takeOutcomes(sessionId: string, deliveredRequestIds: readonly string[] = []): Promise<SettingsOutcomeMessage | undefined> {
+    await this.expireDue({ sessionId });
+    await this.approvals.acknowledge(sessionId, deliveredRequestIds);
     const taken = await this.approvals.takeOutcomes(sessionId);
     if (!taken.length) return undefined;
     const requests = taken.map(request => this.outcomeRequest(request));
@@ -595,7 +620,7 @@ export class SettingsChangePath {
         : request.status === "declined" ? "was declined by the maintainer; it was not applied"
           : request.status === "expired" ? "expired after 24 hours without a decision; it was not applied"
             : request.status === "superseded" ? `was superseded${request.failure ? ` (${request.failure})` : " by a newer request"}; it was not applied`
-              : `failed${request.failure ? ` (${request.failure})` : ""}; it was not applied`;
+              : `failed${request.failure ? ` (${request.failure})` : ""}; ${request.action ? "inspect the operation's state before retrying" : "it was not applied"}`;
       return `Settings request ${request.requestId}: ${what} ${outcome}.`;
     });
     const eventId = `settings-outcome:${createHash("sha256").update(requests.map(request => request.requestId).join(",")).digest("hex").slice(0, 32)}`;
@@ -626,10 +651,43 @@ export class SettingsChangePath {
     };
   }
 
-  /** Pending requests past their 24 hours become expired, never applied (decision 8). */
-  private async expireDue(): Promise<void> {
-    const expired = await this.approvals.expire(this.now());
-    for (const request of expired) {
+  /** Expiry uses the same target stripe as decision admission and effects. A
+   * timer may become due during apply, but cannot contradict an admitted decision. */
+  private async expireDue(filter: { target?: SettingsTarget; sessionId?: string } = {}): Promise<void> {
+    if (this.disposed) throw new GatewayError("conflict", "Settings approvals are disposed");
+    const work: Promise<void>[] = [];
+    for (const request of await this.approvals.pending()) {
+      if (this.disposed) return;
+      if (filter.target && !deepEqual(request.target, filter.target)) continue;
+      if (filter.sessionId && request.actor.sessionId !== filter.sessionId) continue;
+      if (!request.executionStartedAt && Date.parse(request.expiresAt) > this.now().getTime()) continue;
+      let pending = this.expiryWork.get(request.requestId);
+      if (!pending) {
+        pending = this.mutexFor(request.target).run(async () => {
+          if (!this.disposed) await this.expireRequest(request.requestId);
+        }).finally(() => { this.expiryWork.delete(request.requestId); });
+        this.expiryWork.set(request.requestId, pending);
+      }
+      work.push(pending);
+    }
+    // Independent targets remain concurrent; public admission joins only its
+    // own target/requester, never a timer waiting behind another target's apply.
+    await Promise.all(work);
+  }
+
+  /** Caller owns the target stripe. */
+  private async expireRequest(requestId: string): Promise<void> {
+    const current = await this.approvals.get(requestId);
+    if (current?.status === "pending" && current.action && current.executionStartedAt) {
+      // No live apply can be here: the caller owns its stripe. An earlier process
+      // stopped after its durable execution claim; effects are unknown, never replayed.
+      const failure = "Action execution was interrupted; its effects may have completed";
+      const request = await this.approvals.settle(requestId, "failed", this.now(), failure);
+      await this.record.append([{ ...this.actionEntry(request), status: "failed", refersTo: requestId, failure }]);
+      this.settledOutcome(request);
+      return;
+    }
+    for (const request of await this.approvals.expire(this.now(), requestId)) {
       await this.record.append(request.action ? [{ ...this.actionEntry(request), status: "expired", refersTo: request.requestId }]
         : request.changes.map((change): ChangeEntry => ({
           ...this.pendingEntry(request, change, { actor: request.actor }), changeId: randomUUID(), at: this.now().toISOString(),
@@ -650,7 +708,7 @@ export class SettingsChangePath {
         ...this.pendingEntry(previous, change, { actor: previous.actor }), changeId: randomUUID(), at: request.createdAt,
         status: "superseded", refersTo: change.changeId, failure: `Superseded by request ${request.requestId}`,
       })));
-      this.observer?.approvals({ kind: "resolved", request: previous });
+      this.settledOutcome(previous);
     }
     await this.record.append(changes.map(change => this.pendingEntry(request, change, context)));
     this.observer?.approvals({ kind: "pending", request });
