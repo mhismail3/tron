@@ -238,7 +238,7 @@ struct SettingsRendererRow: View {
                fields.allSatisfy({ $0.value.stringValue != nil }),
                Set(fields.compactMap { $0.value.stringValue }).count == fields.count,
                Set((setting.value?.objectValue ?? [:]).keys).isSubset(of: Set(fields.compactMap { $0.value.stringValue })),
-               let range = presentation?.range, range.supportsIntegerSlider,
+               let range = presentation?.range, range.supportsIntegerFields,
                setting.value == nil || setting.value?.objectValue?.values.allSatisfy({ value in
                    if case .number(let number) = value { return Int(exactly: number) != nil }
                    return false

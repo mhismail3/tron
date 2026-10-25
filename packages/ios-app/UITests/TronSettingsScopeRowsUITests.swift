@@ -106,7 +106,13 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let row = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND NOT identifier ENDSWITH '-reset'", prefix)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5), "\(prefix)\n\(app.debugDescription)", file: file, line: line)
-        let editor = row.buttons.matching(NSPredicate(format: "label == %@ AND NOT identifier ENDSWITH '-reset'", title)).firstMatch
+        let editor: XCUIElement
+        if prefix.contains("model.queue") {
+            editor = row.staticTexts.matching(NSPredicate(format: "label MATCHES %@", pattern)).firstMatch
+            XCTAssertEqual(row.buttons.count, 1, "A routine override has only Revert, never a list editor", file: file, line: line)
+        } else {
+            editor = row.buttons.matching(NSPredicate(format: "label == %@ AND NOT identifier ENDSWITH '-reset'", title)).firstMatch
+        }
         let pill = row.staticTexts["Overridden"], heading = row.staticTexts[title].firstMatch
         let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
         XCTAssertTrue(editor.exists && pill.exists && heading.exists && revert.exists, row.debugDescription, file: file, line: line)

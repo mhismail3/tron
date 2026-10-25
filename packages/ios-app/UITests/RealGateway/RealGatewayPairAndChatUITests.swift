@@ -1342,34 +1342,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         keepScreenshot(app, name: "1325-global-settings-live-routes")
 
-        // Context: Summary instructions commits on the keyboard's Done and the keyboard goes away.
-        openSettingsSection(app, "context")
-        keepScreenshot(app, name: "939-context-pills")
-        // The settings row combines its labels, so the field is found inside its row.
-        let instructionsRow = settingRow(app, key: "context.compaction.instructions")
-        XCTAssertTrue(instructionsRow.waitForExistence(timeout: 30), app.debugDescription)
-        let field: XCUIElement? = instructionsRow.textFields.firstMatch
-        for _ in 0..<10 where !(field?.isHittable ?? false) { app.swipeUp() }
-        XCTAssertTrue(field?.isHittable ?? false, "Summary instructions has no field: \(app.debugDescription)")
-        XCTAssertEqual(field?.placeholderValue, "Keep file paths and open decisions.", "the field shows the schema's example")
-        field?.tap()
-        let keyboard = app.keyboards.firstMatch
-        XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "the field did not raise the keyboard")
-        field?.typeText("Keep file paths.")
-        let done = keyboard.buttons.matching(NSPredicate(format: "label ==[c] %@", "done")).firstMatch
-        XCTAssertTrue(done.waitForExistence(timeout: 5), "the return key must read Done: \(keyboard.debugDescription)")
-        keepScreenshot(app, name: "939-text-field-done-key")
-        done.tap()
-        XCTAssertTrue(waitForNonExistence(keyboard, timeout: 10), "Done must dismiss the keyboard")
-        XCTAssertTrue(waitUntil(timeout: 60) {
-            let compaction = (try? self.globalSettingsDocument(fixture.agentDirectory))?["compaction"] as? [String: Any]
-            return compaction?["instructions"] as? String == "Keep file paths."
-        }, "Done must commit Summary instructions through the change path to the Global settings.json")
-        XCTAssertTrue(waitForOverride(instructionsRow, timeout: 30),
-                      "the committed value is set at Global: \(rowProvenance(instructionsRow))")
-        keepScreenshot(app, name: "939-text-field-committed")
-        dismissTopSheet(app)
-
         // MCP Servers: the server rows sit in the shared glass group.
         let mcpLink = app.buttons["settings-link-MCP Servers"]
         for _ in 0..<12 where !mcpLink.isHittable { app.swipeUp() }
@@ -1484,23 +1456,21 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             return retry?["maxRetries"] == nil
         }, "Reset removes the explicit value through the real settings change path")
         XCTAssertTrue(waitForNonExistence(row, timeout: 30), app.debugDescription)
-        XCTAssertTrue(settingRow(app, key: "run.httpProxy").exists, "Connection keeps its safety proxy")
+        XCTAssertTrue(app.buttons["HTTP proxy"].waitForExistence(timeout: 15),
+                      "Connection keeps its safety proxy editor: \(app.debugDescription)")
         keepScreenshot(app, name: "1975-inherited-routine-row-gone")
     }
 
     @MainActor
-    func testSessionSettingsServeEveryKeyAndEditAtSessionScope() throws {
+    func testSessionSettingsOmitsInheritedRoutineEditors() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let schema = try SettingsSchemaInventory.fromEnvironment()
         let app = launchApp()
         defer { app.terminate() }
         open(fixture.invitationLink())
         completeFirstRunSetup(app, inWorkspace: fixture.workspace)
-        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90),
-                      "the invitation link and setup did not reach the dashboard: \(app.debugDescription)")
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
-        var coverage: [String: SurfaceCoverage] = [:]
 
         // Manage Session is reached through the composer's context control; the
         // chat navigation-bar gear opens Global Settings, not Manage Session.
@@ -1515,28 +1485,20 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                        "Project Settings is a section of Session Settings, not a Manage Session row (#1655)")
         app.buttons["chat-settings-link"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        // The shared renderer lists the session's overridable keys in place.
-        coverage["session"] = assertSettingsSurface(app, name: "session", layers: ["session"], schema: schema, allowsInheritedRows: true)
-        openSettingsSection(app, "advanced")
-        let sessionRetry = toggleSetting(app, key: "run.retry.enabled")
-        XCTAssertNotEqual(sessionRetry.before, sessionRetry.after, "the Session-scope edit was not accepted")
-        dismissTopSheet(app) // Advanced
-        dismissTopSheet(app) // Session Settings
-        dismissTopSheet(app) // Manage Session
-        XCTAssertTrue(waitForNonExistence(app.staticTexts["Manage Session"], timeout: 15))
+        XCTAssertTrue(app.descendants(matching: .any)["session-project-settings"].waitForExistence(timeout: 15))
+        for id in ["settings-section-context-open", "settings-section-run-open"] {
+            XCTAssertFalse(app.buttons[id].exists,
+                           "Session Settings offers recovery for explicit overrides, not inherited routine editors")
+        }
+        XCTAssertFalse(settingRow(app, key: "run.retry.enabled").exists)
+        keepScreenshot(app, name: "1975-session-inherited-routine-editors-absent")
+        dismissTopSheet(app)
+        dismissTopSheet(app)
         manageSessionButton.tap()
-        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.buttons["chat-settings-link"].waitForExistence(timeout: 15))
         app.buttons["chat-settings-link"].tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        openSettingsSection(app, "advanced")
-        let reopenedRetry = topSwitchRow(app, key: "run.retry.enabled")
-        XCTAssertTrue(waitForOverride(reopenedRetry, timeout: 30),
-                      "the reopened Session Settings must mark the override: \(reopenedRetry.debugDescription)")
-        XCTAssertEqual(switchValue(reopenedRetry), sessionRetry.after, "the reopened Session value is not the accepted value")
-        keepScreenshot(app, name: "settings-surface-session-settings-session-edit")
-        dismissTopSheet(app) // Advanced
-        dismissTopSheet(app) // Session Settings
-        attachSettingsCoverage(coverage, schema: schema)
+        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["settings-section-run-open"].exists, "Reopening cannot manufacture an override")
     }
 
     /// Repository settings are read-only and list only applied values: an untrusted
@@ -1571,7 +1533,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    func testGlobalSettingsServeEveryKeyAndEditAtGlobalScope() throws {
+    func testGlobalSettingsServeExposedEditorsAndEditAtGlobalScope() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let schema = try SettingsSchemaInventory.fromEnvironment()
@@ -1845,7 +1807,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     @MainActor
     private func assertSettingsSurface(_ app: XCUIApplication, name: String, layers: Set<String>,
                                        schema: SettingsSchemaInventory,
-                                       allowsInheritedRows: Bool = false,
                                        sectionDestinations: [String: String] = [:]) -> SurfaceCoverage {
         var coverage = SurfaceCoverage()
         let isGlobalTarget = layers == ["global"]
@@ -1902,9 +1863,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 let served = !key.layers.isDisjoint(with: layers) && (!globalInstancesOnly || isGlobalTarget)
                 guard served else {
                     coverage.notServed += 1
-                    if !allowsInheritedRows {
-                        XCTAssertEqual(rows.count, 0, "\(name) must not show \(key.id): it is not served on this surface")
-                    }
+                    XCTAssertEqual(rows.count, 0, "\(name) must not show \(key.id): it is not served on this surface")
                     if rows.count == 0 { coverage.notServedAbsent += 1 }
                     continue
                 }
