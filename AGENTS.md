@@ -142,9 +142,9 @@ post-merge checker or auto-revert; none without measured benefit and maintainer 
 
 ## Documentation
 
-- Owners: `README.md` (≤ 250 lines), `packages/gateway/README.md`,
-  `packages/ios-app/docs/`, `packages/mac-app/docs/`, repo runbooks `docs/development.md`
-  and `scripts/tron --help`, `tools/work/README.md`, skills only in `.agents/skills/`.
-- Docs state current behavior: no history, evidence or audit ledgers; indexes are generated;
-  this charter ≤ 150 lines, other docs ≤ 2× budget. [check: `scripts/tron budgets`,
-  `scripts/check-documentation-policy.py`, `scripts/check-agent-policy.sh`]
+- Owners: `README.md` (≤ 250 lines), `packages/gateway/README.md`, `packages/ios-app/docs/`, `packages/mac-app/docs/`,
+  repo runbooks `docs/development.md` and `scripts/tron --help`, `tools/work/README.md`, skills only in `.agents/skills/`.
+- When a repository's documentation and its existing code disagree, follow the conventions used in the existing code,
+  and in your final reply or report point out each inconsistency you found between the documentation and the code.
+- Docs state current behavior: no history, evidence or audit ledgers; indexes are generated; this charter ≤ 150 lines, other docs ≤ 2× budget.
+  [check: `scripts/tron budgets`, `scripts/check-documentation-policy.py`, `scripts/check-agent-policy.sh`]
