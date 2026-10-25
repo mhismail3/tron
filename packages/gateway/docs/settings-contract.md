@@ -47,7 +47,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-49 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
+48 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Floor |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -55,7 +55,6 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `model.thinking[role=chat]` | model | model | project, session, global, home | as allowed | fixed | next-turn | quiet |
 | `model.contextWindow` | model | model | project, session, global | as allowed | fixed | next-turn | quiet |
 | `model.thinkingBudgets` | — | workers | project, global | as allowed | fixed | new-chat | quiet |
-| `model.offered` | — | workers | project, global | as allowed | live | next-turn | quiet |
 | `model.thinking[role=summarizer]` | — | context | project, global | none | live | next-compaction | quiet |
 | `model.queue[role=worker]` | — | workers | session, global, home | as allowed | live | delegate | notify |
 | `model.queue[role=subagent]` | — | workers | session, global, home | as allowed | live | next-request | notify |
@@ -90,7 +89,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `run.httpIdleTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
 | `run.websocketConnectTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
 | `run.httpProxy` | — | run | global | as allowed | live | restart | notify |
-| `run.cacheWarming` | — | run | global | none | live | next-turn | narrow quiet, widen notify |
+| `run.cacheWarming` | — | run | global | none | fixed | new-chat | narrow quiet, widen notify |
 | `sources.extensions` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
 | `sources.skills` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
 | `sources.prompts` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |

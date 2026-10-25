@@ -15,6 +15,8 @@ export class RunAbortOwner {
   stopSteeringContinuation: { operationId?: string; queuedSteerCount: number } | undefined;
   /** Set before SDK cancellation can synchronously settle. */
   readonly abortedOperations = new Set<string>();
+  /** Revokes asynchronous preparation before an SDK abort controller exists. */
+  cancellationEpoch = 0;
 
   constructor(private readonly operations: RunOperations<unknown>) {}
 
@@ -77,6 +79,7 @@ export class RunAbortOwner {
       throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
     }
 
+    this.cancellationEpoch += 1;
     // `kind` is presentation metadata, not cancellation authority. A stale
     // retry/compaction/bash projection must never route Stop around another
     // foreground controller or the independently owned built-in bash process.

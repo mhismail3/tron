@@ -534,7 +534,7 @@ describe("settings renderer contract", () => {
     expect(section(before, "model")).toEqual({ id: "model", title: "Model", description: "Model, thinking, and context window", order: 10, chatInline: true });
     expect(before.sections.filter(section => section.chatInline).map(section => section.id)).toEqual(["model", "workers"]);
     const groups = (...keys: string[]) => keys.map(key => before.keys.find(row => row.key === key)?.group);
-    expect(groups("model.queue[role=worker]", "model.thinkingBudgets", "model.offered")).toEqual(["workers", "workers", "workers"]);
+    expect(groups("model.queue[role=worker]", "model.thinkingBudgets")).toEqual(["workers", "workers"]);
     expect(groups("run.transport", "run.queue.steeringMode", "run.retry.maxRetries")).toEqual(["run", "run", "run"]);
     expect(groups("context.images.block", "permissions.defaultProjectTrust", "permissions.floor")).toEqual(["tools", "trust", "approvals"]);
     expect(before.sections.map(entry => entry.id)).not.toContain("advanced");

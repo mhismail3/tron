@@ -1870,7 +1870,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       navigateTree: async (targetId, options) => {
         this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
-        const result = await this.runtime.session.navigateTree(targetId, options);
+        const result = await this.navigateTreeWithSettings(targetId, options);
         if (!result.cancelled) {
           this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
           this.noteCanonicalEntriesCommitted();
@@ -5855,6 +5855,24 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     });
   }
 
+  /** Branch summaries bypass agent request preparation. Publish only their
+   * budget, fencing Stop until the SDK owns cancellation; never reload resources. */
+  private async navigateTreeWithSettings(targetId: string, options: Parameters<AgentSession["navigateTree"]>[1]) {
+    const session = this.runtime.session;
+    const cancellationEpoch = this.runAbort.cancellationEpoch;
+    const owners = this.dependencies.settings();
+    if (options?.summarize && owners) {
+      const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, this.settingsSource(), ["context.branchSummary.reserveTokens"], { storeState: false });
+      if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during branch-summary settings resolution");
+      if (this.runAbort.cancellationEpoch !== cancellationEpoch) throw new GatewayError("cancelled", "Branch summarization was stopped during settings resolution");
+      const reserveTokens = resolved.keys[0]?.value;
+      if (typeof reserveTokens !== "number") throw new GatewayError("conflict", "Branch-summary reserve is unavailable");
+      session.settingsManager.applyOverrides({ branchSummary: { reserveTokens } });
+    }
+    // No await between the cancellation fence and the SDK creating its controller.
+    return session.navigateTree(targetId, options);
+  }
+
   async navigate(
     targetId: string,
     options: { summarize: boolean; instructions?: string; replaceInstructions?: boolean; label?: string },
@@ -5874,7 +5892,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       this.operation = ownsBranchSummary ? { kind: "branchSummary", startedAt: new Date().toISOString() } : undefined;
       let completed = false;
       try {
-        const result = await this.runtime.session.navigateTree(targetId, {
+        const result = await this.navigateTreeWithSettings(targetId, {
           summarize: options.summarize,
           ...(options.instructions ? { customInstructions: options.instructions } : {}),
           ...(options.replaceInstructions === undefined ? {} : { replaceInstructions: options.replaceInstructions }),

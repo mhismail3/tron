@@ -50,7 +50,6 @@ mechanism; its restricted execution recipe is not expanded by this redesign (dec
 | `model.thinking[role=chat]` | model | C,H,P,M | yes | yes | no | Next request for running worker; otherwise next turn |
 | `model.contextWindow` | model | C,P,M | yes | yes | no | Next turn; busy worker must settle |
 | `model.thinkingBudgets` | workers | P,M | no | no | yes | New session |
-| `model.offered` | workers | P,M | no | yes | no | Next picker/turn |
 | `model.thinking[role=summarizer]` | context | P,M | no | yes | no | Next compaction; ordinary runtime only |
 | `model.queue[role=worker]` | workers | C*,H,M | yes | no | no | Next delegation; Home delegation capability |
 | `model.queue[role=subagent]` | workers | C*,H,M | yes | no | no | Next child admission; existing children unchanged |
@@ -85,7 +84,7 @@ mechanism; its restricted execution recipe is not expanded by this redesign (dec
 | `run.httpIdleTimeoutMs` | run | C,P,M | yes | yes | no | Next request |
 | `run.websocketConnectTimeoutMs` | run | C,P,M | yes | yes | no | Next request |
 | `run.httpProxy` | run | M | no | no | yes | Gateway restart; redacted |
-| `run.cacheWarming` | run | M | no | no | no | Next turn; ordinary runtime only |
+| `run.cacheWarming` | run | M | no | no | no | New chat; ordinary runtime only |
 | `sources.extensions` | sources | P,M | no | yes | no | Explicit resource reload, never implicit code execution |
 | `sources.skills` | sources | P,M | no | yes | no | Resource reload |
 | `sources.prompts` | sources | P,M | no | yes | no | Resource reload |

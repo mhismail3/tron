@@ -296,14 +296,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       control: "list",
     },
     {
-      id: "model.offered", sessionOverridable: false, projectSettable: true, group: "workers", type: types.stringList(500),
-      layers: both(pi("enabledModels")), timing: "live", effect: "next-turn", floor: "quiet", writers: ["ui", "home"],
-      label: "Offered models", help: "Models offered in the picker. Empty offers every model.", order: 70,
-      importance: "advanced", control: "list",
-      // pi matches each pattern against `provider/id` and the bare id (pi model-resolver).
-      entry: { hint: "A provider/model ID, or a pattern where * matches any text.", example: "anthropic/claude-sonnet-*" },
-    },
-    {
       id: "model.thinking[role=summarizer]", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "context", fixed: { role: "summarizer" },
       type: types.choice([{ value: "inherit", label: "Same as chat", detail: "Uses the chat's own thinking level" }, ...THINKING], true),
       layers: both(pi("compaction", "thinkingLevel")), defaultValue: "inherit", timing: "live", effect: "next-compaction", floor: "quiet",
@@ -541,7 +533,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         { value: "streaming", label: "While running", detail: "Caches stay warm while a turn runs" },
         { value: "idle", label: "Also between runs", detail: "Also kept warm between turns; costs more" },
       ]),
-      layers: { global: pi("cacheWarming") }, defaultValue: "streaming", timing: "live", effect: "next-turn", floor: { widen: "notify", narrow: "quiet" },
+      layers: { global: pi("cacheWarming") }, defaultValue: "streaming", timing: "fixed", effect: "new-chat", floor: { widen: "notify", narrow: "quiet" },
       direction: (_b, a) => a === "idle" ? "widen" : "narrow", writers: ["ui", "home"],
       label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced", control: "choice",
     },

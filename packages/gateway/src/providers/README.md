@@ -101,7 +101,9 @@ and before worker controls, reading canonical fixed settings and the worker fact
 ## Entry points
 
 - Usage adapters: `provider-usage.ts`; eligibility: `OpenAIModelEligibility`.
-- Queue resolution for background and subagent roles: `model-queue.ts`.
+- Queue availability and fallback for worker, background and subagent roles:
+  `model-queue.ts`; Home owns worker choice at delegation. Typed queues are the
+  routing authority, not Knowledge learned-profile prose.
 - `readWorkerQueueSelection` projects this owner's canonical fallback entries
   after the latest explicit choice. Settings can mask that progression with
   Project without resetting it to the original worker seed.

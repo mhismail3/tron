@@ -171,6 +171,10 @@ changes keep its store, cursors and spend.
 - One writable chapter; sealed chapters never mutate; nothing redirects to another chapter.
 - Accepted input is never replayed; uncertain receipts and deliveries stay fenced.
 - Memory text is request-local evidence, never instructions, never persisted in JSONL.
+- Typed role queues and worker thinking are the machine-routing authority; learned
+  delegation notes are never parsed as queue configuration. Explicit task choices
+  remain overrides. `home-task-worker-model.e2e.test.ts` exercises a contradictory
+  active Knowledge note while the actual worker follows the typed settings.
 
 ## Entry points
 

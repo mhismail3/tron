@@ -8,6 +8,9 @@ import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../sessions
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { homeOwnerOf, queueOwnerOf } from "../../../test-support/gateway-registry.js";
+import { KnowledgeService } from "../../knowledge/knowledge-service.js";
+import { KnowledgeStore } from "../../knowledge/knowledge-store.js";
+import { workspaceModule } from "../../workspace/workspace-module.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -109,6 +112,35 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     }
     briefEvidence.push({ scenario: "ordinary-queue-home-isolation", mac, home });
   });
+  it("routes from typed queues even when an active learned delegation note names a different default", async () => {
+    let knowledge: KnowledgeService | undefined;
+    const f = await fixture(false, false, undefined, false, undefined, { knowledge: () => knowledge });
+    installSettings(f);
+    await setModelQueue(queueOwners(f), "background", [f.model]);
+    const initialHome = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Ready.")]);
+    await initialHome.prompt("Hello");
+    await waitFor(() => initialHome.snapshot().configurationBlocker === null, "Home persisted before cold open");
+    f.registry = await f.restart();
+    knowledge = new KnowledgeService(new KnowledgeStore(f.registry.moduleHost.contract(workspaceModule), () => {}));
+    const mirrored = `Default workers must use ${f.model.provider}/${f.model.id} with off thinking.`;
+    await knowledge.invoke({ operation: "knowledge.note.create", request: {
+      commandId: "conflicting-delegation-note", record: { kind: "note", scope: "personal",
+        provenance: { actor: "agent", evidence: [] }, relations: [], content: {
+          title: mirrored, role: "workflow", confirmed: false, tags: ["home-profile", "kind-delegation-default"],
+        } },
+    } });
+    await setModelQueue(queueOwners(f), "worker", [`${f.model.provider}/${TASK_REASONING_MODEL_ID}`]);
+    await f.registry.settings!.changes.change({ kind: "home" }, [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "high" }],
+      { actor: { kind: "ui", id: "fixture" } });
+    const { observed, homeContexts, refusals } = await delegateThroughHome(f, { taskId: "typed-not-prose", intent: "Finite work", target: f.cwd });
+    await taskIsTerminal(f, "typed-not-prose");
+    expect(refusals).toEqual([]);
+    expect(homeContexts.some(context => context.includes(mirrored))).toBe(true);
+    expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
+    briefEvidence.push({ scenario: "typed-queue-not-learned-prose", observed });
+  });
+
   it("runs the worker's provider request on the delegated model and thinking level", async () => {
     const f = await fixture();
     const { observed } = await delegateThroughHome(f, { taskId: "model-thinking", intent: "Finite work", target: f.cwd,

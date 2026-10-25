@@ -115,6 +115,11 @@ runs at session start. Settings resolution is injected from the admin settings
 I/O owner through K6 admission; compaction keeps operation capture, validation failures and budget
 application, not an independent layer resolver. Pi remains canonical for files
 and compaction execution.
+Branch summaries bypass agent request preparation: native and extension navigation
+resolve the branch reserve through K6 immediately before SDK summarization, without
+reloading fixed resource/shell settings. The cancellation owner's epoch revokes that
+preparation if Stop arrives before the SDK creates its abort controller. Cache-warming mode is captured at chat
+construction; changing Global mode does not republish it to an existing SDK manager.
 Ownership is declared by [`gateway/run`](../../run.module.json).
 
 ## Invariants
@@ -166,6 +171,7 @@ no additional logging or persisted state. Compaction diagnostics remain with the
 ```bash
 scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts src/kernel/run/run-markers.lock.integration.test.ts src/kernel/run/run.store.lock.integration.test.ts
 scripts/tron test gateway src/kernel/run/compaction-policy.integration.test.ts
+scripts/tron test gateway src/sessions/runtime-control-publication.integration.test.ts
 scripts/tron test gateway src/kernel/run/task-lifecycle.conformance.integration.test.ts
 scripts/tron verify --module gateway/run
 ```
