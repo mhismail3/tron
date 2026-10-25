@@ -5,7 +5,8 @@
 The app's authoritative UI projection and its owners: the Gateway lifecycle, the mounted session,
 the dashboard catalog, accepted-mutation receipts, drafts, and the per-domain coordinators that
 feature UI reads. Canonical truth stays in the Gateway and Pi; everything here is a bounded,
-disposable projection or an in-flight command owner.
+disposable projection or an in-flight command owner. The `ios-app/state` module owns this
+folder and [`Kernel`](../Kernel/) through [`state.module.json`](../state.module.json).
 
 ## Owns
 
@@ -16,7 +17,7 @@ disposable projection or an in-flight command owner.
 | `DashboardGatewayConnectionPool` | Shallow catalog connections for the other paired Macs. |
 | `SessionPresentationStore` | The mounted session: target, subscription lease, synchronization, cursor, paging, presentation lease, process activity, session-keyed secondary reads. |
 | `SessionCatalogCoordinator`, `AutomationDashboardPreferencesOwner` (`DashboardStateOwners`) | Dashboard rows per `(profileID, sessionID)`; Automations sheet preferences. |
-| `ConfirmedMutationExecutor`, `SessionMutationService`, `SessionImportCoordinator` | Receipt policy for every mutation; session command DTOs; file import under one captured lifecycle. |
+| [`ConfirmedMutationExecutor`](../Kernel/ConfirmedMutationExecutor.swift), `SessionMutationService`, `SessionImportCoordinator` | Kernel receipt policy for every mutation; session command DTOs; file import under one captured lifecycle. |
 | `ComposerDraftCoordinator`, `ComposerDraftStore` | Composer text, staged resources, annotations, attachments, uploads, submission. |
 | `ChatMediaLoader`, `SessionExportArtifactStore` | Transcript media by `(profile, lifecycle, session, blob)`; photo decoding preflights dimensions/component depth against 64 MiB, then verifies actual bytes; export artifacts. |
 | `TerminalCoordinator`, `TerminalReducer` | Session terminals: wire, presentation intents, attach/replay, resize. |
@@ -104,7 +105,8 @@ disposable projection or an in-flight command owner.
 ## Entry points
 
 `AppModel.swift`, `GatewayLifecycleCoordinator.swift`, `SessionPresentationStore.swift`,
-`DashboardStateOwners.swift`, `ConfirmedMutationExecutor.swift`, `ComposerDraftCoordinator.swift`.
+`DashboardStateOwners.swift`, [`Kernel/ConfirmedMutationExecutor.swift`](../Kernel/ConfirmedMutationExecutor.swift),
+`ComposerDraftCoordinator.swift`.
 
 ## Signals
 

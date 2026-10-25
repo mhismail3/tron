@@ -1,0 +1,8 @@
+{
+  "layer": "L2",
+  "owns": [
+    "State/**",
+    "Kernel/**",
+    "state.module.json"
+  ]
+}
