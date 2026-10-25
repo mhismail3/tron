@@ -1112,7 +1112,8 @@ describe("settings risk gate", () => {
         if (homeCall && last.toolName === homeCall.name) homeResults.set(homeCall.prompt, { isError: last.isError === true, text: textOf(last), details: last.details });
         return fauxAssistantMessage("Done.");
       }
-      if (homeCall && users.at(-1) === homeCall.prompt) return fauxAssistantMessage([fauxToolCall(homeCall.name, homeCall.args)], { stopReason: "toolUse" });
+      // The prompt may carry a settings outcome after it (Home hears the approval it asked for, #1642).
+      if (homeCall && users.slice(-2).includes(homeCall.prompt)) return fauxAssistantMessage([fauxToolCall(homeCall.name, homeCall.args)], { stopReason: "toolUse" });
       return fauxAssistantMessage("Noted.");
     };
     f.faux.setResponses(Array.from({ length: 40 }, () => respond as never));
