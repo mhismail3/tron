@@ -126,7 +126,8 @@ describe("Home request breakdown (home.context)", () => {
 
 describe("Home learned profile in the breakdown", () => {
   it("counts the active profile notes the section lists, from the next activation on", async () => {
-    const f = await fixture();
+    let knowledge: KnowledgeService | undefined;
+    const f = await fixture(false, false, undefined, false, undefined, { knowledge: () => knowledge });
     await configure(f);
     // A conversation file exists only after its first message, which a cold registry needs to find Home.
     const greeted = await f.registry.acquire(f.home.sessionId);
@@ -138,8 +139,7 @@ describe("Home learned profile in the breakdown", () => {
     const registry = await f.restartToReadiness();
     f.registry = registry;
     const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
-    const knowledge = new KnowledgeService(store);
-    registry.setKnowledgeService(knowledge);
+    knowledge = new KnowledgeService(store);
     // Home's profile tool writes through the settings change path the restarted fixture installed,
     // as gateway-main wires it, with this Knowledge owner.
     await registry.catalog("all");

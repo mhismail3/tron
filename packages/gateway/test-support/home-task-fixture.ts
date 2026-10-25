@@ -89,9 +89,11 @@ export interface FixtureOptions {
   providerUsage?: Pick<ProviderUsageOwner, "read">;
   /** Run Home memory on the real background-queue summarizer instead of a fixed summary. */
   queueSummarizer?: boolean;
+  knowledge?: () => KnowledgeService | undefined;
 }
 
 export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false, models?: Record<string, unknown>, options: FixtureOptions = {}) {
+  const knowledge = options.knowledge ?? (() => undefined);
   const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -166,7 +168,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   await pushStore.initialize();
   // No relay: admission validates and records nothing is sent off the Mac.
   const pushAdmission = new NotificationService(pushStore, { available: false, relayOrigin: "https://push.invalid" } as unknown as PushRelayClient);
-  const createRegistry = async () => await createTestRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
+  const createRegistry = async () => await createTestRegistry({ knowledge, agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
     // Production admits the same artifact root (gateway-main.ts): run status artifacts are read only under it.
     ...(managed ? { delegatedArtifactRoot: delegatedArtifactRoot(tronHome) } : {}),
     gatewayModelRuntime: gateway,
@@ -215,7 +217,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     if (hadSettings) {
       const restarted = owned.registry;
       settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, registry: restarted, home: () => homeOwnerOf(restarted),
-        knowledge: () => (restarted as unknown as { knowledgeService?: KnowledgeService }).knowledgeService });
+        knowledge });
     }
     await bringUpToReadiness(owned.registry);
     return owned.registry;

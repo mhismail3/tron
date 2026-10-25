@@ -210,7 +210,8 @@ async function fixture(label: string): Promise<Fixture> {
   runtime.registerNativeProvider(memoryFaux.provider);
   const trust = new TrustService(agentDir);
   await trust.set(project, true);
-  const registry = await createTestRegistry({ agentDir,
+  let knowledge: KnowledgeService | undefined;
+  const registry = await createTestRegistry({ knowledge: () => knowledge, agentDir,
     tronHome,
     idleRuntimeMs: 60_000,
     gatewayModelRuntime: runtime,
@@ -227,8 +228,7 @@ async function fixture(label: string): Promise<Fixture> {
   await registry.catalog("all");
 
   const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
-  const knowledge = new KnowledgeService(store);
-  registry.setKnowledgeService(knowledge);
+  knowledge = new KnowledgeService(store);
   // The one settings change path, wired as gateway-main wires it: Home's profile tool
   // and the maintainer's home.profileChange share its profile applier and record.
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime: runtime }));

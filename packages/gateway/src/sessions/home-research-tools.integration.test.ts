@@ -172,7 +172,8 @@ async function fixture(
   const requestRecords: HomeRequestRecord[] = [];
   const web = webTransport();
   let search: SessionSearchService | undefined;
-  const registry = await createTestRegistry({ agentDir, sessionSearch: () => search,
+  let knowledge: KnowledgeService | undefined;
+  const registry = await createTestRegistry({ knowledge: () => knowledge, agentDir, sessionSearch: () => search,
     tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime,
@@ -192,8 +193,7 @@ async function fixture(
 
   // Real owners, installed the way gateway-main installs them.
   const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
-  const knowledge = new KnowledgeService(store);
-  registry.setKnowledgeService(knowledge);
+  knowledge = new KnowledgeService(store);
   const indexPath = join(tronHome, "gateway", "session-search.sqlite");
   await seedIndex?.(registry, indexPath);
   const index = await SessionSearchIndex.open(indexPath);

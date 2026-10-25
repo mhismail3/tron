@@ -62,6 +62,9 @@ bounded run markers and command receipts; Pi owns JSONL. Host recipes are fixed 
   open, reopen, restart, fork, restore) applies it; only a transcript that declares
   none gets `defaultTools`.
 
+Knowledge is constructed and supplied by composition, never installed on or read
+through the registry.
+
 ## Invariants
 
 1. `RuntimeRegistry` owns at most one `RuntimeSlot` per session in this process.

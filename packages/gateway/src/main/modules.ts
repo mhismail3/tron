@@ -48,7 +48,7 @@ export function gatewayModules(owners: () => ModuleOwners) {
     settlementModule,
     providers,
     compactionPolicyModule,
-    createCoreModule(() => ({ knowledge: registry().knowledge, connections: owners().connections })),
+    createCoreModule(() => ({ knowledge: owners().home.knowledge(), connections: owners().connections })),
     createWebResearchModule(() => owners().home.homeWebTransport),
     settingsModule,
     askUserModule,

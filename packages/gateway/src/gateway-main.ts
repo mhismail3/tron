@@ -258,7 +258,7 @@ const modelQueue = new ModelQueueOwner({
 const homeComposition: HomeComposition = {
   modelQueue, modelRuntime,
   settings: () => sessions.settings,
-  knowledge: () => sessions.knowledge,
+  knowledge: () => knowledge,
   runtime: async () => ({
     runtime: applyHomeCacheRetention(sessionRuntimeView(modelRuntime)),
     ownership: "borrowed",
@@ -531,7 +531,6 @@ const knowledge = new KnowledgeService(
   knowledgeTagging,
 );
 queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
-sessions.setKnowledgeService(knowledge);
 const terminal = new TerminalService(
   config.terminalReplayBytes,
   (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),

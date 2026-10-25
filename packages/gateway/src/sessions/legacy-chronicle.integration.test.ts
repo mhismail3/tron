@@ -51,7 +51,8 @@ describe("retired Chronicle generation over preserved legacy history", { concurr
       fauxAssistantMessage("Noted, replies stay concise."),
     ]);
     runtime.registerNativeProvider(faux.provider);
-    const registry = await createTestRegistry({
+    let knowledge: KnowledgeService | undefined;
+    const registry = await createTestRegistry({ knowledge: () => knowledge,
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -67,8 +68,7 @@ describe("retired Chronicle generation over preserved legacy history", { concurr
       synthesize: async () => "unused", summarizeSource: async () => ({ text: "unused", model: "unused" }),
       assess: async () => { throw new Error("unused"); },
     };
-    const knowledge = new KnowledgeService(store, {}, () => reflectionModel as never);
-    registry.setKnowledgeService(knowledge);
+    knowledge = new KnowledgeService(store, {}, () => reflectionModel as never);
     await registry.initialize();
     const slot = await registry.create(cwd);
     const model = faux.getModel();

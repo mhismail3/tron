@@ -89,7 +89,6 @@ import {
   type SessionCatalogWatcherReset,
 } from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
-import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../kernel/delegation/task-subagents.js";
 import { modelQueueKey } from "../kernel/settings/tool-contract.js";
 import {
@@ -527,7 +526,6 @@ export class RuntimeRegistry implements SessionOperations {
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
   private readonly workspace: TronWorkspace;
-  private knowledgeService: KnowledgeService | undefined;
   private settingsOwners: Readonly<{ model: import("../kernel/settings/settings-model.js").SettingsModel; changes: import("../kernel/settings/settings-change.js").SettingsChangePath }> | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
@@ -735,7 +733,6 @@ export class RuntimeRegistry implements SessionOperations {
   /** The composition's one workspace (`workspaceModule`), shared by capability stores. */
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
   get moduleHost(): ModuleHost { return this.options.modules; }
-  get knowledge(): KnowledgeService | undefined { return this.knowledgeService; }
   notifyModuleServices() { return { notifications: this.options.notifications, machineId: this.options.machineId }; }
   /** The installed K6 owner, read late by session and composition consumers. */
   get settings() { return this.settingsOwners; }
@@ -748,11 +745,6 @@ export class RuntimeRegistry implements SessionOperations {
 
   setSearchInvalidator(invalidator: (sessionID: string, nextSessionID?: string) => void): void {
     this.searchInvalidator = invalidator;
-  }
-
-  setKnowledgeService(service: KnowledgeService): void {
-    if (this.knowledgeService && this.knowledgeService !== service) throw new Error("Knowledge service is already installed");
-    this.knowledgeService = service;
   }
 
   /** Installs the settings model and its change path for the `settings` tool.

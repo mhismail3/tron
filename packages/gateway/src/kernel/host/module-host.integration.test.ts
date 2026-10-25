@@ -125,7 +125,7 @@ describe("kernel/host module host", () => {
     const trust = new TrustService(join(root, "agent"));
     const openAIModelEligibility = new OpenAIModelEligibility();
     const display = new DisplayOwner(new DisplayArtifactStore(tronHome), undefined, () => registry);
-    const composition = gatewayModules(() => ({ registry, display, openAIModelEligibility, home: { tronHome, agentDir: join(root, "agent"), trust, knowledge: () => registry.knowledge, settings: () => registry.settings } }));
+    const composition = gatewayModules(() => ({ registry, display, openAIModelEligibility, home: { tronHome, agentDir: join(root, "agent"), trust, knowledge: () => undefined, settings: () => registry.settings } }));
     const modules = await ModuleHost.start(composition.modules, { tronHome, log }, composition.runtimeOrder);
     const registry = new RuntimeRegistry({
       settingsSchema: TEST_SETTINGS_SCHEMA,
