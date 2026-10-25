@@ -80,8 +80,10 @@ export function curationFailureOutcome(item: KnowledgeCurationItem, error: unkno
 /** Terminal reason for a job that failed, kept typed for the caller. */
 function curationJobFailure(error: unknown, aborted: boolean, cancellationReason?: unknown): { code: KnowledgeCurationCode; reason: string } {
   if (error instanceof KnowledgeCurationRefusal) return { code: error.code, reason: error.message };
-  if (error instanceof KnowledgeModelOutputError) return knowledgeModelFailureSummary(error);
+  // The SDK can report an aborted generation as a model error. Preserve the
+  // job owner's cancellation cause instead of blaming the provider.
   if (aborted) return { code: "cancelled", reason: cancellationReason instanceof Error ? cancellationReason.message : "Knowledge curation job was cancelled" };
+  if (error instanceof KnowledgeModelOutputError) return knowledgeModelFailureSummary(error);
   return { code: "unavailable", reason: error instanceof Error ? error.message : "Knowledge curation job failed" };
 }
 
