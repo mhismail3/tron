@@ -97,7 +97,7 @@ extension RealGatewayPairAndChatUITests {
             keepScreenshot(app, name: "2010-agent-settings-trust-\(appearance)")
             for _ in 0..<5 { app.swipeUp() }
             keepScreenshot(app, name: "2010-agent-settings-more-\(appearance)")
-            dismissTopSheet(app)
+            dismissAgentSheet(app, title: "Agent Behavior")
             let changes = app.buttons["Changes"]
             revealBelowNavigationBar(app, changes)
             changes.tap()
@@ -163,7 +163,7 @@ extension RealGatewayPairAndChatUITests {
         revealBelowNavigationBar(app, row)
         edit.tap()
         XCTAssertTrue(app.buttons["Remove tron-e2e/e2e-alternate"].waitForExistence(timeout: 15), app.debugDescription)
-        dismissTopSheet(app)
+        dismissAgentSheet(app, title: "Worker models")
         let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
         revealBelowNavigationBar(app, revert)
         revert.tap()
@@ -180,6 +180,15 @@ extension RealGatewayPairAndChatUITests {
         link.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Agent Behavior"].waitForExistence(timeout: 30), app.debugDescription)
         expandAgentSheet(app, title: "Agent Behavior")
+    }
+
+    @MainActor
+    private func dismissAgentSheet(_ app: XCUIApplication, title: String) {
+        let bar = app.navigationBars.containing(.staticText, identifier: title).firstMatch
+        let done = bar.buttons.matching(NSPredicate(format: "label == 'Done'")).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 15), app.debugDescription)
+        done.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { !bar.exists }, "Dismiss the named sheet, not a covered ancestor")
     }
 
     @MainActor
