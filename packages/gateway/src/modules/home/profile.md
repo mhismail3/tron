@@ -38,7 +38,9 @@ visibility fence. Unavailable Knowledge is not an empty successful profile.
 
 `profile {action:"read"}` reads the index. `profile {action:"read", path:"engineering"}`
 reads an explicit path and descendants; `inferred` and `prior` are readable too.
-Record pages contain at most sixteen notes and 32 KiB, including exact IDs,
+Record pages and the native list retain the canonical kind, creation-time, then ID
+order; SQL storage-key order is not presentation order. Record pages contain at
+most sixteen notes and 32 KiB, including exact IDs,
 revisions, state, content and provenance. Inactive content requires `includeInactive:true`. An oversized record returns its canonical
 Knowledge reference and byte count, never truncated content. `nextCursor` binds
 the query and revision snapshot; changed snapshots refuse and require a new read.
