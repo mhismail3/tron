@@ -36,9 +36,9 @@ final class TronInlineApprovalBoundaryUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars.staticTexts["Applied"].waitForExistence(timeout: 10), "Historical request resolves its complete recorded terminal facts")
         XCTAssertFalse(app.buttons["settings-approval-approve-approve"].exists)
         XCTAssertFalse(app.buttons["Undo"].exists, "The shared outcome is read-only; Changes owns fenced Undo")
+        keepScreenshot(app, "1643-request-receipt")
         app.buttons["Done"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], "decisions:1 approved:1"), "Reopening a receipt cannot replay a decision")
-        keepScreenshot(app, "1643-request-receipt")
     }
 
     @MainActor
@@ -53,9 +53,9 @@ final class TronInlineApprovalBoundaryUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Value hidden"].exists)
         XCTAssertFalse(app.buttons["settings-approval-approve-settled"].exists)
         XCTAssertFalse(app.buttons["Undo"].exists)
+        keepScreenshot(app, "1643-failed-outcome")
         app.buttons["Done"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], "decisions:0 approved:0"))
-        keepScreenshot(app, "1643-failed-outcome")
     }
 
     @MainActor
