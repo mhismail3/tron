@@ -5,16 +5,32 @@ import XCTest
 /// into the fixture Gateway's canonical store. No user settings are touched.
 extension RealGatewayPairAndChatUITests {
     @MainActor
-    func testAgentSettingsQueuesSaveReopenAndResetInLightAndDark() throws {
+    func testAgentSettingsQueuesSaveReopenAndResetLight() throws {
+        try agentSettingsQueues(appearance: "light")
+    }
+
+    @MainActor
+    func testAgentSettingsQueuesSaveReopenAndResetDark() throws {
+        try agentSettingsQueues(appearance: "dark")
+    }
+
+    @MainActor
+    private func agentSettingsQueues(appearance: String) throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let tronHome = try XCTUnwrap(ProcessInfo.processInfo.environment["TRON_E2E_TRON_HOME"])
-        let store = URL(fileURLWithPath: tronHome).appendingPathComponent("gateway/settings/gateway.json")
+        let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
+        let store = agent.deletingLastPathComponent().appendingPathComponent("tron/gateway/settings/gateway.json")
+        // Seed only this fresh fixture's retired compaction override, so review
+        // captures show its surviving inspector in the consolidated sheet too.
+        let settingsFile = agent.appendingPathComponent("settings.json")
+        var settings = try JSONSerialization.jsonObject(with: Data(contentsOf: settingsFile)) as! [String: Any]
+        settings["compaction"] = ["reserveTokens": 24_576]
+        try JSONSerialization.data(withJSONObject: settings).write(to: settingsFile)
         func saved(_ role: String) -> [String]? {
             let document = (try? JSONSerialization.jsonObject(with: Data(contentsOf: store))) as? [String: Any]
             return (document?["modelQueues"] as? [String: Any])?[role] as? [String]
         }
-        for appearance in ["light", "dark"] {
+        do {
             let app = launchApp(additionalArguments: ["-appearanceMode", appearance])
             defer { app.terminate() }
             open(fixture.invitationLink())
@@ -30,6 +46,7 @@ extension RealGatewayPairAndChatUITests {
             let agentSettings = app.buttons["settings-link-Agent Settings"]
             revealBelowNavigationBar(app, agentSettings)
             XCTAssertTrue(agentSettings.isHittable, app.debugDescription)
+            for _ in 0..<3 where agentSettings.frame.maxY > app.windows.firstMatch.frame.maxY - 120 { app.swipeUp() }
             keepScreenshot(app, name: "2010-global-root-system-\(appearance)")
             agentSettings.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Agent Settings"].waitForExistence(timeout: 30), app.debugDescription)
