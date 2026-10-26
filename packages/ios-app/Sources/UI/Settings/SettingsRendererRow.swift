@@ -253,6 +253,9 @@ struct SettingsRendererRow: View {
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     SettingsListEditor(title: title, help: presentation?.help ?? "", entry: presentation?.entry,
                                        values: values.compactMap(\.stringValue), entryPicker: modelEntryPicker, onChange: onChange)
+                        // The retained sheet host must not reopen a draft seeded
+                        // before the last accepted save. Local edits keep this identity.
+                        .id(values)
                 }
             } else {
                 readOnlyRow
