@@ -1,10 +1,34 @@
 import { StringEnum, Type } from "../../kernel/pi/ai.js";
 import type { ModuleDescriptor } from "../../kernel/host/module-host.js";
+import type { JsonValue } from "../../protocol/types.js";
+import { boolean, integer, rejectUnknownFields, string } from "../../util/validation.js";
 import { ProjectLifecycle, type ProjectRequest } from "./project-lifecycle.js";
 
 export function projectsModule(owner: ProjectLifecycle): ModuleDescriptor<ProjectLifecycle> {
   return { name: "tron-projects", purpose: "Creates projects and requests maintainer-approved trust, rename, recoverable archive and untrust through the canonical approvals owner.", tools: ["projects"], commands: [],
-    start: () => ({ contract: owner, extension: session => pi => {
+    start: () => ({ contract: owner, capabilities: ["projects.lifecycle.v1"], rpc: {
+      "projects.list": { kind: "read", handle: async (params, context) => {
+        rejectUnknownFields(params, ["limit", "after"], "projects.list");
+        return await owner.list({ limit: params.limit === undefined ? 25 : integer(params.limit, "limit", 1, 50),
+          ...(params.after === undefined ? {} : { after: string(params.after, "after", { max: 255 }) }) }, context.signal) as unknown as JsonValue;
+      } },
+      "projects.inspect": { kind: "read", handle: async (params, context) => {
+        rejectUnknownFields(params, ["cwd"], "projects.inspect");
+        return await owner.read(string(params.cwd, "cwd", { min: 1, max: 4096 }), context.signal) as unknown as JsonValue;
+      } },
+      "projects.request": { kind: "mutation", handle: async (params, context) => {
+        rejectUnknownFields(params, ["commandId", "action", "name", "newName", "github", "reason"], "projects.request");
+        const input: ProjectRequest = {
+          action: string(params.action, "action", { min: 1, max: 16 }) as ProjectRequest["action"],
+          name: string(params.name, "name", { min: 1, max: 64 }),
+          reason: string(params.reason, "reason", { min: 1, max: 2000 }),
+          ...(params.newName === undefined ? {} : { newName: string(params.newName, "newName", { min: 1, max: 64 }) }),
+          ...(params.github === undefined ? {} : { github: boolean(params.github, "github") }),
+        };
+        return await owner.request(input, { kind: "ui", id: context.identity },
+          string(params.commandId, "commandId", { min: 8, max: 160 })) as unknown as JsonValue;
+      } },
+    }, extension: session => pi => {
       pi.registerTool({ name: "projects", label: "Projects", annotations: { openWorldHint: false }, executionMode: "sequential",
         description: "Manage direct-child projects in ~/Workspace. create exclusively creates a folder and git repository on main, then requests trust. trust, rename, archive and untrust request the maintainer's tap (24h expiry); never self-approve. Optional github creates a private repository and origin only after approval, without pushing. Existing paths, symlinks and worker/worktree/claim ownership are refused. Archive retains files in ~/Workspace/.archive. Failures may retain partial untrusted work: inspect before retrying.",
         promptSnippet: "Use projects for project creation and maintainer-approved lifecycle changes; never write trust files.",

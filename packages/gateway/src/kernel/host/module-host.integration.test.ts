@@ -109,7 +109,7 @@ describe("kernel/host module host", () => {
     const retired = () => host.observers("sessionRetired").map(hook => (hook as () => string)());
     expect(retired()).toEqual(["first", "second"]);
     expect(host.capabilities()).toEqual(["first.v1", "second.v1"]);
-    expect(await host.rpc("second.read")?.handle({})).toBe("second");
+    expect(await host.rpc("second.read")?.handle({}, { identity: "module-host-fixture" })).toBe("second");
     expect(host.rpc("toString")).toBeUndefined();
     expect(host.policy("modelUsed")).toBeUndefined();
     // Never captured: a module that replaces its hook is dispatched to the new one.

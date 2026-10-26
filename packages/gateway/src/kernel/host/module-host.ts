@@ -113,9 +113,14 @@ export interface SessionContext {
  * (decision D5). A `read` is disposable and admitted while the Gateway drains; a
  * `mutation` runs once per `commandId` under the transport's command receipt and
  * is refused while draining. `handle` validates its own parameters. */
+export interface RpcContext {
+  readonly identity: string;
+  /** Disconnect only cancels disposable reads, never accepted commands. */
+  readonly signal?: AbortSignal;
+}
 export interface RpcHandler {
   kind: "read" | "mutation";
-  handle(params: Record<string, unknown>): Promise<JsonValue>;
+  handle(params: Record<string, unknown>, context: RpcContext): Promise<JsonValue>;
 }
 
 /** The K3 hooks and their dispatch kind (k0-kernel.md §2.1). A `policy` hook has

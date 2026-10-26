@@ -290,7 +290,8 @@ export class SettingsChangePath {
   async requestAction(subject: string, params: unknown, context: Pick<ChangeContext, "actor" | "reason" | "commandId">): Promise<ChangeResult> {
     const handler = this.actions.get(subject);
     if (!handler) throw new GatewayError("invalid_request", `No approval action ${subject}`);
-    if (context.actor.kind === "ui") throw new GatewayError("invalid_request", "The maintainer runs his own actions directly");
+    // Registered actions always require a separate exact-digest decision, even
+    // when their request originates in the native UI. Request is not approval.
     if (!context.reason?.trim()) throw new GatewayError("invalid_request", "A reason is required for an approval request");
     if (Buffer.byteLength(JSON.stringify(params ?? null)) > ACTION_PARAMS_BYTES) throw new GatewayError("invalid_request", "Action parameters exceed 16 KiB");
     const preview = actionPreview(await handler.plan(params, { actor: context.actor }));

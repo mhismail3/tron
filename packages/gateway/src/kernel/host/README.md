@@ -79,7 +79,9 @@ semantic form adapters, including their exact audited package admission.
 - **RPC (D5).** A module's `rpc` methods are routed before `GatewayService`'s
   switch. `read` handlers are admitted while the Gateway drains; `mutation`
   handlers run under the command receipt and are refused while draining.
-  Capabilities are listed in composition order.
+  Handlers receive transport-owned authenticated identity, never a params actor;
+  only disposable reads receive the disconnect signal. Accepted mutation context
+  stays with its receipt. Capabilities are listed in composition order.
 - **Resource lifetime and context.** `resourceRoot` returns the module's actual root
   owner. The kernel initializes it at its existing startup cut and requires its
   disposal after lifecycle owners, retaining failed disposal for retry. This is

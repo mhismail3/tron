@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { lstat, mkdir, realpath, rename, rmdir } from "node:fs/promises";
+import { lstat, mkdir, opendir, realpath, rename, rmdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
-import type { TrustService } from "../../kernel/resources/trust-service.js";
+import type { TrustInspection, TrustService } from "../../kernel/resources/trust-service.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
 import type { Actor } from "../../kernel/settings/settings-record.js";
 import type { ApprovalActionPreview, ChangeResult } from "../../kernel/settings/tool-contract.js";
@@ -16,6 +16,16 @@ export const PROJECT_ACTION = "project.lifecycle";
 type Operation = "trust" | "rename" | "archive" | "untrust";
 interface Action { operation: Operation; name: string; destination?: string; github?: boolean; identity: string }
 export interface ProjectRequest { action: "create" | "trust" | "rename" | "archive" | "untrust"; name: string; newName?: string; github?: boolean; reason: string }
+export type ProjectEligibility = { allowed: true } | { allowed: false; code: string; reason: string };
+export interface ProjectRow {
+  name: string;
+  path: string;
+  trust: TrustInspection | null;
+  eligibility: Record<"trust" | "github" | "rename" | "archive" | "untrust", ProjectEligibility>;
+}
+export interface ProjectPage { workspace: string; projects: ProjectRow[]; nextCursor: string | null }
+const eligibilityActions = ["trust", "github", "rename", "archive", "untrust"] as const;
+
 export interface ProjectRuntimePort {
   assertIdle(path: string, moving: boolean): Promise<void>;
   reload(path: string, trusted: boolean): Promise<void>;
@@ -44,6 +54,63 @@ export class ProjectLifecycle {
       apply: params => this.mutex.run(() => this.apply(this.action(params))),
     });
     this.changes = changes;
+  }
+
+  /** Disposable projections, never a reservation or permission to execute. */
+  async list(options: { limit: number; after?: string }, signal?: AbortSignal): Promise<ProjectPage> {
+    signal?.throwIfAborted();
+    await this.root();
+    const names: string[] = [];
+    let scanned = 0;
+    for await (const entry of await opendir(this.workspace)) {
+      signal?.throwIfAborted();
+      if (++scanned > 1000) throw new GatewayError("busy", "Too many Workspace entries to list safely; use projects.inspect for a specific folder");
+      if (!entry.name.startsWith(".") && (entry.isDirectory() || entry.isSymbolicLink())) names.push(entry.name);
+    }
+    names.sort();
+    const remaining = names.filter(name => options.after === undefined || name > options.after);
+    const selected = remaining.slice(0, options.limit);
+    const projects: ProjectRow[] = [];
+    for (const name of selected) projects.push(await this.read(join(this.workspace, name), signal));
+    signal?.throwIfAborted();
+    return { workspace: this.workspace, projects, nextCursor: remaining.length > selected.length ? selected.at(-1)! : null };
+  }
+
+  async read(cwd: string, signal?: AbortSignal): Promise<ProjectRow> {
+    signal?.throwIfAborted();
+    if (!isAbsolute(cwd)) throw new GatewayError("invalid_request", "Project inspection requires an absolute folder path");
+    const path = resolve(cwd), name = basename(path);
+    const denied = (error: unknown): ProjectEligibility => {
+      if (!(error instanceof GatewayError)) throw error;
+      return { allowed: false, code: error.code, reason: error.message };
+    };
+    const row: ProjectRow = { name, path, trust: null,
+      eligibility: Object.fromEntries(eligibilityActions.map(action => [action,
+        { allowed: false, code: "invalid_request", reason: "Unsupported project folder" }])) as ProjectRow["eligibility"] };
+    try {
+      const identity = await this.directory(path);
+      if (await realpath(path) !== path) throw new GatewayError("invalid_request", "Project paths must be canonical directories, not symlinks");
+      row.trust = await this.trust().inspect(path);
+      if (dirname(path) !== this.workspace) throw new GatewayError("invalid_request", "Lifecycle supports only direct Workspace project folders");
+      this.name(name);
+      const inspected = await this.inspect({ operation: "untrust", name, identity }, signal);
+      signal?.throwIfAborted();
+      row.trust = inspected.trust;
+      row.eligibility.trust = row.eligibility.untrust = { allowed: true };
+      row.eligibility.github = inspected.hasRemotes
+        ? { allowed: false, code: "conflict", reason: "Project already has remotes; no GitHub repository will be created" } : { allowed: true };
+      try {
+        await this.runtimes.assertIdle(path, true);
+        row.eligibility.rename = { allowed: true };
+        try { await this.archiveDirectory(); row.eligibility.archive = { allowed: true }; }
+        catch (error) { row.eligibility.archive = denied(error); }
+      } catch (error) { row.eligibility.rename = row.eligibility.archive = denied(error); }
+    } catch (error) {
+      const refusal = denied(error);
+      for (const action of eligibilityActions) row.eligibility[action] = refusal;
+    }
+    signal?.throwIfAborted();
+    return row;
   }
 
   async request(input: ProjectRequest, actor: Actor, commandId: string): Promise<ChangeResult> {
@@ -132,36 +199,44 @@ export class ProjectLifecycle {
     try { await lstat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
     throw new GatewayError("conflict", "Destination already exists; project lifecycle never overwrites a path");
   }
+  private async archiveDirectory(): Promise<void> {
+    const archive = join(this.workspace, ".archive");
+    try { await this.directory(archive); if (await realpath(archive) !== archive) throw new Error("symlink"); }
+    catch (error) {
+      if (!(error instanceof GatewayError && error.code === "not_found")) throw new GatewayError("invalid_request", "Archive must be a real directory");
+    }
+  }
   private destination(action: Action): string | undefined {
     return action.operation === "rename" ? join(this.workspace, action.destination!)
       : action.operation === "archive" ? join(this.workspace, ".archive", action.destination!) : undefined;
   }
-  private async command(executable: string, args: string[], cwd: string): Promise<string> {
+  private async command(executable: string, args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
     // Do not inherit Git redirection into another checkout or executable hooks.
     const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" };
     for (const key of Object.keys(env)) if (key.startsWith("GIT_") && key !== "GIT_TERMINAL_PROMPT") delete env[key];
-    try { return (await exec(executable, args, { cwd, env, timeout: 60_000, maxBuffer: 1024 * 1024 })).stdout.trim(); }
-    catch { throw new GatewayError("conflict", `${executable === this.githubExecutable ? "GitHub" : "Git"} command did not complete; inspect project state before retrying`); }
+    try { return (await exec(executable, args, { cwd, env, timeout: 60_000, maxBuffer: 1024 * 1024, ...(signal ? { signal } : {}) })).stdout.trim(); }
+    catch { signal?.throwIfAborted(); throw new GatewayError("conflict", `${executable === this.githubExecutable ? "GitHub" : "Git"} command did not complete; inspect project state before retrying`); }
   }
-  private git(path: string, args: string[]): Promise<string> {
+  private git(path: string, args: string[], signal?: AbortSignal): Promise<string> {
     // Even read-only log inspection can launch a repository-configured verifier.
-    return this.command("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "log.showSignature=false", ...args], path);
+    return this.command("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "log.showSignature=false", ...args], path, signal);
   }
-  private async inspect(action: Action) {
+  private async inspect(action: Action, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const path = join(this.workspace, action.name);
     await this.same(path, action.identity);
     const gitIdentity = await this.directory(join(path, ".git")); // linked worktrees/submodules are not project roots
-    const root = await this.git(path, ["rev-parse", "--show-toplevel"]);
+    const root = await this.git(path, ["rev-parse", "--show-toplevel"], signal);
     if (root !== path) throw new GatewayError("invalid_request", "Lifecycle requires a standalone project repository");
-    const worktrees = await this.git(path, ["worktree", "list", "--porcelain"]);
+    const worktrees = await this.git(path, ["worktree", "list", "--porcelain"], signal);
     if (worktrees.split("\n").filter(line => line.startsWith("worktree ")).length !== 1) throw new GatewayError("busy", "Project has linked worktrees; release their owners before changing its lifecycle");
     // Only the work tool's canonical claim-branch namespace owns claims.
     // Verify its trailer too; historical markers merged into main are not owners.
     // Retained claim branches are conservative: only their work owner cleans them.
-    const refs = (await this.git(path, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"])).split("\n");
+    const refs = (await this.git(path, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"], signal)).split("\n");
     if (refs.length > 200) throw new GatewayError("busy", "Too many project refs to inspect safely; review its work ownership first");
     for (const ref of refs.filter(ref => /^refs\/(?:heads|remotes\/[^/]+)\/[a-z0-9._-]+\/\d+-/.test(ref))) {
-      const claim = await this.git(path, ["log", ref, "-1", "--grep=^Work-Claim-Session:", "--format=%(trailers:key=Work-Claim-Session,valueonly)"]);
+      const claim = await this.git(path, ["log", ref, "-1", "--grep=^Work-Claim-Session:", "--format=%(trailers:key=Work-Claim-Session,valueonly)"], signal);
       if (claim) throw new GatewayError("busy", "Project retains a work claim branch; its owner must release and clean it before lifecycle changes");
     }
     await this.runtimes.assertIdle(path, action.operation === "rename" || action.operation === "archive");
@@ -169,18 +244,14 @@ export class ProjectLifecycle {
     if (trust.projectDir !== path) throw new GatewayError("invalid_request", "Project root changed");
     const destination = this.destination(action);
     if (destination) {
-      if (action.operation === "archive") {
-        const archive = join(this.workspace, ".archive");
-        try { await this.directory(archive); if (await realpath(archive) !== archive) throw new Error("symlink"); }
-        catch (error) { if (!(error instanceof GatewayError && error.code === "not_found")) throw new GatewayError("invalid_request", "Archive must be a real directory"); }
-      }
+      if (action.operation === "archive") await this.archiveDirectory();
       await this.absent(destination);
     }
-    const remotes = (await this.git(path, ["config", "--local", "--null", "--list"])).split("\0").filter(value => value.startsWith("remote.")).join("\0");
+    const remotes = (await this.git(path, ["config", "--local", "--null", "--list"], signal)).split("\0").filter(value => value.startsWith("remote.")).join("\0");
     if (action.github && remotes) throw new GatewayError("conflict", "Project already has remotes; no GitHub repository will be created");
     const state = createHash("sha256").update(JSON.stringify({ gitIdentity, worktrees, remotes, saved: trust.savedDecision, effective: trust.effectiveDecision })).digest("hex");
     await this.same(path, action.identity);
-    return { path, destination, trust, state };
+    return { path, destination, trust, state, hasRemotes: remotes.length > 0 };
   }
   private async plan(action: Action): Promise<ApprovalActionPreview> {
     const { path, destination, trust, state } = await this.inspect(action);

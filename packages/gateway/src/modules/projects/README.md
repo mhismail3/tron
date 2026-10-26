@@ -74,6 +74,38 @@ request. To retry a failed creation's trust phase, explicitly request `trust`.
   GitHub stderr/credential-bearing config is not returned.
 - Existing generic iOS approval chips/sheets show action items; no custom UI is introduced.
 
+## Native RPC
+
+Capability `projects.lifecycle.v1` is advertised in `system.info`. Module-host
+routing uses the same owner as the agent tool, not a tool invocation from the UI.
+
+- `projects.list({limit?, after?})` returns `{workspace, projects, nextCursor}`.
+  Limit is 1–50 (default 25); cursor is the last returned name. It sorts visible
+  direct Workspace folders/symlinks, scanning at most 1,000 entries. Hidden
+  archives are not listed. Reads never adopt folders, grant trust or reserve moves.
+- `projects.inspect({cwd})` reads one absolute folder path, including saved folders
+  outside Workspace. Each row is `{name, path, trust, eligibility}`; trust is the
+  existing TrustInspection or null for unsafe/uninspectable paths. Eligibility has
+  `trust/github/rename/archive/untrust`, each `{allowed:true}` or
+  `{allowed:false, code, reason}`. Unsupported layouts/names/outside folders are
+  read-only; idle live sessions block moves; existing remotes block GitHub creation.
+  These are disposable snapshots. Submission and decision always revalidate;
+  rename destination validity/availability is checked on request.
+- `projects.request({commandId, action, name, newName?, github?, reason})`
+  returns the canonical pending Settings ChangeResult and approval reference.
+  Actions are create/trust/rename/archive/untrust; field bounds match the tool,
+  with commandId 8–160 characters. Native UI identity is transport-derived, never
+  caller-supplied. Creation leaves a local untrusted repository; a separate
+  `settings.decide` tap with exact requestId/digest is required to grant trust or
+  apply an action. There is no direct apply/self-approval route.
+
+Canonical receipts bind caller + commandId + method: retries return the original
+result even if their payload differs. A new intent requires a new ID; cross-method
+ID reuse refuses. Disconnect cancels disposable reads, not accepted mutations.
+Refresh after request/decision, reconnect/re-entry, and existing
+`settings.approvalsChanged` (plus relevant trust/settings changes). No second
+project cache, change stream or approval engine is introduced.
+
 ## Entry points
 
 `ProjectLifecycle.register`, `ProjectLifecycle.request`, `projectsModule`,
@@ -97,6 +129,9 @@ GitHub success is a spawned fixture executable, never a live repository. The
 installed `gh` also runs with empty auth configuration/token environment under
 macOS Seatbelt's network deny; this proves unauthenticated refusal/retained state,
 not real remote creation. The real-CLI case requires installed `gh` and `sandbox-exec`.
+Native cases invoke the real Gateway module route, receipts and Settings decisions:
+create → trust → rename → untrust → archive, deny/replay, actual move eligibility,
+unsupported folders, authenticated actor provenance and disconnect ownership.
 
 ## Not here
 

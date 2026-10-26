@@ -6,6 +6,10 @@ Declared settings schema, resolution/request pins and the audited change engine,
 with durable audit/approval stores. Session contexts and store adapters share
 one contract and one persisted store format.
 
+Registered action requests always remain pending until a separate exact-digest
+maintainer decision, including requests originating in the native UI. Requesting
+an action is not approving it; ordinary UI settings-change application is unchanged.
+
 ## Owns
 
 `settings-schema.ts` owns the concrete key table, binding/type declarations,

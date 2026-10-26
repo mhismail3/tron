@@ -622,7 +622,10 @@ export class GatewayService {
     if (this.dependencies.sessions.isAdministrativeDrainStarted && !restartDrainMethods.has(method) && routed?.kind !== "read") {
       throw new GatewayError("busy", "The Gateway is draining accepted work", true);
     }
-    if (routed) return routed.kind === "read" ? routed.handle(params) : this.mutation(client, method, params, () => routed.handle(params));
+    if (routed) {
+      const context = { identity: client.identity, ...(routed.kind === "read" && client.signal ? { signal: client.signal } : {}) };
+      return routed.kind === "read" ? routed.handle(params, context) : this.mutation(client, method, params, () => routed.handle(params, context));
+    }
     switch (method) {
       case "system.info":
         return this.info();

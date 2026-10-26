@@ -40,6 +40,7 @@ async function fixture(github = false) {
   await setHomeMemoryModels(f.registry, [f.model]);
   const service = new GatewayService({ display: displayOwnerOf(f.registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
+    modules: (f.registry as unknown as { options: Pick<GatewayServiceDependencies, "modules"> }).options.modules,
     modelRuntime: f.gateway, trust: f.trust, settingsModel: f.settings.settingsModel, settingsChanges: changes, sessions: f.registry, home: homeOwnerOf(f.registry),
     receipts: new CommandReceiptStore(f.tronHome), uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES),
     notifications: { enqueue: async () => "queued" }, broadcast: () => {},
@@ -87,7 +88,100 @@ async function fixture(github = false) {
   return { ...f, root, workspace, path, git, request, create, decide, outcomes, changes, service, settled, advance: (ms: number) => { clock += ms; } };
 }
 
+type NativeRow = { name: string; path: string; trust: { effectiveDecision: boolean | null; savedDecision: boolean | null } | null;
+  eligibility: Record<"trust" | "github" | "rename" | "archive" | "untrust", { allowed: boolean; code?: string; reason?: string }> };
+type NativePage = { workspace: string; projects: NativeRow[]; nextCursor: string | null };
+
 describe("Gateway project lifecycle", () => {
+  it("native requests are receipt-backed UI requests and only a separate canonical tap applies each lifecycle effect", async () => {
+    const f = await fixture();
+    const list = () => f.service.invoke(phone, "projects.list", {}) as unknown as Promise<NativePage>;
+    const ask = (action: string, name: string, extra: Record<string, unknown> = {}) => f.service.invoke(phone, "projects.request",
+      { commandId: `native-project-${++command}`, action, name, reason: "Native lifecycle boundary", ...extra }) as Promise<ChangeResult>;
+    expect((await list()).projects).toEqual([]);
+    const args = { commandId: `native-create-${++command}`, action: "create", name: "native-original", reason: "Create from paired iPhone" };
+    const pending = await f.service.invoke(phone, "projects.request", args) as unknown as ChangeResult;
+    expect(pending.status).toBe("pending");
+    expect((await list()).projects[0]?.trust?.effectiveDecision).toBe(false);
+    expect(await f.service.invoke(phone, "projects.request", args)).toEqual(pending);
+    expect(await f.service.invoke(phone, "projects.request", { ...args, reason: "Different payload" })).toEqual(pending);
+    const approval = await f.changes.approvals.get(pending.approval!.requestId);
+    expect(approval?.actor).toEqual({ kind: "ui", id: phone.identity });
+    expect((await f.decide(pending)).status).toBe("approved");
+    await writeFile(f.path("native-original/data"), "retained native bytes");
+    const rename = await ask("rename", "native-original", { newName: "native-renamed" });
+    expect(await readFile(f.path("native-original/data"), "utf8")).toBe("retained native bytes");
+    await f.decide(rename);
+    expect(await readFile(f.path("native-renamed/data"), "utf8")).toBe("retained native bytes");
+    const denied = await ask("untrust", "native-renamed");
+    await f.decide(denied, false);
+    expect((await list()).projects.find(row => row.name === "native-renamed")?.trust?.effectiveDecision).toBe(true);
+    await f.decide(await ask("untrust", "native-renamed"));
+    expect((await list()).projects.find(row => row.name === "native-renamed")?.trust?.effectiveDecision).toBe(false);
+    await f.decide(await ask("trust", "native-renamed"));
+    const archive = await ask("archive", "native-renamed");
+    expect(await readFile(f.path("native-renamed/data"), "utf8")).toBe("retained native bytes");
+    await f.decide(archive);
+    expect((await list()).projects.some(row => row.name === "native-renamed")).toBe(false);
+    const archived = (await readdir(join(f.workspace, ".archive")))[0]!;
+    expect(await readFile(join(f.workspace, ".archive", archived, "data"), "utf8")).toBe("retained native bytes");
+    expect((await f.trust.inspect(join(f.workspace, ".archive", archived))).effectiveDecision).toBe(false);
+    evidence.push({ nativeJourney: { pending, rename, denied, archive } });
+  });
+
+  it("native eligibility reads preserve trust, explain actual idle-session move refusal and unsupported saved folders", async () => {
+    const f = await fixture();
+    await f.decide(await f.create("native-idle"));
+    const slot = await f.registry.create(f.path("native-idle"));
+    const inspect = (cwd: string) => f.service.invoke(phone, "projects.inspect", { cwd }) as unknown as Promise<NativeRow>;
+    const before = await f.trust.inspect(slot.cwd);
+    const row = await inspect(slot.cwd);
+    expect(row.trust).toMatchObject({ savedDecision: true, effectiveDecision: true });
+    expect(row.eligibility.untrust.allowed).toBe(true);
+    expect(row.eligibility.archive).toMatchObject({ allowed: false, code: "busy" });
+    expect(row.eligibility.rename.reason).toMatch(/session/i);
+    await expect(f.service.invoke(phone, "projects.request", { commandId: `native-busy-${++command}`, action: "archive",
+      name: "native-idle", reason: "Must retain canonical refusal" })).rejects.toMatchObject({ code: "busy", message: row.eligibility.archive.reason });
+    await mkdir(f.path("not a supported name"));
+    await symlink(f.root, f.path("linked-native"));
+    const unsupported = await inspect(f.root);
+    expect(Object.values(unsupported.eligibility).every(item => !item.allowed)).toBe(true);
+    const linked = await inspect(f.path("linked-native"));
+    expect(linked.trust).toBeNull();
+    expect(Object.values(linked.eligibility).every(item => !item.allowed)).toBe(true);
+    const names: string[] = [];
+    let after: string | null = null;
+    do {
+      const page = await f.service.invoke(phone, "projects.list", { limit: 1, ...(after ? { after } : {}) }) as unknown as NativePage;
+      expect(page.projects.length).toBeLessThanOrEqual(1);
+      names.push(...page.projects.map(item => item.name));
+      after = page.nextCursor;
+    } while (after);
+    expect(names).toEqual(["linked-native", "native-idle", "not a supported name"]);
+    expect(await f.trust.inspect(slot.cwd)).toEqual(before);
+    expect(slot.isDisposed).toBe(false);
+    evidence.push({ nativeEligibility: { row, unsupported, linked, names } });
+  });
+
+  it("native reads cancel on disconnect while accepted commands survive and cannot spoof their actor or approval", async () => {
+    const f = await fixture();
+    const controller = new AbortController();
+    const client = { ...phone, signal: controller.signal };
+    const accepted = f.service.invoke(client, "projects.request", { commandId: `native-disconnect-${++command}`,
+      action: "create", name: "native-disconnect", reason: "Accepted commands retain receipt ownership" });
+    controller.abort();
+    const pending = await accepted as unknown as ChangeResult;
+    expect(pending.status).toBe("pending");
+    await expect(f.service.invoke(client, "projects.list", {})).rejects.toMatchObject({ name: "AbortError" });
+    for (const extra of [{ actor: { kind: "ui", id: "forged" } }, { approved: true }]) {
+      await expect(f.service.invoke(phone, "projects.request", { commandId: `native-spoof-${++command}`,
+        action: "trust", name: "native-disconnect", reason: "Not caller authority", ...extra })).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    expect((await f.trust.inspect(f.path("native-disconnect"))).effectiveDecision).toBe(false);
+    await f.decide(pending, false);
+    expect((await f.trust.inspect(f.path("native-disconnect"))).effectiveDecision).toBe(false);
+  });
+
   it("Home creates an untrusted main repository, approval grants trust and the real delegate owner immediately admits work", async () => {
     const f = await fixture();
     const pending = await f.create("slim-key");
