@@ -428,7 +428,7 @@ export class SettingsChangePath {
   }
 
   private subjectEntry(write: SubjectWrite, context: SubjectContext, status: ChangeStatus, failure?: string,
-    identity = { changeId: randomUUID(), at: this.now().toISOString() }): ChangeEntry {
+    identity: { changeId: string; at: string } = { changeId: randomUUID(), at: this.now().toISOString() }): ChangeEntry {
     const web = context.web === true;
     return {
       ...identity, commandId: context.commandId, actor: context.actor, target: { kind: "home" },
