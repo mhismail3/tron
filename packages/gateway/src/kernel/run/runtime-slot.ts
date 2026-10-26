@@ -5654,10 +5654,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   /** Starts one Home wake: the inbox's pending results start the run. */
-  async admitHomeWake(cancellationEpoch: number): Promise<{ delivered: boolean }> {
+  async admitHomeWake(inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number): Promise<{ delivered: boolean }> {
     let delivered = false;
     await this.prompt("", [], undefined, undefined, undefined, {
-      kind: "homeWake", cancellationEpoch, operationId: randomUUID(), origin: { kind: "gateway", ownerId: "home", title: "Home", confidence: "boundary" },
+      kind: "homeWake", inputCancellation, cancellationEpoch, operationId: randomUUID(), origin: { kind: "gateway", ownerId: "home", title: "Home", confidence: "boundary" },
       onDelivered: (value) => { delivered = value; },
     });
     return { delivered };
@@ -5682,22 +5682,24 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   /** Starts a wake's run with its trigger, or completes an operation with nothing to deliver. */
   public startHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger | undefined,
-    accept: (accepted: boolean) => void, cancellationEpoch: number): Promise<void> {
+    accept: (accepted: boolean) => void, inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number): Promise<void> {
     accept(true);
-    return trigger ? this.sendHomeWake(session, operationId, trigger, cancellationEpoch) : Promise.resolve();
+    return trigger ? this.sendHomeWake(session, operationId, trigger, inputCancellation, cancellationEpoch) : Promise.resolve();
   }
 
   /** Pi appends the trigger and runs the turn. Refuses to leave an inbox result admitted
    * when the trigger never reached the canonical session: it returns to pending first, so
    * a terminal receipt cannot settle it as outcome-unknown. */
-  private async sendHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger, cancellationEpoch: number): Promise<void> {
+  private async sendHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger, inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number): Promise<void> {
     const eventId = trigger.message.details.eventId;
     this.inboxAttributedMessages.add(eventId);
     this.homeWakeTrigger = { input: trigger, operationId };
     try {
       // Stop may win while admission awaits receipt, settings or inbox I/O.
       // Keep this inside the existing trigger-release fence, before SDK append.
-      if (this.runAbort.cancellationEpoch !== cancellationEpoch) throw new GatewayError("cancelled", "Home wake stopped before delivery");
+      if (this.runAbort.inputCancellation !== inputCancellation || inputCancellation.epoch !== cancellationEpoch) {
+        throw new GatewayError("cancelled", "Home wake stopped before delivery");
+      }
       await session.sendCustomMessage(trigger.message, { triggerTurn: true });
       if (!this.hasCanonicalCustomMessage(eventId)) throw new GatewayError("conflict", "Home wake trigger was not persisted");
     } catch (error) {
@@ -5890,12 +5892,13 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
    * budget, fencing Stop until the SDK owns cancellation; never reload resources. */
   private async navigateTreeWithSettings(targetId: string, options: Parameters<AgentSession["navigateTree"]>[1]) {
     const session = this.runtime.session;
-    const cancellationEpoch = this.runAbort.cancellationEpoch;
+    const inputCancellation = this.runAbort.inputCancellation;
+    const cancellationEpoch = inputCancellation.epoch;
     const owners = this.dependencies.settings();
     if (options?.summarize && owners) {
       const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, this.settingsSource(), ["context.branchSummary.reserveTokens"], { storeState: false });
       if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during branch-summary settings resolution");
-      if (this.runAbort.cancellationEpoch !== cancellationEpoch) throw new GatewayError("cancelled", "Branch summarization was stopped during settings resolution");
+      if (this.runAbort.inputCancellation !== inputCancellation || inputCancellation.epoch !== cancellationEpoch) throw new GatewayError("cancelled", "Branch summarization was stopped during settings resolution");
       const reserveTokens = resolved.keys[0]?.value;
       if (typeof reserveTokens !== "number") throw new GatewayError("conflict", "Branch-summary reserve is unavailable");
       session.settingsManager.applyOverrides({ branchSummary: { reserveTokens } });
@@ -6505,6 +6508,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   private async disposeRuntime(): Promise<void> {
+    this.runAbort.cancelPreparations();
     this.runTerminal.operationObservations.clear();
     // Borrowed Home views have no attachment to detach; the shared Gateway
     // installation outlives this slot and is retired by its own runtime owner.

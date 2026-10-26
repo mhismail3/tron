@@ -1,4 +1,5 @@
 import type { RunOperations } from "./run-operations.js";
+import type { RequestPolicy } from "../host/request-policy.js";
 import { randomUUID } from "node:crypto";
 import { GatewayError } from "../../errors.js";
 import { admitResourceInvocations, composeResourcePrompt, parsePiLiteralCommand } from "../../sessions/resource-invocation.js";
@@ -25,7 +26,8 @@ interface AutomationPromptOwnership<TaskFence> {
 /** A Home wake: Gateway-authored, with no user input. The inbox's trigger result starts the run. */
 interface HomeWakeOwnership {
   kind: "homeWake";
-  /** Captured from the native cancellation owner before asynchronous selection. */
+  /** Actual logical lifetime and immutable epoch captured before asynchronous selection. */
+  inputCancellation: RequestPolicy["inputCancellation"];
   cancellationEpoch: number;
   operationId: string;
   origin: ChatOrigin;
