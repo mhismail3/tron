@@ -31,6 +31,7 @@
     "test-support/nested-vitest-payload.ts",
     "test-support/network-isolation.ts",
     "test-support/profile-partition-crash.ts",
+    "test-support/profile-v1-fixture.ts",
     "test-support/runtime-registry-fixture.ts",
     "test-support/scenario-lock.ts",
     "test-support/settings-action-crash-child.ts",

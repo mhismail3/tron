@@ -66,6 +66,8 @@ one accepted recovery through the existing work owner.
 
 ## Invariants
 
+- `profile-v1-fixture.ts` arranges historical profile notes through the real privileged
+  partition-restore owner. It grants no legacy-create exemption to ordinary note APIs.
 - No test reaches the network or a real Tron home.
 - A test owns and removes its processes, temp homes and fixtures on success and
   failure.
