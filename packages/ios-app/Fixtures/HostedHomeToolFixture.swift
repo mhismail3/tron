@@ -39,7 +39,9 @@ enum HostedHomeToolFixture {
     /// The same profile as mutable rows, for the fixture Gateway's `home.profileChange`.
     static var profileItems: [HostedProfileItem] {
         struct List: Decodable { let items: [HostedProfileItem] }
-        return try! JSONDecoder.gateway.decode(List.self, from: Data(profileJSON.utf8)).items
+        let items = try! JSONDecoder.gateway.decode(List.self, from: Data(profileJSON.utf8)).items
+        return ProcessInfo.processInfo.arguments.contains("-home-profile-hierarchy")
+            ? items + HostedProfileHierarchyFixture.additionalItems : items
     }
 
     private static let profileJSON = #"""

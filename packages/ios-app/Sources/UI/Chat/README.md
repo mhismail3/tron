@@ -235,6 +235,11 @@ surface with Manage Home rather than its lifted ink. It also opens/saves the rea
 `TronAnnotationOnlySteerUITests` checks annotation content beneath the queue header, independent chip
 navigation and enabled editing/removal, plus photo/file-only editor validity in Home and normal chat.
 
+`TronProfileHierarchyUITests/testNativeHierarchyReviewMatrix` captures the real Profile sheet
+with isolated `-home-profile-hierarchy` synthetic data in light/dark at Large, XXL and XXXL.
+The fixture sets those exact SwiftUI sizes; the journey measures native row growth and checks
+writable-placement versus read-only-prior actions. Captures require human visual review.
+
 Classes under `TronMobileUITests/`: `TronHomeControlsUITests`, `TronHomeDashboardUITests`, `TronHomeSheetsUITests`,
 `TronConsolidatedUIRegressionTests` (Memory/canonical navigation, metadata, usage loading,
 Workspace cover/uncover, Manage model writes and scoped Settings routes),
