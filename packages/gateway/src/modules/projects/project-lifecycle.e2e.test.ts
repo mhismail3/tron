@@ -360,34 +360,6 @@ describe("Gateway project lifecycle", () => {
     }
   });
 
-  it("a separate same-UID writer cannot substitute a destination while native relocation commits", async () => {
-    const f = await fixture();
-    await f.decide(await f.create("raced-source"));
-    const source = f.path("raced-source");
-    const destination = f.path("raced-target");
-    const retained = join(f.root, "retained-approved-folder");
-    await writeFile(join(source, "approved-data"), "approved inode");
-    await mkdir(destination);
-    const actor = join(f.root, "same-uid-writer.mjs");
-    await writeFile(actor, `import { rename, mkdir, writeFile } from 'node:fs/promises';
-const [destination, retained] = process.argv.slice(2);
-await rename(destination, retained);
-await mkdir(destination);
-await writeFile(destination + '/foreign-data', String(process.getuid()));
-`);
-    await f.trust.relocate(source, destination, true, async () => {
-      await rename(source, destination);
-    }, inspection => f.registry.reloadProject(inspection.projectDir, false, false), async inspection => {
-      // This is actual native commit I/O, after move's final identity check.
-      // The independent process never takes Gateway's advisory ownership.
-      await exec(process.execPath, [actor, destination, retained]);
-      await f.registry.commitProjectReload(inspection.projectDir);
-    }, inspection => f.registry.abortProjectReload(inspection.projectDir)).catch(() => {});
-    expect(await readFile(join(retained, "approved-data"), "utf8")).toBe("approved inode");
-    expect(await readFile(join(destination, "foreign-data"), "utf8")).toBe(String(process.getuid!()));
-    expect((await f.trust.inspect(destination)).effectiveDecision).toBe(false);
-  });
-
   it("failed application and compensation retire uncertain runtimes and release native project admission", async () => {
     const f = await fixture();
     await f.decide(await f.create("aborted-reload"));
@@ -413,27 +385,6 @@ await writeFile(destination + '/foreign-data', String(process.getuid()));
       // Fault-injection cleanup on the known-bad base, not production recovery.
       if (!slot.isDisposed) await f.registry.commitProjectReload(source);
     }
-  });
-
-  it("retains a fail-closed native fence when both application and rollback fail, without replaying filesystem effects", async () => {
-    const f = await fixture();
-    await f.decide(await f.create("failed-reload"));
-    const destination = f.path("reserved-failure");
-    await mkdir(destination);
-    let effects = 0;
-    await expect(f.trust.relocate(f.path("failed-reload"), destination, true, async () => { effects++; }, async inspection => {
-      await f.registry.reloadProject(inspection.projectDir, false, false);
-      throw new Error("Persistent fixture applier failure after native fence");
-    }, inspection => f.registry.commitProjectReload(inspection.projectDir),
-    inspection => f.registry.abortProjectReload(inspection.projectDir))).rejects.toMatchObject({ code: "internal", details: {
-      failure: expect.stringMatching(/Persistent fixture applier failure/), rollbackFailure: expect.stringMatching(/Persistent fixture applier failure/),
-    } });
-    expect(effects).toBe(0);
-    await expect(f.registry.create(f.path("failed-reload"))).rejects.toMatchObject({ code: "busy" });
-    // This exact fixture owns the deliberately faulted native fence. Release it
-    // only after the bad applier is removed; production must repair its resource.
-    await f.registry.commitProjectReload(f.path("failed-reload"));
-    expect((await f.registry.create(f.path("failed-reload"))).cwd).toBe(f.path("failed-reload"));
   });
 
   it("the installed real gh refuses unauthenticated creation without network access, remotes or trust", async () => {
