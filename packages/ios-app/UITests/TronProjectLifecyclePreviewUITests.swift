@@ -53,7 +53,7 @@ final class TronProjectLifecyclePreviewUITests: XCTestCase {
         open(app, "Rename Project")
         title(app, "Rename Project")
         capture(app, "project-route-rename-sub-sheet")
-        app.buttons["Done"].tap()
+        close(app)
         title(app, "Example")
         for operation in ["archive", "untrust"] {
             open(app, "project-preview-\(operation)")
@@ -63,20 +63,20 @@ final class TronProjectLifecyclePreviewUITests: XCTestCase {
                 .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
             title(app, "Example")
         }
-        app.buttons["Done"].tap()
+        close(app)
         title(app, "Trusted Projects")
         open(app, "Add Project")
         title(app, "Add Project")
         open(app, "Create Project")
         title(app, "Create Project")
         capture(app, "project-route-create-sub-sheet")
-        app.buttons["Done"].tap()
+        close(app)
         title(app, "Add Project")
         open(app, "project-preview-existing")
         XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
         app.buttons["Use current folder"].tap()
         title(app, "Add Project")
-        app.buttons["Done"].tap()
+        close(app)
         title(app, "Trusted Projects")
     }
 
@@ -88,6 +88,17 @@ final class TronProjectLifecyclePreviewUITests: XCTestCase {
         if mode == "dark" { app.launchArguments.append("-settings-renderer-dark") }
         app.launch()
         return app
+    }
+
+    private func close(_ app: XCUIApplication) {
+        // Covered sheet chrome can retain a second AX representation of Done.
+        // Match the shared sheet-preview convention: use the last hittable target.
+        guard let button = app.buttons.matching(NSPredicate(format: "label == 'Done'"))
+            .allElementsBoundByIndex.last(where: { $0.isHittable }) else {
+            XCTFail("No hittable Done button in the presented sheet")
+            return
+        }
+        button.tap()
     }
 
     private func title(_ app: XCUIApplication, _ text: String) {
