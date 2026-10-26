@@ -38,6 +38,35 @@ import XCTest
         }
     }
 
+    func testAttachmentOnlySteersHaveContentAndEditableEmptyTextInBothRoutes() {
+        for home in [true, false] {
+            for kind in ["photo", "file"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready",
+                    "-foreground-queued-editor", "-foreground-queued-\(kind)"]
+                app.launch()
+                defer { app.terminate() }
+                let destination = app.buttons[home ? "home-pinned-row" : "session-row-home-shell-fixture:ordinary-session"]
+                guard destination.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
+                destination.tap()
+                let content = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@",
+                    kind == "photo" ? "1 photo" : "File attachment, queued-note.txt")).firstMatch
+                guard content.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
+                let arrow = app.buttons["arrow.turn.up.right"].firstMatch
+                XCTAssertTrue(arrow.waitForExistence(timeout: 5))
+                XCTAssertGreaterThan(content.frame.minY, arrow.frame.maxY, "Attachment content belongs beneath the card header")
+                keep(app, "\(home ? "home" : "session")-\(kind)-only-steer")
+                arrow.tap()
+                let editor = app.textViews["Queued message"]
+                guard editor.waitForExistence(timeout: 8) else { XCTFail(app.debugDescription); return }
+                XCTAssertEqual(editor.value as? String, "")
+                XCTAssertTrue(app.buttons["Save queued message"].isEnabled, "Attachments make an empty typed body valid")
+                XCTAssertTrue(app.buttons["Remove queued message"].isEnabled)
+                app.terminate()
+            }
+        }
+    }
+
     private func keep(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name

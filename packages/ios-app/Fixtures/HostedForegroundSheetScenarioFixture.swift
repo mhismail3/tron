@@ -10,9 +10,22 @@ struct HostedForegroundSheetScenario {
     var queuedItems: [SessionSnapshot.QueuedMessage] {
         guard queueEnabled else { return [] }
         if connections > 1, ProcessInfo.processInfo.arguments.contains("-foreground-queued-removed") { return [] }
+        if let kind = attachmentKind {
+            let photo = kind == "photo"
+            return [.init(id: "foreground-queued-message", behavior: .steer, text: "", attachmentCount: 1,
+                photoCount: photo ? 1 : 0, fileAttachmentCount: photo ? 0 : 1,
+                attachments: [.init(id: "queued-attachment", name: photo ? "queued-photo.png" : "queued-note.txt",
+                    mimeType: photo ? "image/png" : "text/plain", size: 128)])]
+        }
         return [.init(id: "foreground-queued-message",
                       behavior: ProcessInfo.processInfo.arguments.contains("-foreground-queued-steer") ? .steer : .followUp,
                       text: queuedText, attachmentCount: 0)]
+    }
+
+    private var attachmentKind: String? {
+        if ProcessInfo.processInfo.arguments.contains("-foreground-queued-photo") { return "photo" }
+        if ProcessInfo.processInfo.arguments.contains("-foreground-queued-file") { return "file" }
+        return nil
     }
 
     private var queuedText: String {

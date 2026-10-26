@@ -74,7 +74,9 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
     }
 
     private var promptContent: some View {
-        VStack(alignment: .leading, spacing: QueuedMessageCardLayout.contentSpacing) {
+        let parsed = ChatAnnotationEnvelope.parse(text)
+        let body = parsed?.body ?? text
+        return VStack(alignment: .leading, spacing: QueuedMessageCardLayout.contentSpacing) {
             HStack(alignment: .center, spacing: 10) {
                 Text(title)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
@@ -104,8 +106,13 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
                 statusContent
             }
 
-            if !text.isEmpty {
-                UserPromptText(text: text)
+            // An annotation can be the whole prompt. Keep its chip inside the
+            // same editor surface throughout optimistic, pending and queued states.
+            if let parsed {
+                ChatSentAnnotationChips(annotations: parsed.annotations)
+            }
+            if !body.isEmpty {
+                UserPromptText(text: body)
             }
         }
     }
@@ -199,13 +206,10 @@ struct ChatPendingPromptRow: View, Equatable {
         )
         VStack(alignment: .trailing, spacing: 4) {
             CanonicalResourceChips(owner: presentation.id, resources: presentation.resourceInvocations)
-            if let parsed = ChatAnnotationEnvelope.parse(displayText) {
-                ChatSentAnnotationChips(annotations: parsed.annotations)
-            }
             ChatPromptCard(
                 behavior: presentation.cardBehavior,
                 title: presentation.cardTitle,
-                text: ChatAnnotationEnvelope.body(of: displayText),
+                text: displayText,
                 detail: presentation.cardDetail,
                 attachmentContent: {
                     if !chips.isEmpty {
@@ -244,13 +248,10 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                 Spacer(minLength: 24)
                 VStack(alignment: .trailing, spacing: 4) {
                     resourceChip
-                    if let parsed = ChatAnnotationEnvelope.parse(displayText) {
-                        ChatSentAnnotationChips(annotations: parsed.annotations)
-                    }
                     ChatPromptCard(
                         behavior: presentation.cardBehavior,
                         title: presentation.cardTitle,
-                        text: ChatAnnotationEnvelope.body(of: displayText),
+                        text: displayText,
                         detail: presentation.cardDetail,
                         attachmentContent: { queuedAttachmentChips },
                         statusContent: { EmptyView() }

@@ -468,12 +468,9 @@ struct QueuedMessageRow: View {
         let attachmentChips = QueuedMessageAttachmentPresentation.chips(for: message)
         return VStack(alignment: .trailing, spacing: 4) {
             CanonicalResourceChips(owner: message.id, resources: message.resourceInvocations ?? [])
-            if let parsed = ChatAnnotationEnvelope.parse(displayText) {
-                ChatSentAnnotationChips(annotations: parsed.annotations)
-            }
             ChatPromptCard(
                 behavior: behavior,
-                text: ChatAnnotationEnvelope.body(of: displayText),
+                text: displayText,
                 detail: "\(deliveryDetail) · \(position) of \(total)",
                 isInteractive: isManageable,
                 onActivate: isManageable && !isMutating ? onEdit : nil,
