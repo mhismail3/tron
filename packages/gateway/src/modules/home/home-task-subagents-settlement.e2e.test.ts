@@ -260,7 +260,7 @@ describe("Home task subagents: settlement and stop", () => {
       async () => {
         await waitFor(() => child.heldRequests() === 1, "detached child live before the final reply", bound);
         const slot = await f.registry.acquire(run.sessionId);
-        await waitFor(() => slot.liveSubagentRuns().length === 1, "detached child visible as live", bound);
+        await waitFor(() => slot.ownedTurns.liveSubagentRuns().length === 1, "detached child visible as live", bound);
         return fauxAssistantMessage("Finished without a report.");
       },
       // The workflow completed at once, so its completion notice can start a follow-up turn of the same task: that turn holds too.

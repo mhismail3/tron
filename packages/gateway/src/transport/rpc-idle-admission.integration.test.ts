@@ -623,7 +623,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
     const slot = await f.registry.acquire(session.id);
     // Installed extension lifecycle is independent authority. Inject only its
     // admitted artifact, not the configuration admission or RPC under test.
-    const activities = (slot as any).extensionActivities as Map<string, unknown>;
+    const activities = slot.ownedTurns.extensionActivities as Map<string, unknown>;
     const now = new Date().toISOString();
     activities.set("independent-child", {
       id: "independent-child", activityId: "independent-child", runId: "independent-child", toolCallId: "independent-child",

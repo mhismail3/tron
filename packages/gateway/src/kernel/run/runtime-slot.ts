@@ -1,5 +1,7 @@
+import { isEmbeddedLifecycleArtifact } from "../delegation/subagent-artifact-status.js";
+import { updateNestedExtensionActivity, extensionActivityOwnsLiveWork, pausedProcessSettlementAt, hydrateCanonicalExtensionActivities, updateExtensionActivity, onExtensionActivityExpiry } from "../delegation/subagent-activity.js";
 import { WorkerSettlement } from "../delegation/worker-settlement.js";
-import { controlSubagentRun } from "../delegation/subagent-control.js";
+
 import type { TaskWorkerDiagnostic } from "../delegation/worker-contract.js";
 import * as activityProjection from "../projection/activity.js";
 import * as sessionPages from "../projection/session-pages.js";
@@ -12,22 +14,14 @@ import type { SessionConfigurationBlocker } from "../../protocol/types.js";
 import { boundedSummaryText } from "../../sessions/summary-text.js";
 import { catalogActivityTimestamp } from "../../sessions/catalog-metadata-index.js";
 import { historyPage, historyEntry, type HistoryCursor } from "../projection/history.js";
-import {
-  DELEGATED_PROVIDER_TOOL_NAME,
-  DELEGATED_SUPERVISOR_TOOL_NAME,
-  delegatedArtifactPathAllowed,
-  delegatedProviderOrigin,
-  delegatedProviderToolVersion,
-  isInstalledDelegatedTool,
-  trustedDelegatedController,
-} from "../delegation/delegated-provider.js";
+import { delegatedProviderToolVersion } from "../delegation/delegated-provider.js";
 import type { AgentMessage, ThinkingLevel } from "../pi/agent-core.js";
 import { SESSION_SETTINGS_ENTRY, changeSessionSetting, readSessionSettings, readSessionRequestPins, readSessionFixedSettings, readSessionToolChoice } from "../../sessions/session-settings.js";
-import { constants, existsSync, lstatSync, realpathSync, watch, type FSWatcher } from "node:fs";
+import { constants, existsSync, lstatSync, realpathSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { type ImageContent, type Model } from "../pi/ai.js";
 import { bindRuntimeSession, guardCanonicalAppend } from "../pi/adapters.js";
 import {
@@ -58,7 +52,7 @@ import type { SessionLineagePolicy } from "../host/session-lineage.js";
 import type { CanonicalAppendContext } from "../host/canonical-append.js";
 import { createHomeTaskWorkerExtension } from "../delegation/task-worker-extension.js";
 import { workerFinishTurn } from "../delegation/worker-turn-boundary.js";
-import type { HomeTaskSubagentRun } from "../delegation/task-subagents.js";
+
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../delegation/task-report.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
@@ -129,22 +123,17 @@ import { type RunMarkerStore } from "./run-markers.js";
 import { attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand } from "../host/extension-registration.js";
 import { currentExtensionOwner, currentInvocationContext } from "../host/extension-execution-context.js";
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../delegation/managed-producer.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "../projection/extension-run-projection.js";
-import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "../delegation/child-session-admission.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "../../sessions/extension-activity-history.js";
+import { type ExtensionArtifactRejectionReason } from "../projection/extension-run-projection.js";
+import { ChildSessionAdmission } from "../delegation/child-session-admission.js";
+import { extensionActivityReceipts, extensionReceiptActivity, type ExtensionActivityHistoryPage } from "../../sessions/extension-activity-history.js";
 import { makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "./invocation-receipts.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, type InputTrigger } from "../host/input-admission.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "../../sessions/extension-notification-receipts.js";
 import { userFacingPromptPreview, type ResourceExpansionCatalog } from "../../sessions/resource-invocation.js";
-import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "../../sessions/extension-activity-recency.js";
+import { ExtensionActivityRecency } from "../../sessions/extension-activity-recency.js";
 import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "../projection/process-activity-recency.js";
-import {
-  processHistoryDetail,
-  subagentAbortRoute,
-  subagentProcessId,
-  subagentProcessesFromActivity,
-} from "../projection/process-activity.js";
+import { processHistoryDetail, subagentProcessId, subagentProcessesFromActivity } from "../projection/process-activity.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "./gateway-work-registry.js";
 import type { ResourceRoot } from "../resources/resource-root.js";
 import { projectAgentInstructions, type AgentInstructions } from "../../sessions/agent-instructions.js";
@@ -160,60 +149,7 @@ import { availableSubagentRow, loadSubagentCatalog, subagentDetail, type Subagen
 import type { SessionStore } from "../settings/settings-types.js";
 import { hasCompactionApplier, type SettingsSchema } from "../settings/settings-schema.js";
 
-// A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
-// admitted the first property from the exact-owned status file. A payload key
-// named `lifecycleProjection` is presentation data until this private marker is
-// attached, so tool results cannot nominate a fresh child-session owner.
-const EMBEDDED_LIFECYCLE_ARTIFACT = Symbol("embedded-lifecycle-artifact");
-type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE_ARTIFACT]?: true };
-// Disposable exact child subscriptions travel with the admitted read, never
-// with canonical activity data or a separate slot-wide child registry.
-const WORKFLOW_CHILD_ARTIFACT_DIRECTORIES = Symbol("workflow-child-artifact-directories");
-const WORKFLOW_CHILD_PROCESS_SETTLED = Symbol("workflow-child-process-settled");
-
-/** Exact run IDs behind runner-backed workflow keys. Settled paused executions
- * stay in presentation history but cannot hold a task open or become Stop targets. */
-function detachedWorkflowChildKeys(status: Record<string, unknown>): ReadonlyMap<string, string> {
-  const keys = new Map<string, string>();
-  const steps = Array.isArray(status.steps) ? status.steps.slice(0, MAX_EXTENSION_RUN_CHILDREN) : [];
-  for (const step of steps) {
-    const edge = step as Record<string, unknown> | null;
-    if (edge?.async === true && typeof edge.workflowKey === "string" && typeof edge.runId === "string"
-      && !(edge as Record<PropertyKey, unknown>)[WORKFLOW_CHILD_PROCESS_SETTLED]) keys.set(edge.workflowKey, edge.runId);
-  }
-  return keys;
-}
-
-function markEmbeddedLifecycleArtifact(value: Record<string, unknown>): Record<string, unknown> {
-  Object.defineProperty(value, EMBEDDED_LIFECYCLE_ARTIFACT, { configurable: false, enumerable: false, value: true, writable: false });
-  return value;
-}
-
-function isEmbeddedLifecycleArtifact(value: unknown): boolean {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    && (value as EmbeddedLifecycleArtifact)[EMBEDDED_LIFECYCLE_ARTIFACT] === true;
-}
-
-function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, unknown>): Record<string, unknown> {
-  return isEmbeddedLifecycleArtifact(source) ? markEmbeddedLifecycleArtifact(value) : value;
-}
-
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
-
-type CanonicalExtensionRunFact = {
-  toolCallId?: string;
-  asyncDir?: string;
-  terminal: boolean;
-  ambiguous: boolean;
-  recoveredReplacementRunId?: string;
-  recoveredSourceRunId?: string;
-};
-
-type ExtensionArtifactDirectoryIdentity = { dev: number; ino: number };
-type OpenedExtensionArtifact = {
-  handle: Awaited<ReturnType<typeof open>>;
-  directory: ExtensionArtifactDirectoryIdentity;
-};
 
 type PendingContextMessage = {
   kind: "context";
@@ -255,48 +191,6 @@ type PendingExtensionCanonicalEffect =
 const STREAMING_PROGRESS_FLUSH_MS = 150;
 const DEFAULT_RUNTIME_DISPOSAL_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
-
-class OversizedExtensionArtifactError extends Error {
-  constructor() {
-    super("Extension status artifact exceeds the legacy document limit");
-    this.name = "OversizedExtensionArtifactError";
-  }
-}
-
-class ForeignExtensionArtifactSessionError extends Error {
-  constructor() {
-    super("Extension lifecycle projection belongs to another canonical session");
-    this.name = "ForeignExtensionArtifactSessionError";
-  }
-}
-
-function extensionArtifactReadFailureReason(error: unknown): ExtensionArtifactRejectionReason {
-  if (error instanceof OversizedExtensionArtifactError) return "oversized-artifact";
-  if (error instanceof ForeignExtensionArtifactSessionError) return "ownership-mismatch";
-  if (error instanceof SyntaxError) return "malformed-artifact";
-  return "artifact-replacement-in-progress";
-}
-
-const EXTENSION_ARTIFACT_MISSING_GRACE_MS = 30_000;
-/** A producer replaces status.json by an atomic rename, so a read can open the
- * old inode and stat the new one. The discovery lane owns no watcher for that
- * directory, so it re-reads a bounded number of times before reporting the
- * replacement; the producer's next replace is a whole status-update cadence
- * away, so an immediate retry lands in a settled window. */
-const EXTENSION_ARTIFACT_DISCOVERY_READ_RETRIES = 3;
-const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
-const MAX_EXTENSION_EVENT_LINES = 256;
-
-/** How one offer of a `status.json` to a slot ended, for the caller that decides
- * whether this exact artifact may be recorded as dealt with. `accepted` means
- * the slot projected a lifecycle from those bytes; `rejected` means no later
- * offer of the same bytes can decide differently (the artifact's own shape,
- * run identity, declared directory or timestamps rejected it, or a terminal
- * latch the identity cannot lift outranks it); `transient` means the slot could
- * not decide from its current state — a losing read, an unavailable terminal
- * receipt claim, an I/O error, or an ownership/attribution comparison that a
- * later pass may resolve — so the same artifact must be offered again. */
-export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "transient";
 
 interface RuntimeSlotHooks {
   broadcast: SessionBroadcast;
@@ -387,23 +281,6 @@ interface RuntimeDrainBlockerFact {
   admittedAt?: string;
 }
 
-/**
- * Owns one live Pi runtime and the reconnect-safe mobile projection for its
- * canonical JSONL session. Every mutation runs through `lane`; distinct slots
- * remain concurrent.
- */
-/** A run this Gateway first reads already terminal (after a restart or slot
- * reload) ended when its producer recorded, not when it was read: stamping the
- * read time would bring every old run back as recent, with a duration counted
- * from its start to now. A run the Gateway watched finish keeps its own
- * observation instant. A missing, malformed or future producer instant falls
- * back to the observation. */
-function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefined, observedAt: string): string {
-  if (!["completed", "failed", "stopped", "rejected"].includes(state) || producerEndedAt === undefined) return observedAt;
-  const ended = Date.parse(producerEndedAt);
-  return Number.isFinite(ended) && ended <= Date.parse(observedAt) ? producerEndedAt : observedAt;
-}
-
 export class RuntimeSlot extends RunOperations<FixedSetting> {
   public readonly contextPolicies = new WeakMap<AgentSession, ContextPolicy>();
   private readonly newSettingsSessions = new WeakSet<AgentSession>();
@@ -473,7 +350,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   private projectTrustReloadOverride: boolean | undefined;
   public trustReloadPending = false;
   private trustReloadWork: GatewayWorkHandle | undefined;
-  private readonly toolExecutions = new Map<string, ToolExecutionState>();
+  public readonly toolExecutions = new Map<string, ToolExecutionState>();
   /** Tool-result message_end is Pi's ordinary persistence handoff. Keep a
    * bounded exact-ID latch across continuation/settlement callbacks so a late
    * terminal lifecycle event cannot resurrect a runtime row after that handoff.
@@ -485,54 +362,19 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     ToolProjectionMetadata,
     "toolSegmentId" | "groupId" | "groupIndex" | "groupCount" | "groupFinalized"
   >>();
-  /** Bounded, disposable extension-owned run projections retain completed work
-   * for Manage Session while the owning tool carries the live copy. */
-  private readonly extensionActivities = new Map<string, ExtensionRunActivity>();
   readonly workerSettlement = new WorkerSettlement(DEFAULT_RUNTIME_DISPOSAL_GRACE_MS);
-  /** Monotonic lifecycle projection ordering and terminal latches are runtime
-   * facts; producer timestamps are display evidence only. */
-  private readonly extensionActivitySequences = new Map<string, number>();
-  private liveActivityRevision = 0;
-  private extensionActivityAsOf = new Date().toISOString();
-  /** Gateway-owned correlation keeps one activity identity across Pi lifecycle
-   * payloads and independently-written async artifacts. */
-  private readonly extensionRunOwnership = new Map<string, {
-    toolCallId: string;
-    asyncDir?: string;
-    terminal: boolean;
-    /** Gateway-observed instant of this run's paused process-terminal proof;
-     * absent while the run owns live processes or is not paused. */
-    pausedProcessQuiescentAt?: string;
-    /** Exact detached child run IDs by workflow key, excluding admitted paused
-     * exit proofs. Status and Stop consume this same artifact-frame binding. */
-    detachedChildKeys?: ReadonlyMap<string, string>;
-  }>();
-  private readonly extensionActivityWatchers = new Map<string, {
-    watcher: FSWatcher;
-    children: Map<string, FSWatcher>;
-    onChange: (eventType: string, filename: string | Buffer | null) => void;
-    timer: NodeJS.Timeout | undefined;
-    asyncDir: string;
-    readRetries: number;
-    bindingRetries: number;
-  }>();
-  private readonly extensionActivityReadGenerations = new Map<string, number>();
-  private readonly extensionArtifactMissingSince = new Map<string, number>();
-  private readonly extensionArtifactWarnings = new Map<string, number>();
-  private readonly extensionReceiptWrites = new Map<string, Promise<void>>();
-  private readonly extensionReceiptOwners = new Map<string, GatewayWorkHandle>();
   private extensionShutdownWork: GatewayWorkHandle | undefined;
   private extensionShutdownInFlight = false;
   private extensionShutdownRetryTimer: NodeJS.Timeout | undefined;
   private readonly unregisterExtensionExpiry: () => void;
   private readonly unregisterProcessExpiry: () => void;
-  private readonly processActivities = new Map<string, SessionProcessActivity>();
+  public readonly processActivities = new Map<string, SessionProcessActivity>();
   /** Foreground operation captured only while the owning subagent tool call is
    * actively executing. This fences a later sheet stop from newer parent work. */
-  private readonly processOperationIDs = new Map<string, string>();
+  public readonly processOperationIDs = new Map<string, string>();
   private readonly processIDsByToolCall = new Map<string, Set<string>>();
   private readonly pendingProcessRemovalsByToolCall = new Map<string, Set<string>>();
-  private readonly childSessionAdmission = new ChildSessionAdmission({
+  public readonly childSessionAdmission = new ChildSessionAdmission({
     parentSessionFile: () => this.sessionManager.getSessionFile(),
     parentSessionId: () => this.id,
     isEmbeddedLifecycleArtifact,
@@ -643,7 +485,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     this.ui = this.createSemanticBroker();
     this.extensionHost = new RemotePiExtensionHost(this.ui, { enableBlockingCustom: false });
     this.lifecycle = new ExtensionLifecycleCoordinator(this.ui.presentation, () => this.hasRuntimeWork());
-    this.unregisterExtensionExpiry = dependencies.extensionActivityRecency.registerExpiryCallback((frame) => this.onExtensionActivityExpiry(frame));
+    this.unregisterExtensionExpiry = dependencies.extensionActivityRecency.registerExpiryCallback((frame) => onExtensionActivityExpiry(this.ownedTurns, frame));
     this.unregisterProcessExpiry = dependencies.processActivityRecency.registerExpiryCallback((frame) => this.onProcessActivityExpiry(frame));
   }
 
@@ -1277,8 +1119,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         category: "terminal-receipt-persistence", key: `canonical:${key}`, state: "suspect", admittedAt: write.admittedAt,
       });
     }
-    for (const activity of this.extensionActivities.values()) {
-      if (this.extensionActivityOwnsLiveWork(activity)) {
+    for (const activity of this.ownedTurns.extensionActivities.values()) {
+      if (extensionActivityOwnsLiveWork(this.ownedTurns, activity)) {
         facts.push({
           category: "detached-extension-run",
           key: activity.activityId ?? activity.toolCallId,
@@ -1325,80 +1167,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
    * dashboard row stuck in the running phase. A settled paused run owns no live
    * process, so it stops being live work and a drain blocker. */
   public hasDetachedDashboardWork(): boolean {
-    return this.liveExtensionActivities().length > 0;
-  }
-
-  /** The activities that own live work under the one liveness rule below. Dashboard
-   * accounting, drain, settlement and the report gate all read this list. */
-  private liveExtensionActivities(): ExtensionRunActivity[] {
-    return [...this.extensionActivities.values()].filter(activity => this.extensionActivityOwnsLiveWork(activity));
-  }
-
-  /** The live subagent runs this worker shows in task status. Read from the same live
-   * projection as the report gate and settlement, never persisted. The run id is the
-   * provider's; a run not yet published is identified by its launch call. */
-  liveSubagentRuns(): HomeTaskSubagentRun[] {
-    return this.liveExtensionActivities().flatMap(activity => this.liveActivitySubagentRuns(activity));
-  }
-
-  /** Status, report admission and Stop select the same exact executions. A completed
-   * workflow is not stoppable: its live detached children must be named instead. */
-  private liveActivitySubagentRuns(activity: ExtensionRunActivity): HomeTaskSubagentRun[] {
-    if (this.extensionActivityOwnsOwnLiveWork(activity)) return [{
-      runId: activity.runId ?? activity.toolCallId,
-      agent: activity.children[0]?.label ?? activity.title,
-      state: activity.lifecycle?.state ?? activity.status,
-      startedAt: activity.startedAt,
-      lastActivityAt: activity.lastActivityAt ?? null,
-    }];
-    const detached = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId)?.detachedChildKeys;
-    return this.liveWorkflowChildren(activity).flatMap(child => {
-      const runId = detached?.get(child.producerId ?? child.id);
-      return runId === undefined ? [] : [{ runId, agent: child.label, state: child.lifecycle ?? child.status,
-        startedAt: child.startedAt ?? activity.startedAt, lastActivityAt: child.lastActivityAt ?? null }];
-    });
-  }
-
-  /** One liveness rule for detached extension work, shared by dashboard
-   * accounting, administrative drain and task settlement. An async run is live
-   * while it is, and also while a workflow child it launched is: a workflow can
-   * complete while its detached children keep running. */
-  private extensionActivityOwnsLiveWork(activity: ExtensionRunActivity): boolean {
-    return this.extensionActivityOwnsOwnLiveWork(activity) || this.liveWorkflowChildren(activity).length > 0;
-  }
-
-  private extensionActivityOwnsOwnLiveWork(activity: ExtensionRunActivity): boolean {
-    const state = activity.lifecycle?.state;
-    if (state === "queued" || state === "running") return true;
-    if (state !== "paused") return false;
-    return this.pausedProcessSettlementAt(activity) === undefined;
-  }
-
-  /** Live runner-backed workflow children of a run, in the states of the run itself.
-   * A child's state is its lifecycle when projected, else its coarse status. Their
-   * exact-owned paused-process proof is admitted with the detached-child binding,
-   * never copied from untrusted tool-result presentation fields. */
-  private liveWorkflowChildren(activity: ExtensionRunActivity): ExtensionRunChild[] {
-    const detached = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId)?.detachedChildKeys;
-    if (!detached?.size) return [];
-    return activity.children.filter(child => {
-      const state = child.lifecycle ?? child.status;
-      return detached.has(child.producerId ?? child.id) && (state === "queued" || state === "running" || state === "paused");
-    });
-  }
-
-  /** A run stays observed while it is running or a runner-backed child is live, so the
-   * child's own status change still reaches the projection and the join. */
-  private extensionActivityWatchRequired(activity: ExtensionRunActivity): boolean {
-    return activity.status === "running" || this.liveWorkflowChildren(activity).length > 0;
-  }
-
-  /** The Gateway-admitted settlement instant of one paused activity, recorded
-   * when its artifact frame proved every process had exited. */
-  private pausedProcessSettlementAt(activity: ExtensionRunActivity): string | undefined {
-    if (activity.lifecycle?.state !== "paused" || !activity.runId) return undefined;
-    const ownership = this.extensionRunOwnership.get(activity.runId);
-    return ownership?.toolCallId === activity.toolCallId ? ownership.pausedProcessQuiescentAt : undefined;
+    return this.ownedTurns.liveExtensionActivities().length > 0;
   }
 
   /** AgentSession can start an extension-triggered continuation while an older
@@ -1652,8 +1421,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
               refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
                 taskHash: createHash("sha256").update(this.ownedTurns.worker!.identity.taskId).digest("hex").slice(0, 16), reason }),
               reportSealed: () => this.ownedTurns.worker!.reportSealed,
-              ownsSubagentRun: runId => this.ownsSubagentRun(runId),
-              ownsSupervisorRequest: requestId => this.ownsSupervisorRequest(requestId),
+              ownsSubagentRun: runId => this.ownedTurns.ownsSubagentRun(runId),
+              ownsSupervisorRequest: requestId => this.ownedTurns.ownsSupervisorRequest(requestId),
             }) }] : []),
           ];
       const services = await createAgentSessionServices({
@@ -1725,7 +1494,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
-              const live = this.liveSubagentRuns().length;
+              const live = this.ownedTurns.liveSubagentRuns().length;
               if (live > 0) throw new GatewayError("conflict", reportLiveRunsRefusal(live), true);
               await this.persistCanonicalCustomEntry(HOME_TASK_REPORT, JSON.parse(JSON.stringify(report)), report.receiptId,
                 this.runWork.get(report.operationId));
@@ -2020,10 +1789,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           this.runAttention.rebindAttentionDisposition,
           () => {
             this.sessionManager = nextManager;
-            this.clearExtensionActivityWatchers();
-            this.extensionActivities.clear();
-            this.extensionActivitySequences.clear();
-            this.extensionRunOwnership.clear();
+            this.ownedTurns.resetArtifactBranch();
             this.clearProcessActivities();
           },
         );
@@ -2052,7 +1818,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     previousUnsubscribe?.();
     this.unsubscribe = nextUnsubscribe;
     this.forkBoundary = await this.dependencies.resolveForkBoundary?.(nextManager);
-    this.hydrateCanonicalExtensionActivities();
+    hydrateCanonicalExtensionActivities(this.ownedTurns);
     this.reconcileCanonicalDisplayArtifacts();
     if (this.newSettingsSessions.has(session)) {
       await this.captureFixedDefaults();
@@ -2128,43 +1894,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     });
   }
 
-  /** Rebuild terminal extension cards from canonical receipts before backfilling
-   * tool results. This preserves the canonical terminalAt across a restart;
-   * receipts are authoritative when the disposable result projection is rebuilt. */
-  private hydrateCanonicalExtensionActivities(): void {
-    const branch = this.sessionManager.getBranch();
-    const receipts = extensionActivityReceipts(branch, this.id);
-    const receiptToolCallIDs = new Set(receipts.map(({ receipt }) => receipt.toolCallId));
-    for (const { receipt } of receipts) {
-      const activity = extensionReceiptActivity(receipt);
-      const visibility = this.upsertExtensionActivity(activity).visibility;
-      if (visibility === "current" || visibility === "recent") {
-        this.extensionActivities.set(activity.toolCallId, activity);
-      }
-    }
-    for (const entry of branch) {
-      if (entry.type !== "message" || entry.message.role !== "toolResult"
-        || receiptToolCallIDs.has(entry.message.toolCallId)) continue;
-      const toolName = entry.message.toolName;
-      const origin = this.extensionToolOrigin(toolName);
-      if (!origin) continue;
-      const details = entry.message.details;
-      if (!details || typeof details !== "object" || Array.isArray(details)) continue;
-      const state = extensionLifecycleState((details as Record<string, unknown>).state ?? (details as Record<string, unknown>).status);
-      if (!["completed", "failed", "stopped", "rejected"].includes(state)) continue;
-      this.updateExtensionActivity(
-        entry.message.toolCallId,
-        toolName,
-        origin,
-        state === "failed" ? "failed" : "completed",
-        new Date(entry.message.timestamp).toISOString(),
-        new Date(entry.message.timestamp).toISOString(),
-        details,
-        new Date(entry.message.timestamp).toISOString(),
-      );
-    }
-  }
-
   private nestedToolCallsFromDetails(value: unknown): ToolExecutionState["nestedCalls"] | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     const details = (value as Record<string, unknown>).details;
@@ -2208,28 +1937,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       }];
     });
     return { calls, complete };
-  }
-
-  private updateNestedExtensionActivity(
-    event: { toolCallId: string; toolName: string },
-    status: "running" | "completed" | "failed",
-    value?: unknown,
-  ): void {
-    const now = new Date().toISOString();
-    const startedAt = this.extensionActivities.get(event.toolCallId)?.startedAt ?? now;
-    const activity = this.updateExtensionActivity(
-      event.toolCallId,
-      event.toolName,
-      this.extensionToolOrigin(event.toolName),
-      status,
-      startedAt,
-      now,
-      value,
-      status === "running" ? undefined : now,
-      undefined,
-      false,
-    );
-    if (activity) this.publishProcessesForToolCall(event.toolCallId);
   }
 
   private projectNestedToolExecution(
@@ -2312,7 +2019,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     this.processAsOf = new Date().toISOString();
   }
 
-  private replaceProcessesForToolCall(toolCallId: string, projected: readonly SessionProcessActivity[]): void {
+  public replaceProcessesForToolCall(toolCallId: string, projected: readonly SessionProcessActivity[]): void {
     const previousIDs = this.processIDsByToolCall.get(toolCallId) ?? new Set<string>();
     const projectedIDs = new Set(projected.map((activity) => activity.processId));
     const installedNextIDs = new Set<string>();
@@ -2417,8 +2124,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return admitted;
   }
 
-  private syncSubagentProcesses(activity: ExtensionRunActivity): void {
-    const pausedSettledAt = this.pausedProcessSettlementAt(activity);
+  public syncSubagentProcesses(activity: ExtensionRunActivity): void {
+    const pausedSettledAt = pausedProcessSettlementAt(this.ownedTurns, activity);
     const candidates = subagentProcessesFromActivity(
       this.id,
       activity,
@@ -2444,17 +2151,17 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }
   }
 
-  private activitySource(): activityProjection.ActivitySource {
+  public activitySource(): activityProjection.ActivitySource {
     const slot = this;
     return {
       get processActivities() { return slot.processActivities; },
       get dependencies() { return slot.dependencies; },
-      get extensionActivities() { return slot.extensionActivities; },
+      get extensionActivities() { return slot.ownedTurns.extensionActivities; },
       get processRevision() { return slot.processRevision; },
       get processAsOf() { return slot.processAsOf; },
       measureToolDuration: (...args) => slot.measureToolDuration(...args),
-      get liveActivityRevision() { return slot.liveActivityRevision; },
-      get extensionActivityAsOf() { return slot.extensionActivityAsOf; },
+      get liveActivityRevision() { return slot.ownedTurns.liveActivityRevision; },
+      get extensionActivityAsOf() { return slot.ownedTurns.extensionActivityAsOf; },
     };
   }
 
@@ -2476,7 +2183,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }));
   }
 
-  private publishProcessesForToolCall(toolCallId: string): void {
+  public publishProcessesForToolCall(toolCallId: string): void {
     const removals = [...(this.pendingProcessRemovalsByToolCall.get(toolCallId) ?? [])].sort();
     this.pendingProcessRemovalsByToolCall.delete(toolCallId);
     let emitted = false;
@@ -2487,41 +2194,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       emitted = true;
     }
     if (!emitted && removals.length > 0) this.publishProcessDelta(undefined, removals);
-  }
-
-  private upsertExtensionActivity(activity: ExtensionRunActivity): ActivityVisibility {
-    const visibility = this.dependencies.extensionActivityRecency.upsert(activity);
-    if (visibility.accepted) {
-      this.liveActivityRevision += 1;
-      this.extensionActivityAsOf = new Date().toISOString();
-      this.syncSubagentProcesses(activity);
-      this.workerSettlement.publish("detached");
-    }
-    return visibility;
-  }
-
-  /** Evict disposable rows by bucket, never allowing a recent terminal row to
-   * displace queued/running/paused work from the 64-entry runtime map. */
-  private trimExtensionActivities(): void {
-    while (this.extensionActivities.size > 64) {
-      const candidates = [...this.extensionActivities.entries()];
-      const ranked = candidates.sort((left, right) => {
-        const bucket = (activity: ExtensionRunActivity): number => {
-          const visibility = activityProjection.extensionActivityVisibility(this.activitySource(), activity);
-          return visibility === "recent" || visibility === "historical" ? 0 : 1;
-        };
-        return bucket(left[1]) - bucket(right[1]) || left[1].updatedAt.localeCompare(right[1].updatedAt);
-      });
-      const oldest = ranked[0]?.[0];
-      if (!oldest) break;
-      this.stopExtensionActivityWatcher(oldest);
-      this.extensionActivities.delete(oldest);
-      this.extensionArtifactMissingSince.delete(oldest);
-      this.replaceProcessesForToolCall(oldest, []);
-      for (const [runId, binding] of this.extensionRunOwnership) {
-        if (binding.toolCallId === oldest) this.extensionRunOwnership.delete(runId);
-      }
-    }
   }
 
   private requestExtensionShutdown(): void {
@@ -2795,8 +2467,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** The process activity projection owns live delegated work that may wake
    * this session; paused and recent history are not pending work. */
   public pendingBackgroundProcesses(): string[] {
-    return [...this.extensionActivities.values()]
-      .filter((activity) => this.extensionActivityOwnsLiveWork(activity)
+    return [...this.ownedTurns.extensionActivities.values()]
+      .filter((activity) => extensionActivityOwnsLiveWork(this.ownedTurns, activity)
         && ["asynchronous", "workflow"].includes(activity.mode?.toLowerCase() ?? ""))
       .map((activity) => `${activity.toolCallId}:${activity.runId ?? activity.activityId ?? activity.id}`)
       .sort();
@@ -2907,7 +2579,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return typeof eventId === "string" && this.inboxAttributedMessages.has(eventId);
   }
 
-  private persistVerifiedCustomEntry(options: {
+  public persistVerifiedCustomEntry(options: {
     describe: string;
     existing: () => "absent" | "matching" | "contradictory";
     append: () => void;
@@ -3166,7 +2838,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       case "tool_execution_start": {
         if (!this.hasActiveAgentRun) break;
         if ("parentToolCallId" in event && event.parentToolCallId) {
-          this.updateNestedExtensionActivity(event, "running");
+          updateNestedExtensionActivity(this.ownedTurns, event, "running");
           this.projectNestedToolExecution(event, "running");
           break;
         }
@@ -3197,7 +2869,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         );
         const extensionOrigin = this.extensionToolOrigin(event.toolName);
         const toolLabel = existing?.toolLabel ?? this.toolLabel(event.toolName);
-        const extensionActivity = this.updateExtensionActivity(
+        const extensionActivity = updateExtensionActivity(this.ownedTurns,
           event.toolCallId, event.toolName, extensionOrigin, "running", startedAt, now, undefined, undefined, durationMs
         );
         const state: ToolExecutionState = {
@@ -3227,7 +2899,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       case "tool_execution_update": {
         if (!this.hasActiveAgentRun) break;
         if ("parentToolCallId" in event && event.parentToolCallId) {
-          this.updateNestedExtensionActivity(event, "running", event.partialResult);
+          updateNestedExtensionActivity(this.ownedTurns, event, "running", event.partialResult);
           this.projectNestedToolExecution(event, "running");
           break;
         }
@@ -3246,7 +2918,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         const extensionOrigin = this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin;
         const nestedCalls = this.nestedToolCallsFromDetails(event.partialResult) ?? existing?.nestedCalls;
         const toolLabel = existing?.toolLabel ?? this.toolLabel(event.toolName);
-        const extensionActivity = this.updateExtensionActivity(
+        const extensionActivity = updateExtensionActivity(this.ownedTurns,
           event.toolCallId, event.toolName, extensionOrigin, "running", startedAt, now, event.partialResult, undefined, durationMs
         );
         const state: ToolExecutionState = {
@@ -3295,7 +2967,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           this.dependencies.codemodeDiagnostic?.({ sessionId: this.id, outcome, durationMs, nestedCallCount: nestedState?.calls.length ?? 0, complete });
         }
         if ("parentToolCallId" in event && event.parentToolCallId) {
-          this.updateNestedExtensionActivity(event, event.isError ? "failed" : "completed", event.result);
+          updateNestedExtensionActivity(this.ownedTurns, event, event.isError ? "failed" : "completed", event.result);
           this.projectNestedToolExecution(event, event.isError ? "failed" : "completed");
           break;
         }
@@ -3331,7 +3003,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           ?? retained?.extensionOrigin;
         const nestedCalls = this.nestedToolCallsFromDetails(event.result) ?? existing?.nestedCalls;
         const toolLabel = existing?.toolLabel ?? retained?.toolLabel ?? this.toolLabel(event.toolName);
-        const extensionActivity = this.updateExtensionActivity(
+        const extensionActivity = updateExtensionActivity(this.ownedTurns,
           event.toolCallId, event.toolName, extensionOrigin, event.isError ? "failed" : "completed", startedAt, now, event.result, now, durationMs
         );
         const state: ToolExecutionState = {
@@ -3571,1425 +3243,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }
   }
 
-  /** Provider artifact shape policy lives in the delegated-provider module. */
-  private extensionArtifactPathAllowed(asyncPath: string): boolean {
-    return delegatedArtifactPathAllowed(asyncPath, this.cwd, this.dependencies.delegatedArtifactRoot);
-  }
-
-  private subagentExtensionOrigin(): ExtensionToolOrigin {
-    return delegatedProviderOrigin(this.runtime?.session.resourceLoader.getExtensions().extensions ?? []);
-  }
-
-  private isForegroundSubagentTool(toolName: string, origin: ExtensionToolOrigin | undefined): boolean {
-    return isInstalledDelegatedTool(toolName, origin, this.subagentExtensionOrigin().owner?.id);
-  }
-
-  /** Return only the exact installed controller already admitted for subagent
-   * projection. Pi can reload a package through its resolved local path,
-   * so the opaque installed-owner identity—not the mutable source label—is the
-   * authority boundary. */
-  trustedSubagentController(): ToolDefinition | undefined {
-    const session = this.runtime?.session;
-    if (!session) return undefined;
-    return trustedDelegatedController({
-      toolName: DELEGATED_PROVIDER_TOOL_NAME,
-      origin: this.extensionToolOrigin(DELEGATED_PROVIDER_TOOL_NAME),
-      installedOwnerId: this.subagentExtensionOrigin().owner?.id,
-      definitionFor: (name: string) => session.extensionRunner.getToolDefinition(name),
-    });
-  }
-
-  private async openOwnedExtensionArtifact(
-    asyncDir: string,
-    name: "status.json" | "events.jsonl" | "recovery-descriptor.json" | "process-terminal.json",
-    expectedDirectory?: ExtensionArtifactDirectoryIdentity,
-  ): Promise<OpenedExtensionArtifact | undefined> {
-    const canonicalAsyncDir = realpathSync(asyncDir);
-    if (canonicalAsyncDir !== asyncDir || !this.extensionArtifactPathAllowed(canonicalAsyncDir)) return undefined;
-    const directory = await stat(canonicalAsyncDir);
-    if (!directory.isDirectory()
-      || expectedDirectory && (directory.dev !== expectedDirectory.dev || directory.ino !== expectedDirectory.ino)) return undefined;
-    const lexicalPath = join(canonicalAsyncDir, name);
-    let canonicalPath: string;
-    try {
-      canonicalPath = realpathSync(lexicalPath);
-    } catch (error) {
-      // Status artifacts are atomically replaced. A bounded watcher retry owns
-      // the brief unlink/rename window; do not turn it into an unretried read
-      // failure that can strand the previous running projection.
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    }
-    if (dirname(canonicalPath) !== canonicalAsyncDir || !this.extensionArtifactPathAllowed(canonicalPath)) return undefined;
-    const handle = await open(lexicalPath, "r");
-    try {
-      const [opened, observed, observedDirectory] = await Promise.all([
-        handle.stat(), stat(canonicalPath), stat(canonicalAsyncDir),
-      ]);
-      if (!opened.isFile() || !observed.isFile() || !observedDirectory.isDirectory()
-        || realpathSync(lexicalPath) !== canonicalPath
-        || opened.dev !== observed.dev || opened.ino !== observed.ino
-        || directory.dev !== observedDirectory.dev || directory.ino !== observedDirectory.ino) {
-        await handle.close();
-        return undefined;
-      }
-      return { handle, directory: { dev: directory.dev, ino: directory.ino } };
-    } catch (error) {
-      await handle.close();
-      throw error;
-    }
-  }
-
-  /** Released workflows keep execution details in their detached children's
-   * status, not the workflow edge. Join only exact reciprocal producer edges;
-   * root identity/order remains authoritative and every read is disposable. */
-  private async readWorkflowChildDetails(asyncDir: string, status: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (status.mode !== "workflow" || typeof status.runId !== "string" || !Array.isArray(status.steps)) return status;
-    const directories: string[] = [];
-    let unavailableChildren = 0;
-    const steps: unknown[] = [];
-    for (const value of status.steps.slice(0, MAX_EXTENSION_RUN_CHILDREN)) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) { steps.push(value); continue; }
-      const edge = value as Record<string, unknown>;
-      steps.push(edge);
-      if (edge.async !== true || typeof edge.runId !== "string" || !edge.runId
-        || Buffer.byteLength(edge.runId) > 256 || /[\\/\0]/u.test(edge.runId)
-        || typeof edge.workflowKey !== "string" || typeof edge.sessionOwnerId !== "string"
-        || typeof edge.sessionFile !== "string") continue;
-      const directory = join(dirname(asyncDir), edge.runId);
-      if (dirname(directory) !== dirname(asyncDir) || directory === asyncDir) continue;
-      // Observation follows the root edge, never the optional read result.
-      // Even an absent directory must remain subscribed for its first status.
-      directories.push(directory);
-      unavailableChildren += 1;
-      const child = await this.readExtensionStatusArtifact(directory, false).catch(() => undefined);
-      if (!child || child.runId !== edge.runId || child.parentWorkflowRunId !== status.runId
-        || child.workflowKey !== edge.workflowKey || child.sessionOwnerId !== edge.sessionOwnerId || child.sessionId !== status.sessionId
-        || child.mode !== "single" || !Array.isArray(child.steps) || child.steps.length !== 1) continue;
-      const detail = child.steps[0];
-      if (!detail || typeof detail !== "object" || Array.isArray(detail)) continue;
-      const source = detail as Record<string, unknown>;
-      if (source.sessionFile !== edge.sessionFile || source.agent !== edge.agent
-        || !this.childSessionAdmission.admit(edge.sessionFile, status.runId, edge.workflowKey, edge.sessionOwnerId)) continue;
-      unavailableChildren -= 1;
-      // Do not copy child identity, declarations or control authority. Only
-      // provider-authored display facts cross this already verified edge.
-      const projected = { ...edge };
-      for (const key of ["model", "thinking", "currentTool", "currentPath", "lastActivityAt", "currentToolStartedAt",
-        "toolCount", "turnCount", "recentOutput", "output", "error", "attention", "attentionState", "startedAt", "endedAt", "durationMs", "status"] as const) {
-        if (source[key] !== undefined) projected[key] = source[key];
-      }
-      // The child run's own state is the authority for whether it is still live. Its runner
-      // records the step's terminal status first and persists the run's terminal state only
-      // after finishing its result, so a terminal step under a running run is still live work
-      // that settlement must join (#1021).
-      if (typeof child.state === "string") projected.state = child.state;
-      // A paused child remains resumable history, not running work, once its own
-      // runner's exit proof is admitted. Keep that fact private to this exact read.
-      if (observedPausedProcessTerminalAt(child, edge.runId) !== undefined) {
-        Object.assign(projected, { [WORKFLOW_CHILD_PROCESS_SETTLED]: true });
-      }
-      // The released single-child snapshot omits a zero total until its first
-      // tool event; an explicitly empty recent-tools list proves that zero.
-      if (source.toolCount === undefined && Array.isArray(source.recentTools) && source.recentTools.length === 0) projected.toolCount = 0;
-      steps[steps.length - 1] = projected;
-    }
-    const omission = status.lifecycleOmissions as { children?: number; byteLimitExceeded?: boolean } | undefined;
-    const omittedChildren = typeof omission?.children === "number" && Number.isSafeInteger(omission.children) && omission.children >= 0
-      ? omission.children : 0;
-    return Object.assign({ ...status, steps: [...steps, ...status.steps.slice(MAX_EXTENSION_RUN_CHILDREN)],
-      ...(unavailableChildren > 0 ? { lifecycleOmissions: {
-        children: omittedChildren + unavailableChildren,
-        byteLimitExceeded: omission?.byteLimitExceeded === true,
-      } } : {}),
-    }, { [WORKFLOW_CHILD_ARTIFACT_DIRECTORIES]: directories });
-  }
-
-  private syncWorkflowChildArtifactWatchers(toolCallId: string, value: Record<string, unknown>): void {
-    const tracked = this.extensionActivityWatchers.get(toolCallId);
-    if (!tracked) return;
-    const directories = (value as Record<PropertyKey, unknown>)[WORKFLOW_CHILD_ARTIFACT_DIRECTORIES];
-    const next = new Set(Array.isArray(directories) ? directories as string[] : []);
-    for (const [directory, watcher] of tracked.children) if (!next.has(directory)) {
-      watcher.close();
-      tracked.children.delete(directory);
-    }
-    for (const directory of next) if (!tracked.children.has(directory)) {
-      try {
-        // Observe from the admitted parent's tree so a not-yet-created child
-        // directory and later atomic status writes share one edge subscription.
-        const childName = basename(directory);
-        const watcher = watch(dirname(directory), { recursive: true }, (eventType, filename) => {
-          const path = filename?.toString();
-          if (path === undefined || path === childName || path === join(childName, "status.json")
-            || path === join(childName, "process-terminal.json")) {
-            tracked.onChange(eventType, "status.json");
-          }
-        });
-        // Failure stays local to this child's observation. Neither the root
-        // watcher nor its other authoritative edges are retired by that error.
-        watcher.on("error", () => tracked.onChange("change", "status.json"));
-        tracked.children.set(directory, watcher);
-        // The root read that named this child ran before it was subscribed, so a
-        // terminal write in between would be lost. Re-read once after subscribing.
-        tracked.onChange("change", "status.json");
-      } catch {
-        // Optional observation cannot refuse otherwise valid root evidence.
-      }
-    }
-  }
-
-  private async readExtensionStatusArtifact(asyncDir: string, includeWorkflowChildren = true): Promise<Record<string, unknown> | undefined> {
-    if (!this.extensionArtifactPathAllowed(asyncDir)) return undefined;
-    const opened = await this.openOwnedExtensionArtifact(asyncDir, "status.json");
-    if (!opened) return undefined;
-    try {
-      // The compact header admits parent/run ownership. Native children and
-      // details come from the full bounded status, not the widget's eight-row
-      // summary. Keep the header as bounded lifecycle evidence on overflow.
-      const headerBuffer = Buffer.alloc(MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
-      const { bytesRead: headerBytesRead } = await opened.handle.read(headerBuffer, 0, headerBuffer.length, 0);
-      const headerBytes = headerBuffer.subarray(0, headerBytesRead);
-      const lifecycleHeader = parseExtensionLifecycleProjectionHeader(headerBytes);
-      if (lifecycleHeader !== undefined) {
-        const projection = inspectExtensionLifecycleProjection(lifecycleHeader);
-        if (!projection) throw new SyntaxError("Invalid extension lifecycle projection header");
-        // The producer retains the original parent session identity across resumes.
-        // Exact run/tool/path ownership does not authorize a header copied from another session.
-        const parentIdentity = this.sessionFile ? resolve(this.sessionFile) : this.id;
-        if (projection.sessionId !== undefined && projection.sessionId !== parentIdentity) {
-          throw new ForeignExtensionArtifactSessionError();
-        }
-        const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
-        const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
-        const full: unknown = bytesRead <= MAX_EXTENSION_ARTIFACT_BYTES ? JSON.parse(buffer.subarray(0, bytesRead).toString("utf8")) : undefined;
-        if (full !== undefined && (!full || typeof full !== "object" || Array.isArray(full))) throw new SyntaxError("Invalid full extension status");
-        const status = full as Record<string, unknown> | undefined;
-        if (status && (status.runId !== projection.runId
-          || (projection.toolCallId !== undefined && status.toolCallId !== projection.toolCallId))) throw new ForeignExtensionArtifactSessionError();
-        const projected = status ? { ...status, lifecycleArtifactVersion: EXTENSION_LIFECYCLE_ARTIFACT_VERSION }
-          : lifecycleProjectionArtifact({ ...projection, omitted: { ...projection.omitted, byteLimitExceeded: true } });
-        const detailed = includeWorkflowChildren ? await this.readWorkflowChildDetails(asyncDir, projected) : projected;
-        const withRecovery = await this.attachRecoverySessionOwner(asyncDir, detailed, opened.directory);
-        const withProof = await this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
-        return markEmbeddedLifecycleArtifact(withProof);
-      }
-      // A first lifecycleProjection key marks a modern artifact even when its
-      // value is truncated or malformed; do not fall back to report parsing.
-      if (hasExtensionLifecycleProjectionProperty(headerBytes)) {
-        throw new SyntaxError("Incomplete extension lifecycle projection header");
-      }
-      const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
-      const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
-      const bytes = buffer.subarray(0, bytesRead);
-      if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) {
-        const terminal = await this.readOversizedTerminalExtensionArtifact(
-          asyncDir,
-          bytes.subarray(0, MAX_EXTENSION_ARTIFACT_BYTES),
-          opened.directory,
-        );
-        if (!terminal) throw new OversizedExtensionArtifactError();
-        return terminal;
-      }
-      const parsed: unknown = JSON.parse(bytes.toString("utf8"));
-      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-      const recovered = await this.attachRecoverySessionOwner(asyncDir, parsed as Record<string, unknown>, opened.directory);
-      return this.attachProcessTerminalProof(asyncDir, recovered, opened.directory);
-    } finally {
-      await opened.handle.close();
-    }
-  }
-
-  /** The producer persists process-terminal.json before best-effort status
-   * overlay. Read that exact-owned sidecar so an interrupted overlay cannot
-   * leave an exited paused runner blocking restart forever. */
-  private async attachProcessTerminalProof(
-    asyncDir: string,
-    status: Record<string, unknown>,
-    directoryIdentity: ExtensionArtifactDirectoryIdentity,
-  ): Promise<Record<string, unknown>> {
-    const withoutProof = (): Record<string, unknown> => {
-      const { processTerminal: _processTerminal, ...remaining } = status;
-      return remaining;
-    };
-    const runId = typeof status.runId === "string" ? status.runId : undefined;
-    if (!runId || Buffer.byteLength(runId) > 256 || /[\\/\0]/u.test(runId)) return withoutProof();
-    const opened = await this.openOwnedExtensionArtifact(
-      asyncDir,
-      "process-terminal.json",
-      directoryIdentity,
-    ).catch(() => undefined);
-    if (!opened) return status;
-    try {
-      const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
-      const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
-      if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return withoutProof();
-      const parsed: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
-        || (parsed as Record<string, unknown>).runId !== runId) return withoutProof();
-      return { ...status, processTerminal: parsed as Record<string, unknown> };
-    } catch {
-      return withoutProof();
-    } finally {
-      await opened.handle.close();
-    }
-  }
-
-  /** Async single-run status steps intentionally keep the stable child producer
-   * positional, while their fresh session directory is reserved by the root
-   * fan-out run. The exact-owned private recovery descriptor is the producer's
-   * canonical bridge between those identities; neither the path segment nor a
-   * presentation field may nominate the owner. */
-  private async attachRecoverySessionOwner(
-    asyncDir: string,
-    status: Record<string, unknown>,
-    directoryIdentity: ExtensionArtifactDirectoryIdentity,
-  ): Promise<Record<string, unknown>> {
-    if (status.mode !== "single" || typeof status.runId !== "string" || !status.runId
-      || Buffer.byteLength(status.runId) > 256 || /[\\/\0]/u.test(status.runId)
-      || !Array.isArray(status.steps) || status.steps.length !== 1) return status;
-    const step = status.steps[0];
-    if (!step || typeof step !== "object" || Array.isArray(step)) return status;
-    const stepRecord = step as Record<string, unknown>;
-    const sessionFile = typeof stepRecord.sessionFile === "string" ? stepRecord.sessionFile : undefined;
-    if (!sessionFile || !isAbsolute(sessionFile)) return status;
-    const opened = await this.openOwnedExtensionArtifact(
-      asyncDir,
-      "recovery-descriptor.json",
-      directoryIdentity,
-    ).catch(() => undefined);
-    if (!opened) return status;
-    try {
-      const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
-      const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
-      if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return status;
-      const parsed: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return status;
-      const descriptor = parsed as Record<string, unknown>;
-      const budget = descriptor.runFanoutBudget;
-      if (descriptor.version !== 1 || descriptor.sourceRunId !== status.runId
-        || descriptor.sessionFile !== sessionFile
-        || !budget || typeof budget !== "object" || Array.isArray(budget)) return status;
-      const budgetRecord = budget as Record<string, unknown>;
-      const sessionOwnerId = budgetRecord.rootRunId;
-      if (budgetRecord.version !== 1 || typeof sessionOwnerId !== "string" || !sessionOwnerId
-        || Buffer.byteLength(sessionOwnerId) > 256 || /[\\/\0]/u.test(sessionOwnerId)) return status;
-      return {
-        ...status,
-        steps: [{ ...stepRecord, [RECOVERY_SESSION_OWNER]: sessionOwnerId }],
-      };
-    } catch {
-      return status;
-    } finally {
-      await opened.handle.close();
-    }
-  }
-
-  /** A workflow status can exceed the projection byte cap because producer
-   * step details are retained after completion. For an exact directory, admit
-   * only its small top-level header plus a matching terminal event from the
-   * bounded events tail; never parse or project the oversized step payload. */
-  private async readOversizedTerminalExtensionArtifact(
-    asyncDir: string,
-    headerBytes: Buffer,
-    directoryIdentity: ExtensionArtifactDirectoryIdentity,
-  ): Promise<Record<string, unknown> | undefined> {
-    const headerText = headerBytes.toString("utf8");
-    const steps = /,\s*"steps"\s*:/u.exec(headerText);
-    if (!steps) return undefined;
-    let header: unknown;
-    try {
-      header = JSON.parse(`${headerText.slice(0, steps.index)}\n}`);
-    } catch {
-      return undefined;
-    }
-    if (!header || typeof header !== "object" || Array.isArray(header)) return undefined;
-    const candidate = header as Record<string, unknown>;
-    const runId = typeof candidate.runId === "string" ? candidate.runId : undefined;
-    const headerState = extensionLifecycleState(candidate.state ?? candidate.status);
-    if (!runId || !terminalLifecycleStates.has(headerState)) return undefined;
-
-    const openedEvents = await this.openOwnedExtensionArtifact(asyncDir, "events.jsonl", directoryIdentity);
-    if (!openedEvents) return undefined;
-    try {
-      const metadata = await openedEvents.handle.stat();
-      if (!metadata.isFile()) return undefined;
-      const length = Math.min(metadata.size, MAX_EXTENSION_EVENT_TAIL_BYTES);
-      const offset = Math.max(0, metadata.size - length);
-      const buffer = Buffer.alloc(length);
-      const { bytesRead } = await openedEvents.handle.read(buffer, 0, length, offset);
-      let text = buffer.subarray(0, bytesRead).toString("utf8");
-      if (offset > 0) {
-        const firstNewline = text.indexOf("\n");
-        if (firstNewline < 0) return undefined;
-        text = text.slice(firstNewline + 1);
-      }
-      const lines = text.split("\n").filter(Boolean).slice(-MAX_EXTENSION_EVENT_LINES);
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const line = lines[index]!;
-        if (Buffer.byteLength(line) > MAX_EXTENSION_EVENT_TAIL_BYTES) continue;
-        let event: unknown;
-        try { event = JSON.parse(line); } catch { continue; }
-        if (!event || typeof event !== "object" || Array.isArray(event)) continue;
-        const value = event as Record<string, unknown>;
-        if (value.runId !== runId || !Number.isSafeInteger(value.ts) || (value.ts as number) < 0) continue;
-        const recognizedTerminalEvent = value.type === "subagent.workflow.completed"
-          || value.type === "subagent.run.completed" || value.type === "subagent.run.stopped";
-        if (!recognizedTerminalEvent) continue;
-        const eventState = value.type === "subagent.workflow.completed"
-          ? extensionLifecycleState(value.state)
-          : value.type === "subagent.run.completed"
-            ? extensionLifecycleState(value.status)
-            : "stopped";
-        if (eventState !== headerState || !terminalLifecycleStates.has(eventState)) return undefined;
-        const persistedAt = typeof candidate.lastUpdate === "number" && Number.isSafeInteger(candidate.lastUpdate)
-          ? Math.max(candidate.lastUpdate, value.ts as number)
-          : value.ts;
-        return { ...candidate, state: eventState, endedAt: value.ts, lastUpdate: persistedAt };
-      }
-      return undefined;
-    } finally {
-      await openedEvents.handle.close();
-    }
-  }
-
-  /** Run identities and exact directories ambient discovery can attribute to
-   * this slot. Every route this slot can accept requires one of them: a
-   * canonical JSONL fact, a live ownership binding or a projected activity row
-   * names the run, and the artifact's declared directory must agree with the
-   * directory it was found in. A directory none of them names can only be
-   * rejected, so the registry skips it instead of reopening its `status.json` on
-   * every pass (G-8d). Run identities never contain a path separator, so one set
-   * can hold both keys. */
-  extensionAmbientArtifactAttribution(): ReadonlySet<string> {
-    const attributed = new Set<string>();
-    const addDirectory = (asyncDir: string): void => {
-      attributed.add(resolve(asyncDir));
-      try { attributed.add(realpathSync(asyncDir)); } catch { /* a directory that is gone stays attributable lexically */ }
-    };
-    for (const [runId, binding] of this.extensionRunOwnership) {
-      attributed.add(runId);
-      if (binding.asyncDir) addDirectory(binding.asyncDir);
-    }
-    for (const [runId, fact] of this.canonicalExtensionRunFacts()) {
-      attributed.add(runId);
-      if (fact.asyncDir) addDirectory(fact.asyncDir);
-    }
-    for (const activity of this.extensionActivities.values()) {
-      if (activity.runId) attributed.add(activity.runId);
-    }
-    return attributed;
-  }
-
-  /** Exact directories already bound by a live tool result outrank ambient
-   * discovery, especially while administrative drain needs terminal evidence. */
-  ownedExtensionArtifactDirectories(): string[] {
-    const terminalStates = new Set(["completed", "failed", "stopped", "rejected"]);
-    const candidates: Array<{ directory: string; updatedAt: string }> = [];
-    for (const binding of this.extensionRunOwnership.values()) {
-      if (binding.terminal || !binding.asyncDir) continue;
-      const activity = this.extensionActivities.get(binding.toolCallId);
-      if (activity?.lifecycle && terminalStates.has(activity.lifecycle.state)) continue;
-      const directory = this.canonicalExtensionArtifactDirectory(binding.asyncDir)
-        ?? (this.extensionArtifactPathAllowed(resolve(binding.asyncDir)) ? resolve(binding.asyncDir) : undefined);
-      if (directory) candidates.push({ directory, updatedAt: activity?.updatedAt ?? "" });
-    }
-    candidates.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt)
-      || left.directory.localeCompare(right.directory));
-    return [...new Set(candidates.map((candidate) => candidate.directory))].slice(0, 64);
-  }
-
-  private extensionArtifactOwnerForDirectory(directory: string): string | undefined {
-    for (const [runId, binding] of this.extensionRunOwnership) {
-      if (!binding.asyncDir) continue;
-      const owned = this.canonicalExtensionArtifactDirectory(binding.asyncDir);
-      if (owned === directory) return `${runId}\0${binding.toolCallId}`;
-    }
-    return undefined;
-  }
-
-  private warnExtensionArtifact(reason: ExtensionArtifactRejectionReason, owner: string): void {
-    if (!this.dependencies.extensionArtifactWarning) return;
-    const opaqueOwner = createHash("sha256").update(`${this.id}\0${owner}`).digest("hex").slice(0, 24);
-    const key = `${opaqueOwner}:${reason}`;
-    const now = Date.now();
-    const previous = this.extensionArtifactWarnings.get(key);
-    if (previous !== undefined && now - previous < 60_000) return;
-    this.extensionArtifactWarnings.delete(key);
-    this.extensionArtifactWarnings.set(key, now);
-    while (this.extensionArtifactWarnings.size > 256) {
-      const oldest = this.extensionArtifactWarnings.keys().next().value as string | undefined;
-      if (!oldest) break;
-      this.extensionArtifactWarnings.delete(oldest);
-    }
-    this.dependencies.extensionArtifactWarning({ reason, owner: opaqueOwner });
-  }
-
-  private observeMissingExtensionArtifact(toolCallId: string): void {
-    const now = Date.now();
-    const missingSince = this.extensionArtifactMissingSince.get(toolCallId);
-    if (missingSince === undefined) {
-      this.extensionArtifactMissingSince.set(toolCallId, now);
-      return;
-    }
-    if (now - missingSince < EXTENSION_ARTIFACT_MISSING_GRACE_MS) return;
-    const previous = this.extensionActivities.get(toolCallId);
-    if (!previous || previous.lifecycle && terminalLifecycleStates.has(previous.lifecycle.state)
-      || previous.lifecycle?.state === "unknown") return;
-    const activityKey = previous.activityId
-      ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
-    const sequence = (this.extensionActivitySequences.get(activityKey)
-      ?? previous.lifecycle?.sequence ?? 0) + 1;
-    this.extensionActivitySequences.set(activityKey, sequence);
-    const observedAt = new Date().toISOString();
-    const unavailable: ExtensionRunActivity = {
-      ...previous,
-      updatedAt: observedAt,
-      lifecycle: {
-        version: 1,
-        state: "unknown",
-        attention: "none",
-        sequence,
-        observedAt,
-      },
-    };
-    this.extensionActivities.set(toolCallId, unavailable);
-    this.upsertExtensionActivity(unavailable);
-    this.publishExtensionActivity(unavailable);
-    this.stopExtensionActivityWatcher(toolCallId);
-  }
-
-  /** Called only by the Gateway-scoped bounded artifact discovery owner or by
-   * a watcher attached after this slot proved canonical ownership. The outcome
-   * tells a caller whether it may record this exact artifact as dealt with: an
-   * offer the slot could not decide (`transient`) must leave no record, or a
-   * run known only from a saved session log is never offered again (G-8a). */
-  discoverExtensionArtifact(asyncDir: string): Promise<ExtensionArtifactDiscoveryOutcome> {
-    return this.refreshSubagentActivityFromArtifact(asyncDir);
-  }
-
-  /** Administrative drain gets a direct, bounded reconciliation lane for
-   * exact-owned artifacts instead of depending on watcher delivery or ambient
-   * discovery scheduling. Genuine nonterminal work remains a blocker. */
-  async reconcileOwnedExtensionArtifactsForDrain(): Promise<void> {
-    if (this.runAttention.completionOwnershipQueue.length > 0 && !this.runAttention.attentionBarrier) {
-      await this.runAttention.drainCompletionOwnership().catch(() => {
-        this.emit("session.diagnostic", safeJson({
-          code: "canonical-completion-persistence-retrying",
-          message: "Canonical completion persistence is retrying",
-        }));
-      });
-    }
-    const canonicalFacts = this.canonicalExtensionRunFacts();
-    for (const asyncDir of this.ownedExtensionArtifactDirectories()) {
-      await this.refreshSubagentActivityFromArtifact(asyncDir, canonicalFacts);
-    }
-    await this.runWork.reconcileOrphanedForegroundWorkForDrain();
-  }
-
-  private async refreshSubagentActivityFromArtifact(
-    asyncDir: string,
-    canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
-  ): Promise<ExtensionArtifactDiscoveryOutcome> {
-    let diagnosticOwner: string | undefined;
-    let missingToolCallId: string | undefined;
-    let claimedReceipt: { activityId: string; owner: GatewayWorkHandle } | undefined;
-    try {
-      const lexicalDirectory = resolve(asyncDir);
-      const realAsyncDir = this.canonicalExtensionArtifactDirectory(asyncDir);
-      const bound = [...this.extensionRunOwnership.entries()].find(([, binding]) =>
-        binding.asyncDir !== undefined && (resolve(binding.asyncDir) === lexicalDirectory
-          || realAsyncDir !== undefined
-            && this.canonicalExtensionArtifactDirectory(binding.asyncDir) === realAsyncDir));
-      missingToolCallId = bound?.[1].toolCallId;
-      if (!realAsyncDir) {
-        if (bound) this.observeMissingExtensionArtifact(bound[1].toolCallId);
-        return "transient";
-      }
-      diagnosticOwner = this.extensionArtifactOwnerForDirectory(realAsyncDir);
-      const rawValue = await this.readExtensionStatusArtifactWithReplacementRetry(realAsyncDir);
-      if (rawValue === undefined) {
-        if (bound) this.observeMissingExtensionArtifact(bound[1].toolCallId);
-        if (diagnosticOwner) this.warnExtensionArtifact("artifact-replacement-in-progress", diagnosticOwner);
-        return "transient";
-      }
-      if (bound) this.extensionArtifactMissingSince.delete(bound[1].toolCallId);
-      // Registry discovery is bounded but grants no ownership. Historical
-      // artifacts become admissible only here, where the canonical tool result
-      // or an exact live asyncDir binding proves the owning session/tool call.
-      const admission = inspectExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
-      if (!admission.accepted) {
-        if (diagnosticOwner) this.warnExtensionArtifact(admission.reason, diagnosticOwner);
-        return "rejected";
-      }
-      const raw = admission.artifact;
-      const runId = raw.runId as string;
-      if (!runId) return "rejected";
-      // The file's declared directory is advisory. If present, it must agree
-      // with the directory that was actually discovered/read; a declared path
-      // this slot cannot resolve is retried rather than recorded.
-      if (typeof raw.asyncDir === "string") {
-        const declaredAsyncDir = this.canonicalExtensionArtifactDirectory(raw.asyncDir);
-        if (!declaredAsyncDir) return "transient";
-        if (declaredAsyncDir !== realAsyncDir) {
-          if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return "rejected";
-        }
-      }
-      const ownership = this.extensionRunOwnership.get(runId);
-      const canonical = (canonicalFacts ?? this.canonicalExtensionRunFacts()).get(runId);
-      const historicalArtifact = raw.lifecycleArtifactVersion !== EXTENSION_LIFECYCLE_ARTIFACT_VERSION;
-      if (historicalArtifact && !ownership?.asyncDir && !canonical?.asyncDir) return "transient";
-      // A duplicated runId in canonical JSONL has no safe artifact owner.
-      if (canonical?.ambiguous) {
-        if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-        return "transient";
-      }
-      // An ownership or canonical comparison is decided against state this slot
-      // re-reads every pass, so the same bytes may be admissible later.
-      if (ownership?.asyncDir) {
-        const ownershipAsyncDir = this.canonicalExtensionArtifactDirectory(ownership.asyncDir);
-        if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) {
-          if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return "transient";
-        }
-      }
-      if (canonical?.asyncDir) {
-        const canonicalAsyncDir = this.canonicalExtensionArtifactDirectory(canonical.asyncDir);
-        if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) {
-          if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return "transient";
-        }
-      }
-      if (canonical?.toolCallId && ownership && ownership.toolCallId !== canonical.toolCallId) {
-        // A synthetic artifact row may be re-keyed to its first real tool call,
-        // but a real ownership binding must never switch to another call.
-        if (!ownership.toolCallId.startsWith("subagent:") || ownership.toolCallId === canonical.toolCallId) {
-          if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return "transient";
-        }
-      }
-      const matchingEntries = [...this.extensionActivities.entries()].filter(([, activity]) => activity.runId === runId);
-      // Correlation is Gateway-owned; never pick an arbitrary activity when a
-      // malformed or legacy payload has produced duplicate run identities.
-      if (!ownership && !canonical?.toolCallId && matchingEntries.length > 1) {
-        if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-        return "transient";
-      }
-      const boundToolCallId = canonical?.toolCallId ?? ownership?.toolCallId;
-      if (isEmbeddedLifecycleArtifact(rawValue) && raw.toolCallId !== undefined && raw.toolCallId !== boundToolCallId) {
-        if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-        return "rejected";
-      }
-      let existingEntry: readonly [string, ExtensionRunActivity | undefined] | undefined = boundToolCallId
-        ? ([boundToolCallId, this.extensionActivities.get(boundToolCallId)] as const)
-        : matchingEntries[0];
-      // Synthetic rows are placeholders only. Re-key one to the first real
-      // canonical tool call instead of retaining two rows for the same run.
-      if (canonical?.toolCallId && !existingEntry?.[1]) {
-        const synthetic = matchingEntries.find(([id]) => id.startsWith("subagent:"));
-        if (synthetic) existingEntry = [canonical.toolCallId, synthetic[1]];
-      }
-      // A tool result is the ownership proof for an activity. Once that proof
-      // exists, the artifact may enrich it. Unmatched artifacts still require
-      // the exact cwd/session guard.
-      // Artifact files are enrichment only. A current tool execution or a
-      // canonical terminal tool result must establish ownership first; cwd,
-      // sessionId, and a lone running tool are not attribution evidence.
-      if (!existingEntry?.[1] && !canonical?.toolCallId) return "transient";
-      if (!existingEntry?.[1] && canonical?.toolCallId) {
-        existingEntry = [canonical.toolCallId, this.extensionActivities.get(canonical.toolCallId)];
-      }
-      const toolCallId = existingEntry?.[0];
-      if (!toolCallId) return "transient";
-      const previous = existingEntry?.[1];
-      const normalized = normalizeExtensionArtifact(raw, {
-        now: new Date().toISOString(),
-        ...(previous?.startedAt ? { fallbackStartedAt: previous.startedAt } : {}),
-        ...(previous?.updatedAt ? { fallbackUpdatedAt: previous.updatedAt } : {}),
-        // A recovery handoff has no launcher row to supply a start time.
-        // Once admitted, keep that first start stable across later updates.
-        useArtifactStartedAt: previous === undefined,
-      });
-      if (!normalized) {
-        if (diagnosticOwner) this.warnExtensionArtifact("invalid-timestamp", diagnosticOwner);
-        return "rejected";
-      }
-      const { status: state, startedAt, updatedAt, completedAt, durationMs } = normalized;
-      const facts = canonicalFacts ?? this.canonicalExtensionRunFacts();
-      const recoveryClaim = recoveredReplacementClaim(raw);
-      const sourceFact = facts.get(runId);
-      const pausedProcessSettledAt = observedPausedProcessTerminalAt(raw, runId);
-      const processTerminal = pausedProcessSettledAt !== undefined;
-      const rawLastUpdate = raw.lastUpdate;
-      const rawEndedAt = raw.endedAt;
-      // Only the exact provider recovery receipt plus the original paused
-      // runner's terminal proof can settle this source. A later explicit
-      // resume leaves the historical marker behind but has a new live state or
-      // timestamps, so it must not be terminalized by that old marker.
-      const superseded = extensionLifecycleState(raw.state ?? raw.status) === "paused"
-        && recoveryClaim !== undefined
-        && sourceFact?.recoveredReplacementRunId === recoveryClaim.replacementRunId
-        && sourceFact.ambiguous !== true
-        && processTerminal
-        && typeof rawLastUpdate === "number" && Number.isSafeInteger(rawLastUpdate)
-        && rawLastUpdate <= recoveryClaim.recoveredAt
-        && typeof rawEndedAt === "number" && Number.isSafeInteger(rawEndedAt)
-        && rawEndedAt <= recoveryClaim.recoveredAt;
-      const effectiveState = superseded ? "completed" : state;
-      const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
-      // A terminal lifecycle event is authoritative; a late running artifact
-      // enriches neither status nor ownership and must not resurrect the pill.
-      // The latch cannot lift for this identity, so the bytes are rejected.
-      if (ownership?.terminal && state === "running") return "rejected";
-      const artifactValue = ownership?.terminal
-        ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous?.status === "failed" ? "failed" : "completed" })
-        : superseded
-          ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: "stopped", supersededByRunId: recoveryClaim!.replacementRunId })
-          : raw;
-      const activityKey = previous?.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
-      const sequence = (this.extensionActivitySequences.get(activityKey) ?? previous?.lifecycle?.sequence ?? 0) + 1;
-      this.extensionActivitySequences.set(activityKey, sequence);
-      const observedAt = new Date().toISOString();
-      const terminalAt = effectiveState === "running"
-        ? previous?.lifecycle?.terminalAt
-        : previous?.lifecycle?.terminalAt
-          ?? (previous === undefined ? rediscoveredTerminalAt(effectiveState, effectiveCompletedAt, observedAt) : observedAt);
-      const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
-      const activity = this.childSessionAdmission.attach(projectExtensionRunActivity(artifactValue, {
-        id: previous?.id ?? toolCallId,
-        activityId: activityKey,
-        toolCallId,
-        source: previous?.source ?? this.subagentExtensionOrigin(),
-        title: previous?.title ?? "Subagents",
-        mode: "asynchronous",
-        status: effectiveState,
-        authoritativeStatus: effectiveState !== "running" || previous?.lifecycle?.state === "completed" || previous?.lifecycle?.state === "failed" || previous?.lifecycle?.state === "stopped" || previous?.lifecycle?.state === "rejected",
-        startedAt,
-        updatedAt,
-        ...(effectiveCompletedAt ? { completedAt: effectiveCompletedAt } : {}),
-        ...(durationMs === undefined ? {} : { durationMs }),
-        ...(previous ? { previous } : {}),
-        sequence,
-        observedAt,
-        ...(terminalAt ? { terminalAt } : {}),
-        ...(recentUntil ? { recentUntil } : {}),
-        childIdentityStrategy: "piArtifact",
-      }), artifactValue, "piArtifact");
-      // Ambient discovery is another producer of lifecycle candidates. Apply
-      // the same Gateway terminal latch and sequence admission as live tool
-      // events before replacing an existing row.
-      if (admitExtensionRunActivity(previous, activity) === previous) return "rejected";
-      const terminalReceiptOwner = activity.status === "running"
-        ? undefined
-        : this.claimExtensionReceiptOwnership(activityKey);
-      // A full Gateway work registry is temporary: the terminal receipt can be
-      // claimed by a later pass, so this artifact is not delivered yet.
-      if (activity.status !== "running" && !terminalReceiptOwner) return "transient";
-      if (terminalReceiptOwner) claimedReceipt = { activityId: activityKey, owner: terminalReceiptOwner };
-      // Ownership facts are written before this frame's projection publishes:
-      // settled paused presentation, dashboard activity, and drain accounting
-      // all read them from the same frame.
-      const ownershipAccepted = this.bindExtensionRunOwnership(runId, {
-        toolCallId,
-        asyncDir: realAsyncDir,
-        terminal: activity.status !== "running" || Boolean(ownership?.terminal),
-        ...(pausedProcessSettledAt ? { pausedProcessQuiescentAt: pausedProcessSettledAt } : {}),
-        detachedChildKeys: detachedWorkflowChildKeys(raw),
-      });
-      if (!ownershipAccepted) {
-        this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
-        claimedReceipt = undefined;
-        if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-        return "transient";
-      }
-      if (existingEntry) this.extensionActivities.delete(existingEntry[0]);
-      const syntheticToolCallId = matchingEntries.find(([id]) => id.startsWith("subagent:") && id !== toolCallId)?.[0];
-      if (syntheticToolCallId) this.extensionActivities.delete(syntheticToolCallId);
-      this.extensionActivities.delete(toolCallId);
-      this.extensionActivities.set(toolCallId, activity);
-      this.upsertExtensionActivity(activity);
-      if (activity.status !== "running") {
-        void this.appendExtensionActivityReceipt(activity).catch((error) => this.emit("session.extensionError", safeJson(error)));
-        claimedReceipt = undefined;
-      }
-      if (this.extensionActivityWatchRequired(activity)) this.startExtensionActivityWatcher(toolCallId, realAsyncDir);
-      else this.stopExtensionActivityWatcher(toolCallId);
-      this.trimExtensionActivities();
-      this.publishExtensionActivity(activity);
-      return "accepted";
-    } catch (error) {
-      if (claimedReceipt) this.releaseExtensionReceiptOwnership(claimedReceipt.activityId, claimedReceipt.owner);
-      if (error instanceof OversizedExtensionArtifactError && missingToolCallId) {
-        this.observeMissingExtensionArtifact(missingToolCallId);
-      }
-      if (diagnosticOwner) this.warnExtensionArtifact(extensionArtifactReadFailureReason(error), diagnosticOwner);
-      // An artifact that is too large or belongs to another session keeps that
-      // verdict for these bytes; every other failure is retried by the caller.
-      return error instanceof OversizedExtensionArtifactError || error instanceof ForeignExtensionArtifactSessionError
-        ? "rejected"
-        : "transient";
-    }
-  }
-
-  /** The discovery lane's read of one owned artifact. A racing replacement is
-   * retried here rather than warned (G-8a); the watcher lane keeps its own
-   * per-directory retry budget, and the 60 s per-(owner, reason) dedup in
-   * `warnExtensionArtifact` still collapses a genuine replacement. */
-  private async readExtensionStatusArtifactWithReplacementRetry(
-    asyncDir: string,
-  ): Promise<Record<string, unknown> | undefined> {
-    let value = await this.readExtensionStatusArtifact(asyncDir);
-    for (let attempt = 0; value === undefined && attempt < EXTENSION_ARTIFACT_DISCOVERY_READ_RETRIES; attempt += 1) {
-      value = await this.readExtensionStatusArtifact(asyncDir);
-    }
-    return value;
-  }
-
-  private stopExtensionActivityWatcher(toolCallId: string): void {
-    this.extensionActivityReadGenerations.set(
-      toolCallId,
-      (this.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1
-    );
-    const tracked = this.extensionActivityWatchers.get(toolCallId);
-    if (!tracked) return;
-    if (tracked.timer) clearTimeout(tracked.timer);
-    tracked.watcher.close();
-    for (const watcher of tracked.children.values()) watcher.close();
-    this.extensionActivityWatchers.delete(toolCallId);
-  }
-
-  private clearExtensionActivityWatchers(): void {
-    for (const toolCallId of this.extensionActivityWatchers.keys()) this.stopExtensionActivityWatcher(toolCallId);
-    this.extensionActivityReadGenerations.clear();
-  }
-
-  private canonicalExtensionArtifactDirectory(asyncDir: string): string | undefined {
-    if (!isAbsolute(asyncDir) || !this.extensionArtifactPathAllowed(asyncDir)) return undefined;
-    try {
-      const realAsyncDir = realpathSync(asyncDir);
-      return this.extensionArtifactPathAllowed(realAsyncDir) ? realAsyncDir : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private bindExtensionRunOwnership(
-    runId: string,
-    binding: { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string; detachedChildKeys?: ReadonlyMap<string, string> },
-  ): boolean {
-    const existing = this.extensionRunOwnership.get(runId);
-    if (existing && existing.toolCallId !== binding.toolCallId) {
-      // Only a synthetic placeholder may be replaced by a real Pi identity.
-      if (!existing.toolCallId.startsWith("subagent:") || binding.toolCallId.startsWith("subagent:")) return false;
-    }
-    const asyncDir = existing?.asyncDir ?? binding.asyncDir;
-    const detachedChildKeys = binding.detachedChildKeys ?? existing?.detachedChildKeys;
-    this.extensionRunOwnership.set(runId, {
-      toolCallId: binding.toolCallId,
-      ...(asyncDir ? { asyncDir } : {}),
-      terminal: Boolean(existing?.terminal || binding.terminal),
-      // Each admitted frame states the proof it observed: the bound instant is
-      // current, never a latch, so resumed live work clears it again.
-      ...(binding.pausedProcessQuiescentAt
-        ? { pausedProcessQuiescentAt: binding.pausedProcessQuiescentAt }
-        : {}),
-      ...(detachedChildKeys ? { detachedChildKeys } : {}),
-    });
-    return true;
-  }
-
-  /** Canonical JSONL facts are the only reacquisition evidence for an
-   * artifact-created activity. Runtime maps are intentionally disposable. */
-  private canonicalExtensionRunFacts(): Map<string, CanonicalExtensionRunFact> {
-    const facts = new Map<string, CanonicalExtensionRunFact>();
-    const recoveryReceipts: Array<{ sourceRunId: string; replacementRunId: string; toolCallId: string }> = [];
-    const boundedRunId = (value: unknown): value is string => typeof value === "string"
-      && value.length > 0 && Buffer.byteLength(value) <= 256 && !/[\\/\0]/u.test(value);
-    for (const entry of this.runtime.session.sessionManager.getEntries()) {
-      if (entry.type !== "message") continue;
-      const message = entry.message as unknown as Record<string, unknown>;
-      if (message.role !== "toolResult") continue;
-      // Details.runId is untrusted presentation data. Require the canonical
-      // tool identity and prove that its tool is currently extension-owned;
-      // otherwise arbitrary tool results must not claim an artifact run.
-      const toolCallId = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
-      const toolName = typeof message.toolName === "string" ? message.toolName : undefined;
-      // Supervisor receipts reference the target run; they never launch or own
-      // it. Counting a reply as a second owner blocks its terminal artifact.
-      if (!toolCallId || !toolName || toolName === DELEGATED_SUPERVISOR_TOOL_NAME || !this.extensionToolOrigin(toolName)) continue;
-      const details = message.details !== null && typeof message.details === "object" && !Array.isArray(message.details)
-        ? message.details as Record<string, unknown>
-        : undefined;
-      // Auto-recovery returns a management receipt, not a second launcher
-      // result. It can authorize only the exact provider-owned source run and
-      // replacement pair; supervisor references never enter this path.
-      const steering = details?.steering !== null && typeof details?.steering === "object" && !Array.isArray(details.steering)
-        ? details.steering as Record<string, unknown>
-        : undefined;
-      const recoveryTargets = steering && Array.isArray(steering.targets) ? steering.targets : [];
-      const recoveryTarget = recoveryTargets.find((value) => value !== null && typeof value === "object" && !Array.isArray(value)
-        && (value as Record<string, unknown>).state === "recovered") as Record<string, unknown> | undefined;
-      const sourceRunId = steering && boundedRunId(steering.sourceRunId) ? steering.sourceRunId : undefined;
-      const replacementRunId = steering && boundedRunId(steering.replacementRunId) ? steering.replacementRunId : undefined;
-      if (this.isForegroundSubagentTool(toolName, this.extensionToolOrigin(toolName)) && details?.mode === "management"
-        && steering?.state === "recovered" && steering.deliveryStatus === "delivered"
-        && sourceRunId && replacementRunId && sourceRunId !== replacementRunId
-        && recoveryTarget && recoveryTarget.replacementRunId === replacementRunId) {
-        recoveryReceipts.push({ sourceRunId, replacementRunId, toolCallId });
-      }
-      const runId = boundedRunId(details?.runId)
-        ? details.runId
-        : boundedRunId(details?.asyncId) ? details.asyncId : undefined;
-      if (!runId) continue;
-      const explicitTerminal = details?.state === "failed"
-        || details?.state === "complete"
-        || details?.state === "completed"
-        || details?.state === "stopped"
-        || details?.status === "failed"
-        || details?.status === "complete"
-        || details?.status === "completed"
-        || details?.status === "stopped";
-      // An async launcher acknowledgement has no child results and no explicit
-      // terminal state; it remains live after the foreground tool returns.
-      const detached = typeof details?.asyncId === "string"
-        && (!Array.isArray(details.results) || details.results.length === 0)
-        && !explicitTerminal;
-      const asyncDir = typeof details?.asyncDir === "string" ? details.asyncDir : undefined;
-      const terminal = !detached && (explicitTerminal || typeof details?.runId === "string");
-      const previous = facts.get(runId);
-      if (!previous) {
-        facts.set(runId, { toolCallId, ...(asyncDir ? { asyncDir } : {}), terminal, ambiguous: false });
-      } else if (previous.ambiguous) {
-        previous.terminal ||= terminal;
-      } else if (previous.toolCallId === toolCallId) {
-        if (previous.asyncDir && asyncDir && previous.asyncDir !== asyncDir) previous.ambiguous = true;
-        if (!previous.asyncDir && asyncDir) previous.asyncDir = asyncDir;
-        previous.terminal ||= terminal;
-      } else if (previous.toolCallId?.startsWith("subagent:") && !toolCallId.startsWith("subagent:")) {
-        previous.toolCallId = toolCallId;
-        if (!previous.asyncDir && asyncDir) previous.asyncDir = asyncDir;
-        previous.terminal ||= terminal;
-      } else if (toolCallId.startsWith("subagent:") && previous.toolCallId && !previous.toolCallId.startsWith("subagent:")) {
-        previous.terminal ||= terminal;
-      } else {
-        // Distinct real tool calls sharing a runId are ambiguous. Retaining an
-        // arbitrary last writer would let a foreign artifact rebind the first.
-        delete previous.toolCallId;
-        previous.ambiguous = true;
-        previous.terminal ||= terminal;
-      }
-    }
-    // Bind an auto-recovery receipt to the original canonical launch. The
-    // replacement has no distinct toolResult, so its artifact receives a
-    // stable synthetic owner derived from this exact handoff, never from its
-    // name/path alone. Conflicting handoffs fail closed on both runs.
-    for (const receipt of recoveryReceipts) {
-      const source = facts.get(receipt.sourceRunId);
-      if (!source || source.ambiguous || !source.toolCallId) continue;
-      const syntheticToolCallId = `subagent:recovery:${createHash("sha256").update(`${receipt.toolCallId}\\0${receipt.sourceRunId}\\0${receipt.replacementRunId}`).digest("hex").slice(0, 48)}`;
-      const replacement = facts.get(receipt.replacementRunId);
-      if (replacement && (!replacement.toolCallId || replacement.toolCallId !== syntheticToolCallId || replacement.recoveredSourceRunId !== receipt.sourceRunId)) {
-        replacement.ambiguous = true;
-        delete replacement.toolCallId;
-        continue;
-      }
-      if (source.recoveredReplacementRunId && source.recoveredReplacementRunId !== receipt.replacementRunId) {
-        source.ambiguous = true;
-        delete source.recoveredReplacementRunId;
-        continue;
-      }
-      source.recoveredReplacementRunId = receipt.replacementRunId;
-      facts.set(receipt.replacementRunId, {
-        ...(replacement ?? {}),
-        toolCallId: syntheticToolCallId,
-        terminal: replacement?.terminal ?? false,
-        ambiguous: replacement?.ambiguous ?? false,
-        recoveredSourceRunId: receipt.sourceRunId,
-      });
-    }
-    return facts;
-  }
-
-  private async refreshExtensionActivityFromArtifact(toolCallId: string, asyncDir: string): Promise<void> {
-    const previous = this.extensionActivities.get(toolCallId);
-    const realAsyncDir = this.canonicalExtensionArtifactDirectory(asyncDir);
-    if (!previous || this.disposed || !realAsyncDir) return;
-    const generation = (this.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1;
-    this.extensionActivityReadGenerations.set(toolCallId, generation);
-    let claimedReceiptOwner: GatewayWorkHandle | undefined;
-    let claimedReceiptActivityId: string | undefined;
-    try {
-      const rawValue = await this.readExtensionStatusArtifact(realAsyncDir);
-      if (rawValue === undefined) {
-        const tracked = this.extensionActivityWatchers.get(toolCallId);
-        if (tracked && tracked.asyncDir === realAsyncDir) {
-          // A pending debounce or retry already owns this re-read, so a read that
-          // lost a replacement race waits for it instead of warning: the timer
-          // fires a few milliseconds later, inside the same replacement.
-          if (tracked.timer === undefined && tracked.readRetries < 3) {
-            tracked.readRetries += 1;
-            tracked.timer = setTimeout(() => {
-              tracked.timer = undefined;
-              void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
-            }, tracked.readRetries * 100);
-            tracked.timer.unref();
-          }
-          if (tracked.timer !== undefined) return;
-        }
-        this.observeMissingExtensionArtifact(toolCallId);
-        this.warnExtensionArtifact("artifact-replacement-in-progress", `${previous.runId ?? "run"}\0${toolCallId}`);
-        return;
-      }
-      this.extensionArtifactMissingSince.delete(toolCallId);
-      const tracked = this.extensionActivityWatchers.get(toolCallId);
-      if (tracked?.asyncDir === realAsyncDir) tracked.readRetries = 0;
-      const admission = inspectExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
-      if (!admission.accepted) {
-        this.warnExtensionArtifact(admission.reason, `${previous.runId ?? "run"}\0${toolCallId}`);
-        return;
-      }
-      const raw = admission.artifact;
-      if (this.disposed || this.extensionActivityReadGenerations.get(toolCallId) !== generation) return;
-      const runId = raw.runId as string;
-      if (!runId || runId !== previous.runId) return;
-      if (typeof raw.asyncDir === "string") {
-        const declaredAsyncDir = this.canonicalExtensionArtifactDirectory(raw.asyncDir);
-        if (!declaredAsyncDir || declaredAsyncDir !== realAsyncDir) {
-          this.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
-          return;
-        }
-      }
-      const canonical = this.canonicalExtensionRunFacts().get(runId);
-      const ownership = this.extensionRunOwnership.get(runId);
-      // Watcher refresh is bound to one tool and one canonical directory. A
-      // duplicate canonical runId or either mismatch fails closed.
-      if (canonical?.ambiguous || (canonical?.toolCallId && canonical.toolCallId !== toolCallId)
-        || !ownership || ownership.toolCallId !== toolCallId) {
-          this.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
-        return;
-      }
-      if (ownership.asyncDir) {
-        const ownershipAsyncDir = this.canonicalExtensionArtifactDirectory(ownership.asyncDir);
-        if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) {
-          this.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
-          return;
-        }
-      }
-      if (canonical?.asyncDir) {
-        const canonicalAsyncDir = this.canonicalExtensionArtifactDirectory(canonical.asyncDir);
-        if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) {
-          this.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
-          return;
-        }
-      }
-      this.syncWorkflowChildArtifactWatchers(toolCallId, raw);
-      const normalized = normalizeExtensionArtifact(raw, {
-        now: new Date().toISOString(),
-        fallbackStartedAt: previous.startedAt,
-        useArtifactStartedAt: false,
-      });
-      if (!normalized) {
-          this.warnExtensionArtifact("invalid-timestamp", `${runId}\0${toolCallId}`);
-        return;
-      }
-      const { status: artifactState, updatedAt, completedAt, durationMs } = normalized;
-      const facts = this.canonicalExtensionRunFacts();
-      const recoveryClaim = recoveredReplacementClaim(raw);
-      const sourceFact = facts.get(runId);
-      const pausedProcessSettledAt = observedPausedProcessTerminalAt(raw, runId);
-      const processTerminal = pausedProcessSettledAt !== undefined;
-      const rawLastUpdate = raw.lastUpdate;
-      const rawEndedAt = raw.endedAt;
-      const superseded = extensionLifecycleState(raw.state ?? raw.status) === "paused"
-        && recoveryClaim !== undefined
-        && sourceFact?.recoveredReplacementRunId === recoveryClaim.replacementRunId
-        && sourceFact.ambiguous !== true
-        && processTerminal
-        && typeof rawLastUpdate === "number" && Number.isSafeInteger(rawLastUpdate)
-        && rawLastUpdate <= recoveryClaim.recoveredAt
-        && typeof rawEndedAt === "number" && Number.isSafeInteger(rawEndedAt)
-        && rawEndedAt <= recoveryClaim.recoveredAt;
-      const effectiveArtifactState = superseded ? "completed" : artifactState;
-      const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
-      const terminalStates = ["completed", "failed", "stopped", "rejected"];
-      if (ownership.terminal && artifactState === "running" && !superseded) return;
-      // A latched terminal state is final: a re-read of a kept-open run may restate
-      // it (its workflow children still report), never move it to another state.
-      if (terminalStates.includes(previous.lifecycle?.state ?? "") && artifactState !== "running"
-        && normalized.lifecycleState !== previous.lifecycle?.state) return;
-      // A kept-open run restates its latched terminal lifecycle; only its children move.
-      const latchedState = previous.lifecycle?.state !== undefined && terminalStates.includes(previous.lifecycle.state)
-        ? previous.lifecycle.state : undefined;
-      const artifactValue = ownership.terminal
-        ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: latchedState ?? (previous.status === "failed" ? "failed" : "completed") })
-        : superseded
-          ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: "stopped", supersededByRunId: recoveryClaim!.replacementRunId })
-          : raw;
-      const activityKey = previous.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
-      const sequence = (this.extensionActivitySequences.get(activityKey) ?? previous.lifecycle?.sequence ?? 0) + 1;
-      this.extensionActivitySequences.set(activityKey, sequence);
-      const observedAt = new Date().toISOString();
-      const terminalAt = effectiveArtifactState === "running"
-        ? previous.lifecycle?.terminalAt
-        : previous.lifecycle?.terminalAt ?? observedAt;
-      const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
-      const activity = this.childSessionAdmission.attach(projectExtensionRunActivity(artifactValue, {
-        id: previous.id,
-        activityId: activityKey,
-        toolCallId,
-        source: previous.source,
-        title: previous.title,
-        mode: "asynchronous",
-        status: effectiveArtifactState,
-        authoritativeStatus: effectiveArtifactState !== "running" || previous.lifecycle?.state === "completed" || previous.lifecycle?.state === "failed" || previous.lifecycle?.state === "stopped" || previous.lifecycle?.state === "rejected",
-        startedAt: previous.startedAt,
-        updatedAt,
-        ...(effectiveCompletedAt ? { completedAt: effectiveCompletedAt } : {}),
-        ...(durationMs === undefined ? {} : { durationMs }),
-        previous,
-        sequence,
-        observedAt,
-        ...(terminalAt ? { terminalAt } : {}),
-        ...(recentUntil ? { recentUntil } : {}),
-        childIdentityStrategy: "piArtifact",
-      }), artifactValue, "piArtifact");
-      const current = this.extensionActivities.get(toolCallId);
-      if (!current) return;
-      if (admitExtensionRunActivity(current, activity) === current) return;
-      if (current.lifecycle?.sequence !== undefined && activity.lifecycle?.sequence !== undefined
-        && activity.lifecycle.sequence <= current.lifecycle.sequence) return;
-      if (activity.status !== "running") {
-        claimedReceiptOwner = this.claimExtensionReceiptOwnership(activityKey);
-        if (!claimedReceiptOwner) return;
-        claimedReceiptActivityId = activityKey;
-      }
-      // Ownership facts are written before this frame's projection publishes:
-      // settled paused presentation, dashboard activity, and drain accounting
-      // all read them from the same frame.
-      this.bindExtensionRunOwnership(runId, {
-        toolCallId,
-        asyncDir: realAsyncDir,
-        terminal: activity.status !== "running" || Boolean(ownership.terminal),
-        ...(pausedProcessSettledAt ? { pausedProcessQuiescentAt: pausedProcessSettledAt } : {}),
-        detachedChildKeys: detachedWorkflowChildKeys(raw),
-      });
-      this.extensionActivities.delete(toolCallId);
-      this.extensionActivities.set(toolCallId, activity);
-      this.upsertExtensionActivity(activity);
-      const tool = this.toolExecutions.get(toolCallId);
-      if (tool) this.toolExecutions.set(toolCallId, { ...tool, extensionActivity: activity });
-      this.publishExtensionActivity(activity);
-      if (activity.status === "running") {
-        const tracked = this.extensionActivityWatchers.get(toolCallId);
-        if (this.activityNeedsChildSessionBinding(activity.children)
-          && this.artifactPublishesChildSession(artifactValue)) {
-          this.scheduleExtensionBindingRetry(toolCallId, realAsyncDir);
-        } else if (tracked?.asyncDir === realAsyncDir) {
-          tracked.bindingRetries = 0;
-        }
-      }
-      if (activity.status !== "running") {
-        claimedReceiptOwner = undefined;
-        claimedReceiptActivityId = undefined;
-        void this.appendExtensionActivityReceipt(activity).catch((error) => this.emit("session.extensionError", safeJson(error)));
-      }
-      if (!this.extensionActivityWatchRequired(activity)) this.stopExtensionActivityWatcher(toolCallId);
-    } catch (error) {
-      if (claimedReceiptActivityId) this.releaseExtensionReceiptOwnership(claimedReceiptActivityId, claimedReceiptOwner);
-      // The next filesystem event or normal snapshot retries; warning is bounded.
-      this.warnExtensionArtifact(
-        extensionArtifactReadFailureReason(error),
-        `${previous.runId ?? "run"}\0${toolCallId}`,
-      );
-    }
-  }
-
-  private artifactPublishesChildSession(value: unknown): boolean {
-    const root = value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : undefined;
-    const details = root?.details && typeof root.details === "object" && !Array.isArray(root.details)
-      ? root.details as Record<string, unknown>
-      : root;
-    if (!details) return false;
-    const visit = (candidate: unknown, depth: number): boolean => {
-      if (depth > 4 || !candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
-      const record = candidate as Record<string, unknown>;
-      const progress = record.progress && typeof record.progress === "object" && !Array.isArray(record.progress)
-        ? record.progress as Record<string, unknown>
-        : undefined;
-      if (typeof record.sessionFile === "string" || typeof progress?.sessionFile === "string") return true;
-      for (const key of ["results", "steps", "children", "progress"] as const) {
-        const nested = record[key];
-        if (Array.isArray(nested) && nested.slice(0, 64).some((child) => visit(child, depth + 1))) return true;
-      }
-      return false;
-    };
-    return visit(details, 0);
-  }
-
-  private activityNeedsChildSessionBinding(children: readonly ExtensionRunChild[]): boolean {
-    return children.some((child) => child.childSessionRef === undefined
-      || child.children !== undefined && this.activityNeedsChildSessionBinding(child.children));
-  }
-
-  private scheduleExtensionBindingRetry(toolCallId: string, asyncDir: string): void {
-    const tracked = this.extensionActivityWatchers.get(toolCallId);
-    if (!tracked || tracked.asyncDir !== asyncDir || tracked.timer || tracked.bindingRetries >= 4) return;
-    tracked.bindingRetries += 1;
-    tracked.timer = setTimeout(() => {
-      tracked.timer = undefined;
-      void this.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
-    }, tracked.bindingRetries * 150);
-    tracked.timer.unref();
-  }
-
-  private startExtensionActivityWatcher(toolCallId: string, asyncDir: string): void {
-    if (!this.extensionArtifactPathAllowed(asyncDir)) return;
-    let realAsyncDir: string;
-    try {
-      realAsyncDir = realpathSync(asyncDir);
-    } catch {
-      return;
-    }
-    if (!this.extensionArtifactPathAllowed(realAsyncDir)) return;
-    const existing = this.extensionActivityWatchers.get(toolCallId);
-    if (existing?.asyncDir === realAsyncDir) {
-      void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
-      return;
-    }
-    this.stopExtensionActivityWatcher(toolCallId);
-    try {
-      const onChange = (_eventType: string, filename: string | Buffer | null) => {
-        if (filename !== null && filename.toString() !== "status.json") return;
-        const tracked = this.extensionActivityWatchers.get(toolCallId);
-        if (!tracked) return;
-        if (tracked.timer) clearTimeout(tracked.timer);
-        tracked.readRetries = 0;
-        tracked.bindingRetries = 0;
-        tracked.timer = setTimeout(() => {
-          tracked.timer = undefined;
-          void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
-        }, 50);
-        tracked.timer.unref();
-      };
-      const watcher = watch(realAsyncDir, onChange);
-      watcher.on("error", () => this.stopExtensionActivityWatcher(toolCallId));
-      this.extensionActivityWatchers.set(toolCallId, {
-        watcher,
-        children: new Map(),
-        onChange,
-        timer: undefined,
-        asyncDir: realAsyncDir,
-        readRetries: 0,
-        bindingRetries: 0,
-      });
-      void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
-    } catch {
-      // A missing or inaccessible extension artifact remains a generic live row.
-    }
-  }
-
-  private claimExtensionReceiptOwnership(activityId: string): GatewayWorkHandle | undefined {
-    const existing = this.extensionReceiptOwners.get(activityId);
-    if (existing) return existing;
-    try {
-      const owner = this.dependencies.workRegistry.beginDerived({
-        kind: "terminal-receipt-persistence",
-        sessionId: this.id,
-        hostEpoch: this.ui.hostEpoch,
-      });
-      this.extensionReceiptOwners.set(activityId, owner);
-      return owner;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private releaseExtensionReceiptOwnership(activityId: string, owner?: GatewayWorkHandle): void {
-    if (!owner || this.extensionReceiptOwners.get(activityId) !== owner) return;
-    this.extensionReceiptOwners.delete(activityId);
-    owner.settle();
-  }
-
-  private appendExtensionActivityReceipt(activity: ExtensionRunActivity): Promise<void> {
-    if (!activity.lifecycle || !["completed", "failed", "stopped", "rejected"].includes(activity.lifecycle.state)) return Promise.resolve();
-    const receipt = makeExtensionActivityReceipt(activity, this.id);
-    const activityId = receipt?.activityId ?? activity.activityId ?? activity.toolCallId;
-    const owner = this.extensionReceiptOwners.get(activityId);
-    if (!receipt) {
-      this.releaseExtensionReceiptOwnership(activityId, owner);
-      return Promise.resolve();
-    }
-    const existingWrite = this.extensionReceiptWrites.get(receipt.activityId);
-    if (existingWrite) return existingWrite;
-    if (!owner) return Promise.reject(new GatewayError("busy", "Extension receipt ownership is unavailable", true));
-    const write = this.runPersistence.trackOwnershipWrite(() => this.lane.run(() => this.runPersistence.retryDurableWrite(
-      `extension-receipt:${receipt.activityId}`,
-      async () => {
-          this.persistVerifiedCustomEntry({
-            describe: "extension activity receipt",
-            existing: () => extensionActivityReceipts(this.runtime.session.sessionManager.getEntries(), this.id)
-              .some((record) => record.receipt.activityId === receipt.activityId) ? "matching" : "absent",
-            append: () => {
-              this.runtime.session.sessionManager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
-              this.revision += 1;
-              this.scheduleSnapshot();
-            },
-          });
-      },
-    )), owner);
-    this.extensionReceiptWrites.set(receipt.activityId, write);
-    void write.then(() => {
-      if (this.extensionReceiptWrites.get(receipt.activityId) === write) this.extensionReceiptWrites.delete(receipt.activityId);
-      this.releaseExtensionReceiptOwnership(receipt.activityId, owner);
-    }, () => {
-      // Retain and identify the exact failed owner; drain recovery is process replacement.
-      owner.markSuspect();
-    });
-    return write;
-  }
-
-  private updateExtensionActivity(
-    toolCallId: string,
-    toolName: string,
-    extensionOrigin: ExtensionToolOrigin | undefined,
-    status: "running" | "completed" | "failed",
-    startedAt: string,
-    updatedAt: string,
-    value: unknown,
-    completedAt?: string,
-    durationMs?: number,
-    persistReceipt = true,
-  ): ExtensionRunActivity | undefined {
-    // The native supervisor is ordinary control-tool activity, not a new
-    // delegated execution, even when its receipt includes the target runId.
-    if (!extensionOrigin || toolName === DELEGATED_SUPERVISOR_TOOL_NAME) return undefined;
-    const current = this.extensionActivities.get(toolCallId);
-    const foregroundSubagentOwner = this.isForegroundSubagentTool(toolName, extensionOrigin);
-    const admittedForegroundSubagent = foregroundSubagentOwner && hasForegroundSubagentRunActivity(value);
-    const childIdentityStrategy: ExtensionRunChildIdentityStrategy = foregroundSubagentOwner
-      && current?.mode !== "asynchronous"
-      && usesForegroundSubagentChildIdentity(value, { allowTerminalResults: status !== "running" })
-      ? "piForeground" : "declared";
-    if (!current && !hasStructuredExtensionRunActivity(value) && !admittedForegroundSubagent) return undefined;
-    const activityKey = current?.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
-    const terminalStates = ["completed", "failed", "stopped", "rejected"];
-    if (current?.lifecycle && terminalStates.includes(current.lifecycle.state)) {
-      // Terminal admission is a Gateway fact: neither wall-clock order nor a
-      // producer's later contradictory terminal may replace it.
-      if (status === "running") return current;
-      const requestedTerminal = status === "failed" ? "failed" : "completed";
-      if (requestedTerminal !== current.lifecycle.state) return current;
-      if (persistReceipt) void this.appendExtensionActivityReceipt(current).catch(() => {});
-      return current;
-    }
-    const sequence = (this.extensionActivitySequences.get(activityKey) ?? current?.lifecycle?.sequence ?? 0) + 1;
-    this.extensionActivitySequences.set(activityKey, sequence);
-    // Returning an async launch receipt completes only the outer tool call. The
-    // delegated run remains current until its lifecycle artifact reaches a
-    // terminal state; treating this acknowledgement as terminal made pills
-    // flash directly into Recently Finished with a near-zero duration.
-    const requestedAsyncDir = extensionRunAsyncDir(value);
-    const asyncDir = requestedAsyncDir ? this.canonicalExtensionArtifactDirectory(requestedAsyncDir) : undefined;
-    const invalidDetachedDirectory = requestedAsyncDir !== undefined && asyncDir === undefined;
-    const derivedStatus = extensionActivityStatusFromTool(value, status);
-    // An async acknowledgement without an admitted observable directory cannot
-    // author a detached live row. Settle the launcher projection instead of
-    // creating unwatched runtime/drain ownership.
-    const terminal = invalidDetachedDirectory ? true : derivedStatus.terminal;
-    const reportedTerminal = derivedStatus.reportedTerminal;
-    const effectiveStatus = invalidDetachedDirectory ? (status === "failed" ? "failed" : "completed") : derivedStatus.status;
-    const observedAt = new Date().toISOString();
-    const terminalAt = terminal ? current?.lifecycle?.terminalAt ?? observedAt : current?.lifecycle?.terminalAt;
-    const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
-    const activity = this.childSessionAdmission.attach(projectExtensionRunActivity(value, {
-      id: toolCallId,
-      activityId: activityKey,
-      toolCallId,
-      source: extensionOrigin,
-      title: this.toolLabel(toolName) ?? toolName,
-      ...(asyncDir ? { mode: "asynchronous" } : {}),
-      status: current?.lifecycle && terminalStates.includes(current.lifecycle.state) ? current.status : effectiveStatus,
-      authoritativeStatus: invalidDetachedDirectory || reportedTerminal || Boolean(current?.lifecycle && terminalStates.includes(current.lifecycle.state)),
-      startedAt,
-      updatedAt,
-      ...(terminal && completedAt ? { completedAt } : {}),
-      ...(!terminal || durationMs === undefined ? {} : { durationMs }),
-      ...(current ? { previous: current } : {}),
-      sequence,
-      observedAt,
-      ...(terminalAt ? { terminalAt } : {}),
-      ...(recentUntil ? { recentUntil } : {}),
-      childIdentityStrategy,
-    }), value, childIdentityStrategy);
-    if (admitExtensionRunActivity(current, activity) === current) return current;
-    const terminalReceiptOwner = terminal && persistReceipt ? this.claimExtensionReceiptOwnership(activityKey) : undefined;
-    if (terminal && persistReceipt && !terminalReceiptOwner) return current;
-    if (activity.runId && !this.bindExtensionRunOwnership(activity.runId, {
-      toolCallId,
-      ...(asyncDir === undefined ? {} : { asyncDir }),
-      terminal: activity.status !== "running",
-    })) {
-      this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
-      return current;
-    }
-    // A synchronous result can be the first lifecycle payload carrying runId.
-    // Re-key any artifact-created synthetic row to the real Pi tool call.
-    const ownership = activity.runId ? this.extensionRunOwnership.get(activity.runId) : undefined;
-    const syntheticToolCallId = ownership?.toolCallId?.startsWith("subagent:")
-      ? ownership.toolCallId
-      : undefined;
-    const synthetic = syntheticToolCallId && syntheticToolCallId !== toolCallId
-      ? this.extensionActivities.get(syntheticToolCallId)
-      : undefined;
-    if (synthetic) {
-      this.stopExtensionActivityWatcher(syntheticToolCallId!);
-      this.extensionActivities.delete(syntheticToolCallId!);
-      const merged = this.childSessionAdmission.attach(projectExtensionRunActivity(value, {
-        id: toolCallId,
-        activityId: activityKey,
-        toolCallId,
-        source: extensionOrigin,
-        title: this.toolLabel(toolName) ?? toolName,
-        ...(asyncDir ? { mode: "asynchronous" } : {}),
-        status,
-        startedAt,
-        updatedAt,
-        ...(completedAt ? { completedAt } : {}),
-        ...(durationMs === undefined ? {} : { durationMs }),
-        sequence,
-        observedAt,
-        ...(terminalAt ? { terminalAt } : {}),
-        ...(recentUntil ? { recentUntil } : {}),
-        childIdentityStrategy,
-        previous: current
-          ? {
-              ...synthetic,
-              ...current,
-              children: current.children.length > 0 ? current.children : synthetic.children,
-            }
-          : synthetic,
-      }), value, childIdentityStrategy);
-      this.extensionActivities.delete(toolCallId);
-      this.extensionActivities.set(toolCallId, merged);
-      this.upsertExtensionActivity(merged);
-    } else {
-      this.extensionActivities.delete(toolCallId);
-      this.extensionActivities.set(toolCallId, activity);
-      this.upsertExtensionActivity(activity);
-    }
-    const retainedActivity = this.extensionActivities.get(toolCallId)!;
-    this.trimExtensionActivities();
-    if (asyncDir && retainedActivity.status === "running") this.startExtensionActivityWatcher(toolCallId, asyncDir);
-    if (retainedActivity.status !== "running") {
-      this.stopExtensionActivityWatcher(toolCallId);
-      if (persistReceipt) void this.appendExtensionActivityReceipt(retainedActivity).catch((error) => this.emit("session.extensionError", safeJson(error)));
-    }
-    return retainedActivity;
-  }
-
   private measureToolDuration(
     toolCallId: string,
     startedAt: string,
@@ -5033,28 +3286,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     this.toolProgressTimers.set(state.toolCallId, timer);
   }
 
-  /** Lifecycle updates are compact presentation deltas, not transcript
-   * changes. Avoid rebuilding and sending the canonical transcript for every
-   * status artifact heartbeat. */
-  private publishExtensionActivity(activity: ExtensionRunActivity): void {
-    // The projection's `asOf` is refresh time, not execution recency. Artifact
-    // reconciliation can publish an old terminal run during a cold open; use
-    // the activity's own timestamp so observation alone cannot refresh history.
-    this.noteDashboardActivity(activity.updatedAt);
-    if (this.hasDetachedDashboardWork() && !this.activityHeartbeat) this.startActivityHeartbeat();
-    this.emit("session.extensionActivity", safeJson({
-      activity: activityProjection.extensionActivityWire(this.activitySource(), activity),
-      liveActivityRevision: this.liveActivityRevision,
-      extensionActivityAsOf: this.extensionActivityAsOf,
-    }));
-    this.publishProcessesForToolCall(activity.toolCallId);
-    this.workerSettlement.publish("detached");
-    // Detached lifecycle updates do not rebuild the full transcript snapshot,
-    // but they are authoritative live catalog activity and must reorder rows.
-    this.publishSummary();
-    if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
-  }
-
   public clearToolProgressTimers(): void {
     for (const timer of this.toolProgressTimers.values()) clearTimeout(timer);
     this.toolProgressTimers.clear();
@@ -5086,7 +3317,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     this.activityHeartbeat = undefined;
   }
 
-  private toolLabel(toolName: string): string | undefined {
+  public toolLabel(toolName: string): string | undefined {
     const label = this.runtime?.session.extensionRunner.getToolDefinition(toolName)?.label.trim();
     if (!label || Buffer.byteLength(label) > 256
       || [...label].some((character) => {
@@ -5128,7 +3359,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     };
   }
 
-  private extensionToolOrigin(toolName: string): ExtensionToolOrigin | undefined {
+  public extensionToolOrigin(toolName: string): ExtensionToolOrigin | undefined {
     const session = this.runtime?.session;
     if (!session) return undefined;
     const tool = session.getAllTools().find(candidate => candidate.name === toolName);
@@ -5272,25 +3503,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }
   }
 
-  /** Recency is the sole expiry owner. At the wall-clock boundary remove the
-   * disposable ambient rows, advance this slot's revision, and publish one
-   * authoritative snapshot rather than waiting for a client request. */
-  private onExtensionActivityExpiry(frame: ActivityExpiryFrame): void {
-    if (this.disposed) return;
-    let removed = false;
-    for (const [toolCallId, activity] of this.extensionActivities) {
-      const key = activity.activityId ?? activity.id;
-      if (!frame.expiredActivityIds.includes(key)) continue;
-      this.extensionActivities.delete(toolCallId);
-      removed = true;
-    }
-    if (!removed) return;
-    this.liveActivityRevision += 1;
-    this.extensionActivityAsOf = frame.asOf;
-    this.revision += 1;
-    this.publishSnapshot();
-  }
-
   private onProcessActivityExpiry(frame: ProcessActivityExpiryFrame): void {
     if (this.disposed) return;
     let removed = false;
@@ -5375,11 +3587,11 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       get retry() { return slot.retry; },
       get toolExecutions() { return slot.toolExecutions; },
       toolProgressWire: state => activityProjection.toolProgressWire(slot.activitySource(), state),
-      get extensionActivities() { return slot.extensionActivities; },
+      get extensionActivities() { return slot.ownedTurns.extensionActivities; },
       extensionActivityVisibility: activity => activityProjection.extensionActivityVisibility(slot.activitySource(), activity),
       extensionActivityWire: activity => activityProjection.extensionActivityWire(slot.activitySource(), activity),
-      get liveActivityRevision() { return slot.liveActivityRevision; },
-      get extensionActivityAsOf() { return slot.extensionActivityAsOf; },
+      get liveActivityRevision() { return slot.ownedTurns.liveActivityRevision; },
+      get extensionActivityAsOf() { return slot.ownedTurns.extensionActivityAsOf; },
     }, sequence);
   }
 
@@ -5422,24 +3634,13 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       get forkBoundary() { return slot.forkBoundary; },
       internalWakeSemantic: (...args) => slot.internalWakeSemantic(...args),
       get id() { return slot.id; },
-      get extensionActivities() { return slot.extensionActivities; },
+      get extensionActivities() { return slot.ownedTurns.extensionActivities; },
     };
   }
 
   private processForViewer(processId: string): SessionProcessActivity | undefined {
     return this.processActivities.get(processId)
       ?? processHistoryDetail(this.runtime.session.sessionManager, processId);
-  }
-
-  async reconcileProcessChildSessionBinding(processId: string): Promise<void> {
-    if (this.processChildSessionBinding(processId)) return;
-    const process = this.processActivities.get(processId);
-    if (!process || process.kind !== "subagent" || !process.runId || !process.toolCallId) return;
-    const ownership = this.extensionRunOwnership.get(process.runId);
-    if (!ownership?.asyncDir || ownership.toolCallId !== process.toolCallId) return;
-    const asyncDir = this.canonicalExtensionArtifactDirectory(ownership.asyncDir);
-    if (!asyncDir) return;
-    await this.refreshExtensionActivityFromArtifact(ownership.toolCallId, asyncDir);
   }
 
   processChildSessionBinding(processId: string): { ref: string; producerId: string; sessionOwnerId?: string; runId?: string } | undefined {
@@ -5459,104 +3660,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       path,
       ...(binding.runId ? { runId: binding.runId } : {}),
     } : undefined;
-  }
-
-  processSubagentAbortAuthority(
-    processId: string,
-    expectedRunId: string,
-  ): { expectedOperationId?: string } | undefined {
-    this.assertNoTrustReload();
-    const tool = this.trustedSubagentController();
-    const capturedOperationId = this.processOperationIDs.get(processId);
-    const currentOperationId = capturedOperationId === this.operation?.id
-      ? capturedOperationId
-      : undefined;
-    const route = subagentAbortRoute(
-      this.processActivities.get(processId),
-      this.processChildSessionBinding(processId),
-      expectedRunId,
-      currentOperationId,
-      tool !== undefined,
-    );
-    return route?.kind === "foreground"
-      ? { expectedOperationId: route.expectedOperationId }
-      : route ? {} : undefined;
-  }
-
-  async abortSubagentProcess(
-    processId: string,
-    expectedRunId: string,
-    expectedOperationId?: string,
-  ): Promise<void> {
-    const tool = this.trustedSubagentController();
-    const capturedOperationId = this.processOperationIDs.get(processId);
-    const currentOperationId = capturedOperationId === this.operation?.id
-      ? capturedOperationId
-      : undefined;
-    const route = subagentAbortRoute(
-      this.processActivities.get(processId),
-      this.processChildSessionBinding(processId),
-      expectedRunId,
-      currentOperationId,
-      tool !== undefined,
-    );
-    if (!route) {
-      throw new GatewayError("conflict", "The subagent execution changed before it could be stopped", true);
-    }
-
-    // A synchronous subagent is the parent session's current foreground tool.
-    // Fence the same settled abort path used by the ordinary composer control
-    // to the operation captured when this exact transcript lease opened.
-    if (route.kind === "foreground") {
-      if (!expectedOperationId || route.expectedOperationId !== expectedOperationId) {
-        throw new GatewayError("conflict", "The foreground operation changed before it could be stopped", true);
-      }
-      await this.abort("agent", expectedOperationId);
-      return;
-    }
-
-    if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
-    await controlSubagentRun(this.runtime.session, tool, { action: "stop", id: route.runId, childId: route.childId });
-  }
-
-  /** Whether this session owns a run: one its canonical history launched (a launch or a resume
-   * result), or a child run a workflow of this session names in its own provider status. Task
-   * controls use it to refuse a control of any run the task did not start, including a foreign
-   * workflow's child. Only this owner decides, so a control and a reply cannot disagree. */
-  async ownsSubagentRun(runId: string): Promise<boolean> {
-    const facts = this.canonicalExtensionRunFacts();
-    if (facts.has(runId)) return true;
-    for (const fact of facts.values()) {
-      // The status reader opens only a canonical directory: a launch result's path may name a symlinked root.
-      const directory = fact.asyncDir === undefined ? undefined : this.canonicalExtensionArtifactDirectory(fact.asyncDir);
-      if (directory === undefined) continue;
-      const status = await this.readExtensionStatusArtifact(directory, false).catch(() => undefined);
-      if (status?.mode === "workflow" && Array.isArray(status.steps)
-        && status.steps.some(step => (step as { runId?: unknown } | null)?.runId === runId)) return true;
-    }
-    return false;
-  }
-
-  /** Whether a supervisor request came from a run this session owns. The request is canonical
-   * evidence: its `subagent_supervisor_request` message names the child's run. */
-  async ownsSupervisorRequest(requestId: string): Promise<boolean> {
-    const request = this.sessionManager.getBranch().findLast(entry => entry.type === "custom_message"
-      && entry.customType === "subagent_supervisor_request" && (entry.details as { requestId?: unknown } | undefined)?.requestId === requestId);
-    const runId = request?.type === "custom_message" ? (request.details as { runId?: unknown } | undefined)?.runId : undefined;
-    return typeof runId === "string" && await this.ownsSubagentRun(runId);
-  }
-
-  /** The run ids settlement stops through the provider. A live run is stopped as itself,
-   * and a workflow's stop reaches its children. A run that completed while runner-backed
-   * children stay live cannot be stopped by its own state, so each live child is named by
-   * its run id from the run's status. */
-  asyncStopTargets(): string[] {
-    // Selection has no awaits: a refresh cannot reorder the map mid-selection,
-    // and Stop cannot disagree with status by re-reading a different artifact.
-    return this.liveExtensionActivities().flatMap(activity => {
-      const binding = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId);
-      return binding?.asyncDir === undefined ? [] : this.liveActivitySubagentRuns(activity).map(run => run.runId);
-    });
   }
 
   publishSnapshot(): void {
@@ -5595,7 +3698,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     this.publishSummary();
   }
 
-  private publishSummary(): void {
+  public publishSummary(): void {
     const summary = this.summary();
     if (!this.lastPublishedSummary
       || summary.sessionId !== this.lastPublishedSummary.sessionId
@@ -6477,7 +4580,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     this.dependencies.modules.observers("sessionRetired").forEach(retire => { try { retire(this.id); } catch { /* Cleanup is best effort. */ } });
     this.unregisterExtensionExpiry();
     this.unregisterProcessExpiry();
-    for (const activity of this.extensionActivities.values()) {
+    for (const activity of this.ownedTurns.extensionActivities.values()) {
       this.dependencies.extensionActivityRecency.remove(activity.activityId ?? activity.id);
     }
     for (const processId of this.processActivities.keys()) {
@@ -6505,9 +4608,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     this.pendingPromptMessage = undefined;
     this.stopActivityHeartbeat();
     this.clearToolProgressTimers();
-    this.clearExtensionActivityWatchers();
-    this.extensionArtifactMissingSince.clear();
-    this.extensionRunOwnership.clear();
+    this.ownedTurns.retireArtifactWatches();
     this.unsubscribe?.();
     this.ui.cancelAll();
     // An admitted automation must never lose its terminal waiter when runtime
@@ -6582,7 +4683,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     void disposal.catch(() => {});
   }
 
-  private assertNoTrustReload(): void {
+  public assertNoTrustReload(): void {
     if (this.trustReloadPending) {
       throw new GatewayError("busy", "Project trust is being reconfigured", true);
     }

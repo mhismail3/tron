@@ -1,3 +1,4 @@
+import { refreshExtensionActivityFromArtifact } from "./subagent-artifact-reconcile.js";
 import { appendFile, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -60,11 +61,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         sessionFile: childFile,
       }],
     }));
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      startExtensionActivityWatcher: (toolCallId: string, asyncDir: string) => void;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "delayed-workflow-activity", runId: rootRunId, toolCallId,
       source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
@@ -113,11 +110,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const childFile = join(childDirectory, "session.jsonl");
     await rename(generatedChildFile, childFile);
     const startedAt = new Date(Date.now() - 1_000).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId, runId, toolCallId,
       source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
@@ -133,7 +126,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       mode: "workflow",
       steps: [{ agent: "worker", status: "running", sessionFile: childFile }],
     }));
-    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
+    await refreshExtensionActivityFromArtifact(internal, toolCallId, asyncDir);
     const activeSnapshot = slot.snapshot();
     const activeProcess = activeSnapshot.processActivities?.find((activity) => activity.kind === "subagent");
     expect(activeSnapshot.extensionActivities?.[0]?.lifecycle).toMatchObject({
@@ -159,17 +152,13 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const controllerExecute = vi.fn(async (..._arguments: unknown[]) => ({
       content: [{ type: "text", text: "stopped" }], details: {},
     }));
-    const abortInternals = slot as unknown as {
-      extensionToolOrigin: (toolName: string) => ExtensionToolOrigin | undefined;
-      subagentExtensionOrigin: () => ExtensionToolOrigin;
-      runtime: { session: { extensionRunner: { getToolDefinition: (toolName: string) => unknown } } };
-    };
-    const toolOrigin = vi.spyOn(abortInternals, "extensionToolOrigin").mockReturnValue(controllerOrigin);
+    const abortInternals = slot.ownedTurns;
+    const toolOrigin = vi.spyOn(slot, "extensionToolOrigin").mockReturnValue(controllerOrigin);
     const installedOrigin = vi.spyOn(abortInternals, "subagentExtensionOrigin").mockReturnValue(controllerOrigin);
-    const toolDefinition = vi.spyOn(abortInternals.runtime.session.extensionRunner, "getToolDefinition")
+    const toolDefinition = vi.spyOn(slot.runtime.session.extensionRunner, "getToolDefinition")
       .mockReturnValue({ execute: controllerExecute });
-    expect(slot.processSubagentAbortAuthority(activeProcess!.processId, runId)).toEqual({});
-    await slot.abortSubagentProcess(activeProcess!.processId, runId);
+    expect(slot.ownedTurns.processSubagentAbortAuthority(activeProcess!.processId, runId)).toEqual({});
+    await slot.ownedTurns.abortSubagentProcess(activeProcess!.processId, runId);
     expect(controllerExecute.mock.calls[0]?.[1]).toEqual({
       action: "stop", id: runId, childId: childProducerId,
     });
@@ -188,7 +177,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       steps: [{ agent: "worker", status: "completed", sessionFile: childFile }],
     }));
 
-    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
+    await refreshExtensionActivityFromArtifact(internal, toolCallId, asyncDir);
     const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
     expect(process).toMatchObject({
       title: "worker",
@@ -278,11 +267,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await rename(childManager.getSessionFile()!, childFile);
     const started = Date.now() - 1_000;
     const startedAt = new Date(started).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "async-single-activity", runId: asyncRunId, toolCallId,
       source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
@@ -309,7 +294,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       sessionFile: childFile,
       runFanoutBudget: { version: 1, rootRunId, directory: "/private/opaque", limit: 64 },
     }));
-    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
+    await refreshExtensionActivityFromArtifact(internal, toolCallId, asyncDir);
     const unbound = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
     expect(unbound).toMatchObject({ source: "delegatedAgent", visibility: "active" });
     expect(unbound).not.toHaveProperty("childSessionRef");
@@ -332,7 +317,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       mode: "single",
       steps: [{ agent: "worker", status: "running", sessionFile: childFile }],
     }));
-    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
+    await refreshExtensionActivityFromArtifact(internal, toolCallId, asyncDir);
 
     const bound = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
     expect(bound).toMatchObject({
@@ -403,11 +388,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const forkFile = fork.getSessionFile()!;
     const artifactChildId = "artifact-fork-child";
     const startedAt = new Date(Date.now() - 1_000).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set("fork-tool", {
       id: "fork-tool", activityId: "fork-activity", runId: "fork-run", toolCallId: "fork-tool",
       source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
@@ -421,7 +402,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       steps: [{ runId: artifactChildId, agent: "filename-must-not-bind", status: "running", sessionFile: forkFile }],
     }));
 
-    await internal.refreshExtensionActivityFromArtifact("fork-tool", asyncDir);
+    await refreshExtensionActivityFromArtifact(internal, "fork-tool", asyncDir);
     const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
     expect(process).toMatchObject({ childSessionRef: fork.getSessionId() });
     expect(slot.processChildSessionPath(process!.processId)).toEqual({
@@ -451,11 +432,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const forkFile = fork.getSessionFile()!;
     const started = Date.now() - 1_000;
     const startedAt = new Date(started).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set("single-tool", {
       id: "single-tool", activityId: "single-activity", runId: "single-run", toolCallId: "single-tool",
       source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
@@ -470,7 +447,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       steps: [{ agent: "worker", status: "running", sessionFile: forkFile }],
     }));
 
-    await internal.refreshExtensionActivityFromArtifact("single-tool", asyncDir);
+    await refreshExtensionActivityFromArtifact(internal, "single-tool", asyncDir);
     const active = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
     expect(active).toMatchObject({ source: "delegatedAgent", childSessionRef: fork.getSessionId(), visibility: "active" });
     expect(slot.processChildSessionPath(active!.processId)).toEqual({
@@ -482,7 +459,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       mode: "single",
       steps: [{ agent: "worker", status: "complete", sessionFile: forkFile }],
     }));
-    await internal.refreshExtensionActivityFromArtifact("single-tool", asyncDir);
+    await refreshExtensionActivityFromArtifact(internal, "single-tool", asyncDir);
     const recent = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
     expect(recent).toMatchObject({
       processId: active!.processId,

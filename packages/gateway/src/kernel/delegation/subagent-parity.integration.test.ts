@@ -170,7 +170,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
       for (const entry of launches()) if (entry.type === "message" && entry.message.role === "toolResult") {
         const asyncDir = (entry.message.details as { asyncDir?: string })?.asyncDir;
         if (asyncDir) {
-          await slot.discoverExtensionArtifact(asyncDir);
+          await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
           const statuses = report.statuses as Record<string, unknown> ?? {};
           const status = JSON.parse(await readFile(join(asyncDir, "status.json"), "utf8"));
           statuses[`${name}:${entry.message.toolCallId}`] = status;
@@ -343,13 +343,13 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
           candidate[key] = "foreign-owner";
           candidate.steps[0].model = "FORGED_MODEL";
           await replaceStatus(JSON.stringify(candidate));
-          await slot.discoverExtensionArtifact(directory);
+          await slot.ownedTurns.discoverExtensionArtifact(directory);
           expect((slot.snapshot().processActivities ?? []).map(row => row.model), `${key} cannot attach foreign child detail`).not.toContain("FORGED_MODEL");
           refused.push(key);
         }
       } finally { await replaceStatus(original); await rm(replacement, { force: true }); }
       report.refusedChildEdges = refused;
-      await slot.discoverExtensionArtifact(directory);
+      await slot.ownedTurns.discoverExtensionArtifact(directory);
     }
     gates.answer.release();
     await waitFor(() => replies.size === 1 && parentIdle(), "question answer reaches child");

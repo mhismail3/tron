@@ -4248,7 +4248,7 @@ export class RuntimeRegistry implements SessionOperations {
           lastArtifactReconciliation = monotonic;
           await Promise.all(slots
             .filter((slot) => slot.isDrainBusy)
-            .map((slot) => slot.reconcileOwnedExtensionArtifactsForDrain()));
+            .map((slot) => slot.ownedTurns.reconcileOwnedExtensionArtifactsForDrain()));
           continue;
         }
         await new Promise((resolve) => setTimeout(resolve, 100));

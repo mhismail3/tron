@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { GatewayError } from "../../errors.js";
 import type { JsonValue } from "../../protocol/types.js";
-import type { AgentSession, FileEntry, ToolDefinition } from "../pi/coding-agent.js";
+import type { AgentSession, FileEntry } from "../pi/coding-agent.js";
 import type { OwnedTurnOwner } from "./owned-turn-owner.js";
 import type { WorkerSettlement } from "./worker-settlement.js";
 import { controlSubagentRun } from "./subagent-control.js";
@@ -11,13 +11,11 @@ import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME
  * activity projection, canonical append and work-token ownership remain there.
  * Work is opaque: settlement passes the exact existing operation owner to append. */
 export interface SubagentSettlementRuntime<Work> {
-  readonly ownedTurns: Pick<OwnedTurnOwner, "worker">;
+  readonly ownedTurns: Pick<OwnedTurnOwner, "worker" | "asyncStopTargets" | "trustedSubagentController">;
   readonly runtime: { readonly session: AgentSession };
   readonly workerSettlement: WorkerSettlement;
   readonly runWork: { get(operationId: string): Work | undefined };
   canonicalSessionEntries(): FileEntry[];
-  asyncStopTargets(): string[];
-  trustedSubagentController(): ToolDefinition | undefined;
   hasDetachedDashboardWork(): boolean;
   persistCanonicalCustomEntry(customType: string, data: JsonValue, identity: string, owner?: Work): Promise<void>;
 }
@@ -34,9 +32,9 @@ export interface SubagentSettlementRuntime<Work> {
 export async function settleTaskSubagents<Work>(worker: SubagentSettlementRuntime<Work>, operationId: string, deadline: AbortSignal): Promise<{ stoppedAtEnd: number | null; noticesUndelivered: number }> {
   if (worker.ownedTurns.worker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
   const launched = homeTaskSubagentLaunches(worker.canonicalSessionEntries());
-  const targets = worker.asyncStopTargets();
+  const targets = worker.ownedTurns.asyncStopTargets();
   if (targets.length === 0 && launched.every(launch => launch.asyncDir === undefined)) return { stoppedAtEnd: 0, noticesUndelivered: 0 };
-  const tool = worker.trustedSubagentController();
+  const tool = worker.ownedTurns.trustedSubagentController();
   const stops = await Promise.allSettled(targets.map(async runId => {
     if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
     await controlSubagentRun(worker.runtime.session, tool, { action: "stop", id: runId });

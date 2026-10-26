@@ -95,21 +95,11 @@ export default function(pi) {
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
-    const internal = slot as unknown as {
-      processSubagentAbortAuthority: (processId: string, runId: string) => { expectedOperationId?: string } | undefined;
-      abortSubagentProcess: (processId: string, runId: string, operationId?: string) => Promise<void>;
-      isForegroundSubagentTool: (toolName: string) => boolean;
-      extensionToolOrigin: (toolName: string) => unknown;
-      trustedSubagentController: () => unknown;
-      processChildSessionBinding: (processId: string) => unknown;
-      processOperationIDs: Map<string, string>;
-      operation?: { id: string };
-      runtime: { session: { sessionManager: { getEntries: () => Array<{ type: string; customType?: string }> } } };
-    };
+    const internal = slot.ownedTurns;
     const isForeground = vi.spyOn(internal, "isForegroundSubagentTool").mockReturnValue(true);
-    const toolOrigin = vi.spyOn(internal, "extensionToolOrigin").mockReturnValue({ source: "local", owner: { id: "extension:fixture-subagent", title: "Fake subagents", source: "local" } });
+    const toolOrigin = vi.spyOn(slot, "extensionToolOrigin").mockReturnValue({ source: "local", owner: { id: "extension:fixture-subagent", title: "Fake subagents", source: "local" } });
     const trustedController = vi.spyOn(internal, "trustedSubagentController").mockReturnValue({ execute: vi.fn() });
-    const childBinding = vi.spyOn(internal, "processChildSessionBinding").mockReturnValue({ ref: "fake-child-session", producerId: "foreground-index:0", runId: "fake-run" });
+    const childBinding = vi.spyOn(slot, "processChildSessionBinding").mockReturnValue({ ref: "fake-child-session", producerId: "foreground-index:0", runId: "fake-run" });
     const prompt = slot.prompt("Run nested Jev and subagent calls");
     await waitFor(() => existsSync(handoffPath), "the handed-off process file");
     const handedTask = await readFile(handoffPath, "utf8");
@@ -124,10 +114,10 @@ export default function(pi) {
 
     const process = slot.snapshot().processActivities?.find((item) => item.kind === "subagent");
     expect(process).toBeDefined();
-    const authority = slot.processSubagentAbortAuthority(process!.processId, process!.runId!);
-    expect(authority?.expectedOperationId).toBe(internal.operation?.id);
-    expect(internal.processOperationIDs.get(process!.processId)).toBe(internal.operation?.id);
-    await slot.abortSubagentProcess(process!.processId, process!.runId!, authority!.expectedOperationId);
+    const authority = slot.ownedTurns.processSubagentAbortAuthority(process!.processId, process!.runId!);
+    expect(authority?.expectedOperationId).toBe(slot.operation?.id);
+    expect(slot.processOperationIDs.get(process!.processId)).toBe(slot.operation?.id);
+    await slot.ownedTurns.abortSubagentProcess(process!.processId, process!.runId!, authority!.expectedOperationId);
     await prompt;
     await waitFor(() => !slot.isBusy, "the slot to go idle");
     isForeground.mockRestore();
@@ -137,7 +127,7 @@ export default function(pi) {
     expect(slot.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
     expect(slot.snapshot().toolExecutions).toEqual([]);
     expect(slot.snapshot().transcript.filter((entry) => entry.kind === "message" && entry.role === "toolResult")).toHaveLength(1);
-    expect(internal.runtime.session.sessionManager.getEntries().filter((entry) =>
+    expect(slot.runtime.session.sessionManager.getEntries().filter((entry) =>
       entry.type === "custom" && entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE)).toEqual([]);
 
     const artifactPath = join(globalThis.process.cwd(), "test-results", "pi-sdk-099-nested-delegation.json");

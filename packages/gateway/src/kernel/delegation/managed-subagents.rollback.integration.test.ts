@@ -211,7 +211,7 @@ async function runLeg(): Promise<void> {
       const child = SessionManager.open(join(root, candidate.completion.childFile));
       expect(child.getSessionId()).toBe(candidate.completion.childId);
       expect(candidate.completion.processId).toBeDefined();
-      await expect(old.abortSubagentProcess(candidate.completion.processId!, candidate.completion.runId)).rejects.toMatchObject({ code: "conflict" });
+      await expect(old.ownedTurns.abortSubagentProcess(candidate.completion.processId!, candidate.completion.runId)).rejects.toMatchObject({ code: "conflict" });
       facts.candidateHistory = { parentId: session.getSessionId(), childId: child.getSessionId(), terminalControlRefused: true,
         activities: old.snapshot().processActivities };
       // Producer-owned status is exercised through the real tool, not inferred

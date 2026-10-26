@@ -1064,7 +1064,7 @@ export class HomeTaskDispatcher {
    * task has a live worker to read; a settled task lists none. */
   async liveSubagentRuns(task: HomeTaskRecord): Promise<HomeTaskSubagentRuns> {
     if (task.lifecycle !== "active" || !task.sessionId) return { total: 0, runs: [] };
-    const runs = (await this.sessions.acquire(task.sessionId)).liveSubagentRuns();
+    const runs = (await this.sessions.acquire(task.sessionId)).ownedTurns.liveSubagentRuns();
     const newestFirst = [...runs].sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt));
     return { total: runs.length, runs: newestFirst.slice(0, HOME_TASK_STATUS_RUN_LIMIT) };
   }

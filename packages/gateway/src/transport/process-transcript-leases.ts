@@ -310,7 +310,7 @@ export class ProcessTranscriptLeaseStore {
         || admission.fileIdentity !== lease.fileIdentity) {
         throw new GatewayError("conflict", "Subagent session ownership changed", true);
       }
-      await (await this.sessions.acquire(lease.parentSessionId)).abortSubagentProcess(
+      await (await this.sessions.acquire(lease.parentSessionId)).ownedTurns.abortSubagentProcess(
         lease.processId,
         lease.runId,
         lease.expectedOperationId,

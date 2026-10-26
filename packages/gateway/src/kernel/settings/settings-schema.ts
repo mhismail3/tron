@@ -228,7 +228,7 @@ export const TERMINAL_IDLE_KEY: KeyDeclaration = {
   // after this period, so it stops blocking Gateway restarts. Busy terminals
   // (open on a device, running a program, holding typed input) never close.
   // TerminalService reads it at every idle pass, so a change applies live;
-  // Mac Terminal's shell host reads the same store (machine/mac-terminal-host.ts).
+  // Mac Terminal's shell host reads the same store (modules/mac-terminal/mac-terminal-host.ts).
   id: "setup.terminalIdleMinutes", sessionOverridable: false, projectSettable: false, group: "setup", type: terminalIdleType(),
   layers: { global: { store: "gateway", path: ["terminal", "idleMinutes"] } }, defaultValue: TERMINAL_IDLE_DEFAULT_MINUTES,
   timing: "live", effect: "next-change", floor: "notify", writers: ANY_ACTOR,

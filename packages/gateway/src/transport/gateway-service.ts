@@ -1668,12 +1668,12 @@ export class GatewayService {
         );
         try {
           const slot = await abortableRead(reservation.signal, () => this.openedSlot(client, { ...params, sessionId }));
-          await slot.reconcileProcessChildSessionBinding(processId);
+          await slot.ownedTurns.reconcileProcessChildSessionBinding(processId);
           reservation.signal.throwIfAborted();
           const binding = slot.processChildSessionBinding(processId);
           if (!binding?.runId) throw new GatewayError("not_found", "Subagent session ownership is unavailable");
           const live = slot.processChildSessionPath(processId);
-          const abortAuthority = slot.processSubagentAbortAuthority(processId, binding.runId);
+          const abortAuthority = slot.ownedTurns.processSubagentAbortAuthority(processId, binding.runId);
           const lease = await reservation.open(
             processId, binding.ref, binding.runId, live?.path, client.sendEvent, abortAuthority,
           );

@@ -22,6 +22,7 @@
     "managed-workflow-children.integration.test.ts",
     "delegation-operations.ts",
     "paused-subagent.integration.test.ts",
+    "process-transcript-stop.integration.test.ts",
     "subagent-catalog.ts",
     "subagent-parity.integration.test.ts",
     "task-checkin.ts",
@@ -35,10 +36,15 @@
     "subagent-settlement.ts",
     "worker-turn-boundary.ts",
     "owned-operation-terminal.ts",
-    "owned-turn-owner.ts"
+    "owned-turn-owner.ts",
+    "owned-turn-runtime.ts",
+    "subagent-activity.ts",
+    "subagent-artifact-reconcile.ts",
+    "subagent-artifact-status.ts"
   ],
   "dependsOn": [
     "gateway/pi",
-    "gateway/host"
+    "gateway/host",
+    "gateway/extension-activity"
   ]
 }

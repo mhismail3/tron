@@ -4,7 +4,7 @@ How delegated subagent work and extension runs are attributed, projected and rea
 Owners: `gateway/delegation` (`delegated-provider.ts`, `child-session-admission.ts`,
 `managed-subagents.ts`, `managed-producer.ts` for message-local provenance and API binding,
 `task-subagents.ts` for canonical task settlement receipts
-and bounded cold artifact proof), `gateway/extension-activity` and `gateway/projection`
+and bounded cold artifact proof; `OwnedTurnOwner` for live run/artifact authority), `gateway/extension-activity` and `gateway/projection`
 (`process-activity.ts`); RuntimeSlot keeps the exact process-to-child bindings.
 
 `worker-contract.ts` owns the actual control identity, finite refusal reasons and
@@ -49,8 +49,8 @@ K2 installs that policy; it does not duplicate its algorithm.
 `subagent-settlement.ts` owns the actual task-end stop/join/notice/receipt algorithm.
 Its structural backend view is the actual native runtime: no copied context or token
 index. Canonical append and work handles remain native; the same operation owner is
-passed to the append after the live notice join. Native exposes its existing atomic
-activity/controller projections and the single K5 waiter owner.
+passed to the append after the live notice join. Settlement reads the actual K5 run
+controller/Stop selection and waiter owner; native supplies SDK, canonical and work I/O.
 
 `OwnedTurnOwner` holds the single live worker report-owner binding as well as the
 session-local owned-terminal observer map and held-task continuation state. Creation
@@ -63,6 +63,17 @@ directly. K5 keeps wake-before-own selection, own-before-task callback ordering,
 branch/live-work hold decisions and exact waiting-task Stop; no native wait mirror exists.
 `owned-operation-terminal.ts` defines the canonical terminal contract and waiting-Stop code.
 Native completion classification, receipt persistence and abort I/O remain K2.
+
+The same owner holds the actual activity/correlation, watcher/read-generation and receipt
+maps. `subagent-artifact-status.ts` owns bounded opened-file/directory/header proofs;
+`subagent-artifact-reconcile.ts` owns live/cold admission and replacement reconciliation;
+`subagent-activity.ts` folds lifecycle, canonical facts/receipts and publications over those
+same maps. No native subagent artifact parser, run-control method, second index or callback adapter
+exists. Native branch/disposal boundaries call this owner's reset/retirement operations;
+late reads keep the original generation, disposed-frame and canonical identity fences.
+The bounded Gateway discovery scheduler offers each frame's actual K5 owner directly.
+Native process rows, exact process-to-child projection bindings, canonical append and
+physical SDK/work/publication resources retain their original identities and lifetimes.
 
 Managed-provider logging consumes the existing K3 `ModuleLog` contract; K5 does
 not depend on the Transport logger implementation. Optional logging and metadata are unchanged.
@@ -147,7 +158,7 @@ carry `remainingMs`); heartbeats publish one `session.extensionActivity` delta, 
 `extension-activity-history.v1`: `session.extensionActivity.list|get` page reserved
 `tron.extension-activity.v1` receipts (exactly once per activity; identity, label, lifecycle,
 counts only; out of transcript, tree and model), 256 KiB and 50 rows per page, cursors bound to
-the branch revision. One registry owns discovery and watchers; slots watch only proven-owned
+the branch revision. The registry owns discovery scheduling; its frames' K5 owners watch only proven-owned
 artifacts. Timelines must satisfy `startedAt <= endedAt <= lastUpdate`; rejections log
 rate-limited hashed reasons (`invalid-timestamp`, `missing-terminal-time`,
 `ownership-mismatch`, `malformed-artifact`, `artifact-replacement-in-progress`). Drain refreshes
