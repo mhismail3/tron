@@ -34,6 +34,7 @@
   ],
   "dependsOn": [
     "gateway/pi",
-    "gateway/settings"
+    "gateway/settings",
+    "gateway/automations-contract"
   ]
 }

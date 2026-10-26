@@ -1,0 +1,11 @@
+{
+  "layer": "L1",
+  "owns": [
+    "identity.ts",
+    "automations-contract.module.json",
+    "README.md"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/automations/automations.owned-run.lock.integration.test.ts src/automations/automation-scheduler.integration.test.ts src/automations/automations.store.lock.integration.test.ts"
+  ]
+}

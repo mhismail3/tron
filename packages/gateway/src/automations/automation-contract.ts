@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { GatewayError } from "../errors.js";
+import { isAutomationId, runIdFromAutomationOperationId } from "../modules/automations/identity.js";
 import { admitPromptText, admitResourceInvocation } from "../sessions/resource-invocation.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type {
@@ -24,8 +25,6 @@ const MAXIMUM_AUTOMATION_DEADLINE_SECONDS = 24 * 60 * 60;
 const DEFAULT_AUTOMATION_DEADLINE_SECONDS = 60 * 60;
 export const AUTOMATION_FAILURE_CIRCUIT_LIMIT = 3;
 
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const automationOperation = /^automation:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/iu;
 const occurrenceId = /^[A-Za-z0-9_-]{43}$/u;
 const sessionTargetId = /^[A-Za-z0-9_:-]{1,200}$/u;
 const controlCharacter = /[\u0000-\u001f\u007f]/u;
@@ -47,19 +46,6 @@ function bounded(value: unknown, maximumBytes: number, allowEmpty = false): valu
 
 function timestamp(value: unknown): value is string {
   return typeof value === "string" && isGatewayTimestamp(value);
-}
-
-export function isAutomationId(value: unknown): value is string {
-  return typeof value === "string" && uuid.test(value);
-}
-
-export function automationOperationId(runId: string): string {
-  if (!isAutomationId(runId)) throw new Error("Automation run identity is invalid");
-  return `automation:${runId}`;
-}
-
-export function runIdFromAutomationOperationId(value: string): string | undefined {
-  return automationOperation.exec(value)?.[1];
 }
 
 function validateAutomationTimezone(value: string): boolean {
@@ -166,7 +152,7 @@ function admitsAutomationRun(value: unknown): value is AutomationRun {
   const keys = Object.keys(input);
   if (keys.length < required.length || !keys.every((key) => required.includes(key) || optional.includes(key))
     || !required.every((key) => keys.includes(key))) return false;
-  if (!bounded(input.runId, 64) || !uuid.test(input.runId)
+  if (!bounded(input.runId, 64) || !isAutomationId(input.runId)
     || !bounded(input.occurrenceId, 64) || !occurrenceId.test(input.occurrenceId)
     || (input.manual !== undefined && input.manual !== true)
     || !Number.isSafeInteger(input.automationRevision) || (input.automationRevision as number) < 1
@@ -179,7 +165,7 @@ function admitsAutomationRun(value: unknown): value is AutomationRun {
       input.triggerSnapshot as AutomationTrigger,
     )
     || (input.targetSnapshot as AutomationTarget).kind === "existingSession" && input.executionSessionId !== (input.targetSnapshot as { sessionId: string }).sessionId
-    || (input.targetSnapshot as AutomationTarget).kind === "workspace" && !uuid.test(input.executionSessionId as string)
+    || (input.targetSnapshot as AutomationTarget).kind === "workspace" && !isAutomationId(input.executionSessionId)
     || !["queued", "waiting", "admitting", "running", "cancelling", "succeeded", "failed", "cancelled", "skipped", "outcomeUnknown"].includes(input.state as string)
     || !Number.isSafeInteger(input.preAdmissionAttemptCount) || (input.preAdmissionAttemptCount as number) < 0
     || (input.reason !== undefined && !bounded(input.reason, 256))) return false;
@@ -187,8 +173,8 @@ function admitsAutomationRun(value: unknown): value is AutomationRun {
     if (input[key] !== undefined && !timestamp(input[key])) return false;
   }
   if (input.hostEpoch !== undefined && !bounded(input.hostEpoch, 256)) return false;
-  if (input.claimId !== undefined && (!bounded(input.claimId, 64) || !uuid.test(input.claimId))) return false;
-  if (input.operationId !== undefined && (!bounded(input.operationId, 128) || automationOperation.exec(input.operationId) === null)) return false;
+  if (input.claimId !== undefined && (!bounded(input.claimId, 64) || !isAutomationId(input.claimId))) return false;
+  if (input.operationId !== undefined && (!bounded(input.operationId, 128) || runIdFromAutomationOperationId(input.operationId) === undefined)) return false;
   if (input.invocationId !== undefined && !bounded(input.invocationId, 256)) return false;
   if (input.assistantCompletionId !== undefined && !bounded(input.assistantCompletionId, 256)) return false;
   if (input.notificationAdmissionStatus !== undefined
@@ -218,7 +204,7 @@ export function admitsAutomationRecord(value: unknown): value is AutomationRecor
   if (keys.length < required.length || !keys.every((key) => required.includes(key) || optional.includes(key))
     || !required.every((key) => keys.includes(key))) return false;
   return input.schemaVersion === 2
-    && bounded(input.id, 64) && uuid.test(input.id)
+    && bounded(input.id, 64) && isAutomationId(input.id)
     && Number.isSafeInteger(input.revision) && (input.revision as number) >= 1
     && Number.isSafeInteger(input.stateRevision) && (input.stateRevision as number) >= 1
     && bounded(input.name, 256)

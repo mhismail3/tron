@@ -8,7 +8,6 @@
     "two-way gateway/home <-> gateway/transport",
     "two-way gateway/projection <-> gateway/run",
     "two-way gateway/run <-> gateway/session-catalog",
-    "upward gateway/home (L3) -> gateway/transport (L4)",
-    "upward gateway/session-catalog (L2) -> gateway/automations (L3)"
+    "upward gateway/home (L3) -> gateway/transport (L4)"
   ]
 }

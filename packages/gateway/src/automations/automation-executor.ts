@@ -12,7 +12,7 @@ import {
   type AutomationRecoveryResult,
 } from "./automation-scheduler.js";
 import type { AutomationRecord, AutomationRun } from "./types.js";
-import { isAutomationId, runIdFromAutomationOperationId } from "./automation-contract.js";
+import { isAutomationId, runIdFromAutomationOperationId } from "../modules/automations/identity.js";
 
 function terminalResult(terminal: OwnedOperationTerminal): AutomationExecutionResult {
   if (terminal.lifecycle === "completed") {

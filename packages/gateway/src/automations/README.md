@@ -18,6 +18,11 @@ sync the file and its directory before acknowledgement.
 
 ## Contract
 
+Persisted UUID and `automation:<UUID>` codecs belong to the stateless L1
+[`gateway/automations-contract`](../modules/automations/README.md) owner. Scheduling,
+action/trigger admission and durable-record validation stay here; the validator
+uses those same identity codecs as the scheduler, executor and cold catalog.
+
 - **Triggers** (`automations.v2`): one-time, anchored interval, and IANA-timezone
   daily/weekly. Calendar gaps advance to the first valid minute; repeated minutes take
   the earlier instant. Misfire `latest`|`skip`; overlap `skip`|one `queueLatest`.

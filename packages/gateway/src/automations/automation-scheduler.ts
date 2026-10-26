@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { GatewayError, isUncertainOutcome, uncertainOutcome } from "../errors.js";
-import { automationOperationId } from "./automation-contract.js";
+import { automationOperationId } from "../modules/automations/identity.js";
 import { AutomationStore, settleAutomationRun } from "./automation-store.js";
 import { automationOccurrenceId, classifyDueOccurrence } from "./schedule.js";
 import type { AutomationRecord, AutomationRun, AutomationRunState } from "./types.js";
