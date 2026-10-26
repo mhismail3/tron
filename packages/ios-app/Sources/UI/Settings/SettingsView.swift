@@ -52,15 +52,6 @@ struct SettingsView: View {
                             IntegrationsSettingsView(routes: integrationRoutes, onOpenSession: onImported)
                         }
                     }
-                    SettingsGroupCard(.agent) {
-                        SettingsSectionLinks(ids: ["model", "workers", "context"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "global")
-                        TronSettingsDivider()
-                        settingsLink("Trusted Projects", summary: "Projects whose extensions and hooks load", icon: "checkmark.shield") { TrustedProjectsSettingsView() }
-                        TronSettingsDivider()
-                        SettingsSectionLinks(ids: ["approvals", "run"], sections: sections,
-                                             target: SettingsTarget.global.gatewayTarget, writeLayer: "global",
-                                             selection: .allExcept(TrustedProjectsSettingsView.keys))
-                    }
                     SettingsGroupCard(.tools) {
                         SettingsSectionLinks(ids: ["tools"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "global")
                         TronSettingsDivider()
@@ -89,6 +80,14 @@ struct SettingsView: View {
                     // row's summary names its own scope, so the group has no
                     // caption (#1030).
                     SettingsGroupCard(.diagnostics) {
+                        TronProgressiveSheetLink(accessibilityLabel: "Agent Settings", accent: .tronPrimary, surfaceAccent: .tronPrimarySurface) {
+                            GlobalAgentSettingsView()
+                        } label: {
+                            TronSettingsRow(icon: "slider.horizontal.3", title: "Agent Settings",
+                                            subtitle: "Models, compaction, trust, and more", accent: .tronPrimary)
+                        }
+                        .accessibilityIdentifier("settings-link-Agent Settings")
+                        TronSettingsDivider()
                         MacTerminalSettingsRow()
                         TronSettingsDivider()
                         settingsLink("Push Notifications", summary: "Agent alerts on this iPhone", icon: "bell.badge") {
@@ -184,11 +183,10 @@ struct SettingsView: View {
 /// the Macs and accounts Tron reaches, the agent's behaviour and what it can use,
 /// with this iPhone first and System last.
 enum SettingsGroupKind {
-    case agent, tools, accounts, more, iphone, diagnostics
+    case tools, accounts, more, iphone, diagnostics
 
     var title: String {
         switch self {
-        case .agent: "Agent"
         case .tools: "Tools & Extensions"
         case .accounts: "Accounts"
         case .more: "More"
@@ -199,7 +197,6 @@ enum SettingsGroupKind {
 
     @MainActor var accent: Color {
         switch self {
-        case .agent: .tronPurple
         case .tools: .tronCyan
         case .accounts: .tronIndigo
         case .more, .iphone: .tronPrimary
@@ -223,6 +220,28 @@ enum SettingsGroupKind {
         case "setup": "gearshape.2"
         default: "slider.horizontal.3"
         }
+    }
+}
+
+/// Global-only consolidation. Scoped Home and Session links keep their own routes.
+struct GlobalAgentSettingsView: View {
+    private let target = SettingsTarget.global.gatewayTarget
+
+    var body: some View {
+        ScrollView {
+            TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
+                ForEach(["model", "workers", "context"], id: \.self) { section in
+                    SettingsRendererView(target: target, writeLayer: "global", presentation: .section(section), embedded: true)
+                }
+                TrustedProjectsSettingsView()
+                ForEach(["approvals", "run"], id: \.self) { section in
+                    SettingsRendererView(target: target, writeLayer: "global", presentation: .section(section), embedded: true,
+                                         selection: .allExcept(TrustedProjectsSettingsView.keys))
+                }
+            }.padding(20)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle("Agent Settings")
     }
 }
 

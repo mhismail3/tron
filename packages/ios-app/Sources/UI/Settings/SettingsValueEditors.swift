@@ -125,13 +125,16 @@ struct SettingsListEditor: View {
     let help: String
     /// The schema's guidance for one new value: its format and a realistic example.
     let entry: SettingsEntryGuidance?
+    /// Catalog-backed lists add through the shared picker, never free-form model IDs.
+    let entryPicker: ((@escaping (String) -> Void) -> AnyView)?
     let onChange: (JSONValue?) -> Void
     @State private var items: [Item]
     @State private var next = ""
     @Environment(\.dismiss) private var dismiss
 
-    init(title: String, help: String, entry: SettingsEntryGuidance?, values: [String], onChange: @escaping (JSONValue?) -> Void) {
-        self.title = title; self.help = help; self.entry = entry; self.onChange = onChange
+    init(title: String, help: String, entry: SettingsEntryGuidance?, values: [String],
+         entryPicker: ((@escaping (String) -> Void) -> AnyView)? = nil, onChange: @escaping (JSONValue?) -> Void) {
+        self.title = title; self.help = help; self.entry = entry; self.entryPicker = entryPicker; self.onChange = onChange
         _items = State(initialValue: values.map { Item(text: $0) })
     }
 
@@ -156,6 +159,14 @@ struct SettingsListEditor: View {
                     if items.isEmpty { TronSettingsRow(icon: nil, title: "None") }
                 }
                 .tronSettingsCaption(help)
+                if let entryPicker {
+                    TronSelectionSheetRow(icon: "plus", title: "Add model", value: "Choose") {
+                        entryPicker { value in
+                            if !items.contains(where: { $0.text == value }) { items.append(Item(text: value)) }
+                        }
+                    }
+                    .tronGlassSurface(accent: .tronPrimary)
+                } else {
                 TronSettingsRow(icon: "plus", title: "Add value") {
                     TextField("Value", text: $next,
                               prompt: entry.map { Text($0.example).foregroundStyle(Color.tronTextMuted) })
@@ -169,6 +180,7 @@ struct SettingsListEditor: View {
                 }
                 .tronGlassSurface(accent: .tronPrimary)
                 .tronSettingsCaption(entry.map { "\($0.hint) For example: \($0.example)" })
+                }
             }
             .padding(18)
         }

@@ -108,7 +108,7 @@ export class SettingsStoreAdapter {
     const base = { key: key.id, source: name, dependsOn: [...dependsOn] };
     switch (name) {
       case "catalog.models":
-        return { ...base, ...await this.catalogModelOptions(runtime, request, target.kind === "home" || session?.home === true) };
+        return { ...base, ...await this.catalogModelOptions(runtime, request, key.type.kind === "stringList" || target.kind === "home" || session?.home === true) };
       case "catalog.thinkingLevels": {
         const model = await this.followedModel(runtime, request.qualifiers, resolve);
         const supported = model ? getSupportedThinkingLevels(model) : [];

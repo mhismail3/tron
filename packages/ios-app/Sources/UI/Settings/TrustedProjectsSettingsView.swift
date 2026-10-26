@@ -1,7 +1,7 @@
 import SwiftUI
 import TronMobileCore
 
-/// Settings › Trusted Projects: the default trust policy, every project with a
+/// Global Agent Settings: the default trust policy, every project with a
 /// saved trust decision (the schema's `permissions.projectTrust` instances),
 /// and Add Project. Adding
 /// records an explicit Not trusted decision through the ordinary settings
@@ -30,9 +30,8 @@ struct TrustedProjectsSettingsView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
-                TronSettingsGroup(nil) {
+        TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
+                TronSettingsGroup("Trusted Projects") {
                     SettingsRendererView(target: target, writeLayer: "global", presentation: .keys([Self.policyKey]), detailedKeys: true)
                 }
                 SettingsRendererView(target: target, writeLayer: "global", presentation: .instances(key: Self.key), embedded: true)
@@ -48,11 +47,7 @@ struct TrustedProjectsSettingsView: View {
                 .tronGlassSurface(accent: accent, interactive: true)
                 .disabled(adding)
                 .accessibilityIdentifier("trusted-projects-add")
-            }
-            .padding(20)
         }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Trusted Projects")
         .tronManagedSheet(isPresented: $choosingFolder, identity: "settings.trusted-projects.add") {
             WorkspaceBrowser { path in add(path) }
         }

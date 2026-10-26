@@ -25,12 +25,16 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 ## Contract
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, App Customizations),
-  Accounts (indigo: Connections, Model Providers, Connected Services), Agent (purple: Models,
-  Compaction, Trusted Projects, More Settings), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
-  System (slate: Mac Terminal, Push Notifications, Setup, Logs). The
+  Accounts (indigo: Connections, Model Providers, Connected Services),
+  Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
+  System (slate: Agent Settings, Mac Terminal, Push Notifications, Setup, Logs). Agent Settings
+  opens one primary-accent sheet with the Model, Workers & delegation, Compaction, Trusted Projects,
+  Agent changes and Connection groups in place, not another level of section links. The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
-  Models contains direct model/thinking and the task budget. Routine settings have no editor
-  exposure; explicit values retain read-only Reset/Revert and Project inspection. Compaction
+  Models contains direct model/thinking, all three ordered model queues and the task budget.
+  Queue drafts add available physical models through the shared picker, reorder/remove locally,
+  and write only on Save; an empty list is distinct from Reset/Revert to inheritance.
+  Other routine settings have no editor exposure; explicit values retain read-only Reset/Revert and Project inspection. Compaction
   appears only while retained values need inspection or Revert. More Settings contains Agent
   changes and the HTTP proxy; there is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
   groups without duplicating them in More Settings.
@@ -60,8 +64,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   anchored slider with Gateway-served choices; a tap anywhere outside it closes and saves it, even
   below a short embedded section. Embedded renderers inherit the enclosing sheet's slider host;
   only standalone renderers install one, so the editor uses the sheet viewport rather than its card.
-  Session and Home settings place sections in Global's group
-  cards (Agent, Tools & Extensions, More), every section a drill-in row; overrides show the
+  Session and Home retain their scope-specific section drill-in rows; overrides show the
   shared Overridden pill beside the row title and Revert after the value.
 - **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
   `confirm` text asks before sending. Secret drafts start empty and clear on dismissal; list and

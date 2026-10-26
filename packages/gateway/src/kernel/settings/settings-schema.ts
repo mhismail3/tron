@@ -303,7 +303,8 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         home: { store: "home", path: ["modelQueue", role] }, global: { store: "gateway", path: ["modelQueues", role] } },
       timing: "live", effect: role === "worker" ? "delegate" : role === "subagent" ? "next-request" : "next-memory-pass",
       floor: "notify", writers: ["ui", "home"], label: MODEL_QUEUE_LABELS[role].label, help: MODEL_QUEUE_LABELS[role].help,
-      order: 40 + index * 2, importance: "essential",
+      order: 40 + index * 2, importance: "essential", control: "list", fallback: "readOnly",
+      optionsSource: { name: "catalog.models", dependsOn: [] },
     })),
     {
       id: "model.thinking[role=worker]", sessionOverridable: true, projectSettable: false, group: "workers", fixed: { role: "worker" }, type: sameAsHomeChoice(thinkingType),

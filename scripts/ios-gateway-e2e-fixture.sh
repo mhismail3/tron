@@ -8,7 +8,10 @@ write_fixture_extension() {
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "$pi_ai_url";
 const faux = fauxProvider({
   provider: "tron-e2e",
-  models: [{ id: "e2e-model", name: "Tron E2E Model", reasoning: true, input: ["text", "image"], contextWindow: 32768, maxTokens: 4096 }],
+  models: [
+    { id: "e2e-model", name: "Tron E2E Model", reasoning: true, input: ["text", "image"], contextWindow: 32768, maxTokens: 4096 },
+    { id: "e2e-alternate", name: "Tron E2E Alternate", reasoning: false, input: ["text"], contextWindow: 32768, maxTokens: 4096 },
+  ],
   tokensPerSecond: 8,
 });
 // A prompt carrying the codemode journey marker asks its question from inside codemode
