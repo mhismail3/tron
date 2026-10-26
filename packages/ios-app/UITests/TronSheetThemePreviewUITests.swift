@@ -126,7 +126,7 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         for _ in 0..<3 {
             XCTAssertFalse(app.staticTexts["Advanced"].exists)
             XCTAssertTrue(app.staticTexts["Thinking budgets"].exists, "Model controls share the consolidated Agent Behavior sheet")
-            XCTAssertTrue(app.staticTexts["Offered models"].exists, "Model controls share the consolidated Agent Behavior sheet")
+            XCTAssertFalse(app.staticTexts["Offered models"].exists)
             XCTAssertFalse(app.staticTexts["Mac Terminal key"].exists)
             app.swipeUp()
         }

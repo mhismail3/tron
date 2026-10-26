@@ -811,7 +811,9 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(editor.value as? String, "Fixture Lite")
         closeTopSheet(app)
         openRendererSection(app, "context")
-        let toggle = app.descendants(matching: .any)["settings-row-context.images.block"].switches.firstMatch
+        // The native toggle exposes its semantic label, not the containing row ID.
+        let toggle = app.switches["Block images"]
+        reveal(toggle, in: app)
         let before = toggle.value as? String
         toggle.tap()
         XCTAssertTrue(waitForLabel(applied, containing: "applied:2", timeout: 5))
@@ -2945,10 +2947,6 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(app.buttons[row], in: app)
         let detail = app.descendants(matching: .any)["settings-section-\(id)-detail"]
         XCTAssertTrue(detail.waitForExistence(timeout: 5), app.debugDescription)
-        if consolidated {
-            let firstRow = detail.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-' AND NOT identifier ENDSWITH '-reset'")).firstMatch
-            reveal(firstRow, in: app)
-        }
     }
 
     /// Dismisses the frontmost sheet by its own Done; covered sheets' Done
