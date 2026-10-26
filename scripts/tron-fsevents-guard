@@ -1,0 +1,409 @@
+#!/usr/bin/env python3
+"""Development-Mac guard for macOS fseventsd and stale Tron temp fixtures (#2038).
+
+fseventsd is a root daemon that every FSEvents client depends on (Node `fs.watch`,
+Xcode, editors). On this Mac it has degraded twice under Tron work: one thread at
+100% CPU, a footprint growing to tens of GB, events dropped for every client
+(Node's watcher drops them silently), and stream registration taking ~0.4 s. Only
+`sudo killall fseventsd` has cleared it. This guard watches for that state without
+root and keeps the user temp dir from accumulating stale Tron fixtures, whose
+eventual mass removal is itself an event flood.
+
+  check      one pass: measure, maybe clean, maybe alert; one JSON line to the log
+  status     LaunchAgent state and the last pass
+  install    write and load the user LaunchAgent (maintainer-approved action)
+  uninstall  unload and remove the LaunchAgent; the log and state stay
+
+A fixture is removed only when it is provably stale: a directory directly in the
+temp dir named like a Tron mkdtemp root (`tron-<name>-<random>`), not a keyed
+cache (`tron-ios-gateway-e2e-*`), with nothing in its tree modified within the age
+threshold, and with no open file or working directory under it among the
+processes this user can see (`lsof`). Removal is capped per pass and skipped
+while fseventsd is hot, so the guard never adds a burst to a saturated daemon.
+It never uses sudo and never restarts fseventsd; the alert names the manual fix.
+Runs under /usr/bin/python3 (3.9), which the LaunchAgent uses.
+"""
+import argparse
+import fcntl
+import json
+import os
+import plistlib
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import time
+
+LABEL = "com.tron.fsevents-guard"
+FIXTURE = re.compile(r"^tron-[a-z0-9][a-z0-9-]*[-.][A-Za-z0-9_]{6,8}$")
+KEYED_CACHE_PREFIX = "tron-ios-gateway-e2e"
+FSEVENTS_STORE = "/System/Volumes/Data/.fseventsd"
+REMEDY = "sudo killall fseventsd  (launchd restarts it; run in Terminal)"
+LOG_ROTATE_BYTES = 5 * 1024 * 1024
+
+
+def home_path(*parts):
+    return os.path.join(os.path.expanduser("~"), *parts)
+
+
+def default_temp_dir():
+    try:
+        return os.confstr("CS_DARWIN_USER_TEMP_DIR")
+    except (ValueError, OSError):
+        return os.environ.get("TMPDIR", "/tmp")
+
+
+def run(argv, timeout=60):
+    return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=timeout)
+
+
+def cpu_seconds(text):
+    """ps cputime: [dd-][hh:]mm:ss.ss"""
+    text = text.strip()
+    days = 0
+    if "-" in text:
+        day_text, text = text.split("-", 1)
+        days = int(day_text)
+    parts = text.split(":")
+    seconds = float(parts[-1])
+    if len(parts) >= 2:
+        seconds += int(parts[-2]) * 60
+    if len(parts) >= 3:
+        seconds += int(parts[-3]) * 3600
+    return seconds + days * 86400
+
+
+def size_mb(text):
+    match = re.match(r"^([0-9.]+)([BKMGT]?)", text.strip())
+    if not match:
+        return None
+    scale = {"": 1 / 1048576, "B": 1 / 1048576, "K": 1 / 1024, "M": 1, "G": 1024, "T": 1048576}[match.group(2)]
+    return round(float(match.group(1)) * scale, 1)
+
+
+def fseventsd_sample(sample_seconds):
+    """Pid, start identity, cumulative CPU, RSS and footprint of fseventsd, readable without root."""
+    found = run(["/usr/bin/pgrep", "-x", "fseventsd"]).stdout.split()
+    if not found:
+        return None
+    pid = int(found[0])
+
+    def ps():
+        fields = run(["/bin/ps", "-o", "lstart=,time=,rss=", "-p", str(pid)]).stdout.split()
+        if len(fields) < 7:
+            return None
+        return " ".join(fields[:5]), cpu_seconds(fields[5]), int(fields[6])
+
+    first = ps()
+    if first is None:
+        return None
+    time.sleep(sample_seconds)
+    second = ps()
+    if second is None or second[0] != first[0]:
+        return None
+    sample_cpu = (second[1] - first[1]) / sample_seconds * 100 if sample_seconds > 0 else None
+    top = run(["/usr/bin/top", "-l", "1", "-pid", str(pid), "-stats", "pid,mem"]).stdout.splitlines()
+    footprint = None
+    for line in top:
+        cols = line.split()
+        if len(cols) == 2 and cols[0] == str(pid):
+            footprint = size_mb(cols[1])
+    return {
+        "pid": pid,
+        "started": second[0],
+        "cpuSeconds": round(second[1], 2),
+        "cpuPercentSample": None if sample_cpu is None else round(sample_cpu, 1),
+        "rssMB": round(second[2] / 1024, 1),
+        "footprintMB": footprint,
+    }
+
+
+def temp_counts(temp_dir):
+    counts = {"tempEntries": 0, "tronFixtureDirs": 0, "temporaryDirectoryEntries": 0}
+    try:
+        with os.scandir(temp_dir) as entries:
+            for entry in entries:
+                counts["tempEntries"] += 1
+                if entry.name.startswith("TemporaryDirectory."):
+                    counts["temporaryDirectoryEntries"] += 1
+                elif is_fixture_name(entry.name) and entry.is_dir(follow_symlinks=False):
+                    counts["tronFixtureDirs"] += 1
+    except OSError:
+        pass
+    try:
+        # The directory's own size is the only sudo-free view of the event-log store.
+        counts["fseventsdStoreDirBytes"] = os.stat(FSEVENTS_STORE).st_size
+    except OSError:
+        counts["fseventsdStoreDirBytes"] = None
+    return counts
+
+
+def is_fixture_name(name):
+    return bool(FIXTURE.match(name)) and not name.startswith(KEYED_CACHE_PREFIX)
+
+
+def newest_mtime(root, limit):
+    """Newest lstat mtime in the tree, or None when the walk exceeds `limit` entries or fails."""
+    newest = os.lstat(root).st_mtime
+    seen = 0
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    seen += 1
+                    if seen > limit:
+                        return None, seen
+                    info = entry.stat(follow_symlinks=False)
+                    newest = max(newest, info.st_mtime)
+                    if stat.S_ISDIR(info.st_mode):
+                        stack.append(entry.path)
+        except OSError:
+            return None, seen
+    return newest, seen
+
+
+def paths_in_use():
+    """Open files, cwds and mapped executables of every process this user can see, or None."""
+    result = run(["/usr/sbin/lsof", "-nP", "-w", "-F", "n"], timeout=120)
+    if not result.stdout:
+        return None
+    return [line[1:] for line in result.stdout.splitlines() if line.startswith("n/")]
+
+
+def under(path, root):
+    return path == root or path.startswith(root + "/")
+
+
+def clean_fixtures(temp_dir, args, now):
+    real_temp = os.path.realpath(temp_dir)
+    candidates = []
+    report = {"candidates": 0, "deleted": [], "deletedEntries": 0, "keptRecent": 0, "keptInUse": 0,
+              "keptUnproven": 0, "deferred": 0}
+    try:
+        names = sorted(os.listdir(temp_dir))
+    except OSError:
+        return report
+    for name in names:
+        path = os.path.join(real_temp, name)
+        if not is_fixture_name(name):
+            continue
+        try:
+            if not stat.S_ISDIR(os.lstat(path).st_mode):
+                continue
+        except OSError:
+            continue
+        newest, entries = newest_mtime(path, args.max_walk_entries)
+        if newest is None:
+            report["keptUnproven"] += 1
+        elif now - newest < args.fixture_age_hours * 3600:
+            report["keptRecent"] += 1
+        else:
+            candidates.append((path, entries))
+    report["candidates"] = len(candidates)
+    if not candidates:
+        return report
+    in_use = paths_in_use()
+    if in_use is None:
+        report["keptUnproven"] += len(candidates)
+        report["error"] = "lsof unavailable; nothing removed"
+        return report
+    # lsof names the canonical /private/var form; the temp dir is resolved the same way.
+    in_use = ["/private" + path if path.startswith("/var/") else path for path in in_use]
+    budget = args.max_delete_entries
+    for index, (path, entries) in enumerate(candidates):
+        if len(report["deleted"]) >= args.max_delete_roots or entries + 1 > budget:
+            report["deferred"] = len(candidates) - index
+            break
+        if any(under(open_path, path) for open_path in in_use):
+            report["keptInUse"] += 1
+            continue
+        if args.dry_run:
+            report.setdefault("wouldDelete", []).append(os.path.basename(path))
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+        if os.path.lexists(path):
+            report["keptUnproven"] += 1
+            continue
+        report["deleted"].append(os.path.basename(path))
+        report["deletedEntries"] += entries + 1
+        budget -= entries + 1
+        time.sleep((entries + 1) / args.delete_rate)
+    return report
+
+
+def notify(message):
+    script = 'display notification "%s" with title "Tron fseventsd guard"' % message.replace('"', "'")
+    run(["/usr/bin/osascript", "-e", script], timeout=20)
+
+
+def state_paths(args):
+    state_dir = args.state_dir or home_path("Library", "Application Support", "tron-fsevents-guard")
+    log = args.log or home_path("Library", "Logs", "tron-fsevents-guard.jsonl")
+    return state_dir, log
+
+
+def append_log(log, record):
+    os.makedirs(os.path.dirname(log), exist_ok=True)
+    try:
+        if os.path.getsize(log) > LOG_ROTATE_BYTES:
+            os.replace(log, log + ".1")
+    except OSError:
+        pass
+    with open(log, "a") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def check(args):
+    state_dir, log = state_paths(args)
+    os.makedirs(state_dir, exist_ok=True)
+    lock = open(os.path.join(state_dir, "lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("another pass is running; nothing to do")
+        return 0
+    state_file = os.path.join(state_dir, "state.json")
+    try:
+        with open(state_file) as handle:
+            state = json.load(handle)
+    except (OSError, ValueError):
+        state = {}
+    now = time.time()
+    sample = fseventsd_sample(args.sample_seconds)
+    record = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)), "fseventsd": sample}
+    interval_cpu = None
+    if sample and state.get("started") == sample["started"] and now - state.get("at", now) >= 60:
+        interval_cpu = (sample["cpuSeconds"] - state["cpuSeconds"]) / (now - state["at"]) * 100
+        sample["cpuPercentInterval"] = round(interval_cpu, 1)
+    cpu = interval_cpu if interval_cpu is not None else (sample or {}).get("cpuPercentSample")
+    footprint = (sample or {}).get("footprintMB")
+    hot = bool(sample) and ((cpu is not None and cpu >= args.cpu_alert_percent)
+                            or (footprint is not None and footprint >= args.footprint_alert_mb))
+    consecutive = state.get("consecutiveHot", 0) + 1 if hot else 0
+    if sample and state.get("started") != sample["started"]:
+        consecutive = 1 if hot else 0
+    record.update({"hot": hot, "consecutiveHot": consecutive})
+    record.update(temp_counts(args.temp_dir))
+    if hot and not args.dry_run:
+        record["cleanup"] = {"skipped": "fseventsd is hot; removal would add events to a saturated daemon"}
+    else:
+        record["cleanup"] = clean_fixtures(args.temp_dir, args, now)
+    alert = None
+    if hot and consecutive >= args.sustain_passes and now - state.get("lastAlertAt", 0) >= args.alert_interval_hours * 3600:
+        alert = "fseventsd pid %s: CPU %s%%, footprint %s MB for %d passes. Remedy: %s" % (
+            sample["pid"], None if cpu is None else round(cpu), footprint, consecutive, REMEDY)
+        state["lastAlertAt"] = now
+        record["alert"] = alert
+    append_log(log, record)
+    if sample:
+        state.update({"started": sample["started"], "cpuSeconds": sample["cpuSeconds"], "at": now,
+                      "consecutiveHot": consecutive})
+    with open(state_file + ".tmp", "w") as handle:
+        json.dump(state, handle)
+    os.replace(state_file + ".tmp", state_file)
+    summary = "fseventsd cpu=%s%% footprint=%sMB hot=%s fixtures=%s deleted=%d" % (
+        None if cpu is None else round(cpu, 1), footprint, hot, record["tronFixtureDirs"],
+        len(record["cleanup"].get("deleted", [])))
+    print(summary)
+    if alert:
+        print("ALERT " + alert)
+        if args.notify:
+            notify(alert)
+    return 0
+
+
+def plist_bytes(args):
+    source = open(os.path.realpath(__file__)).read()
+    log_dir = home_path("Library", "Logs")
+    program = ["/usr/bin/python3", "-c", source, "--temp-dir", args.temp_dir, "check", "--notify"]
+    return plistlib.dumps({
+        "Label": LABEL,
+        "ProgramArguments": program,
+        "StartInterval": args.interval_minutes * 60,
+        "RunAtLoad": True,
+        "ProcessType": "Background",
+        "LowPriorityIO": True,
+        "Nice": 10,
+        "StandardOutPath": os.path.join(log_dir, "tron-fsevents-guard.log"),
+        "StandardErrorPath": os.path.join(log_dir, "tron-fsevents-guard.log"),
+    })
+
+
+def agent_plist():
+    return home_path("Library", "LaunchAgents", LABEL + ".plist")
+
+
+def domain():
+    return "gui/%d" % os.getuid()
+
+
+def install(args):
+    data = plist_bytes(args)
+    if args.print_plist:
+        sys.stdout.write(data.decode())
+        return 0
+    os.makedirs(os.path.dirname(agent_plist()), exist_ok=True)
+    os.makedirs(home_path("Library", "Logs"), exist_ok=True)
+    with open(agent_plist(), "wb") as handle:
+        handle.write(data)
+    subprocess.run(["/bin/launchctl", "bootout", "%s/%s" % (domain(), LABEL)], stderr=subprocess.DEVNULL)
+    subprocess.run(["/bin/launchctl", "bootstrap", domain(), agent_plist()], check=True)
+    print("installed %s (every %d min); uninstall: scripts/tron-fsevents-guard uninstall" % (LABEL, args.interval_minutes))
+    return status(args)
+
+
+def uninstall(_args):
+    subprocess.run(["/bin/launchctl", "bootout", "%s/%s" % (domain(), LABEL)], stderr=subprocess.DEVNULL)
+    if os.path.exists(agent_plist()):
+        os.remove(agent_plist())
+    print("uninstalled %s; log and state remain under ~/Library/Logs and ~/Library/Application Support" % LABEL)
+    return 0
+
+
+def status(args):
+    loaded = subprocess.run(["/bin/launchctl", "print", "%s/%s" % (domain(), LABEL)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    print("LaunchAgent %s: %s (%s)" % (LABEL, "loaded" if loaded else "not loaded", agent_plist()))
+    _, log = state_paths(args)
+    try:
+        with open(log) as handle:
+            last = handle.readlines()[-1]
+        print("last pass: " + last.strip())
+    except (OSError, IndexError):
+        print("last pass: none (%s)" % log)
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="tron-fsevents-guard", description=__doc__.split("\n\n")[0])
+    parser.add_argument("--state-dir", help="default ~/Library/Application Support/tron-fsevents-guard")
+    parser.add_argument("--log", help="default ~/Library/Logs/tron-fsevents-guard.jsonl")
+    parser.add_argument("--temp-dir", default=default_temp_dir(), help="default: this user's Darwin temp dir")
+    sub = parser.add_subparsers(dest="command", required=True)
+    c = sub.add_parser("check", help="one pass")
+    c.add_argument("--cpu-alert-percent", type=float, default=50.0)
+    c.add_argument("--footprint-alert-mb", type=float, default=2048.0)
+    c.add_argument("--sustain-passes", type=int, default=3)
+    c.add_argument("--alert-interval-hours", type=float, default=6.0)
+    c.add_argument("--sample-seconds", type=float, default=5.0)
+    c.add_argument("--fixture-age-hours", type=float, default=24.0)
+    c.add_argument("--max-delete-roots", type=int, default=200)
+    c.add_argument("--max-delete-entries", type=int, default=20000)
+    c.add_argument("--max-walk-entries", type=int, default=200000)
+    c.add_argument("--delete-rate", type=float, default=2000.0, help="entries per second")
+    c.add_argument("--notify", action="store_true", help="also post a macOS notification on alert")
+    c.add_argument("--dry-run", action="store_true", help="report what would be removed; remove nothing")
+    i = sub.add_parser("install", help="write and load the LaunchAgent")
+    i.add_argument("--interval-minutes", type=int, default=10)
+    i.add_argument("--print-plist", action="store_true", help="print the plist and change nothing")
+    sub.add_parser("uninstall", help="unload and remove the LaunchAgent")
+    sub.add_parser("status", help="LaunchAgent state and the last pass")
+    args = parser.parse_args()
+    return {"check": check, "install": install, "uninstall": uninstall, "status": status}[args.command](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

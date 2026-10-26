@@ -1,7 +1,8 @@
 # Repository development
 
 Repository-wide development runbooks: the privacy guard, the pinned toolchain,
-the isolated Debug Gateway lifecycle, and versions and releases. The rules that
+the isolated Debug Gateway lifecycle, the development Mac's fseventsd guard, and versions
+and releases. The rules that
 bind every change are in the [charter](../AGENTS.md); package runbooks live with
 their packages ([Gateway](../packages/gateway/README.md#development),
 [iOS](../packages/ios-app/docs/development.md),
@@ -160,6 +161,33 @@ replace `/Applications/Tron.app`, invoke production
 deployment, or install an iOS release as part of routine agent work. The
 installed supervised app remains a frozen release image while isolated
 iteration proceeds on `9848`.
+
+## Development Mac: fseventsd guard
+
+macOS `fseventsd` serves every FSEvents client, including Node `fs.watch`. When it
+is saturated (one thread at 100% CPU, footprint in GB), it drops events for its
+clients. Node does not report the drop, so watcher-driven tests time out
+intermittently. Only `sudo killall fseventsd` clears that state (launchd restarts
+the daemon); agents never run it. `scripts/tron-fsevents-guard` is the
+sudo-free monitor:
+
+- `check [--dry-run]` measures fseventsd CPU (averaged over the time since the
+  last pass) and footprint, then appends one JSON line to
+  `~/Library/Logs/tron-fsevents-guard.jsonl`.
+- It counts entries in the user temp dir, and removes stale Tron mkdtemp roots
+  (`tron-<name>-<random>`; keyed `tron-ios-gateway-e2e-*` caches stay). A root
+  is stale when nothing in its tree changed for 24 h and `lsof` shows no open
+  file or cwd under it. Removal is capped (200 roots or 20,000 entries per pass)
+  and paced, and it is skipped while fseventsd is hot.
+- Hot means CPU ≥ 50% or footprint ≥ 2048 MB. After 3 hot passes in a row it
+  alerts with the remedy, at most once every 6 h: an `ALERT` line, plus a macOS
+  notification under the agent.
+- `install [--print-plist] [--interval-minutes 10]` loads the LaunchAgent
+  `com.tron.fsevents-guard`, which embeds the script source. Installing is a
+  maintainer action. `uninstall` unloads it and removes the plist; the log and
+  `~/Library/Application Support/tron-fsevents-guard/` state stay. `status`
+  shows the agent state and the last pass.
+- Tests: `python3 scripts/test-tron-fsevents-guard.py`.
 
 ## Commits, versions and releases
 

@@ -6,8 +6,10 @@
     "gateway-install-inputs.test.mjs",
     "gateway-payload-deploy.mjs",
     "gateway-payload-deploy.test.mjs",
+    "test-tron-fsevents-guard.py",
     "tron-dev",
     "tron-dev-state.mjs",
-    "tron-dev-state.test.mjs"
+    "tron-dev-state.test.mjs",
+    "tron-fsevents-guard"
   ]
 }
