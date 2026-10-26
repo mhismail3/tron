@@ -3220,6 +3220,32 @@ export class RuntimeRegistry implements SessionOperations {
     await Promise.all(slots.map(slot => slot.releaseInheritedImageBlock(projectDir === undefined ? "global" : "project")));
   }
 
+  async abortProjectReload(projectDirInput: string): Promise<void> {
+    const projectDir = await this.options.trust.canonicalDirectory(projectDirInput).catch(() => projectDirInput);
+    const slots = await this.mutex.run(() => this.trustReloadProjects.has(projectDir)
+      ? [...this.slots.entries()].filter(([, slot]) => slot.projectDir === projectDir)
+      : undefined);
+    // An initial busy refusal acquired nothing and must not retire active work.
+    if (slots === undefined) return;
+    try {
+      const results = await Promise.allSettled(slots.map(async ([sessionId, slot]) => {
+        await slot.abortTrustReload();
+        const retired = await this.retireIdleRuntime({
+          sessionId, slot, reason: "publication-uncertain",
+          eligible: () => this.slots.get(sessionId) === slot,
+        });
+        if (!retired && !slot.isDisposed) throw new GatewayError("internal", "Failed trust runtime could not be retired");
+      }));
+      const failures = results.flatMap((result, index) => result.status === "rejected"
+        ? [{ sessionId: slots[index]![0], message: result.reason instanceof Error ? result.reason.message : String(result.reason) }] : []);
+      if (failures.length) throw new GatewayError("internal", "Failed project runtimes could not all retire", false, { failures });
+    } finally {
+      // Failed frames stay closed even if physical disposal reports an error;
+      // never strand every other session behind a project-wide reservation.
+      await this.mutex.run(() => this.trustReloadProjects.delete(projectDir));
+    }
+  }
+
   async commitProjectReload(projectDirInput: string): Promise<void> {
     // The key reloadProject added must leave even if the root vanished since.
     const projectDir = await this.options.trust.canonicalDirectory(projectDirInput).catch(() => projectDirInput);

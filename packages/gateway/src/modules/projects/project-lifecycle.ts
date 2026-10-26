@@ -20,6 +20,7 @@ export interface ProjectRuntimePort {
   assertIdle(path: string, moving: boolean): Promise<void>;
   reload(path: string, trusted: boolean): Promise<void>;
   release(path: string): Promise<void>;
+  abort(path: string): Promise<void>;
 }
 
 /** Filesystem/Git effects have one owner; settings owns approval, execution claims,
@@ -195,7 +196,8 @@ export class ProjectLifecycle {
   private async setTrust(path: string, value: boolean): Promise<void> {
     await this.trust().setAndApply(path, value,
       inspection => this.runtimes.reload(inspection.projectDir, inspection.effectiveDecision === true),
-      inspection => this.runtimes.release(inspection.projectDir));
+      inspection => this.runtimes.release(inspection.projectDir),
+      inspection => this.runtimes.abort(inspection.projectDir));
   }
   private async apply(action: Action): Promise<{ summary: string }> {
     const { path, destination, trust } = await this.inspect(action);
@@ -231,7 +233,8 @@ export class ProjectLifecycle {
         await rename(path, destination);
         moved = true;
         await this.same(destination, action.identity);
-      }, inspection => this.runtimes.reload(inspection.projectDir, false), inspection => this.runtimes.release(inspection.projectDir));
+      }, inspection => this.runtimes.reload(inspection.projectDir, inspection.effectiveDecision === true), inspection => this.runtimes.release(inspection.projectDir),
+      inspection => this.runtimes.abort(inspection.projectDir));
       return { summary: `${path} moved to ${destination}; ${action.operation === "archive" ? "recover manually by moving the retained folder back after releasing work, then request trust; no files deleted" : "new sessions use the new path; historical sessions retain their original path"}` };
     } catch (error) {
       // Never move files backwards automatically after an uncertain external

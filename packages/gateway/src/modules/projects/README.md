@@ -43,8 +43,10 @@ Home can delegate immediately after successful trust. Decline/expiry grant nothi
 An interrupted/failed action is never replayed; inspect retained paths and Changes.
 A crash after a local creation intent may leave an unresolved audit row; it does
 not imply success and is never replayed. If both runtime reload and compensation
-fail, any existing native fence remains fail-closed. Repair the failing resources
-before retrying a trust transition; lifecycle never clears an uncertain fence.
+fail, the native owner retires uncertain frames without a success publication and
+releases project admission. Canonical session data stays intact; repair failing
+resources before reopening the cold session. A refusal before filesystem effects
+preserves trust only for the original retained source directory.
 Repeating create refuses its existing path; repeating an approval refuses its settled
 request. To retry a failed creation's trust phase, explicitly request `trust`.
 
@@ -86,7 +88,10 @@ scripts/tron test gateway src/modules/projects/project-lifecycle.e2e.test.ts
 
 The real Gateway/Registry/Pi/faux-model journey retains a regenerable transcript in
 `packages/gateway/test-results/project-lifecycle/report.json`. All projects are temporary;
-GitHub is a spawned fixture executable, never a live repository.
+GitHub success is a spawned fixture executable, never a live repository. The
+installed `gh` also runs with empty auth configuration/token environment under
+macOS Seatbelt's network deny; this proves unauthenticated refusal/retained state,
+not real remote creation. The real-CLI case requires installed `gh` and `sandbox-exec`.
 
 ## Not here
 
