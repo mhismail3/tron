@@ -19,7 +19,11 @@ policy, not native tool-interruption wiring or a second delegation instance.
 Root's late composition supplies its actual settings model/change owner directly,
 including outcome wake subscription. Home acknowledges outcomes only after the
 canonical reader completes its durable file-and-directory proof; the approvals
-store remains the sole outbox through refused wakes and process recovery.
+store remains the sole outbox through refused wakes and process recovery. Home selects
+outcomes for its chapter requester IDs through the same bounded, cancellable envelope
+for user turns and autonomous wakes; native before-agent-start selection is ordinary-only.
+A failed current canonical proof defers acknowledgement and chapter sealing, retaining
+the outbox without scanning sealed chapter files.
 
 - **Designation and chapters:** `home-owner.ts` (record, ledger, profile changes, wake
   scheduler), `home-chapter-state.ts`, `home-chapter-contents.ts`, `home-session-*.ts`.
@@ -198,6 +202,7 @@ changes keep its store, cursors and spend.
 | `home.task.store-refused`; `home.task.authorization`; `home.task.transition`; `home.task.checkin`; `home.task.spend`; `home.task.dispatch-stage`; `home.task.producer-refused`; `home.task.report-reminder` | info; refusals and slow, timed-out or cancelled dispatch stages warn | Keyed by `taskHash`/`operationHash`, never intent, report or path ([tasks.md](tasks.md)): task-store refusal `reason` (fenced until the next start, in `home.status.taskRecovery`); scope, grant and decision transitions; durable `pending`/`active`/`terminal` transitions with `reason`, `failureCause`, `errorCode`; check-in `attention`; deduplicated token spend; a `delegate` admission `stage` slow (≥ 5 s), timed out (60 s) or cancelled; a refused detached-capable producer (`reason: unverified-provider` diagnoses a reviewed-version/pin mismatch before launch); the single report-only continuation |
 | `home.task.control`; `home.task.runaway-stop`; `home.task.detached-work`; `home.task.subagents`; `home.taskStatus.subagentRuns`; `home.taskStatus.ownerSettlement` | info; runaway stop and detached work warn; `home.taskStatus.*` are read-only status fields | Steer, interrupt and Stop `disposition` (`accepted`, `persisted`, `refused` with a finite `reason`; interrupt `calls`); the deadline cancel-and-join outcome; detached work outliving settlement (outcome unknown); subagent `started`, `stoppedAtEnd`, `noticesUndelivered`; the exact live runs that report and Stop select; the owner-settlement proof (`null` is unproven) |
 | `home.task.inbox`; `home.wake`; `home.inbox.admission-slow`; `home-inbox-settlement-failed` code on `session.diagnostic`; `home-worker-attention-failed` | info; refused wakes, slow admission (≥ 2 s) and failures warn | Wake-inbox transitions (`eventHash`, `state`, coded `reason`); each wake decision (`admitted`, `deferred`, `refused` with `reason`); result delivery into an activation (`delivery`, `durationMs`); a durable terminal whose inbox settlement rejected (session event); a failed acknowledgement of a new worker's earlier completion |
+| `TRON_SETTINGS_OUTCOME_PROOF_DEFERRED` | warning | A settings delivery's canonical proof failed; its outbox remains retained for later proof, without exposing request IDs or paths |
 | `host.pressure` | info; warning at `critical` | A Home-status read saw the host-pressure level change: `state`, `transition`, CPU busy, loop utilization and load per CPU; it informs and never holds a worker back |
 
 ## Verify

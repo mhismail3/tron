@@ -59,7 +59,7 @@ describe("native settings outcome durability", () => {
     await f.settingsChanges.decide(held.approval!.requestId, { digest: held.approval!.digest, approved: true, decidedBy: { kind: "ui", id: "phone" } });
     await prompt(f.slot, "Hear the outcome");
     expect(outcomes(f.slot)).toHaveLength(1);
-    expect((await f.approvals.takeOutcomes(f.slot.id)).map(request => request.requestId)).toEqual([held.approval!.requestId]);
+    expect((await f.approvals.takeOutcomes([f.slot.id])).map(request => request.requestId)).toEqual([held.approval!.requestId]);
     const path = f.slot.sessionFile!;
     const target = await stat(kind === "file" ? path : dirname(path));
     const sync = durability.syncDurably;
@@ -73,10 +73,10 @@ describe("native settings outcome durability", () => {
     expect(failed).toBe(true);
     expect(f.slot.snapshot().phase).toBe("idle");
     expect(outcomes(f.slot)).toHaveLength(1);
-    expect((await f.approvals.takeOutcomes(f.slot.id)).map(request => request.requestId)).toEqual([held.approval!.requestId]);
+    expect((await f.approvals.takeOutcomes([f.slot.id])).map(request => request.requestId)).toEqual([held.approval!.requestId]);
     vi.restoreAllMocks();
     await prompt(f.slot, "Retry the durable proof");
-    expect(await f.approvals.takeOutcomes(f.slot.id)).toEqual([]);
+    expect(await f.approvals.takeOutcomes([f.slot.id])).toEqual([]);
     expect(outcomes(f.slot)).toHaveLength(1);
     artifacts.push({ case: `sync-${kind}`, requestId: held.approval!.requestId, delivered: outcomes(f.slot).map(entry => entry.id) });
   });
@@ -85,7 +85,7 @@ describe("native settings outcome durability", () => {
     const f = await gateway();
     const held = await f.request(f.slot.id);
     await f.settingsChanges.decide(held.approval!.requestId, { digest: held.approval!.digest, approved: true, decidedBy: { kind: "ui", id: "phone" } });
-    const outcome = await f.settingsChanges.takeOutcomes(f.slot.id);
+    const outcome = await f.settingsChanges.takeOutcomes([f.slot.id]);
     const input = join(f.root, "outcome-input.json"); const marker = join(f.root, "outcome-cut");
     await writeFile(input, JSON.stringify({ path: f.slot.sessionFile, outcome }));
     await f.registry.dispose();
@@ -104,7 +104,7 @@ describe("native settings outcome durability", () => {
       const slot = await cold.acquire(f.slot.id);
       await prompt(slot, "Recover the outcome"); await prompt(slot, "Prove it stays heard once");
       expect(outcomes(slot)).toHaveLength(1);
-      expect(await f.approvals.takeOutcomes(slot.id)).toEqual([]);
+      expect(await f.approvals.takeOutcomes([slot.id])).toEqual([]);
       expect(await readFile(f.effects, "utf8")).toBe("applied\n");
       artifacts.push({ case: `crash-${cut}`, requestId: held.approval!.requestId, canonical: outcomes(slot).map(entry => entry.id) });
     } finally {
@@ -133,7 +133,7 @@ describe("native settings outcome durability", () => {
     await waitFor(() => outcomes(slot).length === 1 && slot.snapshot().phase === "idle" || undefined, "autonomous settings wake settles without a user prompt").catch(error => {
       artifacts.push({ case: `autonomous-${status}-failure`, entries: slot.canonicalSessionEntries(), snapshot: slot.snapshot(), signals: f.signals }); throw error;
     });
-    await waitFor(async () => (await f.approvals.takeOutcomes(slot.id)).length === 0 || undefined, "durable wake acknowledgement");
+    await waitFor(async () => (await f.approvals.takeOutcomes([slot.id])).length === 0 || undefined, "durable wake acknowledgement");
     const entries = slot.canonicalSessionEntries(); const message = outcomes(slot)[0]!;
     expect(message).toMatchObject({ details: { requests: [{ requestId: held.approval!.requestId, status }] } });
     expect(providerOutcomes).toEqual([String(message.content)]);
@@ -167,14 +167,14 @@ describe("native settings outcome durability", () => {
     const held = await f.request(slot.id, "home");
     await f.settingsChanges.decide(held.approval!.requestId, { digest: held.approval!.digest, approved: true, decidedBy: { kind: "ui", id: "phone" } });
     await waitFor(() => outcomes(slot).length === 1 && slot.snapshot().phase === "idle" || undefined, "Home outcome visibly appended");
-    await waitFor(async () => failed > 0 || (await f.approvals.takeOutcomes(slot.id)).length === 0 || undefined, "Home attempts post-append proof or acknowledgement");
+    await waitFor(async () => failed > 0 || (await f.approvals.takeOutcomes([slot.id])).length === 0 || undefined, "Home attempts post-append proof or acknowledgement");
     expect(failed).toBeGreaterThan(0);
     await owner.pauseMemory();
     expect(outcomes(slot)).toHaveLength(1);
-    expect((await f.approvals.takeOutcomes(slot.id)).map(request => request.requestId)).toEqual([held.approval!.requestId]);
+    expect((await f.approvals.takeOutcomes([slot.id])).map(request => request.requestId)).toEqual([held.approval!.requestId]);
     vi.restoreAllMocks();
     await owner.resumeMemory();
-    await waitFor(async () => (await f.approvals.takeOutcomes(slot.id)).length === 0 || undefined, "Home acknowledges the existing outcome after durable recovery");
+    await waitFor(async () => (await f.approvals.takeOutcomes([slot.id])).length === 0 || undefined, "Home acknowledges the existing outcome after durable recovery");
     expect(outcomes(slot)).toHaveLength(1);
     expect(await readFile(f.effects, "utf8")).toBe("applied\n");
     artifacts.push({ case: `home-sync-${kind}`, failed, requestId: held.approval!.requestId, canonicalEntryId: outcomes(slot)[0]!.id });
@@ -187,10 +187,10 @@ describe("native settings outcome durability", () => {
     await f.settingsChanges.decide(held.approval!.requestId, { digest: held.approval!.digest, approved: false, decidedBy: { kind: "ui", id: "phone" } });
     await waitFor(() => f.signals.some(signal => signal.outcome === "wake" && signal.reason === "paused") || undefined, "paused wake refusal");
     expect(outcomes(slot)).toHaveLength(0);
-    expect((await f.approvals.takeOutcomes(slot.id)).map(request => request.requestId)).toEqual([held.approval!.requestId]);
+    expect((await f.approvals.takeOutcomes([slot.id])).map(request => request.requestId)).toEqual([held.approval!.requestId]);
     await owner.resumeMemory();
     await waitFor(() => outcomes(slot).length === 1 && slot.snapshot().phase === "idle" || undefined, "resume delivers the retained outcome without a prompt");
-    await waitFor(async () => (await f.approvals.takeOutcomes(slot.id)).length === 0 || undefined, "resumed outcome acknowledgement");
+    await waitFor(async () => (await f.approvals.takeOutcomes([slot.id])).length === 0 || undefined, "resumed outcome acknowledgement");
     artifacts.push({ case: "refused-then-resumed", requestId: held.approval!.requestId });
   });
 });

@@ -950,11 +950,11 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         return { ...result, worker: { ...task, ...slot.taskWorkerSettingsState() } };
       },
       takeOutcomes: async delivered => {
-        // Pi runs before-agent-start before appending this admitted trigger. Its
-        // actual input, not a second outbox selection, owns the wake's message.
-        if (this.homeWakeTrigger?.input.message.customType === SETTINGS_OUTCOME_MESSAGE) return undefined;
+        // Home admits settings messages through its bounded, cancellable input
+        // envelope for both user turns and wakes; the native hook is ordinary-only.
+        if (this.usesHomeSettings) return undefined;
         const path = this.sessionFile;
-        if (!path) return delivered?.length ? undefined : owners.changes.takeOutcomes(this.id, []);
+        if (!path) return delivered?.length ? undefined : owners.changes.takeOutcomes([this.id], []);
         const durable = new Set<string>();
         try {
           await visitCanonicalSessionEntries({ path, sessionId: this.id, maxLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES, durable: true,
@@ -962,15 +962,15 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         } catch (error) {
           // A new conversation has no file until its first prompt is saved. It
           // can select an untold outcome, but cannot acknowledge any delivery.
-          if ((error as NodeJS.ErrnoException).code === "ENOENT" && !delivered?.length) return owners.changes.takeOutcomes(this.id, []);
+          if ((error as NodeJS.ErrnoException).code === "ENOENT" && !delivered?.length) return owners.changes.takeOutcomes([this.id], []);
           // An unreadable or unsynchronized cut proves nothing. Keep the outbox
           // pending, without refusing this prompt or appending a duplicate.
           return undefined;
         }
-        // A wake's trigger can already be SDK-visible before its append reaches
-        // this cut. Do not reselect it as a second before-agent-start message.
+        // SDK visibility can precede canonical durability. Unproven delivery
+        // IDs cannot retire an outcome or cause its selection a second time.
         if (delivered?.some(id => !durable.has(id))) return undefined;
-        return owners.changes.takeOutcomes(this.id, delivered ?? [...durable]);
+        return owners.changes.takeOutcomes([this.id], delivered ?? [...durable]);
       },
     };
   }
@@ -5654,10 +5654,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   /** Starts one Home wake: the inbox's pending results start the run. */
-  async admitHomeWake(): Promise<{ delivered: boolean }> {
+  async admitHomeWake(cancellationEpoch: number): Promise<{ delivered: boolean }> {
     let delivered = false;
     await this.prompt("", [], undefined, undefined, undefined, {
-      kind: "homeWake", operationId: randomUUID(), origin: { kind: "gateway", ownerId: "home", title: "Home", confidence: "boundary" },
+      kind: "homeWake", cancellationEpoch, operationId: randomUUID(), origin: { kind: "gateway", ownerId: "home", title: "Home", confidence: "boundary" },
       onDelivered: (value) => { delivered = value; },
     });
     return { delivered };
@@ -5682,19 +5682,22 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   /** Starts a wake's run with its trigger, or completes an operation with nothing to deliver. */
   public startHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger | undefined,
-    accept: (accepted: boolean) => void): Promise<void> {
+    accept: (accepted: boolean) => void, cancellationEpoch: number): Promise<void> {
     accept(true);
-    return trigger ? this.sendHomeWake(session, operationId, trigger) : Promise.resolve();
+    return trigger ? this.sendHomeWake(session, operationId, trigger, cancellationEpoch) : Promise.resolve();
   }
 
   /** Pi appends the trigger and runs the turn. Refuses to leave an inbox result admitted
    * when the trigger never reached the canonical session: it returns to pending first, so
    * a terminal receipt cannot settle it as outcome-unknown. */
-  private async sendHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger): Promise<void> {
+  private async sendHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger, cancellationEpoch: number): Promise<void> {
     const eventId = trigger.message.details.eventId;
     this.inboxAttributedMessages.add(eventId);
     this.homeWakeTrigger = { input: trigger, operationId };
     try {
+      // Stop may win while admission awaits receipt, settings or inbox I/O.
+      // Keep this inside the existing trigger-release fence, before SDK append.
+      if (this.runAbort.cancellationEpoch !== cancellationEpoch) throw new GatewayError("cancelled", "Home wake stopped before delivery");
       await session.sendCustomMessage(trigger.message, { triggerTurn: true });
       if (!this.hasCanonicalCustomMessage(eventId)) throw new GatewayError("conflict", "Home wake trigger was not persisted");
     } catch (error) {

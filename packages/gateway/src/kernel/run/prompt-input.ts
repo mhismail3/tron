@@ -25,6 +25,8 @@ interface AutomationPromptOwnership<TaskFence> {
 /** A Home wake: Gateway-authored, with no user input. The inbox's trigger result starts the run. */
 interface HomeWakeOwnership {
   kind: "homeWake";
+  /** Captured from the native cancellation owner before asynchronous selection. */
+  cancellationEpoch: number;
   operationId: string;
   origin: ChatOrigin;
   onDelivered: (delivered: boolean) => void;
