@@ -316,8 +316,10 @@ describe("Home task bounded backlogs", () => {
   }, 30_000);
 
   it("delivers a never-fit report by reference before its successor and reads immutable bounded pages", async () => {
-    // A window the fixed Home prefix fits with room for one small result: the 64 KB report never does.
-    const f = await fixture(undefined, false, 8_000); const model = f.faux.getModel();
+    // Budget the current full Home tool/profile prefix plus its output reserve
+    // and a reference with one small successor. The unchanged reference/content
+    // checks below still prove the 64 KiB report itself never fits inline.
+    const f = await fixture(undefined, false, 10_000); const model = f.faux.getModel();
     const owner = homeOwnerOf(f.registry);
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     f.faux.setResponses([fauxAssistantMessage([reportCall("large", "🦊".repeat(16384))], { stopReason: "toolUse" })]);
