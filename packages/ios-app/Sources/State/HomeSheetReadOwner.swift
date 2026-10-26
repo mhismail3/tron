@@ -291,11 +291,12 @@ struct HomeProfileChangeResultDTO: Decodable, Sendable {
 struct HomeProfileListDTO: Decodable, Equatable, Sendable {
     struct Item: Decodable, Equatable, Hashable, Sendable, Identifiable {
         enum Kind: String, Codable, Sendable, CaseIterable {
-            case preference, standingDecision = "standing-decision", delegationDefault = "delegation-default", fact
+            case preference, standingDecision = "standing-decision", delegationDefault = "delegation-default", fact, correction
         }
         enum Status: String, Decodable, Sendable { case active, superseded, retired }
         let id: String
         let revisionId: String
+        let path: String
         let kind: Kind
         let text: String
         let confirmed: Bool
@@ -304,7 +305,7 @@ struct HomeProfileListDTO: Decodable, Equatable, Sendable {
         let updatedAt: String
         var valid: Bool {
             !id.isEmpty && id.utf8.count <= 200 && !revisionId.isEmpty && revisionId.utf8.count <= 200
-                && text.utf16.count <= 4096 && [createdAt, updatedAt].allSatisfy { $0.utf8.count <= 64 }
+                && !path.isEmpty && path.utf8.count <= 131 && text.utf16.count <= 4096 && [createdAt, updatedAt].allSatisfy { $0.utf8.count <= 64 }
         }
     }
     let items: [Item]

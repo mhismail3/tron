@@ -643,7 +643,7 @@ private actor HostedHomeShellGateway {
             case "retire": item.status = "retired"
             case "supersede":
                 let next = HostedProfileItem(id: UUID().uuidString.lowercased(), revisionId: UUID().uuidString.lowercased(),
-                    kind: object["kind"]?.stringValue ?? item.kind, text: object["text"]?.stringValue ?? item.text,
+                    kind: object["kind"]?.stringValue ?? item.kind, path: item.path, text: object["text"]?.stringValue ?? item.text,
                     confirmed: true, status: "active", createdAt: now, updatedAt: now)
                 item = profileItems[index]; item.status = "superseded"
                 profileItems.append(next); touched.append(next.id)

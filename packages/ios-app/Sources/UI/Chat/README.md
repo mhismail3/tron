@@ -157,8 +157,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   cache-hit percentage, with the ring centered against title and subtext together. Its stats line
   uses `SessionSummaryTypography.usageValue` (the shared Dynamic Type code family at the settings
   subtext size), independent of the selected reading family. Both Manage
-  surfaces place their model card immediately below the summary. Normal sessions retain their own summary. Profile's Confirm pill alone
-  opens bulk confirmation; Retire uses destructive styling throughout. Chapter summaries keep
+  surfaces place their model card immediately below the summary. Normal sessions retain their own summary. Profile groups active notes by personal area and shows exact scope paths, with **Confirmed by you** / **Inferred** states; confirmation is per exact note, never bulk. Prior organization stays read-only until explicit placement review. Placement does not grant execution permission. Retire uses destructive styling throughout. Chapter summaries keep
   their message/reply/task counts in wrapping shared tags. Individual task Result and Worker
   values use the shared row with the semantic `subheadline` reading style, including timestamps,
   multiline check-ins and live-run times. Values wrap without a line cap; titles keep their existing typography.

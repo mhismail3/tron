@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 /// The learned profile: what Home has saved about the maintainer as Knowledge
-/// notes, grouped by kind in the order Home applies them. On a Gateway with
+/// notes, grouped by personal area and exact scope rather than instruction kind. On a Gateway with
 /// `home-profile-edit.v1` the maintainer confirms, edits, replaces and retires items
 /// here; every change goes through the settings change path, shows in Changes and
 /// can be undone. An older Gateway keeps the sheet read-only.
@@ -10,45 +10,13 @@ extension HomeSheet {
     func profile(_ list: HomeProfileListDTO) -> some View {
         let active = list.active
         let inactive = list.items.filter { $0.status != .active }
-        let inferred = active.filter { !$0.confirmed }
-        let editable = model.homeProfileEditable
         return TronSettingsSections(alignment: .leading, spacing: 18) {
             profileHeader(list)
             if active.isEmpty { profileEmptyPlaceholder }
-            if editable, inferred.count > 1 {
-                TronListGroup([HomeProfileConfirmAll(count: inferred.count)], identifier: "home-profile-confirm-all") { row in
-                    TronSettingsRow(icon: nil, title: "Confirm all inferred",
-                                    subtitle: "\(row.count) items become binding on every Home turn", accent: accent) {
-                        Button { profileEdit.confirmingAll = true } label: {
-                            TronInlineActionLabel("Confirm", isWorking: profileEdit.working, accent: accent)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(profileEdit.working)
-                        .accessibilityIdentifier("home-profile-confirm-all-button")
-                    }
-                    // Like SettingsRendererRow, an accessory keeps the real
-                    // value control separate instead of combining it into the row.
-                    .environment(\.tronSettingsRowAccessory, { AnyView(EmptyView()) })
-                }
-                .tronManagedSheet(isPresented: $profileEdit.confirmingAll, identity: "home.\(profileID).profile-confirm-all") {
-                    TronConfirmationSheet(
-                        title: "Confirm \(inferred.count) items?",
-                        message: "Every inferred item becomes binding from Home's next activation. You can undo this.",
-                        confirmTitle: "Confirm all",
-                        destructive: false,
-                        icon: "checkmark.seal",
-                        onConfirm: {
-                            changeProfile(inferred.map { HomeProfileChange(action: .confirm, id: $0.id, expectedRevision: $0.revisionId) },
-                                          done: "Confirmed \(inferred.count) items")
-                        }
-                    )
-                }
-            }
-            // One container per kind, in the order Home applies them, then what
-            // no longer applies.
+            // Shared sections preserve row/sheet identity while placement changes.
             if !list.items.isEmpty {
                 TronListGroup(sections: HomeProfilePresentation.groups(active).map {
-                    TronListSection(title: HomeProfilePresentation.groupTitle($0.kind), rows: $0.items)
+                    TronListSection(title: $0.title, rows: $0.items)
                 } + [TronListSection(title: "No longer applied", rows: inactive)], identifier: "home-profile-items") { item in
                     TronListButton(HomeProfilePresentation.rowContent(item), identifier: "home-profile-item-\(item.id)") {
                         present(.profileItem(item))
@@ -73,9 +41,7 @@ extension HomeSheet {
     }
 
     @ViewBuilder private func profileHeader(_ list: HomeProfileListDTO) -> some View {
-        TronSettingsCaption(model.homeProfileEditable
-            ? "Learned from your messages to Home. Confirmed items are binding; inferred items are Home's default until you confirm them. Changes apply from Home's next activation."
-            : "Learned from your messages to Home. Confirmed items are binding; inferred items are Home's default until you confirm them.").containerValue(\.tronSettingsSection, false)
+        TronSettingsCaption("About you, organized by area. Confirmed by you and Inferred describe what you have reviewed. Home reads relevant notes; placement grants no execution permission. Unsorted notes await review.").containerValue(\.tronSettingsSection, false)
         profileEditNotices()
     }
 
@@ -105,8 +71,11 @@ extension HomeSheet {
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home-profile-item-detail")
-            if model.homeProfileEditable, item.status == .active {
+            if model.homeProfileEditable, item.status == .active, item.path != "prior" {
                 profileItemActions(item)
+            }
+            if item.path == "prior" {
+                TronSettingsCaption("Prior organization is read-only until its exact placement has been reviewed.").containerValue(\.tronSettingsSection, false)
             }
             TronSettingsGroup("Knowledge note", accent: accent) {
                 VStack(spacing: 0) {
@@ -132,7 +101,7 @@ extension HomeSheet {
                 if !item.confirmed {
                     Button { confirm(item) } label: {
                         TronSettingsRow(icon: "checkmark.seal", title: "Confirm",
-                                        subtitle: "Make it binding on every Home turn", accent: accent)
+                                        subtitle: "Mark this exact note as confirmed by you", accent: accent)
                     }
                     .buttonStyle(.plain)
                     .disabled(profileEdit.working)
@@ -287,7 +256,6 @@ struct HomeProfileEditState {
     var working = false
     var undo: Undo?
     var failure: Failure?
-    var confirmingAll = false
 }
 
 /// Edits an item's text and kind, the Settings value-editor way: Save in the
@@ -421,22 +389,20 @@ struct HomeProfileRetireEditor: View {
 /// One owner of the profile rows' derived text, shared by the Manage Home row,
 /// the Profile sheet and the `profile` tool's detail.
 enum HomeProfilePresentation {
-    struct Group { let kind: HomeProfileListDTO.Item.Kind; let items: [HomeProfileListDTO.Item] }
+    struct Group { let title: String; let items: [HomeProfileListDTO.Item] }
 
-    /// Items grouped in the Gateway's kind order; the Gateway already orders each kind by creation.
+    private static let areas: [(String, String)] = [
+        ("life", "Life & people"), ("routines", "Routines & wellbeing"),
+        ("communication", "Communication"), ("engineering", "Engineering"),
+        ("resources", "Machines, devices & services"), ("projects", "Projects"),
+        ("corrections", "Corrections"), ("inferred", "Unsorted"), ("prior", "Prior organization")
+    ]
+
     static func groups(_ items: [HomeProfileListDTO.Item]) -> [Group] {
-        HomeProfileListDTO.Item.Kind.allCases.compactMap { kind in
-            let members = items.filter { $0.kind == kind }
-            return members.isEmpty ? nil : Group(kind: kind, items: members)
-        }
-    }
-
-    static func groupTitle(_ kind: HomeProfileListDTO.Item.Kind) -> String {
-        switch kind {
-        case .preference: "Preferences"
-        case .standingDecision: "Standing decisions"
-        case .delegationDefault: "Delegation defaults"
-        case .fact: "Facts"
+        areas.compactMap { path, title in
+            let members = items.filter { $0.path == path || $0.path.hasPrefix(path + "/") }
+                .sorted { $0.path == $1.path ? $0.createdAt < $1.createdAt : $0.path < $1.path }
+            return members.isEmpty ? nil : Group(title: title, items: members)
         }
     }
 
@@ -446,6 +412,7 @@ enum HomeProfilePresentation {
         case .standingDecision: "Standing decision"
         case .delegationDefault: "Delegation default"
         case .fact: "Fact"
+        case .correction: "Correction"
         }
     }
 
@@ -460,6 +427,7 @@ enum HomeProfilePresentation {
         case .standingDecision: "flag"
         case .delegationDefault: "arrow.triangle.branch"
         case .fact: "info.circle"
+        case .correction: "arrow.uturn.backward.circle"
         }
     }
 
@@ -473,7 +441,7 @@ enum HomeProfilePresentation {
 
     static func stateLabel(_ item: HomeProfileListDTO.Item) -> String {
         switch item.status {
-        case .active: item.confirmed ? "Confirmed" : "Inferred"
+        case .active: item.confirmed ? "Confirmed by you" : "Inferred"
         case .superseded: "Superseded"
         case .retired: "Retired"
         }
@@ -488,7 +456,7 @@ enum HomeProfilePresentation {
 
     static func stateLine(_ item: HomeProfileListDTO.Item) -> String {
         switch item.status {
-        case .active: item.confirmed ? "Binding on every Home turn" : "Home's default until you confirm it"
+        case .active: item.confirmed ? "Confirmed by you · " + item.path : "Inferred · " + item.path
         case .superseded: "Replaced by a newer item"
         case .retired: "No longer applies"
         }
@@ -499,11 +467,6 @@ enum HomeProfilePresentation {
     static func rowContent(_ item: HomeProfileListDTO.Item) -> TronListRowContent {
         TronListRowContent(title: HomeChapterPresentation.topicPreview(item.text, limit: 160), preview: true,
                            status: TronListStatus(text: stateLabel(item), tone: stateAccent(item)),
-                           tags: item.status == .active ? [] : [TronListTag(text: kindTitle(item.kind))])
+                           tags: [TronListTag(text: item.path == "prior" ? "Prior organization" : item.path), TronListTag(text: kindTitle(item.kind))])
     }
-}
-
-private struct HomeProfileConfirmAll: Identifiable {
-    let count: Int
-    var id: String { "confirm-all" }
 }
