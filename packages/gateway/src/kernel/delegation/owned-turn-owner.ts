@@ -371,6 +371,17 @@ export class OwnedTurnOwner {
   }
 
 
+  /** Report admission uses the same fenced refresh as live artifact watchers,
+   * including completed workflow roots whose children still own live work. */
+  async reconcileLiveExtensionArtifacts(): Promise<void> {
+    for (const activity of this.liveExtensionActivities()) {
+      const binding = activity.runId ? this.extensionRunOwnership.get(activity.runId) : undefined;
+      if (binding?.asyncDir) {
+        await refreshExtensionActivityFromArtifact(this, binding.toolCallId, binding.asyncDir);
+      }
+    }
+  }
+
   /** Administrative drain gets a direct, bounded reconciliation lane for
    * exact-owned artifacts instead of depending on watcher delivery or ambient
    * discovery scheduling. Genuine nonterminal work remains a blocker. */

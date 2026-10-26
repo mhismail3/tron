@@ -1494,6 +1494,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
+              // A joined run can be terminal before its watcher publication arrives.
+              await this.ownedTurns.reconcileLiveExtensionArtifacts();
               const live = this.ownedTurns.liveSubagentRuns().length;
               if (live > 0) throw new GatewayError("conflict", reportLiveRunsRefusal(live), true);
               await this.persistCanonicalCustomEntry(HOME_TASK_REPORT, JSON.parse(JSON.stringify(report)), report.receiptId,

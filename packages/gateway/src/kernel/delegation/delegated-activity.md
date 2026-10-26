@@ -116,7 +116,11 @@ not depend on the Transport logger implementation. Optional logging and metadata
 - A completed workflow with running children stays open; those children are live work for the
   dashboard, drain, eviction and Home task settlement until terminal or proven paused-exited.
   Home task status, report admission and Stop select executions from one artifact frame: the
-  root ID while it owns live work, else each live child's run ID.
+  root ID while it owns live work, else each live child's run ID. Report admission
+  asks `OwnedTurnOwner` to refresh live activities' exact-owned artifacts before
+  selecting live work, including terminal roots with live children. It uses the
+  watcher's existing generation/disposal-fenced reader and preserves the shared
+  liveness policy for missing artifacts, recovery and failed receipt claims.
 - Recovery: an installed provider's recovered receipt binds source and replacement to the
   original launch; with the original runner's terminal proof the superseded run settles as
   stopped, never successful; the replacement stays active. Only the current tool and bounded
