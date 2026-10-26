@@ -114,9 +114,10 @@ struct HostedSettingsThreeLayerPreview: View {
                 TronSettingsDivider()
                 link("More Settings", "Connection, queues, and retries", "gearshape.2") { runRows }
             }
-            SettingsGroupCard(.tools) {
+            TronSettingsGroup("Tools & Extensions", accent: .tronCyan) {
                 link("Tools", "Available tools and image handling", "wrench.and.screwdriver") { tools }
             }
+            .tronSettingsVisualTheme(accent: .tronCyan)
             if !home {
                 TronSettingsGroup(nil) {
                     link("Set by Project", "2 repository settings", "folder.badge.gearshape") { projectOnly }

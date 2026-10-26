@@ -41,7 +41,7 @@ final class TronDashboardHeadersRegressionUITests: XCTestCase {
             XCTAssertTrue(app.buttons["Appearance"].waitForExistence(timeout: 8))
             Thread.sleep(forTimeInterval: 1)
             capture("global-settings-\(dark ? "dark" : "light")-top")
-            for title in ["This iPhone", "Accounts", "Agent", "Tools & Extensions", "System"] {
+            for title in ["This iPhone", "Accounts", "Agent & Tools", "System"] {
                 let heading = app.staticTexts[title].firstMatch
                 for _ in 0..<5 where !heading.isHittable { app.swipeUp() }
                 XCTAssertTrue(heading.exists, "Missing Global Settings group: \(title)\n\(app.debugDescription)")

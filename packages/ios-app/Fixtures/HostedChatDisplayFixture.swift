@@ -1096,7 +1096,17 @@ private actor HostedHomeShellGateway {
         let profileKeys = reviewKeys + (configuredModels.isEmpty ? [] : [memoryKey]) + [modelKey, .object(thinkingKey),
             HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "session")
         ] + homeKeys
-        return .object(["keys": .array(profileKeys), "sections": .array(HostedSettingsReviewSchema.sections)])
+        let presented = profileKeys.map { value -> JSONValue in
+            guard var row = value.objectValue, row["key"]?.stringValue?.hasPrefix("model.queue[") == true,
+                  var presentation = row["presentation"]?.objectValue else { return value }
+            // Home owns editable queues; Session launch inputs keep their own fixture contract.
+            presentation["control"] = .string("list")
+            presentation["valueKind"] = .string("stringList")
+            presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
+            row["presentation"] = .object(presentation)
+            return .object(row)
+        }
+        return .object(["keys": .array(presented), "sections": .array(HostedSettingsReviewSchema.sections)])
     }
 
     private func homeSettingsOptions(_ params: [String: JSONValue]) throws -> JSONValue {
@@ -1110,7 +1120,7 @@ private actor HostedHomeShellGateway {
                     return .object(option)
                 })])
         }
-        if params["key"]?.stringValue == "model.ref[role=chat]" {
+        if params["key"]?.stringValue == "model.ref[role=chat]" || params["key"]?.stringValue?.hasPrefix("model.queue[") == true {
             let options: [JSONValue] = [("claude-opus-5-5", "Claude Opus 5.5"), ("claude-haiku-5-5", "Claude Haiku 5.5")].map { id, name in
                 .object(["value": .object(["provider": .string("anthropic"), "id": .string(id)]), "label": .string(name)])
             }

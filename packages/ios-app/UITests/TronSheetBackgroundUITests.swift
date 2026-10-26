@@ -27,10 +27,10 @@ final class TronSheetBackgroundUITests: XCTestCase {
             app.launch()
             XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
             app.buttons["Open Settings"].tap()
-            let models = app.buttons["settings-section-model-open"]
+            let models = app.buttons["settings-link-Agent Behavior"]
             XCTAssertTrue(models.waitForExistence(timeout: 10))
             models.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Models"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.navigationBars.staticTexts["Agent Behavior"].waitForExistence(timeout: 10))
             capture(app, name: "settings-models-\(mode)")
             app.terminate()
 

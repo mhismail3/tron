@@ -133,14 +133,14 @@ final class TronChatHapticsUITests: XCTestCase {
     @MainActor func testSettingsAndNestedSheetsPlayOneImpactEach() {
         continueAfterFailure = false
         let app = launchSettings([]); defer { app.terminate() }
-        let section = app.buttons["settings-section-model-open"]
+        let section = app.buttons["settings-link-Agent Behavior"]
         XCTAssertTrue(section.waitForExistence(timeout: 30), app.debugDescription)
         assertHaptics(app, "none", "the Settings root presents no sheet")
         section.tap()
         XCTAssertTrue(app.descendants(matching: .any)["settings-section-model-detail"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(waitHaptics(app, "sheetPresented"), haptics(app))
 
-        let heading = app.navigationBars.staticTexts["Models"].firstMatch
+        let heading = app.navigationBars.staticTexts["Agent Behavior"].firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 5), app.debugDescription)
         heading.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))

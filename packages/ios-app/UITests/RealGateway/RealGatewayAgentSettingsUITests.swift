@@ -5,17 +5,17 @@ import XCTest
 /// into the fixture Gateway's canonical store. No user settings are touched.
 extension RealGatewayPairAndChatUITests {
     @MainActor
-    func testAgentSettingsQueuesSaveReopenAndResetLight() throws {
-        try agentSettingsQueues(appearance: "light")
+    func testAgentBehaviorQueuesSaveReopenAndResetLight() throws {
+        try agentBehaviorQueues(appearance: "light")
     }
 
     @MainActor
-    func testAgentSettingsQueuesSaveReopenAndResetDark() throws {
-        try agentSettingsQueues(appearance: "dark")
+    func testAgentBehaviorQueuesSaveReopenAndResetDark() throws {
+        try agentBehaviorQueues(appearance: "dark")
     }
 
     @MainActor
-    private func agentSettingsQueues(appearance: String) throws {
+    private func agentBehaviorQueues(appearance: String) throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
@@ -43,14 +43,14 @@ extension RealGatewayPairAndChatUITests {
             XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
             expandAgentSheet(app, title: "Global Settings")
             keepScreenshot(app, name: "2010-global-root-top-\(appearance)")
-            let agentSettings = app.buttons["settings-link-Agent Settings"]
-            revealBelowNavigationBar(app, agentSettings)
-            XCTAssertTrue(agentSettings.isHittable, app.debugDescription)
-            for _ in 0..<3 where agentSettings.frame.maxY > app.windows.firstMatch.frame.maxY - 120 { app.swipeUp() }
-            keepScreenshot(app, name: "2010-global-root-system-\(appearance)")
-            agentSettings.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Agent Settings"].waitForExistence(timeout: 30), app.debugDescription)
-            expandAgentSheet(app, title: "Agent Settings")
+            let agentBehavior = app.buttons["settings-link-Agent Behavior"]
+            revealBelowNavigationBar(app, agentBehavior)
+            XCTAssertTrue(agentBehavior.isHittable, app.debugDescription)
+            for _ in 0..<3 where agentBehavior.frame.maxY > app.windows.firstMatch.frame.maxY - 120 { app.swipeUp() }
+            keepScreenshot(app, name: "2010-global-root-agent-tools-\(appearance)")
+            agentBehavior.tap()
+            XCTAssertTrue(app.navigationBars.staticTexts["Agent Behavior"].waitForExistence(timeout: 30), app.debugDescription)
+            expandAgentSheet(app, title: "Agent Behavior")
             keepScreenshot(app, name: "2010-agent-settings-top-\(appearance)")
             for (role, label) in [("worker", "Worker models"), ("subagent", "Subagent models"), ("background", "Background models")] {
                 // Real resolutions include the fixed role qualifier in the row identity;
@@ -97,8 +97,89 @@ extension RealGatewayPairAndChatUITests {
             keepScreenshot(app, name: "2010-agent-settings-trust-\(appearance)")
             for _ in 0..<5 { app.swipeUp() }
             keepScreenshot(app, name: "2010-agent-settings-more-\(appearance)")
+            dismissTopSheet(app)
+            let changes = app.buttons["Changes"]
+            revealBelowNavigationBar(app, changes)
+            changes.tap()
+            let entry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label BEGINSWITH 'Background models,'")).firstMatch
+            XCTAssertTrue(entry.waitForExistence(timeout: 30), app.debugDescription)
+            entry.tap()
+            XCTAssertTrue(app.staticTexts["Before"].waitForExistence(timeout: 15), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["After"].exists, app.debugDescription)
+            let undo = app.buttons["Undo"]
+            revealBelowNavigationBar(app, undo)
+            XCTAssertTrue(undo.waitForExistence(timeout: 15), app.debugDescription)
+            undo.tap()
+            let confirm = app.buttons["Undo change"]
+            XCTAssertTrue(confirm.waitForExistence(timeout: 15), app.debugDescription)
+            confirm.tap()
+            XCTAssertTrue(waitUntil(timeout: 15) { saved("background") == [] }, "Changes Undo restores the explicit empty queue through the receipt owner")
+            keepScreenshot(app, name: "2010-agent-behavior-changes-\(appearance)")
             app.terminate()
         }
+    }
+
+    @MainActor
+    func testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
+        let tron = agent.deletingLastPathComponent().appendingPathComponent("tron/gateway")
+        let homeFile = tron.appendingPathComponent("home/profile.json")
+        let globalFile = tron.appendingPathComponent("settings/gateway.json")
+        func queue(_ file: URL, field: String) -> [String]? {
+            let document = (try? JSONSerialization.jsonObject(with: Data(contentsOf: file))) as? [String: Any]
+            return (document?[field] as? [String: Any])?["worker"] as? [String]
+        }
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(waitForEnabled(home, timeout: 90), app.debugDescription)
+        home.tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitForEnabled(ring, timeout: 60), app.debugDescription)
+        ring.tap()
+        let settings = app.buttons["home-manage-settings"]
+        revealBelowNavigationBar(app, settings)
+        XCTAssertTrue(settings.waitForExistence(timeout: 30), app.debugDescription)
+        settings.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home Settings"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(app.buttons["settings-link-Agent Behavior"].exists, "Global consolidation must not replace Home's routes")
+        let models = app.buttons["settings-section-model-open"]
+        revealBelowNavigationBar(app, models)
+        models.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Models"].waitForExistence(timeout: 30), app.debugDescription)
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
+        revealBelowNavigationBar(app, row)
+        let edit = row.buttons.matching(NSPredicate(format: "label == 'Worker models' AND NOT identifier ENDSWITH '-reset'")).firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 15), app.debugDescription)
+        edit.tap()
+        addQueueModel(app, named: "Tron E2E Alternate")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == ["tron-e2e/e2e-alternate"] }, "Home Save must reach the canonical Home profile")
+        XCTAssertNil(queue(globalFile, field: "modelQueues"), "A Home edit must not change Global")
+        revealBelowNavigationBar(app, row)
+        edit.tap()
+        XCTAssertTrue(app.buttons["Remove tron-e2e/e2e-alternate"].waitForExistence(timeout: 15), app.debugDescription)
+        dismissTopSheet(app)
+        let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
+        revealBelowNavigationBar(app, revert)
+        revert.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == nil }, "Home Revert must remove its override")
+        XCTAssertNil(queue(globalFile, field: "modelQueues"))
+        keepScreenshot(app, name: "2010-home-queue-scope-and-reopen")
+    }
+
+    @MainActor
+    func openAgentBehavior(_ app: XCUIApplication) {
+        let link = app.buttons["settings-link-Agent Behavior"]
+        revealBelowNavigationBar(app, link)
+        XCTAssertTrue(link.waitForExistence(timeout: 30), app.debugDescription)
+        link.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Agent Behavior"].waitForExistence(timeout: 30), app.debugDescription)
+        expandAgentSheet(app, title: "Agent Behavior")
     }
 
     @MainActor

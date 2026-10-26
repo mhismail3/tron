@@ -788,7 +788,7 @@ final class TronSmokeUITests: XCTestCase {
         openRendererSection(app, "model")
         // Medium sheets scale the entire native AX projection (386/402 here).
         // Measure logical target sizes at large; the other journeys operate at medium.
-        expandSettingsSheet(app, title: "Models")
+        expandSettingsSheet(app, title: "Agent Behavior")
         let row = app.descendants(matching: .any)["settings-row-model.ref"]
         let editor = settingEditor(row)
         let reset = app.buttons["settings-row-model.ref-reset"]
@@ -936,14 +936,15 @@ final class TronSmokeUITests: XCTestCase {
                     closeTopSheet(app)
                 }
                 closeTopSheet(app)
-                tapScrolling(app.buttons["settings-section-model-open"], in: app)
-                expandSettingsSheet(app, title: "Models")
-                keepScreenshot(named: "1325-expanded-models-\(suffix)")
+                tapScrolling(app.buttons["settings-link-Agent Behavior"], in: app)
+                expandSettingsSheet(app, title: "Agent Behavior")
+                keepScreenshot(named: "1325-expanded-agent-behavior-\(suffix)")
                 closeTopSheet(app)
                 if !large {
-                    tapScrolling(app.buttons["settings-section-advanced-open"], in: app)
-                    expandSettingsSheet(app, title: "More Settings")
-                    keepScreenshot(named: "1325-expanded-more-\(suffix)")
+                    tapScrolling(app.buttons["settings-link-Agent Behavior"], in: app)
+                    expandSettingsSheet(app, title: "Agent Behavior")
+                    app.swipeUp(); app.swipeUp()
+                    keepScreenshot(named: "1325-expanded-agent-behavior-bottom-\(suffix)")
                     closeTopSheet(app)
                     tapScrolling(app.buttons["settings-link-Setup"], in: app)
                     expandSettingsSheet(app, title: "Setup")
@@ -1052,7 +1053,7 @@ final class TronSmokeUITests: XCTestCase {
                     XCTAssertFalse(app.buttons["Apply again"].exists)
                     keepScreenshot(named: "1305-changes-\(appearance)-repository-detail")
                 } else {
-                    XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10))
+                    XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].waitForExistence(timeout: 10))
                     keepScreenshot(named: "1305-global-\(appearance)")
                 }
                 app.terminate()
@@ -2729,8 +2730,8 @@ final class TronSmokeUITests: XCTestCase {
         let any = app.descendants(matching: .any)
         let applied = app.staticTexts["fixture.settings-renderer-applied"]
         let thinking = app.staticTexts["fixture.settings-renderer-thinking-options"]
-        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10), app.debugDescription)
-        // Settings: one row per section, every key on its section's sheet.
+        XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].waitForExistence(timeout: 10), app.debugDescription)
+        // Global combines agent sections; independently served sections still have their own rows.
         XCTAssertFalse(any["settings-row-model.ref"].exists, "Keys live on section sheets")
         XCTAssertFalse(app.buttons["Show all"].exists, "Settings never expands in place")
         XCTAssertTrue(app.buttons["settings-section-lab-open"].exists, "A section the app never heard of renders from its served title")
@@ -2938,8 +2939,10 @@ final class TronSmokeUITests: XCTestCase {
 
     /// Opens one section's sheet from Settings.
     @MainActor
-    private func openRendererSection(_ app: XCUIApplication, _ id: String, link: String? = nil) { // link: its grouping row (More Settings has Run)
-        tapScrolling(app.buttons["settings-section-\(link ?? id)-open"], in: app)
+    private func openRendererSection(_ app: XCUIApplication, _ id: String, link: String? = nil) {
+        let row = ["model", "workers", "context", "approvals", "run"].contains(id)
+            ? "settings-link-Agent Behavior" : "settings-section-\(link ?? id)-open"
+        tapScrolling(app.buttons[row], in: app)
         XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(id)-detail"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
@@ -2961,7 +2964,7 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["-tron-settings-renderer-fixture"]
         app.launch()
         defer { app.terminate() }
-        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["settings-row-model.ref-open"].exists, "No per-key intermediate sheet")
         openRendererSection(app, "model")
         let reset = app.buttons["settings-row-model.ref-reset"]
@@ -3123,7 +3126,7 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
-        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].waitForExistence(timeout: 10), app.debugDescription)
         keepScreenshot(named: "settings-renderer-dark-xxxl-primary")
         openRendererSection(app, "run", link: "advanced")
         scrollTo(any["settings-row-run.retry.maxRetries"], in: app)
@@ -3352,8 +3355,8 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["-tron-mac-settings-fixture"]
         app.launch()
         defer { app.terminate() }
-        // Settings is one row per section; Thinking is on the Model sheet.
-        tapScrolling(app.buttons["settings-section-model-open"], in: app)
+        // Global's direct model/thinking controls live in Agent Behavior.
+        tapScrolling(app.buttons["settings-link-Agent Behavior"], in: app)
         let thinking = app.descendants(matching: .any)["settings-row-model.thinking"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
         tapScrolling(settingEditor(thinking), in: app)
@@ -3365,8 +3368,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(slider.waitForNonExistence(timeout: 3))
         XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
         XCTAssertFalse(app.buttons["Settings Scope"].exists)
-        closeTopSheet(app) // Model
-        XCTAssertTrue(app.buttons["settings-section-model-open"].isHittable)
+        closeTopSheet(app) // Agent Behavior
+        XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].isHittable)
     }
 
     /// Device preferences survive destination dismissal and process relaunch.

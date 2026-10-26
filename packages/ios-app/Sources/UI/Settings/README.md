@@ -26,16 +26,17 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, App Customizations),
   Accounts (indigo: Connections, Model Providers, Connected Services),
-  Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
-  System (slate: Agent Settings, Mac Terminal, Push Notifications, Setup, Logs). Agent Settings
+  Agent & Tools (existing adaptive amber: Agent Behavior first, Tools, MCP Servers, Extensions, Hooks),
+  System (slate: Mac Terminal, Push Notifications, Setup, Logs). Agent Behavior
   opens one primary-accent sheet with the Model, Workers & delegation, Compaction, Trusted Projects,
   Agent changes and Connection groups in place, not another level of section links. The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
-  Models contains direct model/thinking, all three ordered model queues and the task budget.
+  Model contains direct model/thinking; Workers & delegation contains all three ordered model queues
+  and the task budget. Scoped Home navigation still names its workers/delegation destination Models.
   Queue drafts add available physical models through the shared picker, reorder/remove locally,
-  and write only on Save; an empty list is distinct from Reset/Revert to inheritance. A list
-  draft is keyed to its canonical input value so reopening after an accepted Save seeds the new
-  list, while local draft changes keep stable row identity.
+  and write only on Save; an empty list is distinct from Reset/Revert to inheritance. Each presentation
+  seeds its list draft from the canonical input. The existing presentation-surface generation owns
+  draft identity, so a refresh cannot replace unsaved edits and reopening seeds the latest list.
   Other routine settings have no editor exposure; explicit values retain read-only Reset/Revert and Project inspection. Compaction
   appears only while retained values need inspection or Revert. Scoped More Settings contains
   Agent changes and the HTTP proxy; Global embeds those groups directly. There is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared

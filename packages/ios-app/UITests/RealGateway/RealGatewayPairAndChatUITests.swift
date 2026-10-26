@@ -1274,9 +1274,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
         burst("settings")
-        openSheet("settings-section-model-open", "global-model", section: "model"); dismissTopSheet(app)
-        // More Settings carries Run and the approval floors; there is no Permissions row (#1295).
-        openSheet("settings-section-advanced-open", "global-more", section: "run")
+        openSheet("settings-link-Agent Behavior", "global-agent-behavior", section: "model")
+        // Run and approval floors are embedded beside Model in the consolidated sheet.
+        XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].waitForExistence(timeout: 30))
         openSheet("settings-instances-permissions.floor-open", "agent-approvals"); dismissTopSheet(app); dismissTopSheet(app)
         openSheet("settings-section-tools-open", "global-tools", section: "tools"); dismissTopSheet(app)
         for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"), ("Hooks", "hooks"),
@@ -1436,12 +1436,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         createSession(app, inWorkspace: fixture.workspace)
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 30)); gear.tap()
-        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertFalse(app.buttons["settings-section-context-open"].exists,
-                       "Inherited routine compaction has no editor or empty destination")
-        app.swipeUp()
-        let more = app.buttons["settings-section-advanced-open"]
-        revealBelowNavigationBar(app, more); more.tap()
+        openAgentBehavior(app)
+        XCTAssertFalse(settingRow(app, key: "context.compaction.enabled").exists,
+                       "Inherited routine compaction still has no editor in the consolidated sheet")
         let row = settingRow(app, key: "run.retry.maxRetries")
         revealBelowNavigationBar(app, row)
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)

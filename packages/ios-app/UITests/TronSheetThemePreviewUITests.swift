@@ -14,14 +14,14 @@ final class TronSheetThemePreviewUITests: XCTestCase {
             XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
             app.buttons["Open Settings"].tap()
             expand(app, title: "Global Settings")
-            open(app, "settings-section-advanced-open")
-            expand(app, title: "More Settings")
+            open(app, "settings-link-Agent Behavior")
+            expand(app, title: "Agent Behavior")
             capture(app, "more-top-\(mode)")
             app.swipeUp(); app.swipeUp()
             capture(app, "more-bottom-\(mode)")
             close(app)
-            open(app, "settings-section-model-open")
-            expand(app, title: "Models")
+            open(app, "settings-link-Agent Behavior")
+            expand(app, title: "Agent Behavior")
             capture(app, "models-top-\(mode)")
             app.swipeUp(); app.swipeUp()
             capture(app, "models-bottom-\(mode)")
@@ -40,8 +40,8 @@ final class TronSheetThemePreviewUITests: XCTestCase {
             app.navigationBars.staticTexts["/fixture/projects"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
             close(app); close(app)
-            open(app, "settings-link-Trusted Projects")
-            expand(app, title: "Trusted Projects")
+            open(app, "settings-link-Agent Behavior")
+            expand(app, title: "Agent Behavior")
             app.buttons["Add Project"].tap()
             XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
             capture(app, "workspace-trusted-\(mode)")
@@ -83,8 +83,8 @@ final class TronSheetThemePreviewUITests: XCTestCase {
                     expand(app, title: "Fixture")
                     open(app, "Configure source repository")
                 } else {
-                    open(app, "settings-link-Trusted Projects")
-                    expand(app, title: "Trusted Projects")
+                    open(app, "settings-link-Agent Behavior")
+                    expand(app, title: "Agent Behavior")
                     open(app, "trusted-projects-add")
                 }
                 XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
@@ -105,9 +105,9 @@ final class TronSheetThemePreviewUITests: XCTestCase {
     func testMovedSettingsRemainReachableWithEditorsAndSources() {
         let app = settings("dark")
         defer { app.terminate() }
-        open(app, "settings-section-advanced-open")
-        expand(app, title: "More Settings")
-        let header = app.staticTexts["Agent changes"]
+        open(app, "settings-link-Agent Behavior")
+        expand(app, title: "Agent Behavior")
+        let header = app.staticTexts["Agent approvals"]
         XCTAssertTrue(header.waitForExistence(timeout: 5))
         XCTAssertLessThan(header.frame.minY, app.staticTexts["Transport"].firstMatch.frame.minY)
         let summary = app.staticTexts["Which setting changes need your OK."]
@@ -132,8 +132,8 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         }
         XCTAssertTrue(app.staticTexts["Retries"].isHittable)
         close(app)
-        open(app, "settings-section-model-open")
-        expand(app, title: "Models")
+        open(app, "settings-link-Agent Behavior")
+        expand(app, title: "Agent Behavior")
         for label in ["Worker models", "Subagent models", "Thinking budgets", "Offered models"] {
             XCTAssertTrue(app.staticTexts[label].exists, "Missing moved model setting: \(label)")
         }

@@ -53,6 +53,14 @@ struct SettingsView: View {
                         }
                     }
                     SettingsGroupCard(.tools) {
+                        TronProgressiveSheetLink(accessibilityLabel: "Agent Behavior", accent: .tronPrimary, surfaceAccent: .tronPrimarySurface) {
+                            GlobalAgentBehaviorView()
+                        } label: {
+                            TronSettingsRow(icon: "slider.horizontal.3", title: "Agent Behavior",
+                                            subtitle: "Models, compaction, trust, and more", accent: .tronPrimary)
+                        }
+                        .accessibilityIdentifier("settings-link-Agent Behavior")
+                        TronSettingsDivider()
                         SettingsSectionLinks(ids: ["tools"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "global")
                         TronSettingsDivider()
                         settingsLink("MCP Servers", summary: "Tool providers and their sign-ins", icon: "server.rack") {
@@ -80,14 +88,6 @@ struct SettingsView: View {
                     // row's summary names its own scope, so the group has no
                     // caption (#1030).
                     SettingsGroupCard(.diagnostics) {
-                        TronProgressiveSheetLink(accessibilityLabel: "Agent Settings", accent: .tronPrimary, surfaceAccent: .tronPrimarySurface) {
-                            GlobalAgentSettingsView()
-                        } label: {
-                            TronSettingsRow(icon: "slider.horizontal.3", title: "Agent Settings",
-                                            subtitle: "Models, compaction, trust, and more", accent: .tronPrimary)
-                        }
-                        .accessibilityIdentifier("settings-link-Agent Settings")
-                        TronSettingsDivider()
                         MacTerminalSettingsRow()
                         TronSettingsDivider()
                         settingsLink("Push Notifications", summary: "Agent alerts on this iPhone", icon: "bell.badge") {
@@ -187,7 +187,7 @@ enum SettingsGroupKind {
 
     var title: String {
         switch self {
-        case .tools: "Tools & Extensions"
+        case .tools: "Agent & Tools"
         case .accounts: "Accounts"
         case .more: "More"
         case .iphone: "This iPhone"
@@ -197,7 +197,7 @@ enum SettingsGroupKind {
 
     @MainActor var accent: Color {
         switch self {
-        case .tools: .tronCyan
+        case .tools: .tronAmber
         case .accounts: .tronIndigo
         case .more, .iphone: .tronPrimary
         case .diagnostics: .tronSlate
@@ -224,7 +224,7 @@ enum SettingsGroupKind {
 }
 
 /// Global-only consolidation. Scoped Home and Session links keep their own routes.
-struct GlobalAgentSettingsView: View {
+struct GlobalAgentBehaviorView: View {
     private let target = SettingsTarget.global.gatewayTarget
 
     var body: some View {
@@ -241,7 +241,7 @@ struct GlobalAgentSettingsView: View {
             }.padding(20)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Agent Settings")
+        .tronNavigationTitle("Agent Behavior")
     }
 }
 

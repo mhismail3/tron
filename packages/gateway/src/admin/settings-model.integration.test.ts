@@ -65,11 +65,14 @@ async function fixture() {
     provider: "tron-settings-model", tokensPerSecond: 10_000,
     models: [{ id: "reasoner", name: "Reasoner Pro", reasoning: true, contextWindow: 200_000 }, { id: "plain", reasoning: false }],
   });
+  // A real virtual API entry makes queue catalog/admission exclusions observable.
+  const virtual = fauxProvider({ provider: "tron", api: "pi-virtual", models: [{ id: "subagent" }] });
   const model = faux.getModel();
   const modelKey = `${model.provider}/${model.id}`;
   const runtimeFactory = async () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
+    runtime.registerNativeProvider(virtual.provider);
     return runtime;
   };
   const modelRuntime = await runtimeFactory();
@@ -346,6 +349,10 @@ describe("settings renderer contract", () => {
   it("offers canonical queue editors at Global and Home, preserving ordered saves, empty overrides and inheritance", async () => {
     const f = await fixture();
     const evidence: unknown[] = [];
+    const chatModels = await f.service.invoke(subscribed(), "settings.options", {
+      target: { kind: "global" }, key: "model.ref[role=chat]", query: "tron", limit: 200,
+    }) as unknown as { options: Array<{ value: { provider: string; id: string } }> };
+    expect(chatModels.options.some(option => option.value.provider === "tron" && option.value.id === "subagent")).toBe(true);
     f.registry.setSettings(f.settingsModel, f.settingsChanges);
     const queue = new ModelQueueOwner({ runtime: f.modelRuntime, usage: new ProviderUsageOwner(),
       queue: role => f.registry.modelQueueOf(role, "home") });
@@ -361,8 +368,13 @@ describe("settings renderer contract", () => {
         expect(initial.keys.find(candidate => candidate.key === key), `${kind} ${role} editor`).toMatchObject({
           presentation: { control: "list", editable: true, valueKind: "stringList", optionsSource: { name: "catalog.models" } },
         });
+        await expect(f.service.invoke(subscribed(), "settings.change", {
+          commandId: `queue-virtual-${role}-${kind}`, target: { kind },
+          changes: [{ key, layer: kind === "home" ? "session" : "global", op: "set", value: ["tron/subagent"] }],
+        })).rejects.toMatchObject({ code: "invalid_request" });
+        expect(row(await resolve({ kind }), key).value).toEqual([]);
       }
-      const options = await f.service.invoke(subscribed(), "settings.options", { target: { kind: "global" }, key, query: f.model.provider }) as unknown as {
+      const options = await f.service.invoke(subscribed(), "settings.options", { target: { kind: "global" }, key, query: "tron" }) as unknown as {
         options: Array<{ value: { provider: string; id: string }; disabledReason?: string }>;
       };
       const available = options.options.filter(option => option.value.provider === f.model.provider && !option.disabledReason);
@@ -410,7 +422,7 @@ describe("settings renderer contract", () => {
       target, keys: [queue, "tools.active"], renderer: { version: 1, controls: [...CONTROLS] },
     }) as unknown as PresentedResolution;
     const initial = await resolve();
-    expect(initial.keys.some(row => row.key === queue)).toBe(false);
+    expect(row(initial, queue)).toMatchObject({ value: [], display: "Same as Home", presentation: { control: "list" } });
     expect(row(initial, "tools.active")).toMatchObject({ display: "2 tools", value: ["read", "bash"] });
     const change = async (id: string, key: string, value: unknown) => await f.service.invoke(subscribed(), "settings.change", {
       commandId: id, target, changes: [{ key, layer: "global", op: "set", value }],
@@ -429,7 +441,7 @@ describe("settings renderer contract", () => {
     await f.service.invoke(subscribed(), "settings.change", {
       commandId: "queue-unset", target, changes: [{ key: queue, layer: "global", op: "unset" }],
     });
-    expect((await resolve()).keys.some(row => row.key === queue)).toBe(false);
+    expect(row(await resolve(), queue)).toMatchObject({ value: [], overridden: false, display: "Same as Home" });
     transcript.push({ case: "count summaries preserve full values", response: { initial, configured, singular, history } });
   });
   afterAll(async () => {
@@ -514,7 +526,7 @@ describe("settings renderer contract", () => {
     expect(await readFile(join(f.project, ".pi", "settings.json"), "utf8")).toBe(before);
   });
 
-  it("omits the twenty-nine surviving routine controls but preserves explicit, Project and non-renderer inspection", async () => {
+  it("omits the twenty-six retired routine controls but preserves explicit, Project and non-renderer inspection", async () => {
     const f = await fixture();
     await f.trust.set(f.project, true);
     const routine = new Set([
@@ -525,9 +537,6 @@ describe("settings renderer contract", () => {
       "context.compaction.reserveTokens",
       "context.images.autoResize",
       "model.contextWindow",
-      "model.queue[role=background]",
-      "model.queue[role=subagent]",
-      "model.queue[role=worker]",
       "model.thinkingBudgets",
       "model.thinking[role=summarizer]",
       "model.thinking[role=worker]",
@@ -601,9 +610,9 @@ describe("settings renderer contract", () => {
     transcript.push({ case: "routine false reset and undo", response: { reset, history, restored: await resolve() } });
   });
 
-  it("refuses option requests for retired controls instead of retaining their numeric and queue editor readers", async () => {
+  it("refuses option requests for retired controls while retaining the restored queue catalog", async () => {
     const f = await fixture();
-    for (const key of ["model.contextWindow", "model.queue[role=worker]", "run.transport"]) {
+    for (const key of ["model.contextWindow", "run.transport"]) {
       await expect(options(f, { key, ...(key === "model.contextWindow" ? { qualifiers: { model: f.modelKey } } : {}) }))
         .rejects.toMatchObject({ code: "invalid_request" });
     }
@@ -615,9 +624,15 @@ describe("settings renderer contract", () => {
     const writable = everything.keys.filter(key => key.presentation.control === "text"
       || (key.presentation.control === "list" && key.presentation.valueKind === "stringList"));
     expect(writable.map(key => key.key)).toEqual(expect.arrayContaining(["sources.npmCommand", "sources.extensions", "tools.shell.path"]));
-    for (const key of writable) expect(key.presentation.entry, key.key).toEqual({
-      hint: expect.stringMatching(/\S/), example: expect.stringMatching(/\S/),
-    });
+    for (const key of writable) {
+      if (key.presentation.optionsSource?.name === "catalog.models") {
+        expect(key.presentation.entry, key.key).toBeUndefined();
+      } else {
+        expect(key.presentation.entry, key.key).toEqual({
+          hint: expect.stringMatching(/\S/), example: expect.stringMatching(/\S/),
+        });
+      }
+    }
     expect(presentedRow(everything, "run.retry.maxRetries").presentation.control).toBeUndefined();
     const labelOwners = new Map<string, Set<string>>();
     for (const row of everything.keys) labelOwners.set(row.presentation.label, (labelOwners.get(row.presentation.label) ?? new Set()).add(row.key));

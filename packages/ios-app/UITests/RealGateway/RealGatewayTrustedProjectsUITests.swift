@@ -1,9 +1,9 @@
 import Foundation
 import XCTest
 
-/// #1517: Settings › Trusted Projects against the real Gateway. The Agent
-/// group's Trusted Projects row opens a sheet that owns the default trust
-/// policy and every saved project decision (More Settings repeats neither),
+/// #1517/#2010: Global Settings › Agent Behavior against the real Gateway.
+/// The embedded Trusted Projects group owns the default trust policy and
+/// every saved project decision (the Connection group repeats neither),
 /// and Add Project records the chosen folder through `settings.change` as Not
 /// trusted: it joins the list untoggled and the Gateway's trust store holds
 /// `false` for it. A per-model key's all-models instance is titled "All
@@ -44,29 +44,20 @@ extension RealGatewayPairAndChatUITests {
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
 
-        openSettingsSection(app, "model")
+        openAgentBehavior(app)
         let allModels = app.staticTexts["All models"].firstMatch
         revealBelowNavigationBar(app, allModels)
         XCTAssertTrue(allModels.exists, "Thinking's all-models instance must be titled All models")
         XCTAssertFalse(app.staticTexts["chat"].exists, "a fixed qualifier must not title a row")
-        dismissTopSheet(app)
 
-        openSettingsSection(app, "advanced")
-        XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].waitForExistence(timeout: 30))
-        for _ in 0..<4 { app.swipeUp() }
-        XCTAssertFalse(app.staticTexts["Trust for this project"].exists, "More Settings still lists per-project trust")
-        XCTAssertFalse(app.staticTexts["Default trust policy"].exists, "More Settings still lists the default trust policy")
-        dismissTopSheet(app)
-
-        // The row sits in the Agent group, directly above More Settings (#1521).
-        let trusted = app.buttons["settings-link-Trusted Projects"]
-        let more = app.buttons["settings-section-advanced-open"]
-        revealBelowNavigationBar(app, more)
-        XCTAssertEqual(trusted.frame.minX, more.frame.minX, accuracy: 1)
-        XCTAssertTrue(more.frame.minY >= trusted.frame.maxY - 1 && more.frame.minY < trusted.frame.maxY + 12,
-                      "Trusted Projects must directly precede More Settings in the Agent card: \(trusted.frame) \(more.frame)")
-        keepScreenshot(app, name: "after-settings-agent-trusted-projects")
-        trusted.tap()
+        let run = app.descendants(matching: .any)["settings-section-run-detail"]
+        revealBelowNavigationBar(app, run)
+        XCTAssertTrue(run.waitForExistence(timeout: 30))
+        XCTAssertFalse(run.staticTexts["Trust for this project"].exists, "Connection must not duplicate per-project trust")
+        XCTAssertFalse(run.staticTexts["Default trust policy"].exists, "Connection must not duplicate the default trust policy")
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings-row-permissions.defaultProjectTrust").count, 1,
+                       "The consolidated sheet owns one default trust policy")
+        keepScreenshot(app, name: "after-agent-behavior-trusted-projects")
         XCTAssertTrue(app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"].waitForExistence(timeout: 30),
                       app.debugDescription)
         let seededRow = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "trusted-project")).firstMatch
