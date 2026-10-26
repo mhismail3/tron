@@ -311,18 +311,18 @@ export const say = (text: string): Step => () => fauxAssistantMessage(text);
 
 export interface ProfilePage {
   status: "read";
-  file: string;
-  items: Array<ListedItem & { file: string; provenance: KnowledgeRecord["provenance"]; content: Extract<KnowledgeRecord, { kind: "note" }>["content"] }>;
-  nextOffset?: number;
+  path: string;
+  items: Array<ListedItem & { path: string; provenance: KnowledgeRecord["provenance"]; content: Extract<KnowledgeRecord, { kind: "note" }>["content"] }>;
+  nextCursor?: string;
 }
 export function profileReadResult(messages: Array<Record<string, unknown>>, callId: string): ProfilePage {
   const result = messages.find(message => message.role === "toolResult" && message.toolCallId === callId)?.details as ProfilePage | undefined;
   if (result?.status !== "read") throw new Error(`Expected an explicit profile read: ${JSON.stringify(result)}`);
   return result;
 }
-export async function readProfilePage(f: Fixture, file = "core", offset = 0): Promise<ProfilePage> {
+export async function readProfilePage(f: Fixture, path = "inferred", cursor?: string, includeInactive = false): Promise<ProfilePage> {
   const callId = command("read-profile");
-  const turn = await homeActivation(f, `Read profile file ${file} at ${offset}.`, [profileCall({ action: "read", file, offset }, callId), say("read")]);
+  const turn = await homeActivation(f, `Read profile path ${path}.`, [profileCall({ action: "read", path, ...(cursor ? { cursor } : {}), ...(includeInactive ? { includeInactive: true } : {}) }, callId), say("read")]);
   return profileReadResult(turn.last.messages, callId);
 }
 

@@ -811,7 +811,7 @@
               }
             },
             {
-              "description": "Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit migrate/reorganize assign only placement with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
+              "description": "Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit migrate/reorganize assign only placement with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Use defer with the exact index arrival version for receipt-backed Not now, only on a maintainer turn. Declare sensitive capture with sensitive=true: never infer it, quote this maintainer message verbatim, and keep it unsorted for exact review. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
               "name": "profile",
               "parameters": {
                 "additionalProperties": false,
@@ -848,6 +848,10 @@
                       },
                       {
                         "const": "retry",
+                        "type": "string"
+                      },
+                      {
+                        "const": "defer",
                         "type": "string"
                       }
                     ],
@@ -958,10 +962,21 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "sensitive": {
+                    "description": "learn: declare sensitive personal information. Never infer it: text must be verbatim in this maintainer message and must wait unsorted for review.",
+                    "type": "boolean"
+                  },
                   "text": {
                     "description": "learn, refine and supersede: one line of the item's text, as the maintainer states it.",
                     "maxLength": 512,
                     "minLength": 1,
+                    "type": "string"
+                  },
+                  "version": {
+                    "description": "defer: exact arrival version from the current metadata index. Receipt-backed Not now applies only on a maintainer turn.",
+                    "maxLength": 64,
+                    "minLength": 64,
+                    "pattern": "^[a-f0-9]{64}$",
                     "type": "string"
                   }
                 },
