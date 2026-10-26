@@ -253,6 +253,8 @@ struct SettingsRendererRow: View {
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     SettingsListEditor(title: title, help: presentation?.help ?? "", entry: presentation?.entry,
                                        values: values.compactMap(\.stringValue), entryPicker: modelEntryPicker, onChange: onChange)
+                        // Reopening the retained sheet must seed the accepted canonical list.
+                        .id(values)
                 }
             } else {
                 readOnlyRow

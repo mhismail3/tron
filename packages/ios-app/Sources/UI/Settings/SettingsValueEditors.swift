@@ -120,24 +120,6 @@ struct SettingsNumberMapEditor: View {
 /// Gateway stores them; each row can move earlier or later. The Gateway alone
 /// validates item syntax, count and allowed values on Save.
 struct SettingsListEditor: View {
-    let title: String
-    let help: String
-    let entry: SettingsEntryGuidance?
-    let values: [String]
-    var entryPicker: ((@escaping (String) -> Void) -> AnyView)? = nil
-    let onChange: (JSONValue?) -> Void
-    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
-
-    var body: some View {
-        // A new presentation seeds the latest canonical value. A refresh while
-        // this presentation is open must not replace its unsaved local draft.
-        SettingsListDraft(title: title, help: help, entry: entry, values: values,
-                          entryPicker: entryPicker, onChange: onChange)
-            .id(surfaceToken)
-    }
-}
-
-private struct SettingsListDraft: View {
     private struct Item: Identifiable { let id = UUID(); var text: String }
     let title: String
     let help: String

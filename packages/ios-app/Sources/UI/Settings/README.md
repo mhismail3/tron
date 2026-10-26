@@ -34,9 +34,9 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Model contains direct model/thinking; Workers & delegation contains all three ordered model queues
   and the task budget. Scoped Home navigation still names its workers/delegation destination Models.
   Queue drafts add available physical models through the shared picker, reorder/remove locally,
-  and write only on Save; an empty list is distinct from Reset/Revert to inheritance. Each presentation
-  seeds its list draft from the canonical input. The existing presentation-surface generation owns
-  draft identity, so a refresh cannot replace unsaved edits and reopening seeds the latest list.
+  and write only on Save; an empty list is distinct from Reset/Revert to inheritance. The retained
+  list editor is keyed by its canonical input so reopening reflects accepted saves. Local changes
+  keep stable row identity until Save; the renderer’s existing presentation gate controls refresh.
   Other routine settings have no editor exposure; explicit values retain read-only Reset/Revert and Project inspection. Compaction
   appears only while retained values need inspection or Revert. Scoped More Settings contains
   Agent changes and the HTTP proxy; Global embeds those groups directly. There is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
