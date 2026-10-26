@@ -78,6 +78,26 @@ it.each(["before-backup", "after-backup", "mid-body", "precommit", "after-commit
   evidence.push({ cut, exactOriginalsRestored: 3, originalPreparedIdentitiesReused: !!saved, atomicGroupSize: result.changes.length });
 }, 60_000);
 
+it("repairs a v2-to-historical Undo audit after a real postcommit process death without replaying note effects", async () => {
+  const { f, profile } = await setup();
+  const originals = await Promise.all([seed(0), seed(1)]);
+  const context = { actor: { kind: "ui" as const, id: "fixture" }, commandId: "v2-before-undo-crash", reason: "Exact fixture migration" };
+  const migrated = await profile.partition(f.settings.settingsChanges, { commandId: context.commandId, mode: "migrate", assignments: originals.map(note => ({ id: note.id, expectedRevision: note.revisionId, path: "engineering/undo" })) }, context);
+  const undoContext = { actor: context.actor, commandId: "v2-undo-postcommit-crash", reason: "Restore exact historical placement" };
+  knowledge!.dispose(); await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
+  await crashProfilePartition(f.root, f.tronHome, [], "after-commit", undefined, { context: undoContext, undoChangeId: migrated.changes[0]!.changeId });
+  const registry = await f.restartToReadiness();
+  knowledge = new KnowledgeService(new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {}));
+  const committedHeads = await Promise.all(originals.map(note => knowledge!.store.read(note.id)));
+  for (const note of originals) expect({ ...committedHeads.find(head => head?.id === note.id), revisionId: note.revisionId }).toEqual(note);
+  const repaired = await profile.retryPartition(f.settings.settingsChanges, undoContext.commandId, "ui");
+  expect(repaired.changes).toHaveLength(2);
+  const undoFacts = (await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries.filter(entry => entry.commandId === undoContext.commandId);
+  expect(undoFacts.map(entry => entry.undoOf).sort()).toEqual(migrated.changes.map(entry => entry.changeId).sort());
+  expect(await Promise.all(originals.map(note => knowledge!.store.read(note.id)))).toEqual(committedHeads);
+  evidence.push({ v2UndoPostcommitCrash: true, originalUndoLinksRepaired: 2, committedHeadsNotReplayed: true });
+}, 60_000);
+
 it("enforces personal, unsorted and sub-area limits atomically without losing over-bound originals", async () => {
   const { f, profile } = await setup();
   const originals: Note[] = [];
