@@ -81,8 +81,8 @@ function terminalResult(request: ApprovalRequest): ChangeResult {
 
 function reviewText(schema: SettingsSchema, request: ApprovalRequest): string {
   const target = request.target.kind === "home" ? "Home" : request.target.kind === "session" ? `Session ${request.target.sessionId}`
-    : request.target.kind === "project" ? `Project ${request.target.cwd}` : "Global";
-  const lines = [`Scope: ${target}`, `Reason: ${request.reason ?? "Not provided"}`, ""];
+    : request.target.kind === "project" ? `Project ${JSON.stringify(request.target.cwd)}` : "Global";
+  const lines = [`Scope: ${target}`, `Reason: ${JSON.stringify(request.reason ?? "Not provided")}`, ""];
   for (const change of request.changes) {
     const key = schema.schemaKey(change.key);
     const values = change.redacted ? "Before: Hidden value\nAfter: Changed"
@@ -91,7 +91,10 @@ function reviewText(schema: SettingsSchema, request: ApprovalRequest): string {
       ...(key.confirm ? [key.confirm] : []), "");
   }
   lines.push(`Expires: ${request.expiresAt}`, "Approve applies only this diff. Deny changes nothing.");
-  const text = lines.join("\n");
+  // Escape rather than strip author-supplied controls: host sanitization must
+  // never consume a terminal-control payload and silently hide the bound diff.
+  const text = lines.join("\n").replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029]/g,
+    character => "\\u" + character.charCodeAt(0).toString(16).padStart(4, "0"));
   if (Buffer.byteLength(text, "utf8") > 32 * 1_024) {
     throw new GatewayError("invalid_request", "Settings approval diff is too large to review (maximum 32 KiB); request fewer or smaller changes");
   }

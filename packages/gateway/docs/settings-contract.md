@@ -172,7 +172,9 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   `settings` tool `action: "request"` holds a change at any tier (`tierBasis.requested`)
   and blocks the calling turn on the same semantic form sheet as `ask_user`. The sheet
   shows scope, layer, reason and the full before/after JSON values, not abbreviated
-  display summaries. Approval context is literal selectable text, never Markdown;
+  display summaries. Author-supplied controls are disclosed as Unicode escapes before
+  host sanitization, so terminal payloads cannot swallow later diff text. Approval
+  context is literal selectable text, never Markdown;
   a diff over the form\'s 32 KiB capacity is explicitly refused and its request retired.
   Its approval presentation uses labeled
   toolbar actions: Deny/X on the left in destructive color, Approve/checkmark on the
@@ -182,7 +184,8 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   approval. The original tool result returns approved/applied, declined, expired or
   superseded explicitly, with no separate outcome wake. Stop retires the form and
   supersedes its still-pending diff without applying it. Dry run creates no request;
-  when all plans are refused its result is failed, not a misleading applied/pending status.
+  any refused plan makes the whole preview failed/quiet, with per-change preview/error
+  rows retained, just as the real bundle refuses atomically without asking or writing.
   The settings owner retains the digest fence, one-use decision and Changes/undo.
   A turn cannot request its own between-runs SDK configuration (model, thinking,
   tools or context window); runtime admission refuses before opening a form, including
