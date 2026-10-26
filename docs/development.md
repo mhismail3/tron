@@ -168,26 +168,36 @@ macOS `fseventsd` serves every FSEvents client, including Node `fs.watch`. When 
 is saturated (one thread at 100% CPU, footprint in GB), it drops events for its
 clients. Node does not report the drop, so watcher-driven tests time out
 intermittently. Only `sudo killall fseventsd` clears that state (launchd restarts
-the daemon); agents never run it. `scripts/tron-fsevents-guard` is the
-sudo-free monitor:
+the daemon); agents never run it. `scripts/tron-fsevents-guard` is the sudo-free
+monitor. It runs only against this user's private Darwin temp dir and refuses a
+shared or other-writable one such as `/tmp`.
 
-- `check [--dry-run]` measures fseventsd CPU (averaged over the time since the
-  last pass) and footprint, then appends one JSON line to
+- `check [--dry-run]` measures fseventsd CPU and footprint. CPU is averaged since
+  the previous pass when that pass is at least 60 s old and saw the same daemon;
+  otherwise it is a 5 s sample. Each pass appends one JSON line to
   `~/Library/Logs/tron-fsevents-guard.jsonl`.
-- It counts entries in the user temp dir, and removes stale Tron mkdtemp roots
-  (`tron-<name>-<random>`; keyed `tron-ios-gateway-e2e-*` caches stay). A root
-  is stale when nothing in its tree changed for 24 h and `lsof` shows no open
-  file or cwd under it. Removal is capped (200 roots or 20,000 entries per pass)
-  and paced, and it is skipped while fseventsd is hot.
-- Hot means CPU ≥ 50% or footprint ≥ 2048 MB. After 3 hot passes in a row it
-  alerts with the remedy, at most once every 6 h: an `ALERT` line, plus a macOS
-  notification under the agent.
+- It counts temp-dir entries and removes stale Tron mkdtemp roots
+  (`tron-<name>-<6-8 random>`). Keyed `tron-ios-gateway-e2e-*` caches stay, and
+  persistent `tron-*` temp dirs must not use the mkdtemp name shape.
+- A root is stale when nothing in its tree has changed (mtime or ctime) for 24 h
+  and `lsof` shows no open file or cwd under it. Both are proven again just before
+  removal. If `lsof` fails, nothing is removed.
+- Removal is capped at 200 roots or 20,000 entries per pass and paced. A root too
+  large for one pass is listed (`keptOversized`) for manual review. Removal is
+  skipped while fseventsd is hot.
+- Hot means CPU >= 50% or footprint >= 2048 MB. After 3 consecutive hot passes
+  the guard alerts with the remedy, at most once every 6 h: an `ALERT` line, plus
+  a macOS notification when it runs as the agent.
 - `install [--print-plist] [--interval-minutes 10]` loads the LaunchAgent
-  `com.tron.fsevents-guard`, which embeds the script source. Installing is a
-  maintainer action. `uninstall` unloads it and removes the plist; the log and
-  `~/Library/Application Support/tron-fsevents-guard/` state stay. `status`
-  shows the agent state and the last pass.
-- Tests: `python3 scripts/test-tron-fsevents-guard.py`.
+  `com.tron.fsevents-guard`. Installing is a maintainer action.
+- The agent embeds the script source at install time, so rerun `install` after
+  changing the script.
+- `uninstall` unloads the agent and removes its plist. It keeps the logs
+  (`~/Library/Logs/tron-fsevents-guard.{jsonl,log}`) and the state in
+  `~/Library/Application Support/tron-fsevents-guard/`.
+- `status` shows the agent state and the last pass.
+- Test with `python3 scripts/test-tron-fsevents-guard.py`. It needs about one
+  minute, because staleness is proven by real ctime age.
 
 ## Commits, versions and releases
 

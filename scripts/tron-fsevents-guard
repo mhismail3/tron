@@ -48,14 +48,29 @@ def home_path(*parts):
 
 
 def default_temp_dir():
+    """This user's private Darwin temp dir; never a shared fallback such as /tmp."""
     try:
-        return os.confstr("CS_DARWIN_USER_TEMP_DIR")
+        return os.confstr("CS_DARWIN_USER_TEMP_DIR") or ""
     except (ValueError, OSError):
-        return os.environ.get("TMPDIR", "/tmp")
+        return ""
+
+
+def private_temp_dir(path):
+    """True only for a directory this user owns that no one else can write (not /tmp)."""
+    try:
+        info = os.stat(path)
+    except (OSError, TypeError):
+        return False
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & 0o022
 
 
 def run(argv, timeout=60):
-    return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=timeout)
+    """(exit status, stdout); status None when the command could not run or timed out."""
+    try:
+        result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None, ""
+    return result.returncode, result.stdout.decode("utf-8", "surrogateescape")
 
 
 def cpu_seconds(text):
@@ -84,13 +99,13 @@ def size_mb(text):
 
 def fseventsd_sample(sample_seconds):
     """Pid, start identity, cumulative CPU, RSS and footprint of fseventsd, readable without root."""
-    found = run(["/usr/bin/pgrep", "-x", "fseventsd"]).stdout.split()
+    found = run(["/usr/bin/pgrep", "-x", "fseventsd"])[1].split()
     if not found:
         return None
     pid = int(found[0])
 
     def ps():
-        fields = run(["/bin/ps", "-o", "lstart=,time=,rss=", "-p", str(pid)]).stdout.split()
+        fields = run(["/bin/ps", "-o", "lstart=,time=,rss=", "-p", str(pid)])[1].split()
         if len(fields) < 7:
             return None
         return " ".join(fields[:5]), cpu_seconds(fields[5]), int(fields[6])
@@ -103,7 +118,7 @@ def fseventsd_sample(sample_seconds):
     if second is None or second[0] != first[0]:
         return None
     sample_cpu = (second[1] - first[1]) / sample_seconds * 100 if sample_seconds > 0 else None
-    top = run(["/usr/bin/top", "-l", "1", "-pid", str(pid), "-stats", "pid,mem"]).stdout.splitlines()
+    top = run(["/usr/bin/top", "-l", "1", "-pid", str(pid), "-stats", "pid,mem"])[1].splitlines()
     footprint = None
     for line in top:
         cols = line.split()
@@ -143,9 +158,17 @@ def is_fixture_name(name):
     return bool(FIXTURE.match(name)) and not name.startswith(KEYED_CACHE_PREFIX)
 
 
-def newest_mtime(root, limit):
-    """Newest lstat mtime in the tree, or None when the walk exceeds `limit` entries or fails."""
-    newest = os.lstat(root).st_mtime
+def last_change(info):
+    # ctime too: a copy that preserved old mtimes (cp -p, tar) is still a new tree.
+    return max(info.st_mtime, info.st_ctime)
+
+
+def newest_change(root, limit):
+    """Newest lstat m/ctime in the tree, or None when the walk exceeds `limit` entries or fails."""
+    try:
+        newest = last_change(os.lstat(root))
+    except OSError:
+        return None, 0
     seen = 0
     stack = [root]
     while stack:
@@ -157,7 +180,7 @@ def newest_mtime(root, limit):
                     if seen > limit:
                         return None, seen
                     info = entry.stat(follow_symlinks=False)
-                    newest = max(newest, info.st_mtime)
+                    newest = max(newest, last_change(info))
                     if stat.S_ISDIR(info.st_mode):
                         stack.append(entry.path)
         except OSError:
@@ -166,11 +189,17 @@ def newest_mtime(root, limit):
 
 
 def paths_in_use():
-    """Open files, cwds and mapped executables of every process this user can see, or None."""
-    result = run(["/usr/sbin/lsof", "-nP", "-w", "-F", "n"], timeout=120)
-    if not result.stdout:
+    """Open files, cwds and mapped executables of every process lsof can read, or None.
+
+    Fails closed: a non-zero exit or empty output proves nothing, so nothing is
+    removed. Without root, lsof cannot read other users' processes; the temp dir
+    is private (mode 0700), so only root could hold a fixture there unseen."""
+    status, output = run(["/usr/sbin/lsof", "-nP", "-w", "-F", "n"], timeout=120)
+    if status != 0 or not output:
         return None
-    return [line[1:] for line in result.stdout.splitlines() if line.startswith("n/")]
+    # lsof names the canonical /private/var form; the temp dir is resolved the same way.
+    return ["/private" + line[1:] if line.startswith("n/var/") else line[1:]
+            for line in output.splitlines() if line.startswith("n/")]
 
 
 def under(path, root):
@@ -179,11 +208,12 @@ def under(path, root):
 
 def clean_fixtures(temp_dir, args, now):
     real_temp = os.path.realpath(temp_dir)
+    age = args.fixture_age_hours * 3600
     candidates = []
     report = {"candidates": 0, "deleted": [], "deletedEntries": 0, "keptRecent": 0, "keptInUse": 0,
-              "keptUnproven": 0, "deferred": 0}
+              "keptUnproven": 0, "keptOversized": [], "deferred": 0}
     try:
-        names = sorted(os.listdir(temp_dir))
+        names = sorted(os.listdir(real_temp))
     except OSError:
         return report
     for name in names:
@@ -195,28 +225,35 @@ def clean_fixtures(temp_dir, args, now):
                 continue
         except OSError:
             continue
-        newest, entries = newest_mtime(path, args.max_walk_entries)
+        newest, entries = newest_change(path, args.max_walk_entries)
         if newest is None:
             report["keptUnproven"] += 1
-        elif now - newest < args.fixture_age_hours * 3600:
+        elif now - newest < age:
             report["keptRecent"] += 1
+        elif entries + 1 > args.max_delete_entries:
+            # Never removable within one pass; keep it visible instead of letting
+            # it hold back every root sorted after it.
+            report["keptOversized"].append(name)
         else:
             candidates.append((path, entries))
     report["candidates"] = len(candidates)
-    if not candidates:
-        return report
-    in_use = paths_in_use()
-    if in_use is None:
-        report["keptUnproven"] += len(candidates)
-        report["error"] = "lsof unavailable; nothing removed"
-        return report
-    # lsof names the canonical /private/var form; the temp dir is resolved the same way.
-    in_use = ["/private" + path if path.startswith("/var/") else path for path in in_use]
+    in_use, snapshot_at = None, 0.0
     budget = args.max_delete_entries
     for index, (path, entries) in enumerate(candidates):
         if len(report["deleted"]) >= args.max_delete_roots or entries + 1 > budget:
             report["deferred"] = len(candidates) - index
             break
+        if in_use is None or time.time() - snapshot_at > 30:
+            in_use, snapshot_at = paths_in_use(), time.time()
+            if in_use is None:
+                report["keptUnproven"] += len(candidates) - index
+                report["error"] = "lsof failed; nothing further removed"
+                break
+        # Re-prove staleness at the moment of removal, not at the scan.
+        newest, entries = newest_change(path, args.max_walk_entries)
+        if newest is None or time.time() - newest < age:
+            report["keptRecent" if newest is not None else "keptUnproven"] += 1
+            continue
         if any(under(open_path, path) for open_path in in_use):
             report["keptInUse"] += 1
             continue
@@ -257,6 +294,9 @@ def append_log(log, record):
 
 
 def check(args):
+    if not private_temp_dir(args.temp_dir):
+        print("refusing: %r is not a private temp dir owned by this user" % args.temp_dir, file=sys.stderr)
+        return 2
     state_dir, log = state_paths(args)
     os.makedirs(state_dir, exist_ok=True)
     lock = open(os.path.join(state_dir, "lock"), "w")
@@ -301,6 +341,9 @@ def check(args):
     if sample:
         state.update({"started": sample["started"], "cpuSeconds": sample["cpuSeconds"], "at": now,
                       "consecutiveHot": consecutive})
+    else:
+        # A pass that could not measure breaks the streak: "sustained" means consecutive passes.
+        state["consecutiveHot"] = 0
     with open(state_file + ".tmp", "w") as handle:
         json.dump(state, handle)
     os.replace(state_file + ".tmp", state_file)
@@ -341,6 +384,9 @@ def domain():
 
 
 def install(args):
+    if not private_temp_dir(args.temp_dir):
+        print("refusing: %r is not a private temp dir owned by this user" % args.temp_dir, file=sys.stderr)
+        return 2
     data = plist_bytes(args)
     if args.print_plist:
         sys.stdout.write(data.decode())
@@ -350,7 +396,10 @@ def install(args):
     with open(agent_plist(), "wb") as handle:
         handle.write(data)
     subprocess.run(["/bin/launchctl", "bootout", "%s/%s" % (domain(), LABEL)], stderr=subprocess.DEVNULL)
-    subprocess.run(["/bin/launchctl", "bootstrap", domain(), agent_plist()], check=True)
+    if subprocess.run(["/bin/launchctl", "bootstrap", domain(), agent_plist()]).returncode != 0:
+        os.remove(agent_plist())
+        print("launchctl bootstrap failed; removed %s, nothing is installed" % agent_plist(), file=sys.stderr)
+        return 1
     print("installed %s (every %d min); uninstall: scripts/tron-fsevents-guard uninstall" % (LABEL, args.interval_minutes))
     return status(args)
 
@@ -359,7 +408,8 @@ def uninstall(_args):
     subprocess.run(["/bin/launchctl", "bootout", "%s/%s" % (domain(), LABEL)], stderr=subprocess.DEVNULL)
     if os.path.exists(agent_plist()):
         os.remove(agent_plist())
-    print("uninstalled %s; log and state remain under ~/Library/Logs and ~/Library/Application Support" % LABEL)
+    print("uninstalled %s; kept ~/Library/Logs/tron-fsevents-guard.{jsonl,log} and "
+          "~/Library/Application Support/tron-fsevents-guard (delete them to remove all traces)" % LABEL)
     return 0
 
 
