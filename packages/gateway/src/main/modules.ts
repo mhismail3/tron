@@ -1,3 +1,6 @@
+import { ProjectLifecycle } from "../modules/projects/project-lifecycle.js";
+import { projectsModule } from "../modules/projects/module.js";
+import { projectRuntimePort } from "../modules/projects/runtime-admission.js";
 import { createWebResearchModule } from "../workspace/web-research-module.js";
 import { ORDINARY_MODULE_NAMES } from "../extensions/tron-modules.js";
 import { ModuleHost, type GatewayHost } from "../kernel/host/module-host.js";
@@ -36,14 +39,15 @@ export interface ModuleOwners extends RecentModelSignals {
 
 /** One production composition. Callbacks may close over the not-yet-constructed
  * registry: start only captures them; extension assembly resolves the live owner. */
-export function gatewayModules(owners: () => ModuleOwners) {
+export function gatewayModules(owners: () => ModuleOwners, projectOptions?: ConstructorParameters<typeof ProjectLifecycle>[2]) {
   const registry = () => owners().registry;
   const home = createHomeModules(() => ({ composition: owners().home, sessions: registry(), search: () => {
     const owner = owners().sessionSearch;
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));
+  const projects = projectsModule(new ProjectLifecycle(() => owners().home.trust, projectRuntimePort(registry, cursor => home.owner().taskList({ limit: 50, ...(cursor ? { cursor } : {}) })), projectOptions));
   const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners, () => owners().home.modelQueue);
-  return { home: home.owner, providers, runtimeOrder: ORDINARY_MODULE_NAMES, modules: [
+  return { home: home.owner, projects, providers, runtimeOrder: ORDINARY_MODULE_NAMES, modules: [
     workspaceModule,
     settlementModule,
     providers,
@@ -51,6 +55,7 @@ export function gatewayModules(owners: () => ModuleOwners) {
     createCoreModule(() => ({ knowledge: owners().home.knowledge(), connections: owners().connections })),
     createWebResearchModule(() => owners().home.homeWebTransport),
     settingsModule,
+    projects,
     askUserModule,
     createDisplayModule(() => owners().display),
     appsModule,
@@ -64,9 +69,9 @@ export function gatewayModules(owners: () => ModuleOwners) {
 }
 
 /** Pi's process-global theme must precede every extension resource load. */
-export async function startGatewayModules(platform: Omit<GatewayHost, "contract">, owners: () => ModuleOwners) {
+export async function startGatewayModules(platform: Omit<GatewayHost, "contract">, owners: () => ModuleOwners, projectOptions?: ConstructorParameters<typeof ProjectLifecycle>[2]) {
   initTheme();
-  const composition = gatewayModules(owners);
+  const composition = gatewayModules(owners, projectOptions);
   const modules = await ModuleHost.start(composition.modules, platform, composition.runtimeOrder);
-  return { modules, home: composition.home, recentModels: modules.contract(composition.providers) };
+  return { modules, home: composition.home, projects: modules.contract(composition.projects), recentModels: modules.contract(composition.providers) };
 }

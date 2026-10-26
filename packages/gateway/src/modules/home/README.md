@@ -102,8 +102,11 @@ Composition supplies the same late K6 settings, Knowledge and raw model owners.
 
 - **Profile** (`home-session-profile.ts`) is fixed per runtime. An unrecorded new Home uses
   its creation recipe once; later runtimes read the record (enabled Home, otherwise ordinary).
-  Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-ask-user`,
-  `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` load. Agent `SYSTEM.md`/
+  Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-projects`,
+  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` and
+  `tron-web-research` load. [Projects](../projects/README.md) owns the `projects` tool
+  for creation and tap-gated lifecycle actions; project work remains delegate-only.
+  Agent `SYSTEM.md`/
   `APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
   model on its Gateway-runtime view; the profile owns explicit model admission and physical

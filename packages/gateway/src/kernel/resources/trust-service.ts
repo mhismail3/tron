@@ -127,6 +127,42 @@ export class TrustService {
     });
   }
 
+  /** A newly created/reserved directory must shadow inherited/default trust
+   * before it has a Git root. Never resolve this reservation to an ancestor. */
+  async reserveUntrustedDirectory(path: string): Promise<void> {
+    await this.mutationMutex.run(async () => this.store.set(await this.canonicalDirectory(path), false));
+  }
+
+  /** Approved filesystem relocation shares trust's existing mutation lock and
+   * runtime reload fence. A partial move is retained fail-closed, never replayed. */
+  async relocate(
+    path: string, destination: string, preserveTrust: boolean, move: () => Promise<void>,
+    apply: (inspection: TrustInspection) => Promise<void>,
+    commit: (inspection: TrustInspection) => Promise<void>,
+  ): Promise<void> {
+    await this.mutationMutex.run(async () => {
+      const previous = await this.inspectUnlocked(path);
+      const target = await this.canonicalDirectory(destination);
+      this.store.set(target, false);
+      const proposed = { ...previous, savedDecision: false, effectiveDecision: false };
+      try { await apply(proposed); }
+      catch (failure) {
+        // Same rollback/reload contract as setAndApply: do not publish an
+        // unrelated fence when the initial admission refused before effects.
+        await apply(previous);
+        await commit(previous);
+        throw failure;
+      }
+      try {
+        this.store.set(previous.projectDir, false);
+        await move();
+        this.store.set(target, preserveTrust && previous.effectiveDecision === true);
+      } finally {
+        await commit(proposed);
+      }
+    });
+  }
+
   async set(path: string, decision: boolean | null): Promise<TrustInspection> {
     return this.mutationMutex.run(async () => {
       const cwd = await this.canonicalDirectory(path);

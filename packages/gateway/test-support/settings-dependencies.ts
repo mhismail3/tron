@@ -13,7 +13,7 @@ import type { HomeOwner } from "../src/modules/home/home-owner.js";
 import type { RuntimeRegistry } from "../src/kernel/session/runtime-registry.js";
 import { HomeProfileItems } from "../src/modules/home/home-profile.js";
 import type { KnowledgeService } from "../src/knowledge/knowledge-service.js";
-import { homeOwnerOf } from "./gateway-registry.js";
+import { homeOwnerOf, projectsOwnerOf } from "./gateway-registry.js";
 
 /** The real settings model and change path a fixture Gateway needs, wired the
  * way gateway-main wires them (docs/settings-model.md). */
@@ -48,6 +48,7 @@ export function settingsDependencies(input: {
     ...(input.knowledge ? { undoSubject: (entry, context) => new HomeProfileItems(() => input.knowledge?.()).undo(settingsChanges, entry, context) } : {}),
   }, input.now, input.schedule);
   input.registry?.setSettings(settingsModel, settingsChanges);
+  if (input.registry) projectsOwnerOf(input.registry)?.register(settingsChanges);
   return { settingsModel, settingsChanges };
 }
 

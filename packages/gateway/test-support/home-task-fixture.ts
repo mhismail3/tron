@@ -85,6 +85,7 @@ export const TASK_VIRTUAL_MODEL_ID = "tron-task-router";
 /** `models` is written as the agent directory's models.json before any runtime starts, for a
  * provider the faux one cannot stand in for (a local wire-protocol endpoint). */
 export interface FixtureOptions {
+  projectOptions?: Parameters<typeof createTestRegistry>[0]["projectOptions"];
   /** Provider usage for the model queues' 95% skip (the transport's owner in production). */
   providerUsage?: Pick<ProviderUsageOwner, "read">;
   /** Run Home memory on the real background-queue summarizer instead of a fixed summary. */
@@ -172,7 +173,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   // No relay: admission validates and records nothing is sent off the Mac.
   const pushAdmission = new NotificationService(pushStore, { available: false, relayOrigin: "https://push.invalid" } as unknown as PushRelayClient);
   let settings: ReturnType<typeof settingsDependencies> | undefined;
-  const createRegistry = async () => await createTestRegistry({ knowledge, agentDir, tronHome, trust, machineId: "machine-task-test",
+  const createRegistry = async () => await createTestRegistry({ projectOptions: options.projectOptions, knowledge, agentDir, tronHome, trust, machineId: "machine-task-test",
     settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
     homeDiagnostic: record => { signals.push({ ...record }); options.homeDiagnostic?.(record); }, idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
     // Production admits the same artifact root (gateway-main.ts): run status artifacts are read only under it.

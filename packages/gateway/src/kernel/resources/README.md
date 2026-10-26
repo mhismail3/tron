@@ -12,7 +12,12 @@ bounds, exit rules and retirement live in `util/git-inspection.ts`.
 
 `trust-service.ts` owns the one Pi ProjectTrustStore and serialized trust changes,
 including inherited decisions, standalone directories, worktree propagation and
-compensating runtime application/commit rollback. Admin supplies binding I/O;
+compensating runtime application/commit rollback. `reserveUntrustedDirectory` pins
+an exact new directory before it has a Git root, never an enclosing repository.
+Approved `relocate` holds that same mutex/fence, shadows destination trust before
+filesystem effects and leaves both names explicitly false on a partial move. It
+never replays filesystem effects or automatically moves user data backwards.
+Admin supplies binding I/O;
 the canonical resource owner supplies the trust decision used by sessions.
 
 `prompt-bounds.ts` owns the prompt text/attachment limits and canonical line-bound

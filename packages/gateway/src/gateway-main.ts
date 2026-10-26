@@ -308,7 +308,7 @@ const homeComposition: HomeComposition = {
   },
   homeTaskDiagnostic,
 };
-const { modules, home } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
+const { modules, home, projects } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
   () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch,
     display,
     recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}), persistenceDiagnostic }));
@@ -842,6 +842,7 @@ settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new Sett
   undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
 });
 sessions.setSettings(settingsModel, settingsChanges);
+projects.register(settingsChanges);
 
 const service = new GatewayService({
   config,
