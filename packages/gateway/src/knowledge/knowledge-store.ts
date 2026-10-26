@@ -29,7 +29,7 @@ import { KnowledgeCatalog, type KnowledgeTable, type RecallRank } from "./knowle
 import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../protocol/json-budget.js";
 import type { ConnectionInstance } from "../modules/integrations/contract.js";
-import { carryNoteMarks, storedNoteContent, partitionProfileNotes, type ProfilePartitionRequest, type ProfilePartitionResult } from "./knowledge-notes.js";
+import { carryNoteMarks, storedNoteContent, partitionProfileNotes, profileBackupRetirements, redactProfileBackups, type ProfilePartitionRequest, type ProfilePartitionResult } from "./knowledge-notes.js";
 
 function isDecisionProducer(producer: SourceCurationProducer | undefined): boolean {
   return producer?.actor === "user" || producer?.actor === "agent";
@@ -2002,6 +2002,9 @@ export class KnowledgeStore {
     if (!reason || reason.length > 1_000) throw invalid("Forget reason is required and bounded");
     return this.mutate("knowledge.forget", commandId, { recordId, reason, expectedRevision }, async (state, paths) => {
       const history = state.records.get(recordId); const current = history ? await this.currentRecord(state, paths, recordId) : null; if (!current) throw conflict("Knowledge record does not exist"); if (expectedRevision !== undefined && expectedRevision !== current.revisionId) throw conflict("Knowledge record revision is stale");
+      for await (const item of profileBackupRetirements(paths.root, recordId,
+        record => record.id === recordId || headFor(record, [record.revisionId], [], state.config).recordRefs.includes(recordId),
+        (id, revision) => state.records.get(id)?.revisionIds.includes(revision) === true)) state.recordCleanup.set(cleanupKey(item), item);
       // The tombstone, object cleanup intent, and derivative redactions are
       // published atomically before any canonical revision is removed.
       for (const revision of history!.revisionIds) {
@@ -2045,6 +2048,7 @@ export class KnowledgeStore {
       }
       return { forgotten: true, recordId, stateRevision: state.stateRevision + 1 };
     }, async (state, paths) => {
+      await cleanupProfileBackups(state, paths);
       // A failed post-commit deletion is safe: the state no longer references
       // these files. Pending paths remain durable for reconcile() to retry.
       let changed = false;
@@ -2154,6 +2158,7 @@ export class KnowledgeStore {
       const { state } = await this.load(paths, true);
       try {
         state.catalog!.begin();
+        await cleanupProfileBackups(state, paths);
         const removedObjects: string[] = []; const pendingObjects: string[] = []; let changed = false;
         for (const hash of state.cleanup.keys()) {
           const referenced = state.catalog!.rows<RecordHead>("records", "EXISTS (SELECT 1 FROM json_each(entries.value, '$.objectHashes') AS ref WHERE ref.value = ?)", [hash], "key", 1).length > 0;
@@ -2202,6 +2207,13 @@ export class KnowledgeStore {
     });
   }
 
+}
+
+async function cleanupProfileBackups(state: KnowledgeState, paths: StorePaths): Promise<void> {
+  const forgotten = new Set([...state.suppressions.entries()].filter(([, item]) => item.forgotten).map(([id]) => id));
+  if (!forgotten.size) return;
+  await redactProfileBackups(paths.root, record => forgotten.has(record.id)
+    || headFor(record, [record.revisionId], [], state.config).recordRefs.some(id => forgotten.has(id)));
 }
 
 function scrubReferences(record: KnowledgeRecord, forgottenId: string): KnowledgeRecord | null {

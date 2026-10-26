@@ -240,6 +240,12 @@ owner-only ≤ 64 MiB backup before any body mutation, then one SQL head commit.
 Recovery validates exact originals/history and adopts those same identities;
 rescanned identical destinations create no revisions. Invalid, stale, incomplete,
 excluded or over-bound plans refuse without truncation or inferred classification.
+Forget also redacts forgotten/dependent members from profile backups, retaining
+unrelated recovery snapshots. It invalidates the original atomic plan and queues
+its uncommitted prepared files through the same revision-cleanup table. Existing
+tombstones make backup redaction retryable by `reconcile()` after a crash; no new
+cleanup journal or format is introduced. Unknown envelope shapes require an owned
+privacy contract before they can be forgotten.
 Malformed stored partition labels remain diagnostic/unassigned until an explicit
 reorganization replaces just those owner labels; valid records remain discoverable.
 This is storage recovery, not canonical Changes/undo publication; the

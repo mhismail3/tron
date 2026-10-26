@@ -154,7 +154,10 @@ it("malformed partition labels can be explicitly normalized without inferring a 
 it("profile receipt references are invalidated by forget, and cannot resurrect or replay forgotten data", async () => {
   const f = await fixture();
   const request = { commandId: "partition-forget-original", mode: "migrate" as const, assignments: f.assignments };
-  await f.store.partitionProfile(request);
+  const migration = await f.store.partitionProfile(request);
+  const unrelated = await f.store.read(f.records[1]!.id);
+  const abandonedTemporary = `${migration.backup}.999999.123456789abc.tmp`;
+  await writeFile(abandonedTemporary, await readFile(migration.backup!));
   const id = f.records[0]!.id;
   const current = await f.store.read(id);
   await f.store.forget("partition-forget-target", id, "Explicit fixture forget", current!.revisionId);
@@ -162,6 +165,68 @@ it("profile receipt references are invalidated by forget, and cannot resurrect o
   await expect(f.store.partitionProfile(request)).rejects.toThrow(/forgotten/);
   await expect(f.store.partitionProfile({ ...request, commandId: "partition-after-forget" })).rejects.toMatchObject({ code: "conflict" });
   expect(await f.store.read(id)).toBeNull();
+  expect(await f.store.read(f.records[1]!.id)).toEqual(unrelated);
+  const bytes = await readFile(migration.backup!, "utf8");
+  const target = f.records[0]!;
+  if (target.kind !== "note") throw new Error("Expected note");
+  expect(bytes).not.toContain(target.content.title);
+  expect(bytes).not.toContain(JSON.stringify(target.content.body).slice(1, -1));
+  expect(JSON.parse(bytes).originals.find((item: { record: KnowledgeRecord }) => item.record.id === f.records[1]!.id).record).toEqual(f.records[1]);
+  await expect(readFile(abandonedTemporary)).rejects.toMatchObject({ code: "ENOENT" });
+  const moved = await f.store.partitionProfile({ commandId: "partition-unrelated-after-forget", mode: "reorganize", assignments: [{ id: unrelated!.id, expectedRevision: unrelated!.revisionId, file: "home" }] });
+  expect(moved.changes.map(change => change.id)).toEqual([unrelated!.id]);
+});
+
+it("forget cancels uncommitted partition bodies without erasing unrelated backup recovery data", async () => {
+  const f = await fixture();
+  const workspaceRoot = (await f.workspace.describe()).root, home = join(f.root, "home");
+  await f.workspace.dispose();
+  await crashProfilePartition(f.root, home, f.assignments, "mid-body");
+  const directory = join(workspaceRoot, "state", "knowledge", "profile-backups");
+  const path = join(directory, (await readdir(directory)).find(name => name.endsWith(".json"))!);
+  const before = JSON.parse(await readFile(path, "utf8"));
+  const workspace = new TronWorkspace(home);
+  await workspace.initialize();
+  try {
+    const store = new KnowledgeStore(workspace);
+    await store.forget("partition-cancel-by-forget", f.records[0]!.id, "Explicit fixture forget", f.records[0]!.revisionId);
+    const bytes = await readFile(path, "utf8"), after = JSON.parse(bytes);
+    const target = f.records[0]!;
+    if (target.kind !== "note") throw new Error("Expected note");
+    expect(bytes).not.toContain(target.content.title);
+    const unrelated = f.records[1]!;
+    expect(after.originals.find((item: { record: KnowledgeRecord }) => item.record.id === unrelated.id)).toEqual(before.originals.find((item: { record: KnowledgeRecord }) => item.record.id === unrelated.id));
+    expect(after.prepared.find((item: KnowledgeRecord) => item.id === unrelated.id)).toEqual(before.prepared.find((item: KnowledgeRecord) => item.id === unrelated.id));
+    expect(await store.read(unrelated.id)).toEqual(unrelated);
+    for (const record of before.prepared) await expect(readFile(join(workspaceRoot, "state", "knowledge", "records", record.id, `${record.revisionId}.json`))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(store.partitionProfile({ commandId: "partition-canceled-retry", mode: "migrate", assignments: f.assignments })).rejects.toMatchObject({ code: "conflict" });
+  } finally { await workspace.dispose(); }
+});
+
+it("forget tombstones resume backup redaction after a real postcommit crash", async () => {
+  const f = await fixture();
+  const migration = await f.store.partitionProfile({ commandId: "partition-before-forget-crash", mode: "migrate", assignments: f.assignments });
+  const target = await f.store.read(f.records[0]!.id), unrelated = await f.store.read(f.records[1]!.id);
+  if (target?.kind !== "note") throw new Error("Expected note");
+  await f.workspace.dispose();
+  await crashProfilePartition(f.root, join(f.root, "home"), f.assignments, "before-backup", { recordId: target.id, expectedRevision: target.revisionId });
+  const workspace = new TronWorkspace(join(f.root, "home"));
+  await workspace.initialize();
+  try {
+    const store = new KnowledgeStore(workspace);
+    expect(await store.read(target.id)).toBeNull();
+    expect(await readFile(migration.backup!, "utf8")).toContain(target.content.title);
+    await store.reconcile();
+    const bytes = await readFile(migration.backup!, "utf8");
+    expect(bytes).not.toContain(target.content.title);
+    expect(bytes).not.toContain(JSON.stringify(target.content.body).slice(1, -1));
+    expect(await store.read(unrelated!.id)).toEqual(unrelated);
+    const settled = bytes;
+    await store.reconcile();
+    expect(await readFile(migration.backup!, "utf8")).toBe(settled);
+    await mkdir("test-results/home-profile", { recursive: true });
+    await writeFile("test-results/home-profile/migration-forget.json", JSON.stringify({ canonicalTargetUnavailableBeforeCleanup: true, postcommitCrashRecoveredFromExistingTombstone: true, forgottenBackupTextPurged: true, unrelatedCurrentHeadRetained: true, repeatCleanupStable: true, canonicalHomeEnvelope: "not integrated" }, null, 2) + "\n");
+  } finally { await workspace.dispose(); }
 });
 
 it("excluded members require an explicit eligibility decision rather than incomplete migration", async () => {

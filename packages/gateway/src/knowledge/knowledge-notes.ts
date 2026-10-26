@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { lstat, readdir } from "node:fs/promises";
 import { GatewayError } from "../errors.js";
-import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { durableAtomicWriteJson, durableRemove } from "../util/durable-json.js";
 import { readSecureJson } from "../util/secure-json.js";
 import { assertKnowledgeId, validateKnowledgeRecord, type KnowledgeRecord, type NoteContent } from "./knowledge-contract.js";
 
@@ -59,6 +60,48 @@ interface PartitionAccess {
   write(record: Note, expectedRevision: string): Promise<void>;
 }
 const BACKUP_BYTES = 64 * 1_048_576;
+
+/** Existing Knowledge tombstones govern these copies too. A forget invalidates
+ * its whole atomic plan; unrelated snapshots stay recoverable, while uncommitted
+ * prepared files retire through the existing recordCleanup transaction. */
+async function* profileBackups(root: string): AsyncGenerator<{ path: string; plan: PartitionBackup }> {
+  const directory = join(root, "profile-backups");
+  const status = await lstat(directory).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
+  if (!status) return;
+  if (!status.isDirectory() || status.isSymbolicLink()) refuse("Unsafe profile backup directory");
+  for (const name of await readdir(directory)) {
+    const path = join(directory, name);
+    // The sole writer holds the Knowledge mutex. Unpublished temp files cannot
+    // own staged revisions: bodies only start after the canonical backup rename.
+    if (/^[a-f0-9]{64}\.json\.\d+\.[a-f0-9]{12}\.tmp$/.test(name)) { await durableRemove(path); continue; }
+    if (!/^[a-f0-9]{64}\.json$/.test(name)) refuse("Unknown profile backup file");
+    const saved = await readSecureJson<PartitionBackup>(path, BACKUP_BYTES);
+    const plan = saved.present ? saved.value : refuse("Profile backup disappeared during cleanup");
+    // An added opaque Home envelope must bring its owned privacy contract here;
+    // never silently carry unknown copies through forget.
+    if (plan.version !== 1 || Object.keys(plan).some(key => !["version", "digest", "assignments", "originals", "prepared"].includes(key))) refuse("Unsupported profile backup cleanup shape");
+    for (const record of [...plan.prepared, ...plan.originals.flatMap(item => [item.record, ...item.history])]) validateKnowledgeRecord(record);
+    if (plan.prepared.some(record => record.kind !== "note") || plan.originals.some(item => item.record.kind !== "note" || item.history.some(record => record.id !== item.record.id))) refuse("Invalid profile backup history ownership");
+    yield { path, plan };
+  }
+}
+function affectedBackupMembers(plan: PartitionBackup, affected: (record: KnowledgeRecord) => boolean): Set<string> {
+  return new Set([...plan.prepared, ...plan.originals.flatMap(item => [item.record, ...item.history])].filter(affected).map(record => record.id));
+}
+export async function* profileBackupRetirements(root: string, forgottenId: string, affected: (record: KnowledgeRecord) => boolean, committed: (id: string, revision: string) => boolean) {
+  for await (const { plan } of profileBackups(root)) if (affectedBackupMembers(plan, affected).size) {
+    for (const record of plan.prepared) if (record.id === forgottenId || !committed(record.id, record.revisionId)) yield { recordId: record.id, revisionId: record.revisionId };
+  }
+}
+export async function redactProfileBackups(root: string, affected: (record: KnowledgeRecord) => boolean): Promise<void> {
+  for await (const { path, plan } of profileBackups(root)) {
+    const removed = affectedBackupMembers(plan, affected);
+    if (!removed.size) continue;
+    // Keep original assignment identities: missing members make this operation
+    // non-replayable. Do not mint a new intent or erase unrelated recovery data.
+    await durableAtomicWriteJson(path, { ...plan, originals: plan.originals.filter(item => !removed.has(item.record.id)), prepared: plan.prepared.filter(item => !removed.has(item.id)) });
+  }
+}
 const refuse = (message: string): never => { throw new GatewayError("conflict", message); };
 
 /** Runs INSIDE KnowledgeStore's admitted SQL transaction. The backup is a bounded
@@ -88,7 +131,7 @@ export async function partitionProfileNotes(request: ProfilePartitionRequest, ac
     if (activeBytes > BACKUP_BYTES || notes.length >= 500) refuse("Profile partition exceeds its bounded snapshot; no note was changed");
     notes.push(note);
   }
-  if (notes.some(note => access.excluded(note))) refuse("An excluded profile note needs an explicit eligibility decision before partitioning");
+  if (notes.some(note => assignments.some(item => item.id === note.id) && access.excluded(note))) refuse("An excluded profile note needs an explicit eligibility decision before partitioning");
   const current = new Map(notes.map(note => [note.id, note]));
   if (request.mode === "migrate" && (notes.length !== assignments.length || notes.some(note => !assignments.some(item => item.id === note.id)))) refuse("Migration must explicitly assign every profile note, including inactive members");
   let plan: PartitionBackup;

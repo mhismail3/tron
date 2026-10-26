@@ -41,9 +41,9 @@ process.stdout.write(JSON.stringify(result));
 
 /** Test-owned subprocess cuts at real filesystem/SQLite boundaries. It never
  * opens a live workspace or alters a production fault-injection surface. */
-export async function crashProfilePartition(root: string, home: string, assignments: ProfileAssignment[], cut: string): Promise<void> {
+export async function crashProfilePartition(root: string, home: string, assignments: ProfileAssignment[], cut: string, forget?: { recordId: string; expectedRevision: string }): Promise<void> {
   const hook = join(root, "partition-hook.mjs"), program = join(root, "partition-child.mjs"), input = join(root, "partition-input.json");
-  await writeFile(input, JSON.stringify(assignments));
+  await writeFile(input, JSON.stringify({ assignments, forget }));
   await writeFile(hook, `import { registerHooks } from 'node:module';
 registerHooks({ resolve(specifier, context, next) { try { return next(specifier, context); } catch (error) { if (specifier.endsWith('.js')) return next(specifier.slice(0,-3)+'.ts',context); throw error; } } });
 `);
@@ -53,7 +53,7 @@ registerHooks({ resolve(specifier, context, next) { try { return next(specifier,
 import { syncBuiltinESMExports } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
 const [home,input,cut] = process.argv.slice(2);
-const assignments = JSON.parse(await fs.readFile(input,'utf8'));
+const {assignments,forget} = JSON.parse(await fs.readFile(input,'utf8'));
 let written = 0;
 const park = () => { process.stdout.write('partition-crash-window\\n'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0); };
 const open = fs.open, rename = fs.rename, exec = DatabaseSync.prototype.exec;
@@ -78,7 +78,9 @@ const { KnowledgeStore } = await import(${JSON.stringify(storeModule)});
 const { TronWorkspace } = await import(${JSON.stringify(workspaceModule)});
 const workspace = new TronWorkspace(home);
 await workspace.initialize();
-await new KnowledgeStore(workspace).partitionProfile({ commandId:'partition-child-command', mode:'migrate', assignments });
+const store = new KnowledgeStore(workspace);
+if (forget) await store.forget('partition-child-forget',forget.recordId,'Explicit fixture forget',forget.expectedRevision);
+else await store.partitionProfile({ commandId:'partition-child-command', mode:'migrate', assignments });
 await workspace.dispose();
 throw new Error('Requested crash cut was not reached');
 `);

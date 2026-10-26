@@ -72,6 +72,13 @@ reuses prepared identities, validating original content/history before adoption;
 it does not leak additional immutable revisions. Postcommit replay is stable, and
 resubmission with freshly read identical destinations is a no-op. Merely opening
 Knowledge never migrates. Backups are recovery artifacts, not another profile store
-or permission to retire notes. The Home Changes owner remains responsible for
+or permission to retire notes. Explicit Knowledge forget is the privacy exception:
+it durably queues canceled, uncommitted prepared bodies in the existing revision
+cleanup table, removes forgotten/dependent snapshots from the shared backup, and
+retains unrelated snapshots. Original assignment identities remain, so the canceled
+atomic plan cannot replay as a different intent. Existing tombstones drive retry
+through `reconcile()` after a cleanup crash; no parallel cleanup journal is added.
+An opaque Home audit-envelope addition must supply its owned redaction contract
+atomically; unknown backup shapes refuse rather than silently retain such copies. The Home Changes owner remains responsible for
 canonical audit publication, replay identity and undo; a store-only result is not
 end-to-end curation success.
