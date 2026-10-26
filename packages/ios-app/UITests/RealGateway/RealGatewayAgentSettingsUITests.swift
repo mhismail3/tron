@@ -99,8 +99,9 @@ extension RealGatewayPairAndChatUITests {
             keepScreenshot(app, name: "2010-agent-settings-more-\(appearance)")
             dismissAgentSheet(app, title: "Agent Behavior")
             let changes = app.buttons["Changes"]
-            revealBelowNavigationBar(app, changes)
+            XCTAssertTrue(changes.waitForExistence(timeout: 15), app.debugDescription)
             changes.tap()
+            // The canonical history pages newest first; the latest Background entry is Reset.
             let entry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label BEGINSWITH 'Background models,'")).firstMatch
             XCTAssertTrue(entry.waitForExistence(timeout: 30), app.debugDescription)
             entry.tap()
