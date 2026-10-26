@@ -156,13 +156,13 @@ changes keep its store, cursors and spend.
   typed result projection. Content changes use `SettingsChangePath.auditSubject`, retaining
   the Home stripe through effects, grouped audit, awaited observer and projection; partial
   failures restore before ungrouped failure audit and rethrow the original value.
-  Explicit label-only migration/reorganization freezes the original audit in Knowledge's
+  Explicit placement-only migration/reorganization freezes the original audit in Knowledge's
   backup before effects, then uses the kernel's atomic subject publisher after proving
   committed identities. Retry repairs only a committed audit or explicitly resumes its
   precommit intent; existing Changes Undo restores exact labels without rewriting content.
-  `## Learned profile` carries only paged file/count/revision metadata and diagnostic
-  references, never note text. Home explicitly reads Core, Home or a named scope and
-  chooses relevance and worker-brief content; unavailable Knowledge says so. File labels
+  `## Learned profile` carries bounded seven-area/count/revision metadata and diagnostic
+  references, never note text. Home explicitly reads v2 paths or Prior organization and
+  chooses relevance and worker-brief content; unavailable Knowledge says so. Placement
   never weaken confirmed standing authority. See [profile contract](profile.md).
   Home chapters are never observed by Knowledge.
 

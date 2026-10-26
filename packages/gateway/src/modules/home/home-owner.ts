@@ -19,7 +19,7 @@ import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapt
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { HomeChapterList, HomeProfileList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryView, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../../protocol/types.js";
-import { readHomeProfile } from "./home-profile.js";
+import { readHomeProfileIndex } from "./home-profile.js";
 import { estimateTokens, type SessionEntry } from "../../kernel/pi/coding-agent.js";
 import { historyEntry } from "../../kernel/projection/history.js";
 import type { EpisodicMemory } from "../../episodic/episodic-memory.js";
@@ -848,10 +848,9 @@ export class HomeOwner {
   async profileList(): Promise<HomeProfileList> {
     const knowledge = this.options.knowledge();
     if (!knowledge) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
-    const read = await readHomeProfile(knowledge);
+    const read = await readHomeProfileIndex(knowledge);
     return {
-      items: read.items.map(item => ({ id: item.id, revisionId: item.revisionId, kind: item.kind, text: item.text, confirmed: item.confirmed,
-        status: item.status, createdAt: item.record.createdAt, updatedAt: item.record.updatedAt })),
+      items: read.items,
       unclassified: read.unclassified,
     };
   }

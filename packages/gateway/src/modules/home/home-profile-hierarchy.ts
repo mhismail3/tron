@@ -1,21 +1,38 @@
 import { createHash } from "node:crypto";
-import type { ProfileFile } from "../../knowledge/knowledge-notes.js";
-import type { HomeProfileRead } from "./home-profile.js";
+import { PROFILE_AREAS } from "../../knowledge/knowledge-profile-placement.js";
+import type { HomeProfileIndexRead } from "./home-profile.js";
 
 export const PROFILE_SECTION_HEADING = "## Learned profile";
-export function profileIndex(read: HomeProfileRead, offset = 0): string {
-  const files = new Set<ProfileFile>(["core", "home", ...read.items.flatMap(item => item.file === null ? [] : [item.file ?? "core"])]);
-  const names = [...files].sort();
-  return [PROFILE_SECTION_HEADING,
-    "Structured Knowledge profile: Core, Home and named scopes. This is a metadata index, not selected instructions. Use profile read file=<name> to inspect exact content and provenance; Home decides relevance and what belongs in a worker brief.",
-    "Existing explicitly binding safety and standing instructions retain their force; partitioning or absence from this index does not revoke them. Inspect the relevant records before acting. Confirmation is evidence of confirmation, not permission to infer new binding rules.",
-    ...names.slice(offset, offset + 16).map(file => {
-      const items = read.items.filter(item => item.file === file || (item.file === undefined && file === "core"));
-      const version = createHash("sha256").update(items.map(item => `${item.id}:${item.revisionId}`).join("\n")).digest("hex").slice(0, 12);
-      return `- ${file}: ${items.filter(item => item.status === "active").length} active / ${items.length} total; version ${version}; profile read file=${file}`;
-    }),
-    ...(read.diagnostics.length ? [`Profile diagnostics: ${read.diagnostics.length} notes need explicit metadata repair, not an inferred destination. Exact content remains available through Knowledge reads.`,
-      ...read.diagnostics.slice(offset, offset + 16).map(item => `- ${item.issues.join("/")} labels: knowledge read id=${item.id} revisionId=${item.revisionId}`)] : []),
-    ...(offset + 16 < Math.max(names.length, read.diagnostics.length) ? [`More metadata: profile read offset=${offset + 16}.`] : []),
-  ].join("\n");
+/** Bodies/titles are never included. The final UTF-8 bound includes instructions,
+ * diagnostics and continuation; oversized metadata remains explicitly pageable. */
+export function profileIndex(read: Pick<HomeProfileIndexRead, "diagnostics"> & { items: Array<Pick<HomeProfileIndexRead["items"][number], "id" | "revisionId" | "path" | "status">> }, offset = 0): string {
+  const names = [...Object.keys(PROFILE_AREAS), "inferred", "prior"];
+  const rows = names.map(path => {
+    const items = read.items.filter(item => item.path === path || item.path.startsWith(path + "/"));
+    const version = createHash("sha256").update(items.map(item => `${item.id}:${item.revisionId}`).sort().join("\n")).digest("hex").slice(0, 12);
+    const label = path === "inferred" ? "Unsorted" : path === "prior" ? "Prior organization" : PROFILE_AREAS[path as keyof typeof PROFILE_AREAS];
+    return `- ${label} (${path}): ${items.filter(item => item.status === "active").length} active / ${items.length} total; version ${version}; profile read path=${path}`;
+  });
+  rows.push(...read.diagnostics.map(item => `- ${item.issues.join("/")} metadata: knowledge read id=${item.id} revisionId=${item.revisionId}`));
+  const personal = read.items.filter(item => item.status === "active" && !["inferred", "prior"].includes(item.path.split("/")[0]!));
+  const subareas = new Set(personal.flatMap(item => item.path.split("/").slice(1).map((_, index) => item.path.split("/").slice(0, index + 2).join("/"))));
+  const leaves = new Map<string, number>(); for (const item of personal) leaves.set(item.path, (leaves.get(item.path) ?? 0) + 1);
+  const unsorted = read.items.filter(item => item.status === "active" && item.path.startsWith("inferred/")).length;
+  const nearLeaves = [...leaves.values()].filter(count => count >= Math.ceil(32 * 0.8)).length;
+  const nearCapacity = personal.length >= Math.ceil(256 * 0.8) || unsorted >= Math.ceil(128 * 0.8) || subareas.size >= Math.ceil(128 * 0.8) || nearLeaves > 0;
+  const header = [PROFILE_SECTION_HEADING,
+    `Capacity: ${personal.length}/256 personal, ${unsorted}/128 unsorted, ${subareas.size}/128 subareas; ${nearLeaves} leaf groups at ≥80% of 32.${nearCapacity ? " Warning: review capacity before adding; nothing is automatically evicted." : ""}`,
+    "Personal profile: seven areas, separate Unsorted holding notes, and read-only Prior organization for historical placement. This is metadata, not selected instructions. Use profile read path=<path> for exact content and provenance; Home decides relevance and worker briefs.",
+    "Confirmed by you and Inferred describe evidence, not execution permission. Existing explicitly binding safety and standing instructions retain their force wherever placed; inspect and respect them before acting.",
+    `Unsorted active: ${read.items.filter(item => item.status === "active" && item.path.startsWith("inferred/")).length}. At a maintainer turn start, offer sorting once at 8 unsorted, at most 8 notes per proposal. After Not now, do not repeat until a NEW note arrives; edits/moves/time alone do not reset it. Use conversation evidence, never timers or polling.`,
+    `Profile diagnostics: ${read.diagnostics.length}; exact records remain available through Knowledge.`,
+  ];
+  const selected: string[] = [];
+  let consumed = 0;
+  for (const row of rows.slice(offset, offset + 16)) {
+    const continuation = `More metadata: profile read offset=${offset + consumed + 1}.`;
+    if (Buffer.byteLength([...header, ...selected, row, continuation].join("\n")) > 8 * 1024) break;
+    selected.push(row); consumed++;
+  }
+  return [...header, ...selected, ...(offset + consumed < rows.length ? [`More metadata: profile read offset=${offset + consumed}.`] : [])].join("\n");
 }

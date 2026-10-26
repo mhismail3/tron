@@ -1074,7 +1074,8 @@ export const HOME_PROFILE_EDIT_CAPABILITY = "home-profile-edit.v1";
 export interface HomeProfileListItem {
   id: string;
   revisionId: string;
-  kind: "preference" | "standing-decision" | "delegation-default" | "fact";
+  kind: "preference" | "standing-decision" | "delegation-default" | "fact" | "correction";
+  path: string;
   text: string;
   confirmed: boolean;
   status: "active" | "superseded" | "retired";

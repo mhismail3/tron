@@ -686,7 +686,7 @@ export function recordSubject(id: string): RecordSubject | undefined {
  * one instance per note (qualifier `note`). Not a key: an item never resolves as a
  * setting, and Knowledge stays its store.
  */
-export const HOME_PROFILE_SUBJECT = { id: "home.profile.item", label: "Profile item", group: "context", qualifier: "note" as const, floor: "quiet" as Tier };
+export const HOME_PROFILE_SUBJECT = { id: "home.profile.item", label: "Profile item", group: "context", qualifier: "note" as const, floor: "notify" as Tier };
 
 
 export function timingFor(key: KeyDeclaration, direction: Direction): Timing {

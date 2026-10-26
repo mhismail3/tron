@@ -1,4 +1,5 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { validateProfileMetadata, type ProfileNoteRow } from "./knowledge-profile-placement.js";
 
 export type CatalogCollection = "records" | "coverage" | "suppressions" | "scopeExclusions" | "receipts" | "cleanup" | "recordCleanup" | "sourceIdentities";
 export interface RecallRank { score: number; family: number; freshness: number; sortAt: number; keyOrder: string; }
@@ -33,6 +34,11 @@ function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
         || (value.branchId !== undefined && typeof value.branchId !== "string")
         || (value.kind === "source" ? !validSourceRow(value.sourceRow) : value.sourceRow !== undefined)
         || !Array.isArray(value.searchFields) || !value.searchFields.every(field => strings(field) && field.length === 2)) throw new Error("Invalid Knowledge record head");
+      if (value.profileRow !== undefined && value.profileRow !== null) {
+        const row = value.profileRow as ProfileNoteRow;
+        if (typeof row.title !== "string" || row.title.length > 512 || typeof row.confirmed !== "boolean" || typeof row.retired !== "boolean" || !strings(row.tags) || row.tags.length > 8 || !strings(row.supersedes)) throw new Error("Invalid profile row projection");
+        if (row.profile !== undefined) validateProfileMetadata(row.profile);
+      }
       break;
     case "suppressions":
       if (typeof value.excluded !== "boolean" || typeof value.forgotten !== "boolean") throw new Error("Invalid Knowledge suppression");

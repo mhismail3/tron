@@ -48,6 +48,7 @@ import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import { HomeProfileItems } from "../src/modules/home/home-profile.js";
+import { registerProfileApprovals } from "../src/modules/home/home-profile-approvals.js";
 import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../src/transport/gateway-service.js";
 
@@ -239,6 +240,7 @@ export async function fixture(label: string): Promise<Fixture> {
     setTrust: async () => { throw new Error("trust is not changed here"); },
     undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
   });
+  registerProfileApprovals(settingsChanges, () => knowledge);
   settings = { model: settingsModel, changes: settingsChanges };
   registry.setSettings(settingsModel, settingsChanges);
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
@@ -385,7 +387,14 @@ export async function itemText(f: Fixture, text: string): Promise<ListedItem> {
   return item;
 }
 export async function history(f: Fixture): Promise<HistoryEntry[]> {
-  return (await f.service.invoke(maintainer, "settings.history", { key: "home.profile.item", limit: 200 }) as unknown as { entries: HistoryEntry[] }).entries;
+  const entries: HistoryEntry[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await f.service.invoke(maintainer, "settings.history", { key: "home.profile.item", limit: 200, ...(cursor ? { cursor } : {}) }) as unknown as { entries: HistoryEntry[]; nextCursor?: string };
+    entries.push(...page.entries);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return entries;
 }
 export function change(f: Fixture, changes: Array<Record<string, unknown>>, label: string): Promise<ChangeAnswer> {
   return f.service.invoke(maintainer, "home.profileChange", { commandId: command(label), changes }) as unknown as Promise<ChangeAnswer>;

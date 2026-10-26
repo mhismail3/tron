@@ -73,6 +73,7 @@ import { DisplayOwner } from "./display/display-modules.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
 import { HomeProfileItems } from "./modules/home/home-profile.js";
+import { registerProfileApprovals } from "./modules/home/home-profile-approvals.js";
 import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, QueueKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
@@ -841,6 +842,7 @@ settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new Sett
   ),
   undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
 });
+registerProfileApprovals(settingsChanges, () => knowledge);
 sessions.setSettings(settingsModel, settingsChanges);
 projects.register(settingsChanges);
 

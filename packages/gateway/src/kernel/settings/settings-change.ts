@@ -90,7 +90,7 @@ export interface ApprovalActionHandler {
   plan(params: unknown, context: { actor: Actor }): Promise<ApprovalActionPreview>;
   /** Runs once after the maintainer approves, under the target's stripe. A throw
    * settles the request failed with its message; it is never retried. */
-  apply(params: unknown, context: { actor: Actor; requestId: string }): Promise<{ summary: string; result?: unknown }>;
+  apply(params: unknown, context: { actor: Actor; requestId: string; subjects: Pick<SettingsChangePath, "auditSubject" | "publishSubjectAudit"> }): Promise<{ summary: string; result?: unknown }>;
 }
 
 /** Bounded serialized action parameters; the preview is display text. */
@@ -375,7 +375,11 @@ export class SettingsChangePath {
   /** Home's learned subject shares the settings stripe, audit and observer cut.
    * The domain projects its typed result after the observer, still under the stripe. */
   async auditSubject<T, R>(operation: () => Promise<SubjectMutation<T>>, project: (result: T, audit: ChangeResult) => Promise<R>): Promise<R> {
-    return this.mutexFor({ kind: "home" }).run(async () => {
+    return this.mutexFor({ kind: "home" }).run(() => this.auditSubjectInStripe(operation, project));
+  }
+
+  /** Borrowed only by an approval handler already inside the target stripe. */
+  private async auditSubjectInStripe<T, R>(operation: () => Promise<SubjectMutation<T>>, project: (result: T, audit: ChangeResult) => Promise<R>): Promise<R> {
       const mutation = await operation();
       if (mutation.status === "failed") {
         if (mutation.writes.length) await this.record.append(mutation.writes.map(write => this.subjectEntry(write, mutation.context, "failed", mutation.failure)));
@@ -393,7 +397,6 @@ export class SettingsChangePath {
       const context = mutation.context;
       await this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
       return project(mutation.result, { status: "applied", tier, changes });
-    });
   }
 
   /** Home freezes these original inputs in its existing backup before domain effects. */
@@ -404,15 +407,17 @@ export class SettingsChangePath {
   /** Publishes only facts for proven committed effects; it never replays the domain. */
   async publishSubjectAudit(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): Promise<ChangeResult> {
     if (this.disposed) throw new GatewayError("conflict", "Settings approvals are disposed");
+    return this.mutexFor({ kind: "home" }).run(() => this.publishSubjectAuditInStripe(writes, context, replayAt));
+  }
+
+  private async publishSubjectAuditInStripe(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): Promise<ChangeResult> {
     const entries = this.subjectPublication(writes, context, replayAt);
-    return this.mutexFor({ kind: "home" }).run(async () => {
       await this.record.appendOnce(entries);
       const changes: ChangeOutcome[] = entries.map(entry => ({ changeId: entry.changeId, key: entry.key, qualifiers: entry.qualifiers!,
         layer: "session", status: "applied", tier: entry.tier, before: entry.before ?? null, after: entry.after ?? null }));
       const tier = maxTier(...entries.map(entry => entry.tier));
       if (entries.length) await this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
       return { status: "applied", tier, changes };
-    });
   }
 
   private subjectPublication(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): ChangeEntry[] {
@@ -616,7 +621,9 @@ export class SettingsChangePath {
     }
     await this.approvals.beginAction(request.requestId, this.now());
     let summary: string;
-    try { ({ summary } = await handler!.apply(action.params, { actor: request.actor, requestId: request.requestId })); }
+    try { ({ summary } = await handler!.apply(action.params, { actor: request.actor, requestId: request.requestId,
+      subjects: { auditSubject: (operation, project) => this.auditSubjectInStripe(operation, project),
+        publishSubjectAudit: (writes, context, replayAt) => this.publishSubjectAuditInStripe(writes, context, replayAt) } })); }
     catch (error) {
       await settle("failed", error instanceof Error ? error.message : String(error));
       throw error;

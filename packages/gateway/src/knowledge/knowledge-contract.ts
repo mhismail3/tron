@@ -1,6 +1,7 @@
 import type { JsonValue } from "../protocol/types.js";
 import type { PaidBudgetLedger } from "./paid-budget-ledger.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
+import { validateProfileMetadata } from "./knowledge-profile-placement.js";
 
 export const KNOWLEDGE_SCHEMA_VERSION = 1 as const;
 
@@ -283,6 +284,8 @@ export interface NoteFieldQualification {
 }
 
 export interface NoteContent {
+  /** Sole current placement; absent only in pre-hierarchy revisions/Undo. */
+  profile?: import("./knowledge-profile-placement.js").ProfileMetadata;
   title: string;
   body?: string;
   fields?: NoteFieldQualification[];
@@ -1184,6 +1187,11 @@ export function validateKnowledgeRecord(value: unknown): KnowledgeRecord {
     for (const key of ["eventAt", "validFrom", "validTo", "reviewDue"]) if ((temporal as Record<string, unknown>)[key] !== undefined) assertTimestamp((temporal as Record<string, unknown>)[key], `temporal ${key}`);
   }
   validateKindContent(item.kind, item.content);
+  if (item.kind === "note") {
+    const note = item.content as NoteContent;
+    if (note.profile && item.scope !== "personal") throw new Error("Profile metadata belongs only to personal notes");
+    if (note.profile && note.tags?.includes("kind-correction") && !item.relations.some(relation => relation.type === "corrects" && typeof relation.revisionId === "string")) throw new Error("A correction requires an exact wrong-claim relation");
+  }
   return value as KnowledgeRecord;
 }
 
@@ -1351,6 +1359,11 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
     if (content.tags !== undefined) {
       if (!Array.isArray(content.tags) || content.tags.length > NOTE_TAGS_MAX) throw new Error("Invalid note tags");
       if (new Set(content.tags).size !== content.tags.length || !content.tags.every(tag => typeof tag === "string" && NOTE_TAG_PATTERN.test(tag))) throw new Error("Invalid note tags");
+    }
+    if (content.profile !== undefined) {
+      validateProfileMetadata(content.profile);
+      if ((content.tags as string[] | undefined)?.includes("kind-correction") && content.profile.path[0] !== "corrections") throw new Error("Corrections stay in the Corrections area");
+      if (!(content.tags as string[] | undefined)?.includes("home-profile") || (content.tags as string[]).some(tag => tag.startsWith("home-file-"))) throw new Error("Profile placement must have membership and no legacy file labels");
     }
     if (content.retired !== undefined && typeof content.retired !== "boolean") throw new Error("Invalid note retirement");
     if (content.privacyScope !== undefined && !["private", "shared"].includes(content.privacyScope as string)) throw new Error("Invalid note privacy scope");

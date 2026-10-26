@@ -29,6 +29,7 @@ import { KnowledgeCatalog, type KnowledgeTable, type RecallRank } from "./knowle
 import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../protocol/json-budget.js";
 import type { ConnectionInstance } from "../modules/integrations/contract.js";
+import { profileNoteRow, type ProfileNoteRow, type ProfileRecordRow, assertProfileCapacity } from "./knowledge-profile-placement.js";
 import { carryNoteMarks, storedNoteContent, partitionProfileNotes, profileBackupRetirements, redactProfileBackups, readProfileOperation, type ProfilePartitionAudit, type ProfilePartitionRequest, type ProfilePartitionResult } from "./knowledge-notes.js";
 
 function isDecisionProducer(producer: SourceCurationProducer | undefined): boolean {
@@ -103,6 +104,8 @@ type RecordHead = LegacyRecordHead & {
   admission?: SourceAdmission;
   sessionId?: string; branchId?: string;
   sourceRow?: SourceRowFields;
+  /** Absent only on historical pre-hierarchy heads; null is a known nonmember. */
+  profileRow?: ProfileNoteRow | null;
 };
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
@@ -296,6 +299,7 @@ function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: 
     ...(record.kind === "source" && record.content.admission ? { admission: record.content.admission.status } : {}),
     ...headScopeFields(record),
     ...(record.kind === "source" ? { sourceRow: sourceRowFields(record, config) } : {}),
+    ...(record.kind === "note" ? { profileRow: profileNoteRow(record) } : {}),
   };
 }
 /** Cursor identity for one page of Library rows. Every input that changes which
@@ -1801,6 +1805,22 @@ export class KnowledgeStore {
   }
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, { ...request.record, content: storedNoteContent(request.record.content) })); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, content: carryNoteMarks(current, request.record.content), id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
+  /** Metadata-only after explicit hierarchy migration. The narrow legacy reader
+   * derives old heads from their immutable bodies; it never writes or upgrades. */
+  async profileRows(): Promise<ProfileRecordRow[]> {
+    return this.readState((state, paths) => this.profileRowsInState(state, paths, true));
+  }
+  private async profileRowsInState(state: KnowledgeState, paths: StorePaths, visibleOnly: boolean): Promise<ProfileRecordRow[]> {
+    const heads = state.catalog?.rows<RecordHead>("records", "json_extract(value, '$.kind') = 'note' AND json_extract(value, '$.scope') = 'personal' AND (json_type(value, '$.profileRow') IS NULL OR json_type(value, '$.profileRow') = 'object')", [], "key", 501) ?? [];
+    if (heads.length > 500) throw invalid("Profile metadata exceeds its bounded snapshot; no records were omitted as success");
+    const rows: ProfileRecordRow[] = [];
+    for (const { key: id, value: head } of heads) {
+      if (visibleOnly && !this.headVisible(state, id, head)) continue;
+      const row = head.profileRow === undefined ? profileNoteRow(await this.readRecord(paths, id, head.latestRevisionId)) : head.profileRow;
+      if (row) rows.push({ ...row, id, revisionId: head.latestRevisionId, createdAt: head.createdAt, updatedAt: head.updatedAt });
+    }
+    return rows;
+  }
   /** One SQL commit publishes a fully backed-up partition; staged identities are recoverable. */
   async partitionProfile(request: ProfilePartitionRequest, audit?: ProfilePartitionAudit): Promise<ProfilePartitionResult> {
     return this.mutate("knowledge.profile.partition", request.commandId, request, async (state, paths) => {
@@ -1854,6 +1874,14 @@ export class KnowledgeStore {
     const timestamp = now(); const record = { ...draft, schemaVersion: KNOWLEDGE_SCHEMA_VERSION, id, revisionId: preparedRevision ?? revisionId(), createdAt: draft.createdAt ?? current?.createdAt ?? timestamp, updatedAt: draft.updatedAt ?? timestamp } as KnowledgeRecord;
     try { validateKnowledgeRecord(record); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge record"); }
     if (Buffer.byteLength(`${JSON.stringify(record, null, 2)}\n`, "utf8") > RECORD_MAX_BYTES) throw invalid("Knowledge record exceeds its byte limit");
+    if (!preparedRevision && record.kind === "note" && record.content.tags?.includes("home-profile") && !record.content.profile) throw invalid("New profile writes require v2 placement; historical placement is read-only except exact Changes Undo");
+    if (!preparedRevision && record.kind === "note" && record.scope === "personal" && record.content.tags?.includes("home-profile")
+      && (record.content.profile !== undefined || (current?.kind === "note" && current.content.profile !== undefined)
+        || current?.relations.some(relation => relation.type === "supersedes" && !record.relations.some(next => next.type === "supersedes" && next.recordId === relation.recordId)))) {
+      const notes = (await this.profileRowsInState(state, paths, false)).map(row => ({ id: row.id, content: { ...(row.profile ? { profile: row.profile } : {}), retired: row.retired }, relations: row.supersedes.map(recordId => ({ type: "supersedes" as const, recordId })) }));
+      try { assertProfileCapacity(notes, [...notes.filter(note => note.id !== id), record]); }
+      catch (error) { throw invalid(error instanceof Error ? error.message : String(error)); }
+    }
     await safeDirectory(join(paths.records, id), true);
     await durableAtomicWriteJson(this.recordPath(paths, id, record.revisionId), record, 0o600);
     const revisions = [...(existing?.revisionIds ?? []), record.revisionId];

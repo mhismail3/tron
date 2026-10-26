@@ -1,114 +1,115 @@
-# Structured Home profile
+# Personal profile
 
-## Authority and exposure
+## Authority and organization
 
-Personal Knowledge notes are canonical. Membership is the `home-profile` label;
-`kind-*` retains the existing kind. `home-file-core`, `home-file-home` and
-`home-file-scopes-<name>` partition notes into Core, Home and one shallow level of
-named scopes. File membership is organization, not relevance or binding authority.
-Existing unpartitioned notes remain discoverable under Core before an explicit
-complete migration. No existing label, content or historical revision is removed.
+Personal Knowledge notes are canonical. `home-profile` marks membership; one
+`kind-*` label retains preference, standing decision, delegation default, fact or
+correction. Placement is `content.profile = {version: 2, path: string[]}`. The seven
+roots are `life`, `routines`, `communication`, `engineering`, `resources` (machines,
+devices and services together), `projects` (owned projects and pointers only), and
+`corrections`. `inferred/{review,needs-split,project-rules,procedures,uncertain}`
+is separate holding space, not an eighth personal area. Inactive originals stay unchanged.
+Depth is at most four segments including the root. Segments are lowercase slugs.
 
-Each activation carries a metadata-only discovery index: file names, active/total
-classified counts, revision fingerprints and explicit read instructions. The index
-pages at most sixteen files and sixteen diagnostic references at a time; `offset`
-advances both metadata windows and discloses remaining rows rather than dropping them. It contains no note titles or bodies. A fingerprint changes when a note's
-revision changes, not because a classifier reinterpreted its text.
+Placement, kind and confirmation are distinct. Sorting cannot grant execution
+permission, promote confirmation, split a note, revoke explicit standing authority
+or rewrite provenance. Home chooses relevance and worker brief content; Gateway
+performs no semantic selection, automatic content insertion or inferred routing.
+Existing explicit safety and standing rules retain their force.
 
-Home reads `profile {action:"read", file:"core"}` (or `home` or `scopes/<name>`)
-when it needs the content. Omitting `file` reads the index. `offset` pages the index
-or the chosen file. File reads return up to sixteen exact records with IDs,
-revisions, kind, status, confirmation, full note content and provenance; `nextOffset`
-identifies remaining records. Retired/superseded records stay readable with their
-status, never silently active. Invalid kind or partition labels produce exact
-ID/revision diagnostic references for explicit Knowledge reads and repair, not an
-inferred kind or Core assignment. Malformed metadata never hides healthy records;
-only genuinely unlabelled flat notes read under Core. The existing native list's
-unclassified count remains kind-only. Unavailable/corrupt Knowledge is not an empty profile.
+Historical `home-file-*` labels and unlabelled legacy members are read as **Prior
+organization**, never inferred into a v2 destination. Ordinary Home content edits
+refuse until an exact placement is reviewed. Only internal Changes Undo can write
+historical placement; new Home curation writes v2. Reads never migrate data.
 
-Home chooses interpretation, relevance and worker brief content. Gateway performs
-no semantic selection, inferred scope routing or automatic content insertion, and
-requires no copied profile text or mandatory citation section in worker briefs.
-Confirmation establishes provenance/status, not new execution permission. Existing
-explicitly binding safety/standing instructions retain their authority. Home must
-inspect and respect them before acting; moving a note does not revoke its force.
+## Discovery and exact reads
 
-## Incremental curation
+Each activation receives a metadata-only index: seven roots, active/total counts,
+revision fingerprints, separate Unsorted and historical counts, and diagnostic
+ID/revision references. It contains no note titles or bodies. The index is at most
+8 KiB and pages diagnostics with `offset`; remaining references are explicit, not
+silently omitted. A fingerprint changes with canonical note revisions.
 
-The Home-only `profile` tool reads and curates through the existing Home change
-subject. Learn takes a kind, exact one-line text and optional explicit file (Core
-by default). Refine/supersede/retire retain their existing validation, evidence
-citations, immutable history and visible Changes/undo route. No ordinary worker
-receives this tool. The maintainer's existing explicit confirmation/undo surface is
-unchanged.
+V2 discovery reads the existing SQL heads' mechanical profile projection, written
+with the owning immutable note and head in the same transaction. Only historical
+heads without this projection use the old-body reader; it never writes an upgrade.
+Suppression, scope exclusions and forgotten dependencies retain the existing head
+visibility fence. Unavailable Knowledge is not an empty successful profile.
 
-Home content writes are inferred. The previous confirmed instruction-kind contract
-is conservatively preserved: Home cannot rewrite, supersede or retire an existing
-confirmed preference, standing decision or delegation default. It can save an
-inferred proposal for review, but cannot promote that proposal or weaken existing
-authority. Contextual fact edits retain their existing evidence/confirmation rules.
+`profile {action:"read"}` reads the index. `profile {action:"read", path:"engineering"}`
+reads an explicit path and descendants; `inferred` and `prior` are readable too.
+Record pages contain at most sixteen notes and 32 KiB, including exact IDs,
+revisions, state, content and provenance. Inactive content requires `includeInactive:true`. An oversized record returns its canonical
+Knowledge reference and byte count, never truncated content. `nextCursor` binds
+the query and revision snapshot; changed snapshots refuse and require a new read.
+Raw offsets are only for metadata, not continuation of record pages.
 
-## Mechanical partition storage
+Invalid kinds and legacy partition metadata produce exact diagnostic references;
+Gateway never invents a kind or destination. The native list's unclassified count
+remains kind-only. Retired and superseded notes remain readable, never active by
+placement alone.
 
-`KnowledgeStore.partitionProfile` owns the admitted SQL transaction. Its caller
-supplies every ID, exact expected head and destination; storage never infers a
-mapping from text, kind, confirmation or project. Complete migration includes
-inactive members. Excluded records, stale/incomplete mappings, invalid destination
-labels or bounds refuse before mutation rather than being silently omitted or truncated.
-Explicit reorganization can repair malformed stored partition labels: it replaces
-only `home-file-*` labels, retaining every other value and the original histories.
-No repair destination is inferred, and reads never normalize stored labels.
+## Home proposals and maintainer decisions
 
-An owner-only bounded recovery backup contains every original head and immutable
-historical revision plus every prepared replacement identity. It is synchronized
-before any replacement body. Only the file label and revision identity may change;
-text, body, existing labels, kind, provenance, confirmation, relations, retirement,
-creation/update times and old bodies remain intact. Canonical heads remain in SQL,
-not the backup. All prepared heads publish in one commit.
+New Home statements are unconfirmed, default to `inferred/review`, and cite the
+triggering maintainer message. An explicit destination is accepted only as an
+explicit operation, not a classifier's suggestion. Home's instructions prohibit
+inferring sensitive health, relationship, financial or location information;
+deliberately stated sensitive notes wait unsorted for review. Corrections require
+an exact wrong-claim ID/revision relation and stay in `corrections`.
 
-A process crash before commit leaves old heads authoritative and staged bodies
-reachable through the durable backup. Explicit retry of the same assignments
-reuses prepared identities, validating original content/history before adoption;
-it does not leak additional immutable revisions. Postcommit replay is stable, and
-resubmission with freshly read identical destinations is a no-op. Merely opening
-Knowledge never migrates. Backups are recovery artifacts, not another profile store
-or permission to retire notes. Explicit Knowledge forget is the privacy exception:
-it durably queues canceled, uncommitted prepared bodies in the existing revision
-cleanup table, removes forgotten/dependent snapshots from the shared backup, and
-retains unrelated snapshots. Original assignment identities remain, so the canceled
-atomic plan cannot replay as a different intent. Existing tombstones drive retry
-through `reconcile()` after a cleanup crash; no parallel cleanup journal is added.
-The same backup also holds Home's immutable versioned audit envelope: original
-command ID, timestamp, actor/reason/web context and ordered before/after writes,
-including direction and any Undo links. Its digest binds that envelope to the exact
-assignments and prepared identities. Audited backups are addressed by the original
-command ID, not equivalent assignments. Knowledge treats the envelope as opaque;
-forget of any member drops the WHOLE envelope, which may quote another member in
-free-form context, while retaining unrelated recovery snapshots. The invalidated
-plan cannot publish a partial group or acquire a replacement identity. Unknown
-backup fields refuse privacy cleanup rather than silently retain extra copies.
+Home can sort its own inferred nonbinding notes and retire its own unconfirmed
+proposals with a reason. Confirmed notes, corrections, existing binding kinds and
+other changes require a maintainer decision through `home.profile.review`.
+Original notes remain unchanged while pending. The stored action binds exact
+before/after values and source revisions. Supersede previews show both the old
+note becoming superseded and the replacement's text, kind, confirmation, placement
+and source link. Stale approvals fail rather than overwrite a later native edit.
+Approval apply borrows the already-held Home subject stripe; it does not acquire
+the same non-reentrant mutex twice. Accepted changes retain Changes and Undo.
 
-## Changes, explicit retry and Undo
+Home's model-visible policy offers sorting at the start of a maintainer turn when
+eight notes are unsorted, at most eight per batch. “Not now” suppresses offers until
+a **new note**, not an edit or elapsed time. Conversation evidence carries that
+semantic discretion; no timer or background-completion trigger is introduced.
+The operation boundary independently refuses sorting batches above eight. External
+AGENTS.md, skills/prompts and Settings destinations remain drafts until safe Undo.
 
-`profile {action:"migrate", assignments:[{id,expectedRevision,file}], reason}`
-requires every member, including inactive notes. `reorganize` uses the same explicit
-fields for just the selected notes. Neither action rewrites content or confirmation.
-Home preflights the complete Changes group before writing the backup or any body.
-Only after proving every prepared identity committed does it publish the original
-facts atomically through the existing Changes directory/index. No partially indexed
-group is undoable; no separate journal, consumer or publication controller exists.
+## Capacity and atomic placement
 
-An unacknowledged tool result returns `retry_required` with its original `commandId`.
-`profile {action:"retry", commandId}` resumes only the backed-up precommit intent,
-or repairs ONLY the original audit after commit. It retains the original timestamp,
-actor, reason, web tier and ordered writes, not the retrying turn's context. Later
-edits do not prevent logging historical committed facts and are never overwritten
-by audit repair. Reading/opening never replays domain effects.
+Active v2 limits are 256 personal notes, 128 unsorted notes, 128 subareas and 32
+notes per subarea. Knowledge checks ordinary native writes in its SQL transaction;
+partition publication checks its whole after-state before backup or body writes.
+Overflow is an explicit error, never eviction or truncation. Exact Undo may restore
+an original over-bound state; subsequent writes cannot grow an exceeded dimension.
 
-The existing maintainer Changes Undo checks the whole group's current revision and
-value fences, then restores only the original partition labels and their exact
-positions in one backed-up Knowledge commit. Text, provenance, status, confirmation,
-relations and timestamps remain unchanged; old revisions remain readable. Its audit
-retains the original `undoOf` links through a crash/retry. Only the maintainer may
-resume an uncommitted Undo. Ordinary profile content Undo retains its existing path.
-A store-only result is never treated as end-to-end curation success.
+`profile {action:"migrate", assignments:[{id,expectedRevision,path}], reason}`
+requires exactly the active legacy Core/Home members. Inactive and named-scope
+originals stay unchanged. `reorganize` names only selected notes. Every destination is explicit. Excluded members, stale/incomplete mappings
+and invalid bounds refuse without silently dropping members. Placement changes only
+v2 metadata and removes old `home-file-*` labels; all other labels retain order.
+
+`KnowledgeStore.partitionProfile` owns one SQL publication commit. An owner-only
+bounded backup durably holds original heads, historical bodies and prepared
+identities before writing replacement bodies. Text, IDs, authority, provenance,
+confirmation, relations, retirement, timestamps and historical bodies are preserved.
+Backups are recovery artifacts, not another canonical store or migration trigger.
+
+A precommit crash leaves old heads authoritative. Explicit same-command retry
+reuses prepared identities; postcommit retry proves committed identities before
+repairing only the original Changes facts. The backup's versioned audit envelope
+binds original actor/reason/time, ordered writes and Undo links. Later edits never
+get replayed or overwritten by audit repair. Merely opening Knowledge does nothing.
+An unacknowledged result returns `retry_required` with the original command ID.
+
+Maintainer Changes Undo fences the whole current group, restores exact old
+placement and label positions in one backed-up commit, and displays legacy results
+as Prior organization. Only the maintainer can resume an uncommitted Undo.
+Ordinary content Undo retains the existing path. Store-only success is not
+end-to-end curation success.
+
+Explicit Knowledge forget remains the privacy exception: the existing cleanup
+owner removes canceled prepared bodies and forgotten/dependent backup snapshots,
+retains unrelated recovery snapshots, and clears the whole quoting audit envelope.
+Its invalidated atomic plan cannot replay. Unknown backup fields refuse cleanup
+rather than silently retaining extra copies; no parallel cleanup journal exists.
