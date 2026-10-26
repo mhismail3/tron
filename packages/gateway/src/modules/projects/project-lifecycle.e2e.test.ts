@@ -1,5 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createServer } from "node:http";
+import WebSocket from "ws";
+import { GatewayServer } from "../../transport/server.js";
+import { DeviceStore } from "../../security/device-store.js";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -161,6 +165,90 @@ describe("Gateway project lifecycle", () => {
     expect(await f.trust.inspect(slot.cwd)).toEqual(before);
     expect(slot.isDisposed).toBe(false);
     evidence.push({ nativeEligibility: { row, unsupported, linked, names } });
+  });
+
+  it("native socket cancellation ends the actual Git read process without affecting accepted requests", async () => {
+    const f = await fixture();
+    const created = await f.service.invoke(phone, "projects.request", { commandId: `native-socket-${++command}`,
+      action: "create", name: "native-socket", reason: "Real socket read cancellation" }) as unknown as ChangeResult;
+    await f.decide(created);
+    const realGit = (await exec("/usr/bin/which", ["git"])).stdout.trim();
+    const bin = join(f.root, "gate-bin"), marker = join(f.root, "git-reader-pid");
+    await mkdir(bin);
+    await writeFile(join(bin, "git"), `#!/usr/bin/env node
+const fs = require("node:fs"), cp = require("node:child_process");
+const args = process.argv.slice(2);
+if (args.includes("worktree")) {
+  require("node:net").createServer().listen(0, "127.0.0.1", () => fs.writeFileSync(${JSON.stringify(marker)}, String(process.pid)));
+} else {
+  const result = cp.spawnSync(${JSON.stringify(realGit)}, args, { stdio: "inherit" });
+  process.exit(result.status ?? 1);
+}
+`, { mode: 0o700 });
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+    const devices = new DeviceStore(f.tronHome, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await readFile(join(f.tronHome, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const probe = createServer();
+    await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));
+    const port = (probe.address() as { port: number }).port;
+    await new Promise<void>(resolve => probe.close(() => resolve()));
+    const cancelled: string[] = [];
+    const gateway = new GatewayServer({ display: displayOwnerOf(f.registry), host: "127.0.0.1", port, maxFrameBytes: 1_048_576,
+      devices, sessions: f.registry, service: f.service, uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES),
+      auth: { detachClient: () => {}, cancelOwner: () => {} } as never,
+      logger: { log: (_level: string, _message: string, metadata?: Record<string, unknown>) => {
+        if (metadata?.event === "rpc.cancelled") cancelled.push(String(metadata.method));
+      } } as never });
+    await gateway.listen();
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    const frames: Array<{ type?: string; id?: string }> = [];
+    socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
+    try {
+      await new Promise<void>(resolve => socket.once("open", resolve));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 8 }));
+      await waitFor(() => frames.some(frame => frame.type === "hello") || undefined, "native socket authenticated");
+      for (const method of ["projects.inspect", "projects.list"]) {
+        await rm(marker, { force: true });
+        socket.send(JSON.stringify({ type: "request", id: method, method, params: method === "projects.inspect" ? { cwd: f.path("native-socket") } : {} }));
+        const pid = await waitFor(async () => {
+          try { return Number(await readFile(marker, "utf8")) || undefined; }
+          catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+        }, "actual native Git reader started");
+        socket.send(JSON.stringify({ type: "cancel", id: method }));
+        const fence = `fence-${method}`;
+        socket.send(JSON.stringify({ type: "request", id: fence, method: "system.info", params: {} }));
+        await waitFor(() => frames.some(frame => frame.id === fence) || undefined, "cancel frame processed before later answer");
+        expect(cancelled).toContain(method);
+        await waitFor(() => {
+          try { process.kill(pid, 0); return undefined; }
+          catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return true; throw error; }
+        }, "cancelled Git reader exited");
+      }
+    } finally {
+      socket.close();
+      await gateway.close();
+    }
+    expect((await f.trust.inspect(f.path("native-socket"))).effectiveDecision).toBe(true);
+    evidence.push({ nativeSocketCancellation: cancelled });
+  });
+
+  it("native UI terminal requests retire without a model outbox and keep their canonical audit", async () => {
+    const f = await fixture();
+    const asked = await f.service.invoke(phone, "projects.request", { commandId: `native-outbox-${++command}`,
+      action: "create", name: "native-outbox", reason: "UI outcomes have no model continuation" }) as unknown as ChangeResult;
+    await f.decide(asked, false);
+    expect(await f.changes.approvals.get(asked.approval!.requestId)).toBeUndefined();
+    expect((await f.changes.record.page({ limit: 50 })).entries.some(entry =>
+      entry.requestId === asked.approval!.requestId && entry.status === "declined")).toBe(true);
+    const expiring = await f.service.invoke(phone, "projects.request", { commandId: `native-expire-${++command}`,
+      action: "trust", name: "native-outbox", reason: "UI expiry must not strand an outbox slot" }) as unknown as ChangeResult;
+    f.advance(APPROVAL_TTL_MS + 1);
+    await f.changes.pendingApprovals();
+    expect(await f.changes.approvals.get(expiring.approval!.requestId)).toBeUndefined();
+    expect((await f.changes.record.page({ limit: 50 })).entries.some(entry =>
+      entry.requestId === expiring.approval!.requestId && entry.status === "expired")).toBe(true);
+    expect((await f.trust.inspect(f.path("native-outbox"))).effectiveDecision).toBe(false);
   });
 
   it("native folder paths and cursors are exact and never trim into another project", async () => {

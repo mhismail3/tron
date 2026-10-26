@@ -8,12 +8,14 @@ import { type ApprovalActionPreview, type FixedSetting, type SettingsTarget, typ
 /**
  * Pending settings changes (docs/settings-model.md 5.5, decision 8, Q22).
  *
- * A request whose tier is `approve`, from anyone but the maintainer's own tap,
- * waits here for his decision. The record holds every fact about it (pending,
+ * A request explicitly asking for approval waits here for a separate maintainer
+ * decision, including native UI action requests. The record holds every fact about it (pending,
  * approved, declined, expired, superseded); this store holds only what the
  * record cannot answer cheaply: which requests are still open, the exact diff a
  * decision binds to, and whether the requester has been told of an outcome.
  * A request that is decided and told is dropped; the record keeps it forever.
+ * Native UI requests without a session continuation have no model outbox: once
+ * terminal, their record and command receipts serve the native requester.
  */
 
 export const APPROVAL_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -205,7 +207,8 @@ export class SettingsApprovals {
       // Admission reserves the bounded outbox slot. Never evict an accepted
       // outcome: even an older over-capacity document drains without data loss.
       const open = document.requests.filter(request => request.status === "pending");
-      const untold = document.requests.filter(request => request.status !== "pending" && !request.told);
+      const untold = document.requests.filter(request => request.status !== "pending" && !request.told
+        && (request.actor.kind !== "ui" || request.actor.sessionId !== undefined));
       document.requests = [...open, ...untold].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       return document;
     });

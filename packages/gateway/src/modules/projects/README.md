@@ -102,8 +102,10 @@ routing uses the same owner as the agent tool, not a tool invocation from the UI
   apply an action. There is no direct apply/self-approval route.
 
 Canonical receipts bind caller + commandId + method: retries return the original
-result even if their payload differs. A new intent requires a new ID; cross-method
-ID reuse refuses. Disconnect cancels disposable reads, not accepted mutations.
+result even if their payload differs. A new intent requires a new ID; different
+methods have separate receipt keys. Native UI terminal requests have no model
+continuation/outbox; their canonical audit and receipts serve the caller.
+Disconnect cancels disposable reads, not accepted mutations.
 Refresh after request/decision, reconnect/re-entry, and existing
 `settings.approvalsChanged` (plus relevant trust/settings changes). No second
 project cache, change stream or approval engine is introduced.
