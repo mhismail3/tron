@@ -95,7 +95,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
       async () => {
         await waitFor(() => child.heldRequests() === 1, "detached child live before the final reply", bound);
         const slot = await f.registry.acquire(run.sessionId);
-        await waitFor(() => slot.liveSubagentRuns().length === 1, "detached child visible as live", bound);
+        await waitFor(() => slot.ownedTurns.liveSubagentRuns().length === 1, "detached child visible as live", bound);
         return fauxAssistantMessage("Finished without a report.");
       },
       // The workflow completed at once, so its completion notice can start a follow-up turn of the same task: that turn holds too.
@@ -233,9 +233,9 @@ describe("Home task subagents: refusals, restarts and reports", () => {
         // observation: until its completed frame is admitted the workflow itself is the one
         // live run (#1693). Cross the real public discovery boundary first.
         await waitFor(async () => await asyncState(seen.workflowDir!) === "complete"
-          && await slot.discoverExtensionArtifact(seen.workflowDir!) === "accepted", "completed workflow frame admitted", bound);
-        await waitFor(() => slot.liveSubagentRuns().length === 1, "detached execution is live", bound);
-        seen.liveChildRunId = slot.liveSubagentRuns()[0]?.runId;
+          && await slot.ownedTurns.discoverExtensionArtifact(seen.workflowDir!) === "accepted", "completed workflow frame admitted", bound);
+        await waitFor(() => slot.ownedTurns.liveSubagentRuns().length === 1, "detached execution is live", bound);
+        seen.liveChildRunId = slot.ownedTurns.liveSubagentRuns()[0]?.runId;
         return fauxAssistantMessage([fauxToolCall("subagent", { action: "interrupt", id: childId }, { id: "pause-child" })], { stopReason: "toolUse" });
       },
       async (context: FauxContext) => {
@@ -256,9 +256,9 @@ describe("Home task subagents: refusals, restarts and reports", () => {
         // Disk durability is not Gateway observation. Cross the real public
         // discovery boundary before asserting what the report gate admitted;
         // a watcher may legitimately still hold the preceding paused frame.
-        await waitFor(async () => await slot.discoverExtensionArtifact(seen.workflowDir!) === "accepted", "owned paused workflow frame admitted", bound);
+        await waitFor(async () => await slot.ownedTurns.discoverExtensionArtifact(seen.workflowDir!) === "accepted", "owned paused workflow frame admitted", bound);
         if (ending === "stop") await waitFor(() => !slot.catalogHasActiveSubagents, "paused child stop joined", bound);
-        else await waitFor(() => slot.liveSubagentRuns().every(row => row.state !== "running" && row.state !== "queued"), "paused child artifact frame observed", bound);
+        else await waitFor(() => slot.ownedTurns.liveSubagentRuns().every(row => row.state !== "running" && row.state !== "queued"), "paused child artifact frame observed", bound);
         return fauxAssistantMessage([reportCall("report-paused")], { stopReason: "toolUse" });
       },
       async (context: FauxContext) => {

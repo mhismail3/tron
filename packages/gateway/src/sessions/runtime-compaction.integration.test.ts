@@ -294,7 +294,7 @@ describe("compaction operation admission and authoritative reconciliation", { co
     await waitFor(() => !fresh.isBusy, "the fresh slot to go idle");
     await expect(switchModel("alternate")).resolves.toMatchObject({ status: "applied", changes: [expect.objectContaining({ revision: expect.any(Number) })] });
     expect(fresh.snapshot().model?.id).toBe("alternate");
-    const activities = (fresh as unknown as { extensionActivities: Map<string, ExtensionRunActivity> }).extensionActivities;
+    const activities = fresh.ownedTurns.extensionActivities;
     const now = new Date().toISOString();
     const child: ExtensionRunActivity = {
       id: "async-tool", activityId: "async-activity", runId: "async-run", toolCallId: "async-tool",

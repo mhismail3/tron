@@ -45,7 +45,7 @@ export function createHomeTaskWorkerExtension(input: {
   refused: (reason: HomeTaskProducerRefusal) => void;
   /** True once the task's report is sealed: a later call in the same batch is refused. */
   reportSealed: () => boolean;
-  /** True only for a run this session owns (see `RuntimeSlot.ownsSubagentRun`). */
+  /** True only for a run this session owns (see `OwnedTurnOwner.ownsSubagentRun`). */
   ownsSubagentRun: (runId: string) => Promise<boolean>;
   /** True only for a supervisor request whose child run this session owns. */
   ownsSupervisorRequest: (requestId: string) => Promise<boolean>;

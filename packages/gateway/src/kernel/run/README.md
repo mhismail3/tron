@@ -28,10 +28,15 @@ owner once; every native reader uses it directly. Native SDK rebuild and publica
 remain backend I/O, with no Slot bind route or Registry worker-resume wrapper.
 Home uses the actual SessionOperations
 for canonical worker reads, leases and mutation ordering, with no duplicate worker input.
-K5 owns cold artifact proof; Native supplies the admitted resource input, not a proof wrapper.
-K5 also owns canonical subagent settlement. Its runtime port reads the actual
-native canonical/activity/controller projections and work owner, then calls native
-canonical append; no Slot settlement wrapper or duplicate token index exists.
+K5 owns cold artifact proof and the actual live artifact/run maps, watches, read generations,
+receipt joins, canonical correlation and run/supervisor/Stop authority in the existing
+`OwnedTurnOwner`. Bounded K5 status-reader, reconciliation and activity algorithms use that
+same owner and actual native frame, not copied contexts or Native forwarding methods.
+Native branch/disposal cuts call its reset/retirement operations at the original ordering
+points. Native supplies the admitted resource input, physical SDK/canonical/work I/O and
+process projection, not a proof wrapper. Canonical subagent settlement reads K5's actual
+controller/Stop selection and native work owner, then calls native canonical append;
+no Slot settlement wrapper or duplicate token index exists.
 Worker steering packets and Stop/Interrupt identity fences are K5-owned as well; the
 former Slot-specific control methods are absent. Generic per-tool interruption stays Run-owned.
 The frame composes one K5 `OwnedTurnOwner`: its sole observer map and held-task

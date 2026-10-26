@@ -1,6 +1,6 @@
 import type { SettingsManager, FileEntry, AgentSessionRuntime, AgentSession, SessionManager } from "../pi/coding-agent.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT } from "../delegation/task-report.js";
-import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, JsonValue } from "../../protocol/types.js";
+import type { ExtensionToolOrigin, ExtensionRunActivity, SessionProcessActivity, ChatOrigin, ChatSemanticMetadata, CommandInfo, JsonValue } from "../../protocol/types.js";
 import type { InputTrigger } from "../host/input-admission.js";
 import type { TrustService } from "../resources/trust-service.js";
 import type { ExtensionLifecycleCoordinator } from "../host/extension-lifecycle-coordinator.js";
@@ -17,6 +17,8 @@ import type { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { ToolProjectionMetadata } from "../projection/projection.js";
 import type { GatewayWorkHandle } from "./gateway-work-registry.js";
 import type { RunMarkerStore } from "./run-markers.js";
+import type { ActivitySource } from "../projection/activity.js";
+import type { OwnedTurnRuntime } from "../delegation/owned-turn-runtime.js";
 import type { OwnedTurnOwner } from "../delegation/owned-turn-owner.js";
 
 import type { ToolReferences } from "../projection/tool-result.js";
@@ -24,6 +26,21 @@ import type { ToolReferences } from "../projection/tool-result.js";
 /** Native frame and canonical readers, not copied runtime state. FixedAt is an opaque settings
  * provenance token: interpreted only by the concrete settings persistence owner. */
 export abstract class RunRuntime<FixedAt> {
+  abstract readonly processOperationIDs: OwnedTurnRuntime["processOperationIDs"];
+  abstract readonly processActivities: OwnedTurnRuntime["processActivities"];
+  abstract readonly childSessionAdmission: OwnedTurnRuntime["childSessionAdmission"];
+  abstract updateToolExtensionActivityProjection(toolCallId: string, activity: ExtensionRunActivity): void;
+  abstract readonly workerSettlement: OwnedTurnRuntime["workerSettlement"];
+  abstract assertNoTrustReload(): void;
+  abstract extensionToolOrigin(name: string): ExtensionToolOrigin | undefined;
+  abstract processChildSessionBinding(id: string): { ref: string; producerId: string; sessionOwnerId?: string; runId?: string } | undefined;
+  abstract syncSubagentProcesses(activity: ExtensionRunActivity): void;
+  abstract replaceProcessesForToolCall(id: string, processes: readonly SessionProcessActivity[]): void;
+  abstract activitySource(): ActivitySource;
+  abstract publishProcessesForToolCall(id: string): void;
+  abstract persistVerifiedCustomEntry(options: { describe: string; existing: () => "absent" | "matching" | "contradictory"; append: () => void }): void;
+  abstract toolLabel(name: string): string | undefined;
+  abstract publishSummary(): void;
   abstract readonly cwd: string;
   abstract readonly sessionFile: string | undefined;
   abstract readonly canonicalEntryCount: number;
@@ -118,6 +135,9 @@ export abstract class RunRuntime<FixedAt> {
     sessionLineage(): { state(sessionId: string): { lineageId?: string | undefined } };
     beforeRunAdmission(id: string): Promise<void>;
     workRegistry: GatewayWorkRegistry;
+    extensionActivityRecency: OwnedTurnRuntime["dependencies"]["extensionActivityRecency"];
+    delegatedArtifactRoot?: string;
+    extensionArtifactWarning?: NonNullable<OwnedTurnRuntime["dependencies"]["extensionArtifactWarning"]>;
     markers: RunMarkerStore;
     modules: ModuleHost;
     isSessionPresented(id: string): boolean;

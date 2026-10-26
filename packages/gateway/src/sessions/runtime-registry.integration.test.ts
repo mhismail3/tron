@@ -1,3 +1,5 @@
+import { upsertExtensionActivity, publishExtensionActivity, updateExtensionActivity, appendExtensionActivityReceipt, canonicalExtensionRunFacts } from "../kernel/delegation/subagent-activity.js";
+import { refreshExtensionActivityFromArtifact, refreshSubagentActivityFromArtifact } from "../kernel/delegation/subagent-artifact-reconcile.js";
 import { createTestRegistry, displayStoreOf, displayOwnerOf } from "../../test-support/gateway-registry.js";
 import type { RunPersistence } from "../kernel/run/run-persistence.js";
 import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
@@ -3769,15 +3771,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const fixture = await coldFixture("detached-dashboard-activity");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const beforeActivity = await fixture.registry.catalog("user");
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      upsertExtensionActivity: (activity: ExtensionRunActivity) => unknown;
-      phase: SessionSummaryUpdate["phase"];
-      publishSnapshot: () => void;
-      publishExtensionActivity: (activity: ExtensionRunActivity) => void;
-      publishActivityHeartbeat: () => void;
-      extensionActivityAsOf: string;
-    };
+    const internal = slot.ownedTurns;
     const startedAt = new Date(Date.now() - 2_000).toISOString();
     const running: ExtensionRunActivity = {
       id: "async-tool",
@@ -3799,8 +3793,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         observedAt: startedAt,
       },
     };
-    internal.phase = "running";
-    internal.publishSnapshot();
+    slot.phase = "running";
+    slot.publishSnapshot();
     expect(fixture.summaries.at(-1)).toMatchObject({
       sessionId: slot.id,
       phase: "running",
@@ -3809,8 +3803,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     });
 
     internal.extensionActivities.set(running.toolCallId, running);
-    internal.upsertExtensionActivity(running);
-    internal.publishExtensionActivity(running);
+    upsertExtensionActivity(internal, running);
+    publishExtensionActivity(internal, running);
     expect(fixture.summaries.at(-1)).toMatchObject({
       sessionId: slot.id,
       phase: "running",
@@ -3821,8 +3815,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // Parent settlement does not change aggregate phase while detached work is
     // active. The shallow foreground fact must still publish the visual-state
     // transition to every dashboard.
-    internal.phase = "idle";
-    internal.publishSnapshot();
+    slot.phase = "idle";
+    slot.publishSnapshot();
     const active = fixture.summaries.at(-1)!;
     expect(active).toMatchObject({
       sessionId: slot.id,
@@ -3833,7 +3827,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(active.activeSince).toBeDefined();
     expect(Date.parse(active.updatedAt)).toBeGreaterThan(Date.parse(startedAt));
     await new Promise((resolve) => setTimeout(resolve, 2));
-    internal.publishActivityHeartbeat();
+    slot.publishActivityHeartbeat();
     const heartbeat = fixture.summaries.at(-1)!;
     expect(Date.parse(heartbeat.updatedAt)).toBeGreaterThan(Date.parse(active.updatedAt));
     expect(heartbeat.activeSince).toBe(active.activeSince);
@@ -3865,8 +3859,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       },
     };
     internal.extensionActivities.set(completed.toolCallId, completed);
-    internal.upsertExtensionActivity(completed);
-    internal.publishExtensionActivity(completed);
+    upsertExtensionActivity(internal, completed);
+    publishExtensionActivity(internal, completed);
     expect(fixture.summaries.at(-1)).toMatchObject({
       sessionId: slot.id,
       phase: "idle",
@@ -3891,9 +3885,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         recentUntil: startedAt,
       },
     };
-    internal.publishExtensionActivity(staleTerminal);
+    publishExtensionActivity(internal, staleTerminal);
     expect(fixture.summaries.at(-1)!.updatedAt).toBe(settledRecency);
-    internal.publishActivityHeartbeat();
+    slot.publishActivityHeartbeat();
     expect(fixture.summaries.at(-1)!.updatedAt).toBe(settledRecency);
   });
 
@@ -3905,10 +3899,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
     const startedAt = new Date(Date.now() - 5_000).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId,
       activityId: "historical-terminal-activity",
@@ -3951,8 +3942,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     let drainSettled = false;
     const drain = fixture.registry.waitUntilIdle().then(() => { drainSettled = true; });
     await new Promise((resolve) => setTimeout(resolve, 25));
-    (slot as unknown as { stopExtensionActivityWatcher: (id: string) => void })
-      .stopExtensionActivityWatcher(toolCallId);
+    slot.ownedTurns.stopExtensionActivityWatcher(toolCallId);
     expect(drainSettled).toBe(false);
 
     const endedAt = Date.now();
@@ -3986,13 +3976,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
     const started = Date.now() - 5_000;
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, {
-        toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string;
-      }>;
-      stopExtensionActivityWatcher: (id: string) => void;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId,
       activityId: "paused-process-terminal-activity",
@@ -4058,7 +4042,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       }],
       resumeDisposition: "resumable",
     }));
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     expect(internal.extensionRunOwnership.get(runId)?.pausedProcessQuiescentAt)
       .toBe(new Date(started + 1_500).toISOString());
 
@@ -4087,7 +4071,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await mkdir(sourceDir, { recursive: true });
     await mkdir(replacementDir, { recursive: true });
     const providerOrigin = { source: "pi-subagents", owner: { id: "installed-provider" } };
-    vi.spyOn(slot as unknown as { subagentExtensionOrigin: () => typeof providerOrigin }, "subagentExtensionOrigin")
+    vi.spyOn(slot.ownedTurns, "subagentExtensionOrigin")
       .mockReturnValue(providerOrigin);
     vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => typeof providerOrigin | undefined }, "extensionToolOrigin")
       .mockReturnValue(scenario === "foreign-owner" ? { ...providerOrigin, owner: { id: "project-impostor" } } : providerOrigin);
@@ -4109,11 +4093,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       },
       isError: false, timestamp: Date.now(),
     });
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string }>;
-      canonicalExtensionRunFacts: () => Map<string, unknown>;
-    };
+    const internal = slot.ownedTurns;
     const started = Date.now() - 5_000;
     const recoveredAt = started + 3_000;
     internal.extensionActivities.set(sourceToolCallId, {
@@ -4136,8 +4116,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lifecycleArtifactVersion: 3, runId: replacementRunId, state: "running", startedAt: recoveredAt + 1, lastUpdate: recoveredAt + 2,
     }));
 
-    await slot.discoverExtensionArtifact(sourceDir);
-    await slot.discoverExtensionArtifact(replacementDir);
+    await slot.ownedTurns.discoverExtensionArtifact(sourceDir);
+    await slot.ownedTurns.discoverExtensionArtifact(replacementDir);
     if (scenario !== "recovered") {
       expect(slot.snapshot().extensionActivities.find((item) => item.runId === sourceRunId)?.status).toBe("running");
       if (scenario === "foreign-owner") {
@@ -4157,7 +4137,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lifecycleArtifactVersion: 3, runId: replacementRunId, state: "complete", startedAt: recoveredAt + 1,
       lastUpdate: finished, endedAt: finished,
     }));
-    await slot.discoverExtensionArtifact(replacementDir);
+    await slot.ownedTurns.discoverExtensionArtifact(replacementDir);
     await drain;
     expect(slot.isDrainBusy).toBe(false);
     expect(slot.snapshot().extensionActivities).toEqual(expect.arrayContaining([
@@ -4169,7 +4149,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await writeFile(join(sourceDir, "status.json"), JSON.stringify({
       lifecycleArtifactVersion: 3, runId: sourceRunId, state: "running", startedAt: started, lastUpdate: Date.now(),
     }));
-    await slot.discoverExtensionArtifact(sourceDir);
+    await slot.ownedTurns.discoverExtensionArtifact(sourceDir);
     expect(slot.snapshot().extensionActivities.find((item) => item.runId === sourceRunId)?.lifecycle?.state).toBe("stopped");
     expect(slot.isDrainBusy).toBe(false);
   });
@@ -4177,28 +4157,15 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   it("does not retain unwatched async launcher acknowledgements as running work", async () => {
     const fixture = await coldFixture("unwatched-async-launcher");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const update = (slot as unknown as {
-      updateExtensionActivity: (
-        toolCallId: string, toolName: string, origin: ExtensionToolOrigin,
-        status: "running" | "completed" | "failed", startedAt: string,
-        updatedAt: string, value: unknown, completedAt?: string, durationMs?: number,
-      ) => ExtensionRunActivity | undefined;
-      extensionActivityWatchers: Map<string, unknown>;
-    });
+    const update = slot.ownedTurns;
     const now = new Date().toISOString();
     const origin: ExtensionToolOrigin = { source: "project" };
 
-    const idOnly = update.updateExtensionActivity(
-      "id-only-tool", "subagent", origin, "completed", now, now,
-      { details: { asyncId: "id-only-run", mode: "async" } }, now, 44,
-    );
+    const idOnly = updateExtensionActivity(update, "id-only-tool", "subagent", origin, "completed", now, now, { details: { asyncId: "id-only-run", mode: "async" } }, now, 44);
     expect(idOnly?.status).toBe("completed");
     expect(update.extensionActivityWatchers.has("id-only-tool")).toBe(false);
 
-    const rejectedDirectory = update.updateExtensionActivity(
-      "rejected-dir-tool", "subagent", origin, "completed", now, now,
-      { details: { asyncId: "rejected-dir-run", mode: "async", asyncDir: "/tmp/not-owned-by-this-session" } }, now, 44,
-    );
+    const rejectedDirectory = updateExtensionActivity(update, "rejected-dir-tool", "subagent", origin, "completed", now, now, { details: { asyncId: "rejected-dir-run", mode: "async", asyncDir: "/tmp/not-owned-by-this-session" } }, now, 44);
     expect(rejectedDirectory?.status).toBe("completed");
     expect(update.extensionActivityWatchers.has("rejected-dir-tool")).toBe(false);
 
@@ -4212,15 +4179,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const owner = { id: "extension:pi-subagents", title: "Subagents", source: "project" };
     const origin: ExtensionToolOrigin = { source: "project", owner };
-    const internal = slot as unknown as {
-      subagentExtensionOrigin: () => ExtensionToolOrigin;
-      updateExtensionActivity: (
-        toolCallId: string, toolName: string, origin: ExtensionToolOrigin,
-        status: "running" | "completed" | "failed", startedAt: string,
-        updatedAt: string, value: unknown, completedAt?: string, durationMs?: number,
-      ) => ExtensionRunActivity | undefined;
-      syncSubagentProcesses: (activity: ExtensionRunActivity) => void;
-    };
+    const internal = slot.ownedTurns;
     vi.spyOn(internal, "subagentExtensionOrigin").mockReturnValue(origin);
     const startedAt = new Date(Date.now() - 1_000).toISOString();
     const runningAt = new Date().toISOString();
@@ -4235,9 +4194,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       },
     };
 
-    expect(internal.updateExtensionActivity(
-      "sync-tool", "subagent", origin, "running", startedAt, runningAt, progress, undefined, 1_000,
-    )).toMatchObject({ toolCallId: "sync-tool", status: "running" });
+    expect(updateExtensionActivity(internal, "sync-tool", "subagent", origin, "running", startedAt, runningAt, progress, undefined, 1_000)).toMatchObject({ toolCallId: "sync-tool", status: "running" });
     expect(slot.snapshot().processActivities).toEqual([expect.objectContaining({
       executionMode: "synchronous",
       title: "reviewer",
@@ -4246,7 +4203,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lifecycle: expect.objectContaining({ state: "running" }),
     })]);
 
-    internal.syncSubagentProcesses({
+    slot.syncSubagentProcesses({
       id: "async-tool", activityId: "async-activity", runId: "async-root", toolCallId: "async-tool",
       source: origin, title: "Subagent", mode: "asynchronous", status: "running", startedAt, updatedAt: runningAt,
       children: [{
@@ -4264,9 +4221,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       source: "project",
       owner: { id: "extension:other", title: "Other", source: "project" },
     };
-    expect(internal.updateExtensionActivity(
-      "other-tool", "subagent", unrelatedOwner, "running", startedAt, runningAt, progress,
-    )).toBeUndefined();
+    expect(updateExtensionActivity(internal, "other-tool", "subagent", unrelatedOwner, "running", startedAt, runningAt, progress)).toBeUndefined();
 
     const completedAt = new Date().toISOString();
     const terminal = {
@@ -4279,9 +4234,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         }],
       },
     };
-    expect(internal.updateExtensionActivity(
-      "sync-tool", "subagent", origin, "completed", startedAt, completedAt, terminal, completedAt, 1_200,
-    )).toMatchObject({ toolCallId: "sync-tool", status: "completed", runId: "sync-root" });
+    expect(updateExtensionActivity(internal, "sync-tool", "subagent", origin, "completed", startedAt, completedAt, terminal, completedAt, 1_200)).toMatchObject({ toolCallId: "sync-tool", status: "completed", runId: "sync-root" });
     expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([
       expect.objectContaining({
         executionMode: "synchronous", title: "reviewer", visibility: "recent",
@@ -4435,13 +4388,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const workRegistry = new GatewayWorkRegistry();
     const fixture = await coldFixture("extension-staged-receipt", { workRegistry });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const internal = slot as unknown as {
-      runtime: { session: { sessionManager: SessionManager } };
-      claimExtensionReceiptOwnership: (id: string) => GatewayWorkHandle;
-      releaseExtensionReceiptOwnership: (id: string, owner: GatewayWorkHandle) => void;
-      appendExtensionActivityReceipt: (activity: ExtensionRunActivity) => Promise<void>;
-      runPersistence: RunPersistence;
-    };
+    const internal = slot.ownedTurns;
     const activity: ExtensionRunActivity = {
       id: "staged-extension", activityId: "staged-extension", toolCallId: "tool-staged-extension",
       source: { source: "pi-subagents" }, title: "Fixture", status: "completed", children: [],
@@ -4449,22 +4396,22 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lifecycle: { version: 1, state: "completed", attention: "none", sequence: 1, observedAt: "2026-01-01T00:00:01.000Z" },
     };
     const owner = internal.claimExtensionReceiptOwnership(activity.id);
-    const file = internal.runtime.session.sessionManager.getSessionFile()!;
+    const file = slot.runtime.session.sessionManager.getSessionFile()!;
     const aside = `${file}.aside`;
     await rename(file, aside);
     await mkdir(file);
     try {
-      await expect(internal.appendExtensionActivityReceipt(activity)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      await expect(appendExtensionActivityReceipt(internal, activity)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
       expect(workRegistry.facts().some(fact => fact.token === owner.token)).toBe(true);
       expect(slot.isEvictionProtected).toBe(true);
       expect(slot.isDrainBusy).toBe(true);
       await expect(slot.disposeIf(() => true)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
-      await expect(internal.appendExtensionActivityReceipt(activity)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      await expect(appendExtensionActivityReceipt(internal, activity)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
       expect(await readFile(aside, "utf8")).not.toContain("staged-extension");
     } finally {
       await rm(file, { recursive: true, force: true });
       await rename(aside, file);
-      internal.runPersistence.durableWrites.clear(); // test-only disposal of the faulted runtime
+      slot.runPersistence.durableWrites.clear(); // test-only disposal of the faulted runtime
       internal.releaseExtensionReceiptOwnership(activity.id, owner);
     }
   });
@@ -4519,12 +4466,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
     const startedAt = new Date(Date.now() - 1_000).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
-      runtime: { session: { sessionManager: SessionManager } };
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId, runId, toolCallId,
       source: { source: "pi-subagents" }, title: "Pi Subagents", status: "running",
@@ -4532,14 +4474,14 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
-    const receiptAppend = vi.spyOn(internal.runtime.session.sessionManager, "appendCustomEntry")
+    const receiptAppend = vi.spyOn(slot.runtime.session.sessionManager, "appendCustomEntry")
       .mockImplementationOnce(() => { throw new Error("injected receipt persistence failure"); });
     const endedAt = Date.now();
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
       runId, state: "complete", startedAt: Date.parse(startedAt), endedAt, lastUpdate: endedAt + 1,
     }));
 
-    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
+    await refreshExtensionActivityFromArtifact(internal, toolCallId, asyncDir);
     expect(slot.snapshot().extensionActivities).toMatchObject([{ toolCallId, status: "completed" }]);
     await fixture.registry.waitUntilIdle();
     expect(receiptAppend.mock.calls.length).toBeGreaterThanOrEqual(2);
@@ -4553,12 +4495,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
     const startedAt = new Date(Date.now() - 1_000).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      readExtensionStatusArtifact: (asyncDir: string) => Promise<Record<string, unknown> | undefined>;
-      startExtensionActivityWatcher: (toolCallId: string, asyncDir: string) => void;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "retry-activity", runId, toolCallId,
       source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
@@ -4567,9 +4504,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     });
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
     const canonicalAsyncDir = await realpath(asyncDir);
-    const originalRead = internal.readExtensionStatusArtifact.bind(slot);
+    const originalRead = internal.artifacts.readExtensionStatusArtifact.bind(internal.artifacts);
     let missingReadCompleted = false;
-    internal.readExtensionStatusArtifact = async (directory) => {
+    internal.artifacts.readExtensionStatusArtifact = async (directory) => {
       const status = await originalRead(directory);
       if (directory === canonicalAsyncDir && status === undefined) missingReadCompleted = true;
       return status;
@@ -4633,18 +4570,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       children: [{ id: "child", producerId: "child", label: "worker", status: "running", lifecycle: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     };
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      extensionArtifactMissingSince: Map<string, number>;
-      syncSubagentProcesses: (activity: ExtensionRunActivity) => void;
-      ownedExtensionArtifactDirectories: () => string[];
-      observeMissingExtensionArtifact: (toolCallId: string) => void;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, activity);
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
     internal.extensionArtifactMissingSince.set(toolCallId, Date.now() - 31_000);
-    internal.syncSubagentProcesses(activity);
+    slot.syncSubagentProcesses(activity);
     expect(slot.snapshot().processOverview).toMatchObject({ visibility: "active", activeCount: 1 });
     expect(internal.ownedExtensionArtifactDirectories()).toContain(await realpath(asyncDir));
 
@@ -4661,8 +4591,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const parent = join(fixture.cwd, ".pi", "subagents");
     const sibling = join(parent, "sibling");
     await mkdir(sibling, { recursive: true });
-    const allowed = (slot as unknown as { extensionArtifactPathAllowed: (path: string) => boolean })
-      .extensionArtifactPathAllowed.bind(slot);
+    const allowed = slot.ownedTurns.extensionArtifactPathAllowed.bind(slot.ownedTurns);
     expect(allowed(parent)).toBe(false);
     expect(allowed(sibling)).toBe(false);
   });
@@ -4677,10 +4606,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
     const startedAt = new Date(Date.now() - 1_000).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId, runId, toolCallId,
       source: { source: "pi-subagents" }, title: "Pi Subagents", status: "running",
@@ -4698,12 +4624,12 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       runId, state: "complete", startedAt: Date.parse(startedAt), endedAt, lastUpdate: endedAt + 1,
     }));
 
-    await slot.reconcileOwnedExtensionArtifactsForDrain();
+    await slot.ownedTurns.reconcileOwnedExtensionArtifactsForDrain();
     expect(slot.snapshot().extensionActivities).toMatchObject([{ lifecycle: { state: "running" } }]);
     expect(slot.administrativeDrainBlockers()).toHaveLength(1);
 
     capacityOwner.settle();
-    await slot.reconcileOwnedExtensionArtifactsForDrain();
+    await slot.ownedTurns.reconcileOwnedExtensionArtifactsForDrain();
     await waitFor(() => slot.snapshot().extensionActivities[0]?.lifecycle?.state === "completed", "the first extension activity to complete");
     expect(slot.administrativeDrainBlockers()).toEqual([]);
     await waitFor(() => workRegistry.size === 0, "the work registry to drain");
@@ -4713,7 +4639,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const fixture = await coldFixture("terminal-attention-presentation");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const observedAt = new Date().toISOString();
-    const internal = slot as unknown as { extensionActivities: Map<string, ExtensionRunActivity> };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set("terminal-tool", {
       id: "terminal-tool", activityId: "terminal-activity", runId: "terminal-run", toolCallId: "terminal-tool",
       source: { source: "pi-subagents" }, title: "Pi Subagents", status: "failed",
@@ -4732,7 +4658,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const fixture = await coldFixture("running-artifact-clock");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const startedAt = new Date().toISOString();
-    const internal = slot as unknown as { extensionActivities: Map<string, ExtensionRunActivity> };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set("running-tool", {
       id: "running-tool", activityId: "running-activity", runId: "running-run", toolCallId: "running-tool",
       source: { source: "pi-subagents" }, title: "Pi Subagents", status: "running",
@@ -4753,11 +4679,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const fixture = await coldFixture("artifact-warning-redaction");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const warnings: Array<{ reason: string; owner: string }> = [];
-    const internal = slot as unknown as {
-      dependencies: { extensionArtifactWarning?: (warning: { reason: string; owner: string }) => void };
-      warnExtensionArtifact: (reason: "ownership-mismatch", owner: string) => void;
-    };
-    internal.dependencies.extensionArtifactWarning = (warning) => warnings.push(warning);
+    const internal = slot.ownedTurns;
+    slot.dependencies.extensionArtifactWarning = (warning) => warnings.push(warning);
     internal.warnExtensionArtifact("ownership-mismatch", "/private/project/run-with-output");
     internal.warnExtensionArtifact("ownership-mismatch", "/private/project/run-with-output");
     expect(warnings).toEqual([{ reason: "ownership-mismatch", owner: expect.stringMatching(/^[0-9a-f]{24}$/u) }]);
@@ -4804,11 +4727,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
           await writeFile(temp, typeof value === "string" ? value : JSON.stringify(value));
           await rename(temp, join(directory, "status.json"));
         };
-        const internal = slot as unknown as {
-          extensionActivityWatchers: Map<string, { watcher: import("node:fs").FSWatcher; children: Map<string, import("node:fs").FSWatcher> }>;
-          extensionActivities: Map<string, ExtensionRunActivity>;
-          extensionRunOwnership: Map<string, { toolCallId: string; asyncDir: string; terminal: boolean }>;
-        };
+        const internal = slot.ownedTurns;
         try {
           // Seed the same admitted launcher boundary as the producer-capture fixture.
           internal.extensionActivities.set(toolCallId, { id: toolCallId, runId, toolCallId,
@@ -4824,7 +4743,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
           const partial = () => activity()?.lifecycleOmissions?.children;
           if (failure !== "missing directory") await replace(childDir, child);
           await replace(asyncDir, root);
-          expect(await slot.discoverExtensionArtifact(asyncDir), "root artifact admission").toBe("accepted");
+          expect(await slot.ownedTurns.discoverExtensionArtifact(asyncDir), "root artifact admission").toBe("accepted");
           expect(activity(), "root admitted on its own evidence").toMatchObject({ runId, status: "running", updatedAt: new Date(started + 5_000).toISOString() });
           expect(internal.extensionActivityWatchers.has(toolCallId), "root watcher started").toBe(true);
           if (failure !== "missing directory") expect(activity()?.children[0], "reciprocal fixture detail").toMatchObject({ model: "fixture/child" });
@@ -4848,7 +4767,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
             await replace(asyncDir, updated);
             await waitFor(() => activity()?.updatedAt === new Date(started + 10_000).toISOString(), "root watcher publishes despite child failure");
             expect(internal.extensionActivityWatchers.get(toolCallId)?.children.has(childDir), "unchanged edge stays subscribed").toBe(true);
-            expect(await slot.discoverExtensionArtifact(asyncDir), "optional detail never rejects discovery").toBe("accepted");
+            expect(await slot.ownedTurns.discoverExtensionArtifact(asyncDir), "optional detail never rejects discovery").toBe("accepted");
             if (failure !== "watcher error") expect(partial()).toBe(1);
             expect(JSON.stringify(activity())).not.toContain("FORGED_MODEL");
           }
@@ -4868,7 +4787,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
           // an assertion fails against the unfixed optional-detail reader.
           await replace(asyncDir, { ...root, state: "completed", endedAt: started + 20_000, lastUpdate: started + 20_000, steps: [],
             lifecycleProjection: { ...root.lifecycleProjection, root: { ...root.lifecycleProjection.root, state: "complete", endedAt: started + 20_000, updatedAt: started + 20_000 } } });
-          await slot.discoverExtensionArtifact(asyncDir);
+          await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
         }
         expect(internal.extensionActivityWatchers.size).toBe(0);
       } finally {
@@ -4910,10 +4829,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         .replaceAll("/tmp/frozen-real-child/session.jsonl", childFile)
         .replaceAll("/tmp/frozen-real-nested/session.jsonl", nestedFile);
     };
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-    };
+    const internal = slot.ownedTurns;
     const started = 1_700_000_000_000;
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "frozen-real-activity", runId, toolCallId,
@@ -4923,7 +4839,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     });
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
     await writeFile(join(asyncDir, "status.json"), await loadFixture("active"));
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     const active = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(active).toMatchObject({ status: "running", lifecycle: { state: "running" } });
     expect(active.children).toEqual(expect.arrayContaining([
@@ -4955,13 +4871,13 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       mode: "workflow",
       steps: [{ runId: "forged-child", sessionOwnerId: "forged-owner", agent: "forged", status: "running", sessionFile: foreignFile }],
     }));
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     const forged = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(forged.children[0]?.childSessionRef).toBeUndefined();
     expect(slot.snapshot().processActivities?.some((activity) => activity.childSessionRef === "forged-child-session")).toBe(false);
 
     await writeFile(join(asyncDir, "status.json"), await loadFixture("terminal"));
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     const terminal = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(terminal).toMatchObject({ status: "completed", lifecycle: { state: "completed" }, completedAt: new Date(1_700_000_010_000).toISOString() });
   });
@@ -5007,7 +4923,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     (slot as unknown as { dependencies: { extensionArtifactWarning?: (warning: { reason: string; owner: string }) => void } })
       .dependencies.extensionArtifactWarning = (warning) => warnings.push(warning);
     await writeHeader(ownedHeader);
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     const admitted = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(admitted).toMatchObject({ status: "running", children: expect.arrayContaining([
       expect.objectContaining({ id: "step-a", status: "completed" }),
@@ -5016,12 +4932,12 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     // Exact run/tool/path bindings do not authorize this producer header's foreign session.
     await writeHeader(foreignHeader);
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     const afterForeign = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(afterForeign.children.find((child) => child.id === "step-a")?.status).toBe("completed");
     expect(warnings).toContainEqual(expect.objectContaining({ reason: "ownership-mismatch" }));
     await writeHeader(foreignTerminalHeader);
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     expect(slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)?.status).toBe("running");
     const receiptCount = async (sessionFile: string) => (await readFile(sessionFile, "utf8"))
       .trimEnd().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>)
@@ -5042,7 +4958,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     vi.spyOn(recoveredSlot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
     await discoverExtensionArtifactsUntil(recoveredRegistry);
-    await recoveredSlot.discoverExtensionArtifact(asyncDir);
+    await recoveredSlot.ownedTurns.discoverExtensionArtifact(asyncDir);
     const coldForeign = recoveredSlot.snapshot().extensionActivities?.find((activity) => activity.runId === runId);
     expect(coldForeign?.status).not.toBe("completed");
     expect(coldForeign?.children.some((child) => child.id === "step-a" && child.status === "completed")).not.toBe(true);
@@ -5111,30 +5027,25 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const foreignProjection = projection();
     foreignProjection.sessionId = "another-session";
     await writeFile(statusPath, JSON.stringify({ lifecycleProjection: foreignProjection, steps: [{ report: "x".repeat(300 * 1_024) }] }));
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     expect((slot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)?.status).toBe("running");
     await writeFile(statusPath, `{"lifecycleProjection":${"x".repeat(300 * 1_024)}`);
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     expect((slot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)?.status).toBe("running");
     await writeModern();
 
     // Known-bad control: the old headerless oversized artifact cannot refresh;
     // after the existing missing grace it hides the live activity as unknown.
-    const slotState = slot as unknown as {
-      extensionArtifactMissingSince: Map<string, number>;
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      stopExtensionActivityWatcher: (id: string) => void;
-      dependencies: { extensionArtifactWarning?: (warning: { reason: string; owner: string }) => void };
-    };
+    const slotState = slot.ownedTurns;
     slotState.stopExtensionActivityWatcher(toolCallId);
     await writeFile(statusPath, JSON.stringify({
       runId, state: "running", startedAt: root.startedAt, lastUpdate: root.updatedAt,
       steps: [{ report: "x".repeat(300 * 1_024) }],
     }));
     const artifactWarnings: Array<{ reason: string; owner: string }> = [];
-    slotState.dependencies.extensionArtifactWarning = (warning) => artifactWarnings.push(warning);
+    slot.dependencies.extensionArtifactWarning = (warning) => artifactWarnings.push(warning);
     slotState.extensionArtifactMissingSince.set(toolCallId, Date.now() - 31_000);
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     expect(artifactWarnings).toMatchObject([{ reason: "oversized-artifact" }]);
     expect(artifactWarnings).not.toMatchObject([{ reason: "artifact-replacement-in-progress" }]);
     expect(slotState.extensionActivities.get(toolCallId)?.lifecycle?.state).toBe("unknown");
@@ -5175,7 +5086,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       startedAt: root.startedAt, endedAt: root.updatedAt, lastUpdate: root.updatedAt,
       steps: [{ report: "x".repeat(300 * 1_024) }],
     }));
-    await recoveredSlot.discoverExtensionArtifact(asyncDir);
+    await recoveredSlot.ownedTurns.discoverExtensionArtifact(asyncDir);
     await recoveredRegistry.waitUntilIdle();
     expect((recoveredSlot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)?.status).toBe("completed");
     const canonical = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n")
@@ -5193,10 +5104,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const started = Date.now() - 5_000;
     const ended = Date.now() - 1_000;
     const startedAt = new Date(started).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId,
       activityId: "oversized-terminal-activity",
@@ -5237,7 +5145,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await symlink(join(foreignDir, "status.json"), join(asyncDir, "status.json"));
     await writeFile(join(asyncDir, "events.jsonl"), `${completedEvent}\n`);
 
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     expect(slot.isDrainBusy).toBe(true);
 
     await rm(join(asyncDir, "status.json"));
@@ -5245,7 +5153,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await writeFile(join(foreignDir, "events.jsonl"), `${completedEvent}\n`);
     await rm(join(asyncDir, "events.jsonl"));
     await symlink(join(foreignDir, "events.jsonl"), join(asyncDir, "events.jsonl"));
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     expect(slot.isDrainBusy).toBe(true);
 
     await rm(join(asyncDir, "events.jsonl"));
@@ -5255,7 +5163,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       type: "subagent.workflow.completed",
       state: "failed",
     })}\n`);
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     expect(slot.isDrainBusy).toBe(true);
 
     await writeFile(join(asyncDir, "events.jsonl"), `${JSON.stringify({
@@ -5306,7 +5214,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
 
-    const discovered = vi.spyOn(slot, "discoverExtensionArtifact");
+    const discovered = vi.spyOn(slot.ownedTurns, "discoverExtensionArtifact");
     await discoverExtensionArtifactsUntil(fixture.registry, () => discovered.mock.calls.length > 0);
     expect(discovered.mock.calls[0]?.[0]).toMatch(/async-subagent-runs[\\/]late-active-run$/u);
   });
@@ -5345,7 +5253,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       artifactDiscoveryTruncated: (counts) => stopped.push(counts),
     });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const routed = vi.spyOn(slot, "discoverExtensionArtifact");
+    const routed = vi.spyOn(slot.ownedTurns, "discoverExtensionArtifact");
 
     await discoverExtensionArtifactsUntil(fixture.registry);
     // The first pass stops at the read budget after 1,025 entries and reads
@@ -5419,9 +5327,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     });
     // The Gateway work registry is full for one offer: the terminal receipt
     // claim is refused, exactly as a busy Gateway refuses it in production.
-    const claim = vi.spyOn(slot as unknown as { claimExtensionReceiptOwnership: (activityId: string) => unknown }, "claimExtensionReceiptOwnership");
+    const claim = vi.spyOn(slot.ownedTurns, "claimExtensionReceiptOwnership");
     claim.mockReturnValueOnce(undefined);
-    const offered = vi.spyOn(slot, "discoverExtensionArtifact");
+    const offered = vi.spyOn(slot.ownedTurns, "discoverExtensionArtifact");
     const projected = () => slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId);
 
     await discoverExtensionArtifactsUntil(fixture.registry, () => projected() !== undefined);
@@ -5461,7 +5369,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         details: { runId, asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
       });
     }
-    const routed = vi.spyOn(slot, "discoverExtensionArtifact");
+    const routed = vi.spyOn(slot.ownedTurns, "discoverExtensionArtifact");
 
     // Only the two runs this slot can attribute are offered.
     await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.length >= 2);
@@ -5513,7 +5421,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const warnings: Array<{ reason: string }> = [];
     (slot as unknown as { dependencies: { extensionArtifactWarning?: (warning: { reason: string }) => void } })
       .dependencies.extensionArtifactWarning = (warning) => warnings.push(warning);
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     const projected = () => slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId);
     expect(projected()).toMatchObject({ status: "running" });
 
@@ -5529,12 +5437,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // longer decide whether the case observes its event — the old sample guard
     // (`passes > 100`) was the speed budget that let them (#430). Only the
     // test-owned producer is deterministic here; the spies below only observe.
-    const slotInternals = slot as unknown as {
-      readExtensionStatusArtifact: (asyncDir: string) => Promise<Record<string, unknown> | undefined>;
-      readExtensionStatusArtifactWithReplacementRetry: (asyncDir: string) => Promise<Record<string, unknown> | undefined>;
-    };
-    const readOnce = slotInternals.readExtensionStatusArtifact.bind(slot);
-    const readWithRetry = slotInternals.readExtensionStatusArtifactWithReplacementRetry.bind(slot);
+    const slotInternals = slot.ownedTurns.artifacts;
+    const readOnce = slotInternals.readExtensionStatusArtifact.bind(slotInternals);
+    const readWithRetry = slotInternals.readExtensionStatusArtifactWithReplacementRetry.bind(slotInternals);
     // The watcher lane reads the same file through the same inner method
     // (`refreshExtensionActivityFromArtifact`), so a read count taken across the
     // retry path's wall-clock window would count its reads too. Scoping the count
@@ -5568,7 +5473,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       // One read; the product's retry path runs because the injected replace made
       // that read lose, and its second read succeeds.
-      await slot.discoverExtensionArtifact(asyncDir);
+      await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     } finally {
       statusJsonReplace.armed = false;
       statusJsonReplace.insideRetryInvocation = () => false;
@@ -5600,11 +5505,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
       lifecycleArtifactVersion: 3, runId, state: "running", startedAt, lastUpdate: Date.now(),
     }));
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      updateExtensionActivity: (...args: unknown[]) => unknown;
-    };
+    const internal = slot.ownedTurns;
     const started = new Date(startedAt).toISOString();
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "supervisor-launch-activity", runId, toolCallId,
@@ -5623,13 +5524,12 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       ...reply, isError: false, timestamp: Date.now(),
     });
     const now = new Date().toISOString();
-    expect(internal.updateExtensionActivity("supervisor-reply-call", "subagent_supervisor",
-      { source: "pi-subagents" }, "completed", now, now, reply, now)).toBeUndefined();
+    expect(updateExtensionActivity(internal, "supervisor-reply-call", "subagent_supervisor", { source: "pi-subagents" }, "completed", now, now, reply, now)).toBeUndefined();
 
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
       lifecycleArtifactVersion: 3, runId, state: "complete", startedAt, lastUpdate: Date.now(), endedAt: Date.now(),
     }));
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     expect(slot.snapshot().extensionActivities).toMatchObject([{ toolCallId, lifecycle: { state: "completed" } }]);
     expect(slot.snapshot().extensionActivities).toHaveLength(1);
     await fixture.registry.waitUntilIdle();
@@ -5668,8 +5568,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       startedAt: Date.now() - 1_000,
       lastUpdate: Date.now(),
     }));
-    const internal = slot as unknown as { refreshSubagentActivityFromArtifact: (path: string) => Promise<void> };
-    await internal.refreshSubagentActivityFromArtifact(asyncDir);
+    const internal = slot.ownedTurns;
+    await refreshSubagentActivityFromArtifact(internal, asyncDir);
     expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
 
     const projectRoot = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs");
@@ -5682,10 +5582,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lastUpdate: Date.now(),
       endedAt: Date.now(),
     }));
-    await internal.refreshSubagentActivityFromArtifact(unboundHistoricalDir);
+    await refreshSubagentActivityFromArtifact(internal, unboundHistoricalDir);
     expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
 
-    const pathPolicy = slot as unknown as { extensionArtifactPathAllowed: (path: string) => boolean };
+    const pathPolicy = slot.ownedTurns;
     expect(pathPolicy.extensionArtifactPathAllowed(projectRoot)).toBe(false);
     expect(pathPolicy.extensionArtifactPathAllowed(`${projectRoot}/.`)).toBe(false);
     expect(pathPolicy.extensionArtifactPathAllowed(`${projectRoot}/../escape`)).toBe(false);
@@ -5712,7 +5612,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       startedAt: Date.now() - 1_000,
       lastUpdate: Date.now(),
     }));
-    await internal.refreshSubagentActivityFromArtifact(ordinaryDir);
+    await refreshSubagentActivityFromArtifact(internal, ordinaryDir);
     expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
   });
 
@@ -5747,14 +5647,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       updatedAt: activityStartedAt,
       children: [],
     };
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      refreshSubagentActivityFromArtifact: (path: string) => Promise<void>;
-      refreshExtensionActivityFromArtifact: (toolCallId: string, path: string) => Promise<void>;
-      bindExtensionRunOwnership: (runId: string, binding: { toolCallId: string; asyncDir?: string; terminal: boolean }) => boolean;
-      canonicalExtensionRunFacts: () => Map<string, { toolCallId?: string; terminal: boolean; ambiguous: boolean }>;
-    };
+    const internal = slot.ownedTurns;
     internal.extensionActivities.set(toolCallId, activity);
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
     const admissionWindowStartedAt = Date.now();
@@ -5766,7 +5659,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lastUpdate: Date.parse(artifactCompletedAt),
       endedAt: Date.parse(artifactCompletedAt),
     }));
-    await internal.refreshSubagentActivityFromArtifact(asyncDir);
+    await refreshSubagentActivityFromArtifact(internal, asyncDir);
     const admitted = slot.snapshot().extensionActivities?.find((candidate) => candidate.toolCallId === toolCallId);
     expect(admitted).toMatchObject({
       toolCallId,
@@ -5782,7 +5675,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(terminalAt).toBeLessThanOrEqual(Date.parse(admitted?.lifecycle?.observedAt ?? ""));
     // A later observation of the same terminal artifact keeps that instant.
     await new Promise((resolve) => setTimeout(resolve, 2));
-    await internal.refreshSubagentActivityFromArtifact(asyncDir);
+    await refreshSubagentActivityFromArtifact(internal, asyncDir);
     const reobserved = slot.snapshot().extensionActivities?.find((candidate) => candidate.toolCallId === toolCallId);
     expect(reobserved?.lifecycle?.terminalAt).toBe(admitted?.lifecycle?.terminalAt);
 
@@ -5795,8 +5688,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       startedAt: Date.parse(activity.startedAt),
       lastUpdate: Date.parse("2026-01-01T00:00:05.000Z"),
     }));
-    await internal.refreshSubagentActivityFromArtifact(foreignDir);
-    await internal.refreshExtensionActivityFromArtifact(toolCallId, foreignDir);
+    await refreshSubagentActivityFromArtifact(internal, foreignDir);
+    await refreshExtensionActivityFromArtifact(internal, toolCallId, foreignDir);
     expect(slot.snapshot().extensionActivities).toMatchObject([{
       toolCallId,
       status: "completed",
@@ -5814,7 +5707,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
-    const duplicateFact = internal.canonicalExtensionRunFacts().get("duplicate-canonical-run");
+    const duplicateFact = canonicalExtensionRunFacts(internal).get("duplicate-canonical-run");
     expect(duplicateFact?.toolCallId).toBeUndefined();
     expect(duplicateFact?.ambiguous).toBe(true);
   });

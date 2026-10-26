@@ -102,12 +102,9 @@ it("settles a paused subagent row as recent only after the observed process-term
   const toolCallId = "paused-tool";
   const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "run-1");
   await mkdir(asyncDir, { recursive: true });
-  const internal = slot as unknown as {
-    subagentExtensionOrigin: () => ExtensionToolOrigin;
-    extensionToolOrigin: (toolName: string) => ExtensionToolOrigin | undefined;
-  };
+  const internal = slot.ownedTurns;
   vi.spyOn(internal, "subagentExtensionOrigin").mockReturnValue(PROVIDER_ORIGIN);
-  vi.spyOn(internal, "extensionToolOrigin").mockReturnValue(PROVIDER_ORIGIN);
+  vi.spyOn(slot, "extensionToolOrigin").mockReturnValue(PROVIDER_ORIGIN);
 
   const started = Date.now() - 60_000;
   const childEndedAt = started + 30_000;
@@ -177,7 +174,7 @@ it("settles a paused subagent row as recent only after the observed process-term
   );
 
   await writeStatus("running", started + 5_000, "running");
-  await slot.discoverExtensionArtifact(asyncDir);
+  await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
   const liveRow = processRows(slot).find((row) => row.title === "worker");
   expect(liveRow).toBeDefined();
   expect(liveRow!.lifecycle).toMatchObject({ state: "running" });
@@ -187,7 +184,7 @@ it("settles a paused subagent row as recent only after the observed process-term
   // Winding down: paused without the proof owns no settlement fact yet.
   await writeStatus("paused", childEndedAt + 1_000, "paused");
   await writeProof("pending");
-  await slot.discoverExtensionArtifact(asyncDir);
+  await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
   const windingDown = processRows(slot).find((row) => row.processId === liveRow!.processId)!;
   expect(windingDown.lifecycle.state).toBe("paused");
   expect(windingDown.lifecycle.terminalAt).toBeUndefined();
@@ -203,7 +200,7 @@ it("settles a paused subagent row as recent only after the observed process-term
 
   // Settled: the exact-owned proof has observed every paused process exit.
   await writeProof("observed");
-  await slot.discoverExtensionArtifact(asyncDir);
+  await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
   const settled = processRows(slot).find((row) => row.processId === liveRow!.processId)!;
   const terminalAt = new Date(proofObservedAt).toISOString();
   expect(settled.lifecycle.state).toBe("paused");
@@ -247,7 +244,7 @@ it("settles a paused subagent row as recent only after the observed process-term
       startedAt: proofObservedAt + 1_000,
     }],
   }));
-  await slot.discoverExtensionArtifact(replacementDir);
+  await slot.ownedTurns.discoverExtensionArtifact(replacementDir);
   const resumed = processRows(slot).find((row) => row.runId === replacementRunId);
   const unchanged = processRows(slot).find((row) => row.processId === settled.processId)!;
   expect(resumed).toBeDefined();
@@ -270,12 +267,9 @@ it("settles a paused subagent row as recent only after the observed process-term
 it("keeps a rediscovered terminal run's own end instant, so an old run does not return as recent", async () => {
   const fixture = await pausedFixture("rediscovery");
   const { slot } = fixture;
-  const internal = slot as unknown as {
-    subagentExtensionOrigin: () => ExtensionToolOrigin;
-    extensionToolOrigin: (toolName: string) => ExtensionToolOrigin | undefined;
-  };
+  const internal = slot.ownedTurns;
   vi.spyOn(internal, "subagentExtensionOrigin").mockReturnValue(PROVIDER_ORIGIN);
-  vi.spyOn(internal, "extensionToolOrigin").mockReturnValue(PROVIDER_ORIGIN);
+  vi.spyOn(slot, "extensionToolOrigin").mockReturnValue(PROVIDER_ORIGIN);
   const slotManager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } })
     .runtime.session.sessionManager;
 
@@ -308,7 +302,7 @@ it("keeps a rediscovered terminal run's own end instant, so an old run does not 
       steps: [{ index: 0, agent: "worker", workflowKey: "worker-1", runId: `${runId}-child`, status: "failed",
         startedAt, endedAt: startedAt + 28, durationMs: 28 }],
     }));
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
   }
 
   const activities = slot.snapshot().extensionActivities ?? [];

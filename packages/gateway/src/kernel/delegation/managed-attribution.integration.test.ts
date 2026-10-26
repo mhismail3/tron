@@ -189,7 +189,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const status = JSON.parse(await readFile(join(asyncDir, "status.json"), "utf8"));
     facts.workflowStatus = status;
     expect.soft(status.lifecycleProjection.sessionId).toBe(slot.sessionFile);
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     const native = slot.snapshot().extensionActivities?.find(activity => activity.toolCallId === "workflow-launch")
       ?? extensionActivityReceipts(SessionManager.open(slot.sessionFile!).getEntries(), slot.id).find(value => value.receipt.toolCallId === "workflow-launch");
     facts.workflowNative = native;
@@ -212,7 +212,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     runtimeManager.appendMessage({ role: "toolResult", toolName: "subagent", toolCallId: parityTool, content: [{ type: "text", text: "parity launch" }],
       details: { runId: parityRun, asyncId: parityRun, asyncDir: parityDir, mode: "workflow", state: "running" }, isError: false, timestamp: Date.now() });
     facts.parityStatus = running;
-    facts.parityDiscovery = await slot.discoverExtensionArtifact(parityDir);
+    facts.parityDiscovery = await slot.ownedTurns.discoverExtensionArtifact(parityDir);
     facts.parityProcesses = slot.snapshot().processActivities;
     const parity = slot.snapshot().extensionActivities?.find(activity => activity.toolCallId === parityTool);
     facts.parity = parity;
@@ -225,13 +225,13 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const expanded = { ...running, steps: Array.from({ length: 40 }, (_, index) => ({ ...running.steps[index % 4], workflowKey: `bounded-${index}`,
       runId: `bounded-child-${index}`, sessionFile: undefined, sessionOwnerId: undefined, children: [] })) };
     await writeFile(join(parityDir, "status.json"), JSON.stringify(expanded));
-    await slot.discoverExtensionArtifact(parityDir);
+    await slot.ownedTurns.discoverExtensionArtifact(parityDir);
     const covered = slot.snapshot().extensionActivities?.find(activity => activity.toolCallId === parityTool);
     expect.soft(covered?.children.map(child => child.id)).toEqual(Array.from({ length: 32 }, (_, index) => `bounded-${index}`));
     const nested = { ...expanded, steps: expanded.steps.map((step: Record<string, unknown>, index: number) => ({ ...step,
       children: [0, 1].map(child => ({ agent: "probe", workflowKey: `nested-${index}-${child}`, runId: `nested-run-${index}-${child}`, status: "running", toolCount: 1 })) })) };
     await writeFile(join(parityDir, "status.json"), JSON.stringify(nested));
-    await slot.discoverExtensionArtifact(parityDir);
+    await slot.ownedTurns.discoverExtensionArtifact(parityDir);
     const tree = slot.snapshot().extensionActivities?.find(activity => activity.toolCallId === parityTool)?.children ?? [];
     const count = (children: typeof tree): number => children.reduce((sum, child) => sum + 1 + count(child.children ?? []), 0);
     expect.soft(count(tree)).toBe(64);
@@ -242,7 +242,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     await writeFile(join(parityDir, "status.json"), JSON.stringify({ ...running, state: "completed", endedAt: status.endedAt, steps: status.steps,
       lifecycleProjection: { ...running.lifecycleProjection, root: { ...running.lifecycleProjection.root, state: "complete", endedAt: status.endedAt,
         children: status.lifecycleProjection.root.children } } }));
-    await slot.discoverExtensionArtifact(parityDir);
+    await slot.ownedTurns.discoverExtensionArtifact(parityDir);
     facts.receipts = entries.filter(entry => entry.type === "custom" && entry.customType === "tron.context-delivery.v4");
     const decodedDeliveries = contextDeliveryMetadataByEntry(entries);
     facts.decodedDeliveries = [...decodedDeliveries];

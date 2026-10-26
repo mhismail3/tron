@@ -1,7 +1,14 @@
 import { opendir, open, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import type { ExtensionArtifactDiscoveryOutcome } from "../kernel/run/runtime-slot.js";
+/** How one offer of a `status.json` to its owner ended, for the caller deciding
+ * whether these exact bytes may be recorded as dealt with. `accepted` means a
+ * lifecycle was projected; `rejected` means no later offer of the same bytes can
+ * decide differently (shape, run identity, directory, timestamps or a terminal
+ * latch outranks them); `transient` means current state could not decide — a
+ * losing read, unavailable receipt claim, I/O error or attribution comparison a
+ * later pass may resolve — so the same artifact must be offered again. */
+export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "transient";
 import {
   MAX_EXTENSION_ARTIFACT_BYTES,
   MAX_EXTENSION_LIFECYCLE_HEADER_BYTES,
@@ -49,9 +56,12 @@ export interface ExtensionArtifactDiscoveryCounts {
 interface ExtensionArtifactDiscoverySlot {
   readonly id: string;
   readonly cwd: string;
-  ownedExtensionArtifactDirectories(): string[];
-  discoverExtensionArtifact(asyncDir: string): Promise<ExtensionArtifactDiscoveryOutcome>;
-  extensionAmbientArtifactAttribution(): ReadonlySet<string>;
+  /** The frame's actual producer authority, not Slot forwarding methods or an adapter. */
+  readonly ownedTurns: {
+    ownedExtensionArtifactDirectories(): string[];
+    discoverExtensionArtifact(asyncDir: string): Promise<ExtensionArtifactDiscoveryOutcome>;
+    extensionAmbientArtifactAttribution(): ReadonlySet<string>;
+  };
 }
 
 /** Gateway-scoped bounded ambient extension-artifact discovery. RuntimeRegistry
@@ -120,12 +130,12 @@ export class ExtensionArtifactDiscovery {
     const slots = [...this.slots.values()];
     const exact = new Set<string>();
     for (const slot of slots) {
-      for (const asyncDir of slot.ownedExtensionArtifactDirectories()) {
+      for (const asyncDir of slot.ownedTurns.ownedExtensionArtifactDirectories()) {
         const key = `${slot.id}\0${asyncDir}`;
         if (!exact.add(key)) continue;
         if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK) return counts;
         counts.work += 1;
-        await slot.discoverExtensionArtifact(asyncDir);
+        await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
       }
     }
 
@@ -169,7 +179,7 @@ export class ExtensionArtifactDiscovery {
     let dropped = 0;
     const attributed = new Map<string, ReadonlySet<string>>();
     for (const slot of slots) {
-      attributed.set(slot.id, slot.extensionAmbientArtifactAttribution());
+      attributed.set(slot.id, slot.ownedTurns.extensionAmbientArtifactAttribution());
     }
     for (let rootIndex = 0; rootIndex < rootList.length; rootIndex += 1) {
       if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK
@@ -250,7 +260,7 @@ export class ExtensionArtifactDiscovery {
           // An offer the slot could not decide leaves no record, so the next
           // pass offers the same artifact again; only an accepted or
           // permanently rejected artifact is dealt with (G-8a).
-          const outcome = await slot.discoverExtensionArtifact(candidate.asyncDir);
+          const outcome = await slot.ownedTurns.discoverExtensionArtifact(candidate.asyncDir);
           if (outcome === "transient") continue;
           let routed = this.ambientArtifactRoutes.get(slot.id);
           if (!routed) {
