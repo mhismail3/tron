@@ -83,8 +83,11 @@ async function gateway() {
   };
   f.faux.setResponses(Array.from({ length: 60 }, () => respond as never));
   const home = await f.registry.acquire(f.home.sessionId);
-  const settled = () => waitFor(() => home.snapshot().configurationBlocker === null && home.snapshot().phase === "idle" || undefined, "Home idle");
+  const settled = () => waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null && home.snapshot().phase === "idle" || undefined, "Home idle");
   const homeSays = async (prompt: string, name: string, args: Record<string, unknown>) => {
+    // A maintainer tap may already have admitted an autonomous outcome turn.
+    await (homeOwnerOf(f.registry) as unknown as { wakeDrain?: Promise<void> }).wakeDrain;
+    await settled();
     calls.set(prompt, { name, args });
     await home.prompt(prompt);
     const result = await waitFor(() => results.get(prompt), `Home result: ${prompt}`);
