@@ -147,15 +147,21 @@ changes keep its store, cursors and spend.
 - **Settings tool:** Home changes settings through the one change path as `home`; fetched
   content raises the tier one step. With `taskId` it reads or changes a worker's session.
 - **Learned profile:** personal Knowledge notes labelled `home-profile` plus one `kind-<kind>`
-  (`preference`, `standing-decision`, `delegation-default`, `fact`). Written only by the
-  `profile` tool (unconfirmed) and `home.profileChange` (confirmed, `expectedRevision`), both
-  through `HomeProfileItems`, which owns operation validation, rollback, undo fencing and
-  typed result projection. The kernel `SettingsChangePath.auditSubject` retains the Home
-  stripe through those effects, grouped audit, awaited observer and projection; partial
+  (`preference`, `standing-decision`, `delegation-default`, `fact`). The `profile` tool's
+  inferred content writes and maintainer `home.profileChange` (confirmed, `expectedRevision`)
+  share `HomeProfileItems`, which owns operation validation, rollback, undo fencing and
+  typed result projection. Content changes use `SettingsChangePath.auditSubject`, retaining
+  the Home stripe through effects, grouped audit, awaited observer and projection; partial
   failures restore before ungrouped failure audit and rethrow the original value.
-  Active items are injected as
-  `## Learned profile` (≤ `HOME_PROFILE_BOUND_BYTES`, 8 KiB, else IDs only); unavailable
-  Knowledge says so. Home chapters are never observed by Knowledge.
+  Explicit label-only migration/reorganization freezes the original audit in Knowledge's
+  backup before effects, then uses the kernel's atomic subject publisher after proving
+  committed identities. Retry repairs only a committed audit or explicitly resumes its
+  precommit intent; existing Changes Undo restores exact labels without rewriting content.
+  `## Learned profile` carries only paged file/count/revision metadata and diagnostic
+  references, never note text. Home explicitly reads Core, Home or a named scope and
+  chooses relevance and worker-brief content; unavailable Knowledge says so. File labels
+  never weaken confirmed standing authority. See [profile contract](profile.md).
+  Home chapters are never observed by Knowledge.
 
 ### RPCs and clients
 
