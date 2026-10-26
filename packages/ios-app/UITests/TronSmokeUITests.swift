@@ -2537,7 +2537,12 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(request, in: app)
         XCTAssertTrue(app.buttons["settings-approval-approve-approve"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.alerts.count, 0)
-        XCTAssertFalse(app.buttons["Done"].exists)
+        let approvalBars = app.navigationBars.containing(.button, identifier: "settings-approval-approve-approve")
+        XCTAssertEqual(approvalBars.count, 1, "Identify the actual approval chrome, not a missing container")
+        let approvalBar = approvalBars.element
+        XCTAssertTrue(approvalBar.staticTexts["Approve"].exists)
+        XCTAssertTrue(approvalBar.buttons["settings-approval-approve-approve"].isHittable)
+        XCTAssertFalse(approvalBar.buttons["Done"].exists)
         app.navigationBars.staticTexts["Approve"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
         XCTAssertTrue(request.waitForExistence(timeout: 5))
