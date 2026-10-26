@@ -229,6 +229,25 @@ describe("blocking settings approval", () => {
     } finally { await home.abort("agent"); await prompting; }
   });
 
+  it("a worker removed before decision admission retires the owned request instead of orphaning it", async () => {
+    const f = await pendingApproval({}, [
+      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 3 },
+    ], true);
+    try {
+      const workerSessionId = (await homeOwnerOf(f.registry).taskStatus("diff-worker")).sessionId!;
+      await f.registry.delete(workerSessionId);
+      f.answer("approve");
+      await waitFor(() => !f.home.isBusy, "removed worker decision settles");
+      const result = f.home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "settings-request");
+      expect(result).toMatchObject({ isError: true });
+      expect(await f.settings.settingsChanges.pendingApprovals()).toEqual([]);
+      const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
+      expect(history.some(entry => entry.status === "approved")).toBe(false);
+      expect(history.some(entry => entry.status === "superseded")).toBe(true);
+      await saveCase("removed-worker", { result, history });
+    } finally { await f.home.abort("agent"); await f.prompting; }
+  });
+
   it("Changes approves a live Home form through settings.decide once and retires the same interaction", async () => {
     const f = await pendingApproval();
     const service = new GatewayService({
