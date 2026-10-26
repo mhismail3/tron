@@ -36,7 +36,7 @@ export async function reviewSettingsApproval(input: {
       try {
         choice = await input.present({ requestId, title: "Settings approval", context: reviewText(input.schema, request), expiresAt: request.expiresAt }, controller.signal);
       } catch (error) {
-        await path.cancelApproval(requestId, requesterSessionId);
+        await path.cancelApproval(requestId, requesterSessionId, "turn-ended");
         await path.approvals.acknowledge([requesterSessionId], [requestId]);
         throw error;
       }
@@ -50,7 +50,7 @@ export async function reviewSettingsApproval(input: {
           if (settled.status === "pending") {
             // A vanished target/context ends this continuation too. Retire its
             // owned diff before surfacing the failure, rather than orphaning it.
-            await path.cancelApproval(requestId, requesterSessionId);
+            await path.cancelApproval(requestId, requesterSessionId, "decision-failed");
             throw error;
           }
           // A tap can lose to expiry or a newer diff while awaiting the target
@@ -63,7 +63,7 @@ export async function reviewSettingsApproval(input: {
       request = await read();
     }
     if (request.status === "pending") {
-      await path.cancelApproval(requestId, requesterSessionId);
+      await path.cancelApproval(requestId, requesterSessionId, "turn-ended");
       request = await read();
     }
     await path.approvals.acknowledge([requesterSessionId], [requestId]);
@@ -98,7 +98,7 @@ function reviewText(schema: SettingsSchema, request: ApprovalRequest): string {
   lines.push(`Expires: ${request.expiresAt}`, "Approve applies only this diff. Deny changes nothing.");
   // Escape rather than strip author-supplied controls: host sanitization must
   // never consume a terminal-control payload and silently hide the bound diff.
-  const text = lines.join("\n").replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029]/g,
+  const text = lines.join("\n").replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g,
     character => "\\u" + character.charCodeAt(0).toString(16).padStart(4, "0"));
   if (Buffer.byteLength(text, "utf8") > 32 * 1_024) {
     throw new GatewayError("invalid_request", "Settings approval diff is too large to review (maximum 32 KiB); request fewer or smaller changes");

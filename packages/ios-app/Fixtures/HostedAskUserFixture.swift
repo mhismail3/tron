@@ -62,11 +62,11 @@ struct HostedAskUserFixtureView: View {
                             .accessibilityIdentifier("ask-user-mutation-count")
                         Text(receipt.summary)
                             .accessibilityIdentifier("ask-user-receipt")
-                        if fixture.form.presentation == .approval {
-                            ToolCard(data: fixture.pendingSettingsTool)
+                        if fixture.form.presentation == .approval || ProcessInfo.processInfo.arguments.contains("-tron-ask-user-tool-row") {
+                            ToolCard(data: fixture.pendingFormTool)
                                 .environment(\.canonicalResourceSessionID, sessionID)
                                 .environment(\.pendingExtensionInteractionPresenter, { value in interaction = value })
-                                .accessibilityIdentifier("settings-approval-pending-tool")
+                                .accessibilityIdentifier(fixture.form.presentation == .approval ? "settings-approval-pending-tool" : "ask-user-pending-tool")
                         } else {
                             Button("Reopen Ask User") { interaction = fixture.interaction }
                                 .accessibilityIdentifier("ask-user-reopen")
@@ -169,11 +169,12 @@ private struct HostedAskUserFixture {
     let receipt: HostedAskUserFixtureReceipt
     let model: AppModel
 
-    var pendingSettingsTool: ChatToolPresentation {
-        ChatToolPresentation(id: "hosted-settings-call", title: "Settings", toolName: "settings", subtitle: "Running",
+    var pendingFormTool: ChatToolPresentation {
+        ChatToolPresentation(id: "hosted-form-call", title: form.presentation == .approval ? "Settings" : "Ask User",
+            toolName: form.presentation == .approval ? "settings" : "ask_user", subtitle: "Running",
             request: nil, response: nil, content: "", fallbackContent: nil, error: false,
             startedAt: nil, completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil,
-            extensionOrigin: ExtensionToolOrigin(source: "inline", owner: interaction.owner),
+            extensionOrigin: ExtensionToolOrigin(source: form.presentation == .approval ? "inline" : AskUserToolPresentation.tronSource, owner: interaction.owner),
             toolSegmentId: "tool-segment:\"hosted-ask-user-operation\"")
     }
 

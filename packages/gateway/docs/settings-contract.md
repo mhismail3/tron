@@ -172,7 +172,8 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   `settings` tool `action: "request"` holds a change at any tier (`tierBasis.requested`)
   and blocks the calling turn on the same semantic form sheet as `ask_user`. The sheet
   shows scope, layer, reason and the full before/after JSON values, not abbreviated
-  display summaries. Author-supplied controls are disclosed as Unicode escapes before
+  display summaries. Author-supplied terminal, bidi and invisible format controls
+  are disclosed as Unicode escapes before
   host sanitization, so terminal payloads cannot swallow later diff text. Approval
   context is literal selectable text, never Markdown;
   a diff over the form\'s 32 KiB capacity is explicitly refused and its request retired.

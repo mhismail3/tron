@@ -50,6 +50,30 @@ final class TronSettingsApprovalFormUITests: XCTestCase {
     }
 
     @MainActor
+    func testAskUserToolRowReopensAndSubmits() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-ask-user-fixture", "-tron-ask-user-tool-row"]
+        app.launch()
+        let send = app.buttons["Submit all answers"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5), app.debugDescription)
+        let window = app.windows.firstMatch
+        let title = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.midX, dy: send.frame.midY))
+        title.press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        let row = app.buttons["ask-user-pending-tool"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Mutation count: 0"].exists)
+        row.tap()
+        XCTAssertTrue(send.waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["Staging"].tap()
+        send.tap()
+        XCTAssertTrue(app.staticTexts["extension.respond cancelled=false selected=environment-a other="].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Mutation count: 1"].exists)
+        app.terminate()
+    }
+
+    @MainActor
     func testApprovalContextDisplaysLiteralLinkAndImageTargets() {
         continueAfterFailure = false
         let app = XCUIApplication()
