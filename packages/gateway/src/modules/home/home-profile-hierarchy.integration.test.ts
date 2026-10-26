@@ -126,16 +126,16 @@ it("Home cannot rewrite existing confirmed instruction-kind authority or promote
 it("explicit reads preserve exact standing-rule status/provenance and isolate named scopes", async () => {
   const f = await fixture("hierarchy-read");
   const seeded = [];
-  for (const [file, title, role, confirmed] of [["core", "Never publish without approval.", "decision", true], ["home", "Keep orchestration concise.", "preference", false], ["scopes/ui", "UI context: Cedar controls.", "fact", false], ["scopes/release", "Release context: Maple signing.", "fact", false]] as const) {
-    seeded.push((await f.store.createNote({ commandId: command("hierarchy-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "user", source: "hierarchy-fixture", evidence: [], reason: "Explicit standing instruction or contextual reference." }, relations: [], content: { title, role, confirmed, tags: ["home-profile", role === "decision" ? "kind-standing-decision" : `kind-${role}`, `home-file-${file.replace("/", "-")}`] } } })).record);
+  for (const [file, title, role, confirmed] of [["communication", "Never publish without approval.", "decision", true], ["routines", "Keep orchestration concise.", "preference", false], ["projects/ui", "UI context: Cedar controls.", "fact", false], ["projects/release", "Release context: Maple signing.", "fact", false]] as const) {
+    seeded.push((await f.store.createNote({ commandId: command("hierarchy-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "user", source: "hierarchy-fixture", evidence: [], reason: "Explicit standing instruction or contextual reference." }, relations: [], content: { title, role, confirmed, tags: ["home-profile", role === "decision" ? "kind-standing-decision" : `kind-${role}`], profile: { version: 2, path: file.split("/") } } } })).record);
   }
-  const turn = await homeActivation(f, "Read UI context.", [profileCall({ action: "read", file: "scopes/ui" }, "hierarchy-ui"), say("read")]);
+  const turn = await homeActivation(f, "Read UI context.", [profileCall({ action: "read", path: "projects/ui" }, "hierarchy-ui"), say("read")]);
   expect(turn.first.systemPrompt).not.toContain("UI context: Cedar controls.");
   expect(turn.first.systemPrompt).not.toContain("Release context: Maple signing.");
   const result = turn.last.messages.filter(message => message.role === "toolResult" && message.toolCallId === "hierarchy-ui");
   expect(JSON.stringify(result)).toContain("UI context: Cedar controls.");
   expect(JSON.stringify(result)).not.toContain("Release context: Maple signing.");
-  const rules = await homeActivation(f, "Read standing rules.", [profileCall({ action: "read", file: "core" }, "hierarchy-core"), say("read")]);
+  const rules = await homeActivation(f, "Read standing rules.", [profileCall({ action: "read", path: "communication" }, "hierarchy-core"), say("read")]);
   const ruleResult = JSON.stringify(rules.last.messages.filter(message => message.role === "toolResult" && message.toolCallId === "hierarchy-core"));
   expect(ruleResult).toContain("Never publish without approval.");
   expect(ruleResult).toContain("hierarchy-fixture");

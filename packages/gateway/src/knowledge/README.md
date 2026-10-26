@@ -49,8 +49,10 @@ connector details: [contract](contract.md).
   receipt. Mutations serialize per workspace with command IDs, exact request hashes
   and expected revisions; reads never take the workspace mutex.
 - **Profile partition.** Explicit assignments over personal `home-profile` notes
-  preserve exact content, labels, status, provenance and historical revisions. An
-  owner-only backup precedes all staged bodies; one SQL commit publishes every
+  change only organization metadata, preserving exact content, status, provenance
+  and historical revisions. Complete migration selects active legacy Core/Home or
+  unlabelled members, never inactive notes; explicit reorganization selects its
+  named members. An owner-only backup precedes all staged bodies; one SQL commit publishes every
   head. Explicit recovery reuses prepared identities; reads never migrate. Home's
   original command-addressed opaque audit is in the same backup and digest; forget
   of any member drops the entire envelope, retaining unrelated recovery snapshots.

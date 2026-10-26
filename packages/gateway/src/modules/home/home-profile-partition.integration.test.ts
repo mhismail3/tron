@@ -2,11 +2,12 @@ import * as fs from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { crashProfilePartition } from "../../../test-support/profile-partition-crash.js";
+import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
 import { fixture, disposeFixtures } from "../../../test-support/home-task-fixture.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { KnowledgeStore } from "../../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../../knowledge/knowledge-service.js";
-import { profileFile } from "../../knowledge/knowledge-notes.js";
+import { profileFile, profileOperationKey } from "../../knowledge/knowledge-notes.js";
 import { HomeProfileItems } from "./home-profile.js";
 import type { KnowledgeRecord } from "../../knowledge/knowledge-contract.js";
 import * as durability from "../../util/durable-json.js";
@@ -19,23 +20,31 @@ afterEach(async () => {
   await fs.mkdir("test-results/home-profile", { recursive: true });
   await fs.writeFile("test-results/home-profile/migration-changes.json", JSON.stringify(evidence, null, 2));
 });
-async function setup() {
+async function setup(mode: "legacy" | "v2" | "migration" = "legacy") {
   const f = await fixture(false, false, undefined, false, undefined, { knowledge: () => knowledge });
   knowledge = new KnowledgeService(new KnowledgeStore(f.registry.moduleHost.contract(workspaceModule), () => {}));
   const profile = new HomeProfileItems(() => knowledge);
   const originals: Extract<KnowledgeRecord, { kind: "note" }>[] = [];
   for (let i = 0; i < 3; i++) {
-    const created = await knowledge.store.createNote({ commandId: `create-original-${i}`, record: {
+    const record: Parameters<KnowledgeStore["createNote"]>[0]["record"] = {
       kind: "note", scope: "personal", provenance: { actor: "user", source: "fixture", evidence: [], reason: `Original provenance ${i}` },
-      relations: i === 2 ? [{ type: "supersedes", recordId: originals[0]!.id, revisionId: originals[0]!.revisionId }] : [],
+      relations: mode !== "migration" && i === 2 ? [{ type: "supersedes", recordId: originals[0]!.id, revisionId: originals[0]!.revisionId }] : [],
       content: { title: `Original confirmed standing instruction ${i}`, body: `Original private body ${i}`, role: "decision", confirmed: true,
-        ...(i === 1 ? { retired: true } : {}), tags: ["home-profile", "kind-standing-decision", "fixture-label"] },
-    } });
-    originals.push(created.record as Extract<KnowledgeRecord, { kind: "note" }>);
+        ...(mode !== "migration" && i === 1 ? { retired: true } : {}), tags: ["home-profile", "kind-standing-decision", "fixture-label", ...(mode === "migration" ? [i === 1 ? "home-file-home" : "home-file-core"] : [])],
+        ...(mode === "v2" ? { profile: { version: 2 as const, path: ["engineering", "originals"] } } : {}) },
+    };
+    originals.push(mode === "migration"
+      ? await legacyProfileFixture(knowledge.store, `create-original-${i}`, record)
+      : (await knowledge.store.createNote({ commandId: `create-original-${i}`, record })).record as Extract<KnowledgeRecord, { kind: "note" }>);
   }
-  const context = { commandId: "original-partition-command", actor: { kind: "home" as const, id: "home-fixture", sessionId: "home-fixture", toolCallId: "original-tool-call" }, reason: "Original private audit reason", web: true };
-  const assignments = originals.map((record, index) => ({ id: record.id, expectedRevision: record.revisionId, file: index === 0 ? "core" as const : index === 1 ? "home" as const : "scopes/work" as const }));
-  const request = { commandId: context.commandId, mode: "migrate" as const, assignments };
+  if (mode === "migration") {
+    const state = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "knowledge", "profile-backups");
+    for (let i = 0; i < 3; i++) await fs.rm(join(state, `${profileOperationKey(`create-original-${i}-historical-fixture`)}.json`));
+  }
+  const context = { commandId: "original-partition-command", actor: { kind: mode !== "legacy" ? "ui" as const : "home" as const, id: "home-fixture", sessionId: "home-fixture", toolCallId: "original-tool-call" }, reason: "Original private audit reason", web: true };
+  const assignments = originals.map((record, index) => ({ id: record.id, expectedRevision: record.revisionId,
+    ...(mode !== "legacy" ? { path: `engineering/selected-${index}` } : { file: index === 0 ? "core" as const : index === 1 ? "home" as const : "scopes/work" as const }) }));
+  const request = { commandId: context.commandId, mode: mode === "v2" ? "reorganize" as const : "migrate" as const, assignments };
   const cold = async () => {
     knowledge!.dispose();
     const registry = await f.restartToReadiness();
@@ -109,7 +118,7 @@ it("backs up exact original audit, publishes the full migration group on cold re
 }, 60_000);
 
 it("repairs original committed audit after a later native edit without replaying domain effects, then refuses stale grouped Undo", async () => {
-  const { f, profile, originals, context, request, cold } = await setup();
+  const { f, profile, originals, context, request, cold } = await setup("v2");
   const fault = await failPublication(f.settings.settingsChanges.record.path);
   await expect(profile.partition(f.settings.settingsChanges, request, context)).rejects.toThrow("Owned original group publication fault");
   const current = await knowledge!.store.read(originals[0]!.id) as typeof originals[number];
@@ -150,7 +159,7 @@ it("invalidates and physically removes the WHOLE opaque audit envelope on forget
 }, 60_000);
 
 it.each(["before-backup", "after-backup", "mid-body", "precommit", "after-commit"])("preserves one original audit and explicit retry across a real %s process death", async cut => {
-  const { f, profile, originals, context, request, cold } = await setup();
+  const { f, profile, originals, context, request, cold } = await setup("migration");
   knowledge!.dispose();
   await f.registry.dispose();
   await f.registry.administrativeWorkRegistry.waitUntilSettled();
@@ -172,7 +181,7 @@ it.each(["before-backup", "after-backup", "mid-body", "precommit", "after-commit
     savedTime = (recovered.envelope as { replayAt: string }).replayAt;
     prepared = recovered.prepared.map(record => record.revisionId);
   }
-  const result = cut === "before-backup" ? await profile.partition(changes, request, context) : await profile.retryPartition(changes, context.commandId, "home");
+  const result = cut === "before-backup" ? await profile.partition(changes, request, context) : await profile.retryPartition(changes, context.commandId, context.actor.kind);
   const recovery = await knowledge!.store.profilePartitionRecovery(context.commandId);
   if (prepared) expect(recovery.prepared.map(record => record.revisionId)).toEqual(prepared);
   const audit = (await changes.history({ key: "home.profile.item" })).entries;
@@ -207,7 +216,7 @@ it("keeps distinct original commands with identical assignments as distinct inte
 }, 60_000);
 
 it("retains original Undo links across a real postcommit Undo crash and cold publication retry", async () => {
-  const { f, profile, originals, context, request, cold } = await setup();
+  const { f, profile, originals, context, request, cold } = await setup("v2");
   const applied = await profile.partition(f.settings.settingsChanges, request, context);
   const undoContext = { commandId: "original-crashed-undo", actor: { kind: "ui" as const, id: "fixture" }, reason: "Original Undo reason", web: true };
   knowledge!.dispose();
@@ -235,7 +244,7 @@ it("retains original Undo links across a real postcommit Undo crash and cold pub
 }, 60_000);
 
 it("refuses recovery through a replaced backup-directory symlink without publishing or rewriting anything", async () => {
-  const { f, profile, context, request } = await setup();
+  const { f, profile, context, request } = await setup("v2");
   const applied = await profile.partition(f.settings.settingsChanges, request, context);
   const directory = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "knowledge", "profile-backups");
   const before = await Promise.all(request.assignments.map(item => knowledge!.store.read(item.id)));
@@ -248,7 +257,7 @@ it("refuses recovery through a replaced backup-directory symlink without publish
 }, 60_000);
 
 it("preflights the complete Changes group before backup/body publication", async () => {
-  const { f, profile, originals, context, request } = await setup();
+  const { f, profile, originals, context, request } = await setup("v2");
   await expect(profile.partition(f.settings.settingsChanges, request, { ...context, reason: "x".repeat(1024 * 1024) })).rejects.toThrow(/bound/);
   for (const record of originals) expect(await knowledge!.store.read(record.id)).toEqual(record);
   expect((await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries).toEqual([]);

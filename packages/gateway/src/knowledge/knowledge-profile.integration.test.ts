@@ -5,29 +5,44 @@ import { afterEach, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { boundedProfilePartition, crashProfilePartition } from "../../test-support/profile-partition-crash.js";
-import { profileFileTags, type ProfileAssignment } from "./knowledge-notes.js";
-import type { KnowledgeRecord } from "./knowledge-contract.js";
+import { profileFileTags, profileOperationKey, type ProfileAssignment } from "./knowledge-notes.js";
+import { legacyProfileFixture } from "../../test-support/profile-v1-fixture.js";
+import type { KnowledgeNoteMutationRequest, KnowledgeRecord } from "./knowledge-contract.js";
 
 const fixtures: Array<{ root: string; workspace: TronWorkspace }> = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) { await f.workspace.dispose(); await rm(f.root, { recursive: true, force: true }); } });
-async function fixture() {
+async function fixture(mode: "legacy" | "v2" | "migration" = "legacy") {
   const root = await mkdtemp(join(tmpdir(), "tron-profile-partition-"));
   const workspace = new TronWorkspace(join(root, "home")); fixtures.push({ root, workspace });
   await workspace.initialize();
   const store = new KnowledgeStore(workspace);
   const records = [];
   for (let index = 0; index < 21; index++) {
-    const created = await store.createNote({ commandId: `partition-create-${index}`, record: { kind: "note", scope: "personal", provenance: { actor: index % 2 ? "agent" : "user", source: "partition-fixture", evidence: index === 2 ? [{ recordId: records[0]!.id, revisionId: records[0]!.revisionId }] : [], reason: `original ${index}` }, relations: index === 3 ? [{ type: "supersedes", recordId: records[1]!.id, revisionId: records[1]!.revisionId }] : [], content: { title: `Exact profile text ${index}.`, body: `Complete body ${index}.\nDo not truncate this history.`, role: index % 2 ? "preference" : "decision", confirmed: index % 2 === 0, ...(index % 7 === 0 ? { retired: true } : {}), tags: ["home-profile", index % 2 ? "kind-preference" : "kind-standing-decision", "fixture-label"] } } });
-    const draft = created.record;
-    if (draft.kind !== "note") throw new Error("Expected note");
-    records.push((await store.updateNote({ commandId: `partition-history-${index}`, recordId: draft.id, expectedRevision: draft.revisionId, record: { ...draft, content: { ...draft.content, body: draft.content.body + "\nSecond edition." } } })).record);
+    const request: KnowledgeNoteMutationRequest = { commandId: `partition-create-${index}`, record: { kind: "note", scope: "personal", provenance: { actor: index % 2 ? "agent" : "user", source: "partition-fixture", evidence: index === 2 ? [{ recordId: records[0]!.id, revisionId: records[0]!.revisionId }] : [], reason: `original ${index}` }, relations: mode !== "migration" && index === 3 ? [{ type: "supersedes", recordId: records[1]!.id, revisionId: records[1]!.revisionId }] : [], content: { title: `Exact profile text ${index}.`, body: `Complete body ${index}.\nDo not truncate this history.`, role: index % 2 ? "preference" : "decision", confirmed: index % 2 === 0, ...(mode !== "migration" && index % 7 === 0 ? { retired: true } : {}), tags: ["home-profile", index % 2 ? "kind-preference" : "kind-standing-decision", "fixture-label"], ...(mode === "v2" ? { profile: { version: 2 as const, path: ["life"] } } : {}) } } };
+    if (mode === "migration") {
+      // Migration admits active legacy members only. The two distinct historical
+      // revisions come from v2 creation followed by the existing exact restore,
+      // not an ordinary legacy edit or a production admission bypass.
+      records.push(await legacyProfileFixture(store, request.commandId, request.record));
+    } else {
+      const draft = (await store.createNote(request)).record;
+      if (draft.kind !== "note") throw new Error("Expected note");
+      records.push((await store.updateNote({ commandId: `partition-history-${index}`, recordId: draft.id, expectedRevision: draft.revisionId, record: { ...draft, content: { ...draft.content, body: draft.content.body + "\nSecond edition." } } })).record);
+    }
   }
-  const assignments: ProfileAssignment[] = records.map((note, index) => ({ id: note.id, expectedRevision: note.revisionId, file: index < 10 ? "core" : index < 20 ? "home" : "scopes/ui" }));
+  if (mode === "migration") {
+    // Completed seed-operation backups are fixture artifacts, not backups of the
+    // operation under test. Canonical heads and both body revisions stay intact.
+    const state = join((await workspace.describe()).root, "state", "knowledge", "profile-backups");
+    for (let index = 0; index < 21; index++) await rm(join(state, `${profileOperationKey(`partition-create-${index}-historical-fixture`)}.json`));
+  }
+  const assignments: ProfileAssignment[] = records.map((note, index) => ({ id: note.id, expectedRevision: note.revisionId,
+    ...(mode !== "legacy" ? { path: `engineering/selected-${Math.floor(index / 10)}` } : { file: index < 10 ? "core" as const : index < 20 ? "home" as const : "scopes/ui" as const }) }));
   return { root, workspace, store, records, assignments };
 }
 
 it("backs up complete histories before label-only migration; replay/reopen retain every exact value", async () => {
-  const f = await fixture();
+  const f = await fixture("migration");
   const result = await f.store.partitionProfile({ commandId: "partition-migrate-one", mode: "migrate", assignments: f.assignments });
   if (!result.backup) throw new Error("Migration must publish its backup");
   const backup = JSON.parse(await readFile(result.backup, "utf8")) as { originals: Array<{ record: KnowledgeRecord; history: KnowledgeRecord[] }> };
@@ -58,7 +73,7 @@ it("backs up complete histories before label-only migration; replay/reopen retai
 
 const crashEvidence: Array<Record<string, unknown>> = [];
 it.each(["before-backup", "after-backup", "mid-body", "precommit", "after-commit"])("recovers every canonical/body reference after a process crash at %s", async cut => {
-  const f = await fixture();
+  const f = await fixture("migration");
   const home = join(f.root, "home");
   const root = join((await f.workspace.describe()).root, "state", "knowledge");
   await f.workspace.dispose();
@@ -106,7 +121,7 @@ it.each(["before-backup", "after-backup", "mid-body", "precommit", "after-commit
 });
 
 it("a missing historical body refuses migration before any new record body or backup is published", async () => {
-  const f = await fixture();
+  const f = await fixture("migration");
   const root = join((await f.workspace.describe()).root, "state", "knowledge");
   const first = f.records[0]!;
   const files = await readdir(join(root, "records", first.id));
@@ -119,7 +134,7 @@ it("a missing historical body refuses migration before any new record body or ba
 });
 
 it("a valid-JSON but altered backup cannot rewrite text or discard a historical revision", async () => {
-  const f = await fixture();
+  const f = await fixture("migration");
   const result = await f.store.partitionProfile({ commandId: "partition-backup-original", mode: "migrate", assignments: f.assignments });
   if (!result.backup) throw new Error("Missing migration backup");
   const bytes = await readFile(result.backup, "utf8");
@@ -152,7 +167,7 @@ it("malformed partition labels can be explicitly normalized without inferring a 
 });
 
 it("profile receipt references are invalidated by forget, and cannot resurrect or replay forgotten data", async () => {
-  const f = await fixture();
+  const f = await fixture("migration");
   const request = { commandId: "partition-forget-original", mode: "migrate" as const, assignments: f.assignments };
   const migration = await f.store.partitionProfile(request);
   const unrelated = await f.store.read(f.records[1]!.id);
@@ -173,12 +188,12 @@ it("profile receipt references are invalidated by forget, and cannot resurrect o
   expect(bytes).not.toContain(JSON.stringify(target.content.body).slice(1, -1));
   expect(JSON.parse(bytes).originals.find((item: { record: KnowledgeRecord }) => item.record.id === f.records[1]!.id).record).toEqual(f.records[1]);
   await expect(readFile(abandonedTemporary)).rejects.toMatchObject({ code: "ENOENT" });
-  const moved = await f.store.partitionProfile({ commandId: "partition-unrelated-after-forget", mode: "reorganize", assignments: [{ id: unrelated!.id, expectedRevision: unrelated!.revisionId, file: "home" }] });
+  const moved = await f.store.partitionProfile({ commandId: "partition-unrelated-after-forget", mode: "reorganize", assignments: [{ id: unrelated!.id, expectedRevision: unrelated!.revisionId, path: "routines/retained" }] });
   expect(moved.changes.map(change => change.id)).toEqual([unrelated!.id]);
 });
 
 it("forget cancels uncommitted partition bodies without erasing unrelated backup recovery data", async () => {
-  const f = await fixture();
+  const f = await fixture("migration");
   const workspaceRoot = (await f.workspace.describe()).root, home = join(f.root, "home");
   await f.workspace.dispose();
   await crashProfilePartition(f.root, home, f.assignments, "mid-body");
@@ -204,7 +219,7 @@ it("forget cancels uncommitted partition bodies without erasing unrelated backup
 });
 
 it("forget tombstones resume backup redaction after a real postcommit crash", async () => {
-  const f = await fixture();
+  const f = await fixture("migration");
   const migration = await f.store.partitionProfile({ commandId: "partition-before-forget-crash", mode: "migrate", assignments: f.assignments });
   const target = await f.store.read(f.records[0]!.id), unrelated = await f.store.read(f.records[1]!.id);
   if (target?.kind !== "note") throw new Error("Expected note");
@@ -230,7 +245,7 @@ it("forget tombstones resume backup redaction after a real postcommit crash", as
 });
 
 it("excluded members require an explicit eligibility decision rather than incomplete migration", async () => {
-  const f = await fixture();
+  const f = await fixture("migration");
   const note = f.records[0]!;
   await f.store.setExclusion("partition-exclude-member", note.id, true, note.revisionId);
   await expect(f.store.partitionProfile({ commandId: "partition-with-excluded", mode: "migrate", assignments: f.assignments })).rejects.toThrow(/eligibility decision/);
@@ -240,7 +255,7 @@ it("excluded members require an explicit eligibility decision rather than incomp
 });
 
 it("streams and bounds deep histories before publishing backup or replacement bodies", async () => {
-  const f = await fixture();
+  const f = await fixture("v2");
   let current = f.records[0]!;
   if (current.kind !== "note") throw new Error("Expected note");
   const body = "界".repeat(100_000);
@@ -250,7 +265,7 @@ it("streams and bounds deep histories before publishing backup or replacement bo
   const workspaceRoot = (await f.workspace.describe()).root;
   const home = join(f.root, "home");
   await f.workspace.dispose();
-  const outcome = await boundedProfilePartition(f.root, home, assignments);
+  const outcome = await boundedProfilePartition(f.root, home, assignments, "reorganize");
   expect(outcome, outcome.stderr).toMatchObject({ code: 0, signal: null });
   expect(JSON.parse(outcome.stdout)).toMatchObject({ status: "refused", message: expect.stringMatching(/backup exceeds its bound/) });
   const workspace = new TronWorkspace(home);

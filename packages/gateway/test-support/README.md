@@ -68,6 +68,10 @@ one accepted recovery through the existing work owner.
 
 - `profile-v1-fixture.ts` arranges historical profile notes through the real privileged
   partition-restore owner. It grants no legacy-create exemption to ordinary note APIs.
+  Migration fixtures select active legacy members; completed seed-operation backups
+  are removed before the operation under test, retaining canonical heads and bodies.
+- The bounded profile child takes an explicit migration/reorganization mode. The
+  v2 deep-history case exercises reorganization with a real 96 MiB process ceiling.
 - No test reaches the network or a real Tron home.
 - A test owns and removes its processes, temp homes and fixtures on success and
   failure.

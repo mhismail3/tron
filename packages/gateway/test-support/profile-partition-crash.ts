@@ -8,9 +8,9 @@ import type { ProfileAssignment } from "../src/knowledge/knowledge-notes.js";
 
 /** A real process heap ceiling proves deep-history admission is incremental,
  * rather than merely checking the final encoded backup after unbounded loading. */
-export async function boundedProfilePartition(root: string, home: string, assignments: ProfileAssignment[]) {
+export async function boundedProfilePartition(root: string, home: string, assignments: ProfileAssignment[], mode: "migrate" | "reorganize") {
   const hook = join(root, "bounded-hook.mjs"), program = join(root, "bounded-child.mjs"), input = join(root, "bounded-input.json");
-  await writeFile(input, JSON.stringify(assignments));
+  await writeFile(input, JSON.stringify({ assignments, mode }));
   await writeFile(hook, `import { registerHooks } from 'node:module';
 registerHooks({ resolve(specifier, context, next) { try { return next(specifier, context); } catch (error) { if (specifier.endsWith('.js')) return next(specifier.slice(0,-3)+'.ts',context); throw error; } } });
 `);
@@ -24,7 +24,8 @@ const workspace = new TronWorkspace(home);
 await workspace.initialize();
 let result;
 try {
-  await new KnowledgeStore(workspace).partitionProfile({commandId:'partition-bounded-command',mode:'migrate',assignments:JSON.parse(await fs.readFile(input,'utf8'))});
+  const { assignments, mode } = JSON.parse(await fs.readFile(input,'utf8'));
+  await new KnowledgeStore(workspace).partitionProfile({commandId:'partition-bounded-command',mode,assignments});
   result = {status:'unexpected-commit'};
 } catch (error) {
   if (error.code !== 'conflict') throw error;
