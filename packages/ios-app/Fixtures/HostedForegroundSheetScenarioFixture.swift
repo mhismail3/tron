@@ -12,7 +12,17 @@ struct HostedForegroundSheetScenario {
         if connections > 1, ProcessInfo.processInfo.arguments.contains("-foreground-queued-removed") { return [] }
         return [.init(id: "foreground-queued-message",
                       behavior: ProcessInfo.processInfo.arguments.contains("-foreground-queued-steer") ? .steer : .followUp,
-                      text: "Queued message 1607", attachmentCount: 0)]
+                      text: queuedText, attachmentCount: 0)]
+    }
+
+    private var queuedText: String {
+        guard ProcessInfo.processInfo.arguments.contains("-foreground-queued-annotation") else {
+            return "Queued message 1607"
+        }
+        return ChatAnnotationEnvelope.compose(annotations: [ChatAnnotation(
+            quote: "Tron project (6 notes): rule — keep one owner per lifecycle.",
+            comment: "Apply this rule to the queued card.", anchor: nil
+        )], body: "")
     }
 
     mutating func capabilities(_ base: [String]) -> [String] {

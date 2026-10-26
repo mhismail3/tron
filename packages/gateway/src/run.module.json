@@ -3,6 +3,7 @@
   "owns": [
     "sessions/README.md",
     "sessions/administrative-drain-snapshot.integration.test.ts",
+    "sessions/annotation-only-steer.integration.test.ts",
     "kernel/run/bounded-tool-cancellation.ts",
     "kernel/run/compaction-policy.integration.test.ts",
     "kernel/run/compaction-policy.ts",
