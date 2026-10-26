@@ -136,6 +136,30 @@ class FseventsGuard(unittest.TestCase):
         self.assertGreater(record["fseventsd"]["footprintMB"], 0, record)
         self.assertGreater(record["fseventsd"]["rssMB"], 0, record)
 
+    def test_removes_only_old_empty_swift_driver_temp_directories(self):
+        stale = self.temp / "TemporaryDirectory.Ab12Cd"
+        recent = self.temp / "TemporaryDirectory.Ef34Gh"
+        nonempty = self.temp / "TemporaryDirectory.Ij56Kl"
+        for path in (stale, recent, nonempty):
+            path.mkdir()
+        (nonempty / "keep").write_text("compiler output")
+        outside = self.base / "outside"
+        outside.mkdir()
+        link = self.temp / "TemporaryDirectory.Mn78Op"
+        link.symlink_to(outside, target_is_directory=True)
+        for path in (stale, nonempty, outside):
+            os.utime(path, (OLD, OLD))
+        _, dry = self.check(*COLD, "--dry-run")
+        self.assertIn(stale.name, dry["cleanup"].get("wouldDelete", []), dry)
+        self.assertTrue(stale.is_dir())
+        _, record = self.check(*COLD)
+        self.assertEqual(record["cleanup"]["deleted"], [stale.name], record)
+        self.assertFalse(stale.exists())
+        self.assertTrue(recent.is_dir())
+        self.assertEqual((nonempty / "keep").read_text(), "compiler output")
+        self.assertTrue(link.is_symlink())
+        self.assertTrue(outside.is_dir())
+
     def test_caps_removal_per_pass_and_skips_roots_too_large_for_any_pass(self):
         oversized = self.temp / "tron-aaa-big-Zz00Zz"
         make_tree(oversized, files=40)

@@ -20,6 +20,9 @@ cache (`tron-ios-gateway-e2e-*`), with nothing in its tree modified within the a
 threshold, and with no open file or working directory under it among the
 processes this user can see (`lsof`). Removal is capped per pass and skipped
 while fseventsd is hot, so the guard never adds a burst to a saturated daemon.
+The same bounded pass also removes empty swift-driver `TemporaryDirectory.*`
+roots whose directory mtime is over one day old, using rmdir (never recursive
+removal). Non-empty, recent, symlinked and in-use roots stay.
 It never uses sudo and never restarts fseventsd; the alert names the manual fix.
 Runs under /usr/bin/python3 (3.9), which the LaunchAgent uses.
 """
@@ -38,6 +41,7 @@ import time
 LABEL = "com.tron.fsevents-guard"
 FIXTURE = re.compile(r"^tron-[a-z0-9][a-z0-9-]*[-.][A-Za-z0-9_]{6,8}$")
 KEYED_CACHE_PREFIX = "tron-ios-gateway-e2e"
+DRIVER_TEMP = re.compile(r"^TemporaryDirectory\.[A-Za-z0-9]{6}$")
 FSEVENTS_STORE = "/System/Volumes/Data/.fseventsd"
 REMEDY = "sudo killall fseventsd  (launchd restarts it; run in Terminal)"
 LOG_ROTATE_BYTES = 5 * 1024 * 1024
@@ -186,6 +190,21 @@ def newest_change(root, limit):
     return newest, seen
 
 
+def cleanup_age(path, empty_only, limit):
+    if not empty_only:
+        return newest_change(path, limit)
+    try:
+        info = os.lstat(path)
+        if not stat.S_ISDIR(info.st_mode):
+            return None, 0
+        with os.scandir(path) as entries:
+            if next(entries, None) is not None:
+                return None, 0
+        return info.st_mtime, 0
+    except OSError:
+        return None, 0
+
+
 def paths_in_use():
     """Open files, cwds and mapped executables of every process lsof can read, or None.
 
@@ -206,7 +225,6 @@ def under(path, root):
 
 def clean_fixtures(temp_dir, args, now):
     real_temp = os.path.realpath(temp_dir)
-    age = args.fixture_age_hours * 3600
     candidates = []
     report = {"candidates": 0, "deleted": [], "deletedEntries": 0, "keptRecent": 0, "keptInUse": 0,
               "keptUnproven": 0, "keptOversized": [], "deferred": 0}
@@ -216,14 +234,16 @@ def clean_fixtures(temp_dir, args, now):
         return report
     for name in names:
         path = os.path.join(real_temp, name)
-        if not is_fixture_name(name):
+        empty_only = bool(DRIVER_TEMP.fullmatch(name))
+        if not empty_only and not is_fixture_name(name):
             continue
         try:
             if not stat.S_ISDIR(os.lstat(path).st_mode):
                 continue
         except OSError:
             continue
-        newest, entries = newest_change(path, args.max_walk_entries)
+        age = 86400 if empty_only else args.fixture_age_hours * 3600
+        newest, entries = cleanup_age(path, empty_only, args.max_walk_entries)
         if newest is None:
             report["keptUnproven"] += 1
         elif now - newest < age:
@@ -233,11 +253,11 @@ def clean_fixtures(temp_dir, args, now):
             # it hold back every root sorted after it.
             report["keptOversized"].append(name)
         else:
-            candidates.append((path, entries))
+            candidates.append((path, entries, empty_only, age))
     report["candidates"] = len(candidates)
     in_use, snapshot_at = None, 0.0
     budget = args.max_delete_entries
-    for index, (path, entries) in enumerate(candidates):
+    for index, (path, entries, empty_only, age) in enumerate(candidates):
         if len(report["deleted"]) >= args.max_delete_roots or entries + 1 > budget:
             report["deferred"] = len(candidates) - index
             break
@@ -248,7 +268,7 @@ def clean_fixtures(temp_dir, args, now):
                 report["error"] = "lsof failed; nothing further removed"
                 break
         # Re-prove staleness at the moment of removal, not at the scan.
-        newest, entries = newest_change(path, args.max_walk_entries)
+        newest, entries = cleanup_age(path, empty_only, args.max_walk_entries)
         if newest is None or time.time() - newest < age:
             report["keptRecent" if newest is not None else "keptUnproven"] += 1
             continue
@@ -258,7 +278,14 @@ def clean_fixtures(temp_dir, args, now):
         if args.dry_run:
             report.setdefault("wouldDelete", []).append(os.path.basename(path))
             continue
-        shutil.rmtree(path, ignore_errors=True)
+        if empty_only:
+            # rmdir fails if a compiler writes after the emptiness check.
+            try:
+                os.rmdir(path)
+            except OSError:
+                pass
+        else:
+            shutil.rmtree(path, ignore_errors=True)
         if os.path.lexists(path):
             report["keptUnproven"] += 1
             continue

@@ -182,6 +182,10 @@ shared or other-writable one such as `/tmp`.
 - A root is stale when nothing in its tree has changed (mtime or ctime) for 24 h
   and `lsof` shows no open file or cwd under it. Both are proven again just before
   removal. If `lsof` fails, nothing is removed.
+- Each pass also removes only empty swift-driver `TemporaryDirectory.<6 alphanumeric>`
+  roots with directory mtime older than one day. It uses non-recursive `rmdir`, so
+  a concurrent write keeps the directory; recent, non-empty, symlinked and in-use
+  roots stay. This fixed one-day threshold is separate from fixture age.
 - Removal is capped at 200 roots or 20,000 entries per pass and paced. A root too
   large for one pass is listed (`keptOversized`) for manual review. Removal is
   skipped while fseventsd is hot.
