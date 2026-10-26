@@ -23,7 +23,7 @@ import { McpAdminService } from "./mcp-admin-service.js";
 import { ModelConfigService } from "./model-config-service.js";
 import { SettingsRiskEvaluator, type SettingsRiskInput } from "./settings-risk.js";
 import { JEV_MAX_ESTIMATED_CHARGE_CENTS } from "../knowledge/jev-client.js";
-import { CONTROLS, type SettingsStores } from "../kernel/settings/settings-types.js";
+import { type SettingsStores } from "../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../kernel/settings/settings-resolver.js";
 import { type Resolution } from "../kernel/settings/tool-contract.js";
 import { type KeyDeclaration } from "../kernel/settings/settings-schema.js";
@@ -496,10 +496,8 @@ describe("settings.change", () => {
     const resolution = await f.service.invoke(client(), "settings.resolve", {
       target: { kind: "global" }, keys: ["model.thinkingBudgets"], renderer: { version: 1, controls: ["list", "readOnly"] },
     }) as unknown as PresentedResolution;
-    expect(resolution.keys[0]).toMatchObject({ value: { low: 1_234 }, presentation: {
-      control: "list", valueKind: "numberMap", options: expect.arrayContaining([{ value: "low", label: "Low" }]),
-      range: { min: 0, max: 10_000_000, step: 1, unit: "tokens" },
-    } });
+    expect(resolution.keys[0]).toMatchObject({ value: { low: 1_234 }, presentation: { valueKind: "numberMap" } });
+    expect(resolution.keys[0]!.presentation.control).toBeUndefined();
     transcript.push({ case: "numeric-map-persistence", detail: resolution });
   });
 
@@ -1160,7 +1158,7 @@ describe("outside changes to MCP servers and custom models", () => {
 
 /**
  * Every declared key at every layer it allows (docs/settings-model.md 4, F1/F4),
- * derived from `KEYS` and the served presentation, never a second key list:
+ * derived from canonical typed declarations, never editor options or a second key list:
  * `settings.change` as the maintainer, the effective value and source on a target
  * whose top layer that is, the value in the real store bytes through the schema
  * binding, and `settings.undo` restoring the prior value. Keys added later are
@@ -1182,33 +1180,30 @@ describe("every key at every allowed layer", () => {
     await f.macTerminalKeys.set(ENROLLED_IPHONE, macTerminalSampleKey());
     const slot = await f.registry.create(project);
     await slot.setModel(first.provider, first.id);
-    const controls = [...CONTROLS];
     const targets: Record<string, Record<string, unknown>> = {
       session: { kind: "session", sessionId: slot.id }, home: { kind: "home" }, project: { kind: "project", cwd: project }, global: { kind: "global" },
     };
     type Served = { key: string; group: string; qualifiers?: Record<string, string>; value: unknown; layer: string;
-      projectSetting?: { file: string; path: string }; presentation: { editable: boolean; valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
+      projectSetting?: { file: string; path: string }; presentation: { editable: boolean } };
     const resolve = async (layer: string, key: string) => {
-      const resolution = await f.service.invoke(client([slot.id]), "settings.resolve", { target: targets[layer], keys: [key], renderer: { version: 1, controls } }) as unknown as { keys: Served[] };
+      const resolution = await f.service.invoke(client([slot.id]), "settings.resolve", { target: targets[layer], keys: [key] }) as unknown as { keys: Served[] };
       if (key === "permissions.macTerminalKey") expect(resolution.keys[0]?.group).toBe("connections");
       return resolution.keys[0];
     };
     const fence = () => { const snapshot = slot.snapshot(); return { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model, revision: snapshot.revision }; };
     const differs = (left: unknown, right: unknown) => JSON.stringify(left ?? null) !== JSON.stringify(right ?? null);
-    /** A valid value other than the current one, from the served type and its options. */
-    const sample = async (layer: string, row: Served): Promise<unknown> => {
-      const { valueKind, options, range, optionsSource } = row.presentation;
-      // A model queue is a list of the served models, in order.
-      if (optionsSource?.name === "catalog.models" && valueKind === "stringList") return [`${second.provider}/${second.id}`, `${first.provider}/${first.id}`];
+    /** Mutation coverage follows the canonical type even when no app editor exists. */
+    const sample = async (layer: string, row: Served, key: KeyDeclaration): Promise<unknown> => {
+      const { kind: valueKind, options, range } = key.type;
+      const { optionsSource } = key;
+      // Queue writes remain typed runtime policy, not an app catalog reader.
+      if (key.fixed?.role && valueKind === "stringList") return [`${second.provider}/${second.id}`, `${first.provider}/${first.id}`];
       if (optionsSource?.name === "catalog.models") return differs(row.value, { provider: second.provider, id: second.id }) ? { provider: second.provider, id: second.id } : { provider: first.provider, id: first.id };
       if (optionsSource?.name === "catalog.thinkingLevels") {
         const served = await f.service.invoke(client([slot.id]), "settings.options", { target: targets[layer], key: row.key, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }) as unknown as { options: Array<{ value: unknown }> };
         return served.options.map(option => option.value).find(value => differs(value, row.value));
       }
-      if (optionsSource?.name === "catalog.contextWindow") {
-        const served = await f.service.invoke(client([slot.id]), "settings.options", { target: targets[layer], key: row.key, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }) as unknown as { range: { min: number; max: number } };
-        return Math.floor((served.range.min + served.range.max) / 2);
-      }
+      if (optionsSource?.name === "catalog.contextWindow") return row.value === first.contextWindow ? first.contextWindow - 1 : first.contextWindow;
       if (row.key === "permissions.macTerminalKey") return macTerminalSampleKey();
       if (valueKind === "boolean") return row.value !== true;
       if (valueKind === "numberMap") return { [String(options![0]!.value)]: range!.min + 1 };
@@ -1245,7 +1240,7 @@ describe("every key at every allowed layer", () => {
         const instance = { key: key.id, layer, qualifiers: row?.qualifiers };
         // A key no one may write (the session folder) is not served on any target.
         if (!row) { report.push({ ...instance, result: key.writers.length === 0 ? "verified unserved: no writer" : "no instance on its target" }); continue; }
-        const value = await sample(layer, row);
+        const value = await sample(layer, row, key);
         // A store's public scope: Home's saved settings are Home's Session scope.
         const scope = layer === "home" ? "session" : layer;
         const request = [{ key: key.id, layer: scope, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];

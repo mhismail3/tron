@@ -30,7 +30,6 @@ export interface SettingsOptionsResult {
   source: string;
   dependsOn: string[];
   options: SettingsOption[];
-  range?: { min: number; max: number; unit: "tokens" };
   /** An opaque cursor for the next page of a catalog. */
   nextCursor?: string;
 }

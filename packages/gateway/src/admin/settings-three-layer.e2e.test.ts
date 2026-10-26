@@ -127,14 +127,14 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(observed).toEqual({ effective: 1, requests: 2 });
   });
 
-  it("serves the shared editor's scope grants, inactive override and exact Project path from real resolution", async () => {
+  it("serves read-only recovery scope, inactive override and exact Project path from real resolution", async () => {
     const f = await setup();
     const slot = await f.create();
     await f.retryChange(slot, "set", 0);
     await f.project({ retry: { maxRetries: 2 } });
     const read = async () => f.service.invoke(f.client, "settings.resolve", {
       target: { kind: "session", sessionId: slot.id }, keys: ["run.retry.maxRetries"],
-      renderer: { version: 1, controls: ["number"] },
+      renderer: { version: 1, controls: [] },
     }) as Promise<{ keys: Array<{ value: unknown; overridden: boolean; projectSetting?: { file: string; path: string }; presentation: { sessionOverridable: boolean; projectSettable: boolean; editable: boolean } }> }>;
     const masked = (await read()).keys[0]!;
     expect(masked).toMatchObject({ value: 2, overridden: true,
@@ -145,13 +145,13 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(active).toMatchObject({ value: 0, overridden: true });
     expect(active.projectSetting).toBeUndefined();
     await f.retryChange(slot, "unset");
-    expect((await read()).keys[0]).toMatchObject({ value: 1, overridden: false });
+    expect((await read()).keys).toEqual([]);
   });
 
-  it("serves target-specific editor capability, Global reset presence and no stopped-runtime setting row", async () => {
+  it("serves target-specific recovery capability, Global reset presence and no stopped-runtime setting row", async () => {
     const f = await setup();
     const read = (target: Record<string, string>) => f.service.invoke(f.client, "settings.resolve", {
-      target, keys: ["run.retry.maxRetries", "setup.sessionDir"], renderer: { version: 1, controls: ["number", "text"] },
+      target, keys: ["run.retry.maxRetries", "setup.sessionDir"], renderer: { version: 1, controls: ["text"] },
     }) as Promise<{ keys: Array<{ key: string; overridden: boolean; presentation: { editable: boolean } }> }>;
     const global = await read({ kind: "global" });
     expect(global.keys).toHaveLength(1);

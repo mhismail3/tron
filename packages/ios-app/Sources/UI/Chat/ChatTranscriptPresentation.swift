@@ -1608,6 +1608,15 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     /// liveness. A paged or temporarily partial finalized group is still
     /// historical evidence when every visible descriptor is terminal.
     var isRunning: Bool { tools.contains(where: \.isRunning) }
+    /// The projector assembles runs in canonical transcript/group order, not
+    /// result-arrival order. Within the final group, its declared invocation
+    /// index wins even when descriptors or mutable timing metadata disagree.
+    var latestInvocation: ChatToolDescriptor? {
+        guard let last = tools.last else { return nil }
+        guard last.groupFinalized == true, let groupID = last.groupId else { return last }
+        return tools.filter { $0.groupFinalized == true && $0.groupId == groupID }
+            .max { ($0.groupIndex ?? -1) < ($1.groupIndex ?? -1) }
+    }
     var failureCount: Int {
         tools.reduce(into: 0) { count, tool in
             count += (tool.error ? 1 : 0) + (tool.toolName == "codemode" ? tool.nestedFailureCount : 0)

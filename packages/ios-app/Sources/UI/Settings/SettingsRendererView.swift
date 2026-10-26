@@ -18,7 +18,7 @@ struct SettingsRendererView: View {
     /// Inside a caller's scroll view (a hand-built sheet that shows a section's keys).
     var embedded = false
     var detailedKeys = false
-    /// Manage's three model controls reuse this renderer's admission and receipts.
+    /// Manage's model controls and override inspection reuse this renderer's admission and receipts.
     var modelConfiguration = false
     /// Existing live model/tool owners retain admission and pending controls;
     /// schema rows supply their single source/reset path, not another editor.

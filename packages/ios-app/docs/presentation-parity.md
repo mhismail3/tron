@@ -56,7 +56,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   13-point symbol (or a pulse at that nominal size with 20% footprint compensation), then a
   five-point gap. Only a pill with real detail is an interactive Liquid Glass button; no-detail
   pills use a flat tinted fill with identical type and geometry. Tones are `Sendable` semantic
-  values resolved to colors only at the view boundary.
+  values resolved to colors only at the view boundary. Provider-error runs retain the flat
+  semantic-error treatment and centered alignment.
 - **Role palette.** User input emerald, commands indigo, tools emerald, attributed extension
   context violet, informational notifications primary-themed, unknown context slate, warnings amber,
   failures red. Producer and category stay in text so color is never the only signal.
@@ -102,6 +103,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   `ChatMotion.transcriptViewReveal` (Reduce Motion: fade only). Owners request it only while they
   have no content, so cached or refreshed content is never hidden or replayed. Non-scroll sheets
   (media, terminal, camera, Swift-app preparation) keep their own preparation surfaces.
+- **Chat details.** Provider-error and nested tool-call details reuse `ChatDetailSheet` for
+  navigation, Done, top chrome, insets and detents. Error content composes the existing themed
+  sections/groups/rows and flat code inset, not a second sheet or card style.
 - **Detents.** Progressive and Home sub-sheets open at medium and drag to large; a presentation's
   managed scope owns its chosen detent, so refreshes and child round trips do not reset it.
 

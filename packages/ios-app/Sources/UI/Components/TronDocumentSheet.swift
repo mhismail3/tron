@@ -20,7 +20,7 @@ struct TronDocumentSheet<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    private var resolvedAccent: Color { settingsTheme?.accent ?? .tronBlue }
+    private var resolvedAccent: Color { TronSheetTint.resolve(nil, theme: settingsTheme) }
 
     init(
         title: String,
@@ -72,7 +72,7 @@ private struct TronDocumentSheetChrome: ViewModifier {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    private var resolvedAccent: Color { settingsTheme?.accent ?? .tronBlue }
+    private var resolvedAccent: Color { TronSheetTint.resolve(nil, theme: settingsTheme) }
 
     func body(content: Content) -> some View {
         content

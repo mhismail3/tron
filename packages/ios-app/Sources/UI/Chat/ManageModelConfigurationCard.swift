@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 /// One model card for both Manage surfaces. It restores the former header and
-/// three controls without reviving a second mutation/pending-state owner.
+/// direct model/thinking controls and explicit override inspection without a second mutation owner.
 struct ManageModelConfigurationCard: View {
     static let keys: Set<String> = ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]
     let sessionID: String

@@ -734,7 +734,7 @@ private struct DisplayImageArtifactView: View {
             } else if failed {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
-                TronLoadingState(label: "Loading image…", accent: .tronBlue)
+                TronLoadingState(label: "Loading image…", accent: .tronPrimary)
                     .frame(height: 220)
             }
         }
@@ -808,7 +808,7 @@ private struct DisplayTextArtifactView: View {
             } else if failed {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
-                TronLoadingState(label: "Preparing content…", accent: .tronBlue)
+                TronLoadingState(label: "Preparing content…", accent: .tronPrimary)
                     .frame(height: context == .inline
                         ? DisplayInlineLayoutPolicy.reservedViewportHeight(for: display.kind)
                         : DisplayInlineLayoutPolicy.maximumViewportHeight)
@@ -917,7 +917,7 @@ private struct DisplayDocumentSummary: View {
         VStack(spacing: 12) {
             Image(systemName: display.kind == .pdf ? "doc.richtext.fill" : "doc.fill")
                 .font(TronTypography.sans(size: 38, weight: .semibold))
-                .foregroundStyle(Color.tronBlue)
+                .foregroundStyle(Color.tronPrimary)
             Text(display.artifact?.name ?? display.title)
                 .font(TronTypography.buttonSM)
                 .foregroundStyle(Color.tronTextPrimary)
@@ -955,7 +955,7 @@ private struct DisplayHTMLArtifactView: View {
             } else if failed {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
-                TronLoadingState(label: "Preparing HTML…", accent: .tronBlue)
+                TronLoadingState(label: "Preparing HTML…", accent: .tronPrimary)
             }
         }
         .task(id: PresentationActivityTaskID(
@@ -1087,7 +1087,7 @@ private struct DisplayVideoArtifactView: View {
             } else if playback.failed || mediaIdentity == nil {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
-                TronLoadingState(label: "Preparing media…", accent: .tronBlue)
+                TronLoadingState(label: "Preparing media…", accent: .tronPrimary)
                     .frame(minHeight: 220)
             }
         }
@@ -1171,7 +1171,7 @@ private struct DisplayUnavailableView: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            TronInfoCard(icon: "rectangle.slash", text: text, accent: .tronBlue)
+            TronInfoCard(icon: "rectangle.slash", text: text, accent: .tronPrimary)
                 .padding(20)
                 .frame(maxWidth: .infinity, minHeight: 160)
         }
@@ -1239,7 +1239,7 @@ private struct LiveDisplayView: View {
             } else if rendersCurrentResult, let failure {
                 DisplayUnavailableView(text: failure.message)
             } else {
-                TronLoadingState(label: display.kind == .nativeLive ? "Connecting to window…" : "Connecting to browser…", accent: .tronBlue)
+                TronLoadingState(label: display.kind == .nativeLive ? "Connecting to window…" : "Connecting to browser…", accent: .tronPrimary)
             }
         }
         .accessibilityLabel((rendersCurrentResult ? failure?.message : nil) ?? display.altText)
@@ -1364,13 +1364,13 @@ struct DisplaySheet: View {
                     .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
                     .toolbar {
                         ToolbarItem(placement: .principal) {
-                            TronSheetTitle(title: route.display.title, accent: .tronBlue)
+                            TronSheetTitle(title: route.display.title, accent: .tronPrimary)
                         }
                         ToolbarItem(placement: .confirmationAction) {
                             Button { dismiss() } label: {
                                 Image(systemName: "checkmark")
                                     .font(TronTypography.buttonSM)
-                                    .tronToolbarAction(accent: .tronBlue)
+                                    .tronToolbarAction(accent: .tronPrimary)
                             }
                             .accessibilityLabel("Done")
                         }

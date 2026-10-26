@@ -279,7 +279,8 @@ struct ChatCompactPillVisualState: Hashable, Sendable {
     }
 
     static func toolRun(_ run: ChatToolRunPresentation) -> Self {
-        let tone: ChatNotificationTone = run.failureCount > 0
+        let errorTint = run.isRunning ? run.failureCount > 0 : run.latestInvocation?.error == true
+        let tone: ChatNotificationTone = errorTint
             ? .error : run.isRunning ? .warning : ChatSemanticPillRole.tool.tone
         let single = run.displayCount == 1 ? run.tools.first : nil
         return Self(

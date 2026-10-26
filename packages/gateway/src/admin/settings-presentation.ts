@@ -16,7 +16,8 @@ export const UPDATE_TRON_NOTE = "Update Tron to edit";
 /** The control a key renders with for a client (doc 7.5): the declared control
  * when the client has it, else the declared fallback, else read-only. A client
  * that names no controls gets every editable key read-only, with its display. */
-function negotiateControl(key: KeyDeclaration, clientControls: readonly string[] | undefined): { control: Control; note?: string } {
+function negotiateControl(key: KeyDeclaration, clientControls: readonly string[] | undefined): { control?: Control; note?: string } {
+  if (key.control === undefined) return {};
   if (key.control === "readOnly") return { control: "readOnly" };
   const supports = (control: Control) => clientControls?.includes(control) === true;
   if (supports(key.control)) return { control: key.control };
@@ -29,7 +30,7 @@ export interface KeyPresentation {
   help: string;
   order: number;
   importance: "essential" | "advanced";
-  control: Control;
+  control?: Control;
   note?: string;
   valueKind: string;
   /** The static choices, for a `choice` control. Dynamic options come from `settings.options`. */
@@ -56,7 +57,7 @@ function presentKey(key: KeyDeclaration, clientControls: readonly string[] | und
     help: key.help,
     order: key.order,
     importance: key.importance,
-    control,
+    ...(control ? { control } : {}),
     ...(note ? { note } : {}),
     valueKind: key.type.kind,
     // Project files remain repository-owned; the app is an inspector there.
@@ -65,9 +66,9 @@ function presentKey(key: KeyDeclaration, clientControls: readonly string[] | und
     editable: layer !== "project" && scopeAdmitted(key, layer) && key.writers.includes("ui") && binding !== undefined && binding.store !== "session-launch",
     timing: key.timing,
     effect: key.effect,
-    ...(key.type.options ? { options: key.type.options } : {}),
-    ...(key.type.range ? { range: key.type.range } : {}),
-    ...(key.optionsSource ? { optionsSource: key.optionsSource } : {}),
+    ...(control && key.type.options ? { options: key.type.options } : {}),
+    ...(control && key.type.range ? { range: key.type.range } : {}),
+    ...(control && key.optionsSource ? { optionsSource: key.optionsSource } : {}),
     ...(key.confirm ? { confirm: key.confirm } : {}),
     ...(key.redacted ? { redacted: true as const } : {}),
     ...(key.entry ? { entry: key.entry } : {}),
@@ -163,10 +164,18 @@ export function presentHistoryEntry(schema: SettingsSchema, entry: ChangeEntry) 
 export function presentResolution(schema: SettingsSchema, resolution: Resolution, input: PresentationInput): PresentedResolution {
   const layer = resolution.target.kind === "global" ? "global" : resolution.target.kind === "project" ? "project"
     : resolution.target.kind === "home" ? "home" : "session";
-  const keys: PresentedKey[] = resolution.keys.filter(key => input.controls === undefined || schema.schemaKey(key.key).writers.length > 0).map(key => ({
-    ...key,
-    presentation: presentKey(keyForHome(schema.schemaKey(key.key), resolution.target.kind === "home"), input.controls, layer),
-  }));
+  const keys: PresentedKey[] = resolution.keys.filter(key => {
+    if (input.controls === undefined) return true;
+    const declaration = schema.schemaKey(key.key);
+    return declaration.writers.length > 0 && (declaration.control !== undefined
+      || key.overridden === true || key.projectSetting !== undefined || layer === "project");
+  }).map(key => {
+    const declaration = keyForHome(schema.schemaKey(key.key), resolution.target.kind === "home");
+    return {
+      ...key,
+      presentation: presentKey(declaration, input.controls, layer),
+    };
+  });
   const sections = SECTIONS.flatMap((section): SettingsSectionPresentation[] =>
     keys.some(key => key.group === section.id) ? [{
       id: section.id, title: section.title, description: section.description, order: section.order,

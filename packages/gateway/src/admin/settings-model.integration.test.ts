@@ -21,7 +21,6 @@ import type { Resolution, ResolvedKey, SettingsTarget } from "../kernel/settings
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
 import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "../kernel/settings/settings-types.js";
 import { ScopeToolCatalog } from "./tool-catalog.js";
-import { contextWindowLimits } from "../providers/context-window-policy.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -352,7 +351,7 @@ describe("settings renderer contract", () => {
       target, keys: [queue, "tools.active"], renderer: { version: 1, controls: [...CONTROLS] },
     }) as unknown as PresentedResolution;
     const initial = await resolve();
-    expect(row(initial, queue)).toMatchObject({ display: "Same as Home", value: [] });
+    expect(initial.keys.some(row => row.key === queue)).toBe(false);
     expect(row(initial, "tools.active")).toMatchObject({ display: "2 tools", value: ["read", "bash"] });
     const change = async (id: string, key: string, value: unknown) => await f.service.invoke(subscribed(), "settings.change", {
       commandId: id, target, changes: [{ key, layer: "global", op: "set", value }],
@@ -371,7 +370,7 @@ describe("settings renderer contract", () => {
     await f.service.invoke(subscribed(), "settings.change", {
       commandId: "queue-unset", target, changes: [{ key: queue, layer: "global", op: "unset" }],
     });
-    expect(row(await resolve(), queue)).toMatchObject({ display: "Same as Home", value: [], layer: "global" });
+    expect((await resolve()).keys.some(row => row.key === queue)).toBe(false);
     transcript.push({ case: "count summaries preserve full values", response: { initial, configured, singular, history } });
   });
   afterAll(async () => {
@@ -456,86 +455,154 @@ describe("settings renderer contract", () => {
     expect(await readFile(join(f.project, ".pi", "settings.json"), "utf8")).toBe(before);
   });
 
-  it("negotiates each key's control with the client, and shows every key read-only with its display when no renderer is named", async () => {
+  it("omits the twenty-nine surviving routine controls but preserves explicit, Project and non-renderer inspection", async () => {
+    const f = await fixture();
+    await f.trust.set(f.project, true);
+    const routine = new Set([
+      "context.branchSummary.reserveTokens",
+      "context.compaction.enabled",
+      "context.compaction.instructions",
+      "context.compaction.keepRecentTokens",
+      "context.compaction.reserveTokens",
+      "context.images.autoResize",
+      "model.contextWindow",
+      "model.queue[role=background]",
+      "model.queue[role=subagent]",
+      "model.queue[role=worker]",
+      "model.thinkingBudgets",
+      "model.thinking[role=summarizer]",
+      "model.thinking[role=worker]",
+      "run.cacheWarming",
+      "run.httpIdleTimeoutMs",
+      "run.queue.followUpMode",
+      "run.queue.steeringMode",
+      "run.retry.baseDelayMs",
+      "run.retry.enabled",
+      "run.retry.maxRetries",
+      "run.retry.provider.maxRetries",
+      "run.retry.provider.maxRetryDelayMs",
+      "run.retry.provider.timeoutMs",
+      "run.transport",
+      "run.websocketConnectTimeoutMs",
+      "sources.prompts",
+      "sources.skills",
+      "sources.themes",
+      "tools.codemode.inlineBudget"
+]);
+    const slot = await f.registry.create(f.project);
+    const caller = subscribed([slot.id]);
+    const targets = [macTarget, { kind: "session", sessionId: slot.id }, { kind: "project", cwd: f.project }];
+    for (const target of targets) {
+      const raw = await f.service.invoke(caller, "settings.resolve", { target }) as unknown as PresentedResolution;
+      const exposed = await f.service.invoke(caller, "settings.resolve", {
+        target, renderer: { version: 1, controls: [...CONTROLS] },
+      }) as unknown as PresentedResolution;
+      const candidates = raw.keys.filter(key => routine.has(key.key));
+      if (target.kind === "global") expect(new Set(candidates.map(key => key.key))).toEqual(routine);
+      for (const original of candidates) {
+        const shown = exposed.keys.find(key => key.key === original.key && JSON.stringify(key.qualifiers) === JSON.stringify(original.qualifiers));
+        const inspect = original.overridden || original.projectSetting !== undefined || target.kind === "project";
+        expect(shown !== undefined, target.kind + ": " + original.key).toBe(inspect);
+        expect(original.presentation.control).toBeUndefined();
+        if (shown) {
+          expect(shown.value).toEqual(original.value);
+          expect(shown.presentation.control).toBeUndefined();
+          expect(shown.presentation.options).toBeUndefined();
+          expect(shown.presentation.range).toBeUndefined();
+          expect(shown.presentation.optionsSource).toBeUndefined();
+        }
+      }
+      transcript.push({ case: "routine inspection " + target.kind, response: { raw, exposed } });
+    }
+    const surface = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    expect(presentedRow(surface, "permissions.budget.task").presentation).toMatchObject({ control: "list", valueKind: "numberMap" });
+    expect(presentedRow(surface, "model.ref[role=chat]").presentation.control).toBe("catalog");
+    expect(presentedRow(surface, "model.thinking[role=chat]", { model: f.modelKey }).presentation.control).toBe("choice");
+    expect(presentedRow(surface, "run.httpProxy").presentation.control).toBe("secret");
+    expect(surface.keys.some(key => key.key === "permissions.floor")).toBe(true);
+  });
+
+  it("keeps false overrides resettable and Changes undoable without publishing a routine editor", async () => {
+    const f = await fixture();
+    const key = "context.compaction.enabled";
+    const resolve = () => resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    expect((await resolve()).keys.some(row => row.key === key)).toBe(false);
+    expect((await maintainerChange(f, [{ key, layer: "global", op: "set", value: false }])).status).toBe("applied");
+    expect(presentedRow(await resolve(), key)).toMatchObject({
+      value: false, overridden: true, presentation: { editable: true },
+    });
+    expect(presentedRow(await resolve(), key).presentation.control).toBeUndefined();
+    const reset = await maintainerChange(f, [{ key, layer: "global", op: "unset" }]);
+    expect((await resolve()).keys.some(row => row.key === key)).toBe(false);
+    const history = await f.service.invoke(subscribed(), "settings.history", { key }) as unknown as { entries: ChangeEntry[] };
+    expect(history.entries.some(entry => entry.before === false)).toBe(true);
+    await f.service.invoke(subscribed(), "settings.undo", { commandId: commandId(), changeId: reset.changes[0]!.changeId });
+    expect(presentedRow(await resolve(), key)).toMatchObject({ value: false, overridden: true });
+    expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).compaction.enabled).toBe(false);
+    transcript.push({ case: "routine false reset and undo", response: { reset, history, restored: await resolve() } });
+  });
+
+  it("refuses option requests for retired controls instead of retaining their numeric and queue editor readers", async () => {
+    const f = await fixture();
+    for (const key of ["model.contextWindow", "model.queue[role=worker]", "run.transport"]) {
+      await expect(options(f, { key, ...(key === "model.contextWindow" ? { qualifiers: { model: f.modelKey } } : {}) }))
+        .rejects.toMatchObject({ code: "invalid_request" });
+    }
+  });
+
+  it("negotiates retained controls, redacts secrets and keeps no-control inspection intrinsic", async () => {
     const f = await fixture();
     const everything = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    expect(everything.renderer).toEqual({ version: 1 });
-    // Every editable free-text or string-list key says what to enter, with a
-    // realistic example for the field's placeholder (#939).
     const writable = everything.keys.filter(key => key.presentation.control === "text"
       || (key.presentation.control === "list" && key.presentation.valueKind === "stringList"));
     expect(writable.map(key => key.key)).toEqual(expect.arrayContaining(["sources.npmCommand", "sources.extensions", "tools.shell.path"]));
-    for (const key of writable) {
-      expect(key.presentation.entry, key.key).toEqual({ hint: expect.stringMatching(/\S/), example: expect.stringMatching(/\S/) });
-    }
-    expect(presentedRow(everything, "sources.npmCommand").presentation.entry).toEqual({
-      hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm",
+    for (const key of writable) expect(key.presentation.entry, key.key).toEqual({
+      hint: expect.stringMatching(/\S/), example: expect.stringMatching(/\S/),
     });
-    expect(presentedRow(everything, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({
-      control: "choice", valueKind: "orderedChoice", options: expect.arrayContaining([{ value: "high", label: "High", detail: expect.any(String) }]),
-    });
-    expect(presentedRow(everything, "run.retry.maxRetries").presentation).toMatchObject({
-      control: "number", importance: "essential", label: "Retries", range: { min: 0, max: 20, unit: "retries" },
-    });
-    expect(presentedRow(everything, "run.retry.maxRetries").presentation.note).toBeUndefined();
-    // One meaning per name (#760, doc 7.9 D2/D3): no two served keys share a label,
-    // so "Thinking", "Worker thinking" and "Summary thinking", and "Trust for this
-    // project" and the default trust policy, stay distinct controls.
+    expect(presentedRow(everything, "run.retry.maxRetries").presentation.control).toBeUndefined();
     const labelOwners = new Map<string, Set<string>>();
     for (const row of everything.keys) labelOwners.set(row.presentation.label, (labelOwners.get(row.presentation.label) ?? new Set()).add(row.key));
     expect([...labelOwners].filter(([, owners]) => owners.size > 1)).toEqual([]);
-    expect([...labelOwners.keys()].filter(label => /thinking|trust/iu.test(label)).sort().length).toBeGreaterThanOrEqual(4);
-
-    // The new iPhone primitives persist through the same real change path. A
-    // secret is writable but never comes back as an editable/readable value.
     await maintainerChange(f, [
-      { key: "sources.skills", layer: "global", op: "set", value: ["beta", "gamma"] },
+      { key: "sources.extensions", layer: "global", op: "set", value: ["beta", "gamma"] },
       { key: "run.httpProxy", layer: "global", op: "set", value: "http://replacement.invalid:8080" },
     ]);
     const edited = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    expect(presentedRow(edited, "sources.skills")).toMatchObject({ value: ["beta", "gamma"], presentation: { control: "list", valueKind: "stringList" } });
-    expect(presentedRow(edited, "run.httpProxy").presentation).toMatchObject({ control: "secret", redacted: true });
-    expect(presentedRow(edited, "run.httpProxy").value).toBeNull();
+    expect(presentedRow(edited, "sources.extensions")).toMatchObject({ value: ["beta", "gamma"], presentation: { control: "list", valueKind: "stringList" } });
+    expect(presentedRow(edited, "run.httpProxy")).toMatchObject({ value: null, presentation: { control: "secret", redacted: true } });
     expect(JSON.stringify(edited)).not.toContain("replacement.invalid");
-    const history = await f.service.invoke(subscribed(), "settings.history", {});
-    expect(JSON.stringify(history)).not.toContain("replacement.invalid");
-    transcript.push({ case: "secret and ordered list after changes", response: { list: presentedRow(edited, "sources.skills"), secret: presentedRow(edited, "run.httpProxy") } });
-
-    // A client that speaks only toggles: a choice with no fallback, and a catalog whose fallback is read-only.
+    expect(JSON.stringify(await f.service.invoke(subscribed(), "settings.history", {}))).not.toContain("replacement.invalid");
     const toggles = await resolveWith(f, macTarget, { version: 1, controls: ["hologram", "toggle"] });
     expect(presentedRow(toggles, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({ control: "readOnly", note: UPDATE_TRON_NOTE });
-    expect(presentedRow(toggles, "model.ref[role=chat]").presentation).toMatchObject({ control: "readOnly", note: UPDATE_TRON_NOTE });
-    expect(presentedRow(toggles, "context.compaction.enabled").presentation).toMatchObject({ control: "toggle" });
-    expect(presentedRow(toggles, "context.compaction.enabled").presentation.note).toBeUndefined();
-    transcript.push({ case: "negotiation: every control, toggles only", response: { all: presentedRow(everything, "run.retry.maxRetries"), toggles: presentedRow(toggles, "model.ref[role=chat]") } });
-
-    // No renderer: every editable key is read-only with the note, and every key still carries its display.
+    expect(presentedRow(toggles, "context.images.block").presentation.control).toBe("toggle");
+    expect(presentedRow(toggles, "run.retry.maxRetries").presentation.control).toBeUndefined();
     const declared = new Map(KEYS.map(key => [key.id, key.control]));
     const plain = await resolveWith(f, macTarget);
-    expect(plain.renderer).toEqual({ version: 1 });
     for (const key of plain.keys) {
       expect(typeof key.display, key.key).toBe("string");
-      const note = declared.get(key.key) === "readOnly" ? undefined : UPDATE_TRON_NOTE;
-      expect(key.presentation, key.key).toMatchObject({ control: "readOnly", ...(note ? { note } : {}) });
-      expect(key.presentation.note, key.key).toBe(note);
+      if (!declared.get(key.key)) {
+        expect(key.presentation.control, key.key).toBeUndefined();
+        expect(key.presentation.note, key.key).toBeUndefined();
+      } else {
+        expect(key.presentation.control, key.key).toBe("readOnly");
+        expect(key.presentation.note, key.key).toBe(declared.get(key.key) === "readOnly" ? undefined : UPDATE_TRON_NOTE);
+      }
     }
-    expect(presentedRow(plain, "run.retry.maxRetries")).toMatchObject({ display: "5 retries", presentation: { control: "readOnly", note: UPDATE_TRON_NOTE } });
-
-    // Unknown renderer fields are refused; the version must be a positive integer.
-    await expect(f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, renderer: { version: 1, controls: [], extra: true } }))
-      .rejects.toMatchObject({ code: "invalid_request" });
-    await expect(f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, renderer: { version: 0, controls: [] } }))
-      .rejects.toMatchObject({ code: "invalid_request" });
+    for (const renderer of [{ version: 1, controls: [], extra: true }, { version: 0, controls: [] }]) {
+      await expect(f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, renderer }))
+        .rejects.toMatchObject({ code: "invalid_request" });
+    }
+    transcript.push({ case: "retained negotiation", response: { everything, edited, toggles, plain } });
   });
 
   it("serves each section with its title, one-line description and order, only where the target has keys", async () => {
     const f = await fixture();
     const before = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    expect(section(before, "model")).toEqual({ id: "model", title: "Model", description: "Model, thinking, and context window", order: 10, chatInline: true });
+    expect(section(before, "model")).toMatchObject({ id: "model", title: "Model", order: 10, chatInline: true });
     expect(before.sections.filter(section => section.chatInline).map(section => section.id)).toEqual(["model", "workers"]);
     const groups = (...keys: string[]) => keys.map(key => before.keys.find(row => row.key === key)?.group);
-    expect(groups("model.queue[role=worker]", "model.thinkingBudgets")).toEqual(["workers", "workers"]);
-    expect(groups("run.transport", "run.queue.steeringMode", "run.retry.maxRetries")).toEqual(["run", "run", "run"]);
+    expect(groups("permissions.budget.task")).toEqual(["workers"]);
+    expect(groups("run.retry.maxRetries", "run.httpProxy")).toEqual(["run", "run"]);
     expect(groups("context.images.block", "permissions.defaultProjectTrust", "permissions.floor")).toEqual(["tools", "trust", "approvals"]);
     expect(before.sections.map(entry => entry.id)).not.toContain("advanced");
     expect(section(before, "approvals").order).toBeLessThan(section(before, "run").order);
@@ -544,7 +611,7 @@ describe("settings renderer contract", () => {
     // A section the target has no key in is not presented at all.
     expect(before.sections.map(entry => entry.id)).not.toContain("accounts");
     // Filtering the live RPC must also prune unrelated destinations.
-    const filtered = await f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: ["number"] } }) as unknown as PresentedResolution;
+    const filtered = await f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: [...CONTROLS] } }) as unknown as PresentedResolution;
     expect(filtered.keys.map(key => key.key)).toEqual(["run.retry.maxRetries"]);
     expect(filtered.sections.map(entry => entry.id)).toEqual(["run"]);
     transcript.push({ case: "sections", response: { sections: before.sections, filtered } });
@@ -570,9 +637,7 @@ describe("settings renderer contract", () => {
     expect((await options(f, { key: "model.thinking[role=chat]" })).options).toEqual([]);
     expect((await options(f, { key: "model.thinking[role=chat]", qualifiers: { model: f.modelKey } })).options.length).toBeGreaterThan(0);
 
-    // The context window range is the bounds settings.change validates against.
-    const window = await options(f, { key: "model.contextWindow", qualifiers: { model: f.modelKey } });
-    expect(window).toMatchObject({ source: "catalog.contextWindow", options: [], range: { min: contextWindowLimits(reasoner)!.minimum, max: 200_000, unit: "tokens" } });
+    // Context-window validation remains canonical even without its retired slider.
     const tooLarge = await maintainerChange(f, [{ key: "model.contextWindow", qualifiers: { model: f.modelKey }, layer: "global", op: "set", value: 200_001 }], true);
     expect(tooLarge.changes[0]).toMatchObject({ status: "failed", error: { code: "invalid_request", message: expect.stringContaining("Context window must be") } });
 
@@ -588,17 +653,11 @@ describe("settings renderer contract", () => {
     expect(secondPage.nextCursor).toBeUndefined();
     expect((await options(f, { key: "model.ref[role=chat]", query: "no-such-model-anywhere" })).options).toEqual([]);
 
-    // A static choice: its declared options, in declared order.
-    const transport = await options(f, { key: "run.transport" });
-    expect(transport).toMatchObject({ source: "static", dependsOn: [], options: [
-      { value: "auto", label: "Automatic" }, { value: "sse", label: "SSE" }, { value: "websocket", label: "WebSocket" }, { value: "websocket-cached", label: "WebSocket (cached)" },
-    ] });
-
     // Refused: an unknown key, a key with neither options nor a source, and a malformed cursor.
     await expect(options(f, { key: "no.such.key" })).rejects.toMatchObject({ code: "invalid_request" });
     await expect(options(f, { key: "run.retry.maxRetries" })).rejects.toMatchObject({ code: "invalid_request" });
     await expect(options(f, { key: "model.ref[role=chat]", cursor: "not-a-cursor" })).rejects.toMatchObject({ code: "invalid_request" });
-    transcript.push({ case: "options", response: { levels, followed, window, firstPage, transport } });
+    transcript.push({ case: "options", response: { levels, followed, firstPage } });
   });
 
   it("refuses an out-of-range value in a dry run, names the error, and changes nothing", async () => {
