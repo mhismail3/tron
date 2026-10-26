@@ -108,7 +108,13 @@ python3 scripts/test-ios-process-evidence.py  # owned-group timeout diagnostics;
 ```
 
 Repeat `--only-testing` for adjacent journeys; a class selector runs the class. Count the methods
-executed: an unmatched selector is not evidence. Screenshots stay in the reported
+executed: an unmatched selector is not evidence. Design-only hierarchy captures are available through
+`TronProfileHierarchyDesignPreviewUITests/testCaptureProfileHierarchyDesign` and the
+HOSTED_TEST-only `HostedProfileHierarchyDesignFixture`. They render illustrative Profile,
+Engineering, inferred-note and review sheets in light/dark at Large and xxLarge. They do not
+exercise a Gateway, live profile writes, approvals or Undo and are not feature acceptance.
+
+Screenshots stay in the reported
 `TestResults.xcresult` (`xcrun xcresulttool export attachments --path <xcresult> --output-path
 <private-dir>`), never in the source tree. Goldens: [UI locks](../UITests/Locks/README.md).
 
