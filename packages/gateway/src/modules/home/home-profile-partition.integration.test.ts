@@ -7,7 +7,7 @@ import { fixture, disposeFixtures } from "../../../test-support/home-task-fixtur
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { KnowledgeStore } from "../../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../../knowledge/knowledge-service.js";
-import { profileFile, profileOperationKey } from "../../knowledge/knowledge-notes.js";
+import { profileOperationKey } from "../../knowledge/knowledge-notes.js";
 import { HomeProfileItems } from "./home-profile.js";
 import type { KnowledgeRecord } from "../../knowledge/knowledge-contract.js";
 import * as durability from "../../util/durable-json.js";
@@ -20,7 +20,7 @@ afterEach(async () => {
   await fs.mkdir("test-results/home-profile", { recursive: true });
   await fs.writeFile("test-results/home-profile/migration-changes.json", JSON.stringify(evidence, null, 2));
 });
-async function setup(mode: "legacy" | "v2" | "migration" = "legacy") {
+async function setup(mode: "v2" | "migration") {
   const f = await fixture(false, false, undefined, false, undefined, { knowledge: () => knowledge });
   knowledge = new KnowledgeService(new KnowledgeStore(f.registry.moduleHost.contract(workspaceModule), () => {}));
   const profile = new HomeProfileItems(() => knowledge);
@@ -41,9 +41,8 @@ async function setup(mode: "legacy" | "v2" | "migration" = "legacy") {
     const state = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "knowledge", "profile-backups");
     for (let i = 0; i < 3; i++) await fs.rm(join(state, `${profileOperationKey(`create-original-${i}-historical-fixture`)}.json`));
   }
-  const context = { commandId: "original-partition-command", actor: { kind: mode !== "legacy" ? "ui" as const : "home" as const, id: "home-fixture", sessionId: "home-fixture", toolCallId: "original-tool-call" }, reason: "Original private audit reason", web: true };
-  const assignments = originals.map((record, index) => ({ id: record.id, expectedRevision: record.revisionId,
-    ...(mode !== "legacy" ? { path: `engineering/selected-${index}` } : { file: index === 0 ? "core" as const : index === 1 ? "home" as const : "scopes/work" as const }) }));
+  const context = { commandId: "original-partition-command", actor: { kind: "ui" as const, id: "home-fixture", sessionId: "home-fixture", toolCallId: "original-tool-call" }, reason: "Original private audit reason", web: true };
+  const assignments = originals.map((record, index) => ({ id: record.id, expectedRevision: record.revisionId, path: `engineering/selected-${index}` }));
   const request = { commandId: context.commandId, mode: mode === "v2" ? "reorganize" as const : "migrate" as const, assignments };
   const cold = async () => {
     knowledge!.dispose();
@@ -69,7 +68,7 @@ async function failPublication(path: string) {
 }
 
 it("backs up exact original audit, publishes the full migration group on cold retry, and undoes/reorganizes only labels through real Changes", async () => {
-  const { f, profile, originals, context, request, cold } = await setup();
+  const { f, profile, originals, context, request, cold } = await setup("v2");
   const fault = await failPublication(f.settings.settingsChanges.record.path);
   await expect(profile.partition(f.settings.settingsChanges, request, context)).rejects.toThrow("Owned original group publication fault");
   expect((await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries).toEqual([]);
@@ -82,14 +81,16 @@ it("backs up exact original audit, publishes the full migration group on cold re
   expect(projected.items.map(item => item.status).sort()).toEqual(["active", "retired", "superseded"]);
   for (const original of originals) {
     const current = await knowledge!.store.read(original.id) as typeof original;
-    expect(withoutPartition(current)).toEqual(withoutPartition(original));
+    const destination = request.assignments.find(assignment => assignment.id === original.id)!.path!;
+    expect({ ...current, revisionId: original.revisionId }).toEqual({ ...original,
+      content: { ...original.content, profile: { version: 2, path: destination.split("/") } } });
     expect(await knowledge!.store.read(original.id, original.revisionId)).toEqual(original);
   }
   const headRevisions = recovery.prepared.map(record => record.revisionId);
   fault.mockRestore();
   const changes = await cold();
   const published = await profile.retryPartition(changes, context.commandId, "home");
-  expect(published.tier).toBe("notify");
+  expect(published.tier).toBe("approve");
   const audit = (await changes.history({ key: "home.profile.item" })).entries;
   expect(audit).toHaveLength(3);
   expect(audit.every(entry => entry.at === envelope.replayAt && entry.commandId === context.commandId && entry.group?.size === 3 && entry.tierBasis.web && entry.actor.toolCallId === "original-tool-call")).toBe(true);
@@ -108,8 +109,9 @@ it("backs up exact original audit, publishes the full migration group on cold re
   expect(undoEntries.map(entry => entry.undoOf).sort()).toEqual(published.changes.map(change => change.changeId).sort());
   expect(undoEntries.every(entry => entry.commandId === "undo-partition-command" && entry.group?.size === 3)).toBe(true);
   const one = await knowledge!.store.read(originals[0]!.id) as typeof originals[number];
-  const reorganized = await profile.partition(changes, { commandId: "reorganize-one", mode: "reorganize", assignments: [{ id: one.id, expectedRevision: one.revisionId, file: "scopes/selected" }] }, { ...context, commandId: "reorganize-one", web: false });
+  const reorganized = await profile.partition(changes, { commandId: "reorganize-one", mode: "reorganize", assignments: [{ id: one.id, expectedRevision: one.revisionId, path: "engineering/selected" }] }, { ...context, commandId: "reorganize-one", web: false });
   expect(reorganized.changes).toHaveLength(1);
+  expect((await knowledge!.store.read(one.id) as typeof one).content.profile).toEqual({ version: 2, path: ["engineering", "selected"] });
   await changes.undo(reorganized.changes[0]!.changeId, { actor: { kind: "ui", id: "fixture" }, commandId: "undo-reorganize" });
   const restored = await knowledge!.store.read(one.id) as typeof one;
   expect(withoutPartition(restored)).toEqual(withoutPartition(one));
@@ -137,7 +139,7 @@ it("repairs original committed audit after a later native edit without replaying
 }, 60_000);
 
 it("invalidates and physically removes the WHOLE opaque audit envelope on forget while preserving unrelated recovery snapshots", async () => {
-  const { f, profile, originals, context, request } = await setup();
+  const { f, profile, originals, context, request } = await setup("v2");
   const fault = await failPublication(f.settings.settingsChanges.record.path);
   await expect(profile.partition(f.settings.settingsChanges, request, context)).rejects.toThrow("Owned original group publication fault");
   fault.mockRestore();
@@ -153,12 +155,14 @@ it("invalidates and physically removes the WHOLE opaque audit envelope on forget
   expect(bytes).toContain(originals[1]!.content.body);
   expect((JSON.parse(bytes) as { operation?: unknown }).operation).toBeUndefined();
   expect((await fs.stat(join(root, names[0]!))).mode & 0o777).toBe(0o600);
-  expect(profileFile((await knowledge!.store.read(originals[1]!.id) as typeof originals[number]).content.tags)).toBe("home");
+  expect((await knowledge!.store.read(originals[1]!.id) as typeof originals[number]).content.profile).toEqual({ version: 2, path: ["engineering", "selected-1"] });
   expect((await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries).toEqual([]);
   evidence.push({ case: "forget-invalidates-envelope-without-partial-audit", preservedUnrelatedBackup: true, forgottenEnvelopeRemoved: true });
 }, 60_000);
 
-it.each(["before-backup", "after-backup", "mid-body", "precommit", "after-commit"])("preserves one original audit and explicit retry across a real %s process death", async cut => {
+// V2 recovery owns exact postcommit placement/authority/Undo; this matrix isolates
+// precommit audit recovery. Knowledge separately covers the postcommit store boundary.
+it.each(["before-backup", "after-backup", "mid-body", "precommit"])("preserves one original audit and explicit retry across a real %s process death", async cut => {
   const { f, profile, originals, context, request, cold } = await setup("migration");
   knowledge!.dispose();
   await f.registry.dispose();
@@ -193,7 +197,7 @@ it.each(["before-backup", "after-backup", "mid-body", "precommit", "after-commit
 }, 60_000);
 
 it("keeps distinct original commands with identical assignments as distinct intents, never adopting another command's prepared identities or context", async () => {
-  const { f, profile, originals, context, request, cold } = await setup();
+  const { f, profile, originals, context, request, cold } = await setup("migration");
   knowledge!.dispose();
   await f.registry.dispose();
   await f.registry.administrativeWorkRegistry.waitUntilSettled();
@@ -207,11 +211,17 @@ it("keeps distinct original commands with identical assignments as distinct inte
   const recovery = await knowledge!.store.profilePartitionRecovery(secondContext.commandId);
   expect(recovery.prepared.every(record => !first.prepared.some(prior => prior.revisionId === record.revisionId))).toBe(true);
   expect((recovery.envelope as { context: unknown }).context).toEqual(secondContext);
-  await expect(profile.retryPartition(changes, context.commandId, "home")).rejects.toThrow(/changed since/);
+  await expect(profile.retryPartition(changes, context.commandId, context.actor.kind)).rejects.toThrow(/changed since/);
   const audit = (await changes.history({ key: "home.profile.item" })).entries;
   expect(audit).toHaveLength(3);
   expect(audit.every(entry => entry.commandId === secondContext.commandId && entry.reason === secondContext.reason && !entry.tierBasis.web)).toBe(true);
-  for (const original of originals) expect(withoutPartition(await knowledge!.store.read(original.id) as typeof original)).toEqual(withoutPartition(original));
+  for (const original of originals) {
+    const current = await knowledge!.store.read(original.id) as typeof original;
+    const destination = request.assignments.find(assignment => assignment.id === original.id)!.path!;
+    expect({ ...current, revisionId: original.revisionId }).toEqual({ ...original, content: { ...original.content,
+      tags: original.content.tags!.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: destination.split("/") } } });
+    expect(await knowledge!.store.read(original.id, original.revisionId)).toEqual(original);
+  }
   evidence.push({ case: "distinct-original-commands-not-assignment-identity", separatePreparedIdentities: true, firstIntentNeverCommitted: true, audit });
 }, 60_000);
 

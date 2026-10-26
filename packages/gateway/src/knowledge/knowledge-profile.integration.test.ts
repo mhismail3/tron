@@ -22,7 +22,7 @@ async function fixture(mode: "legacy" | "v2" | "migration" = "legacy") {
     if (mode === "migration") {
       // Preserve the original two TEXT editions, not just two placement states.
       // The admitted v2 create/edit followed by exact historical restore needs
-      // three revisions; frozen two-revision assertions must await approval.
+      // three revisions: the text edit and placement restore each retain their source.
       const created = (await store.createNote({ ...request, record: { ...request.record, content: { ...request.record.content, profile: { version: 2, path: ["life"] } } } })).record;
       if (created.kind !== "note") throw new Error("Expected note");
       const edited = (await store.updateNote({ commandId: `partition-history-${index}`, recordId: created.id, expectedRevision: created.revisionId, record: { ...created, content: { ...created.content, body: created.content.body + "\nSecond edition." } } })).record;
@@ -36,7 +36,7 @@ async function fixture(mode: "legacy" | "v2" | "migration" = "legacy") {
   }
   if (mode === "migration") {
     // Completed seed-operation backups are fixture artifacts, not backups of the
-    // operation under test. Canonical heads and both body revisions stay intact.
+    // operation under test. Canonical heads and all three body revisions stay intact.
     const state = join((await workspace.describe()).root, "state", "knowledge", "profile-backups");
     for (let index = 0; index < 21; index++) await rm(join(state, `${profileOperationKey(`partition-create-${index}-historical-fixture`)}.json`));
   }
@@ -55,24 +55,28 @@ it("backs up complete histories before label-only migration; replay/reopen retai
   for (const [index, original] of f.records.entries()) {
     const saved = backup.originals.find(item => item.record.id === original.id)!;
     expect(saved.record).toEqual(original);
-    expect(saved.history).toHaveLength(2);
-    expect(saved.history[1]).toEqual(original);
+    // V2 creation, distinct text edit, then historical placement restore.
+    expect(saved.history).toHaveLength(3);
+    expect(saved.history[2]).toEqual(original);
+    if (saved.history[0]?.kind !== "note" || saved.history[1]?.kind !== "note") throw new Error("Missing text editions");
+    expect(saved.history[1].content.body).toBe(saved.history[0].content.body + "\nSecond edition.");
     const after = await f.store.read(original.id);
     if (original.kind !== "note" || after?.kind !== "note") throw new Error("Missing note");
-    expect(after).toEqual({ ...original, revisionId: after.revisionId, content: { ...original.content, tags: profileFileTags(original.content.tags ?? [], f.assignments[index]!.file) } });
+    expect(after).toEqual({ ...original, revisionId: after.revisionId, content: { ...original.content, tags: profileFileTags(original.content.tags ?? []), profile: { version: 2, path: f.assignments[index]!.path!.split("/") } } });
     expect(after.revisionId).not.toBe(original.revisionId);
     for (const historical of saved.history) expect(await f.store.read(original.id, historical.revisionId)).toEqual(historical);
   }
   const heads = await Promise.all(f.records.map(note => f.store.read(note.id)));
-  const repeat = await new KnowledgeStore(f.workspace).partitionProfile({ commandId: "partition-migrate-two", mode: "migrate", assignments: [...f.assignments].reverse().map(({ id, expectedRevision, file }) => ({ file, expectedRevision, id })) });
+  const repeat = await new KnowledgeStore(f.workspace).partitionProfile({ commandId: "partition-migrate-two", mode: "migrate", assignments: [...f.assignments].reverse().map(({ id, expectedRevision, path }) => ({ path: path!, expectedRevision, id })) });
   expect(repeat).toEqual(result);
   expect(await Promise.all(f.records.map(note => f.store.read(note.id)))).toEqual(heads);
-  const rescanned: ProfileAssignment[] = heads.map((note, index) => ({ id: note!.id, expectedRevision: note!.revisionId, file: f.assignments[index]!.file! }));
-  expect(await f.store.partitionProfile({ commandId: "partition-rescanned", mode: "migrate", assignments: rescanned })).toEqual({ changes: [] });
+  const rescanned: ProfileAssignment[] = heads.map((note, index) => ({ id: note!.id, expectedRevision: note!.revisionId, path: f.assignments[index]!.path! }));
+  expect(await f.store.partitionProfile({ commandId: "partition-rescanned", mode: "reorganize", assignments: rescanned })).toEqual({ changes: [] });
   const directory = join(result.backup, "..", "..", "records");
-  for (const note of f.records) expect(await readdir(join(directory, note.id))).toHaveLength(3);
+  // Three retained seed revisions plus the single placement publication.
+  for (const note of f.records) expect(await readdir(join(directory, note.id))).toHaveLength(3 + 1);
   await mkdir("test-results/home-profile", { recursive: true });
-  await writeFile("test-results/home-profile/migration-store.json", JSON.stringify({ notes: 21, historicalRevisions: 42, exactMetadataAndContentPreserved: true, extraRevisionsOnRepeat: 0, ownerOnlyBackup: true }, null, 2) + "\n");
+  await writeFile("test-results/home-profile/migration-store.json", JSON.stringify({ notes: 21, historicalRevisions: 21 * 3, exactMetadataAndContentPreserved: true, extraRevisionsOnRepeat: 0, ownerOnlyBackup: true }, null, 2) + "\n");
 });
 
 const crashEvidence: Array<Record<string, unknown>> = [];
@@ -117,7 +121,8 @@ it.each(["before-backup", "after-backup", "mid-body", "precommit", "after-commit
   expect(JSON.stringify(await Promise.all(f.records.map(note => store.read(note.id))))).toBe(beforeRetry);
   for (const original of f.records) {
     expect(await store.read(original.id, original.revisionId)).toEqual(original);
-    expect(await readdir(join(root, "records", original.id))).toHaveLength(3);
+    // Create + text edit + historical restore + one resumed migration, never two.
+    expect(await readdir(join(root, "records", original.id))).toHaveLength(3 + 1);
   }
   crashEvidence.push({ cut, notes: 21, stagedBodies: staged, allStagedBodiesReferencedByBackup: true, originalHeadsUnchangedUntilCommit: cut !== "after-commit", resumedWithoutExtraBodies: true, canonicalAuditUndo: "not yet integrated; store-only evidence" });
   await mkdir("test-results/home-profile", { recursive: true });
@@ -134,7 +139,8 @@ it("a missing historical body refuses migration before any new record body or ba
   await expect(f.store.partitionProfile({ commandId: "partition-missing-history", mode: "migrate", assignments: f.assignments })).rejects.toThrow(/Record revision is missing/);
   expect(await Promise.all(f.records.map(note => f.store.read(note.id)))).toEqual(f.records);
   expect(await readdir(join(root, "profile-backups"))).toEqual([]);
-  for (const note of f.records.slice(1)) expect(await readdir(join(root, "records", note.id))).toHaveLength(2);
+  // Missing one member's body must not delete any of the other three-revision histories.
+  for (const note of f.records.slice(1)) expect(await readdir(join(root, "records", note.id))).toHaveLength(3);
 });
 
 it("a valid-JSON but altered backup cannot rewrite text or discard a historical revision", async () => {
@@ -146,7 +152,7 @@ it("a valid-JSON but altered backup cannot rewrite text or discard a historical 
   const changedText = JSON.parse(bytes);
   changedText.prepared[0].content.title = "An unauthorized replacement.";
   await writeFile(result.backup, JSON.stringify(changedText));
-  await expect(f.store.partitionProfile({ commandId: "partition-bad-text-backup", mode: "migrate", assignments: f.assignments })).rejects.toThrow(/more than partition labels/);
+  await expect(f.store.partitionProfile({ commandId: "partition-bad-text-backup", mode: "migrate", assignments: f.assignments })).rejects.toThrow(/more than profile placement/);
   expect(await Promise.all(f.records.map(note => f.store.read(note.id)))).toEqual(heads);
   const changedHistory = JSON.parse(bytes);
   changedHistory.originals[0].history.shift();
@@ -157,13 +163,18 @@ it("a valid-JSON but altered backup cannot rewrite text or discard a historical 
 });
 
 it("malformed partition labels can be explicitly normalized without inferring a destination or changing other data", async () => {
-  const f = await fixture();
+  const f = await fixture("v2");
   const note = f.records[0]!;
   if (note.kind !== "note") throw new Error("Expected note");
-  const malformed = (await f.store.updateNote({ commandId: "partition-malformed-seed", recordId: note.id, expectedRevision: note.revisionId, record: { ...note, content: { ...note.content, tags: [...note.content.tags!, "home-file-core", "home-file-home"] } } })).record;
-  const result = await f.store.partitionProfile({ commandId: "partition-explicit-repair", mode: "reorganize", assignments: [{ id: malformed.id, expectedRevision: malformed.revisionId, file: "scopes/repaired" }] });
+  const tags = [...note.content.tags!, "home-file-core", "home-file-home"];
+  await expect(f.store.updateNote({ commandId: "partition-malformed-refused", recordId: note.id, expectedRevision: note.revisionId, record: { ...note, content: { ...note.content, tags } } })).rejects.toThrow(/no legacy file labels/);
+  expect(await f.store.read(note.id)).toEqual(note);
+  const malformed = await restoreLegacyProfileFixture(f.store, "partition-malformed-seed", note, tags);
+  await expect(f.store.partitionProfile({ commandId: "partition-legacy-repair-refused", mode: "reorganize", assignments: [{ id: malformed.id, expectedRevision: malformed.revisionId, file: "scopes/repaired" }] })).rejects.toThrow(/v2 path/);
+  expect(await f.store.read(note.id)).toEqual(malformed);
+  const result = await f.store.partitionProfile({ commandId: "partition-explicit-repair", mode: "reorganize", assignments: [{ id: malformed.id, expectedRevision: malformed.revisionId, path: "engineering/repaired" }] });
   const after = await f.store.read(note.id);
-  expect(after).toEqual({ ...malformed, revisionId: after!.revisionId, content: { ...malformed.content, tags: [...note.content.tags!, "home-file-scopes-repaired"] } });
+  expect(after).toEqual({ ...malformed, revisionId: after!.revisionId, content: { ...malformed.content, tags: profileFileTags(note.content.tags!), profile: { version: 2, path: ["engineering", "repaired"] } } });
   expect(await Promise.all(f.records.slice(1).map(record => f.store.read(record.id)))).toEqual(f.records.slice(1));
   const backup = JSON.parse(await readFile(result.backup!, "utf8"));
   expect(backup.originals[0].record).toEqual(malformed);
@@ -292,16 +303,22 @@ it("streams and bounds deep histories before publishing backup or replacement bo
 });
 
 it("refuses incomplete/stale plans and a later tag-cap overflow before any canonical head or body changes", async () => {
-  const f = await fixture();
+  const f = await fixture("migration");
   await expect(f.store.partitionProfile({ commandId: "partition-incomplete", mode: "migrate", assignments: f.assignments.slice(1) })).rejects.toMatchObject({ code: "conflict" });
-  const original = f.records.at(-1)!;
-  if (original.kind !== "note") throw new Error("Expected note");
+  expect(await Promise.all(f.records.map(note => f.store.read(note.id)))).toEqual(f.records);
+  await f.store.partitionProfile({ commandId: "partition-admitted", mode: "migrate", assignments: f.assignments });
+  const original = await f.store.read(f.records.at(-1)!.id);
+  if (original?.kind !== "note") throw new Error("Expected note");
   const full = (await f.store.updateNote({ commandId: "partition-full-tags", recordId: original.id, expectedRevision: original.revisionId, record: { ...original, content: { ...original.content, tags: ["home-profile", "kind-standing-decision", "label-a", "label-b", "label-c", "label-d", "label-e", "label-f"] } } })).record;
-  await expect(f.store.partitionProfile({ commandId: "partition-stale-plan", mode: "migrate", assignments: f.assignments })).rejects.toMatchObject({ code: "conflict" });
-  const assignments = f.assignments.map(item => item.id === full.id ? { ...item, expectedRevision: full.revisionId } : item);
+  await expect(f.store.partitionProfile({ commandId: "partition-stale-plan", mode: "reorganize", assignments: f.assignments })).rejects.toMatchObject({ code: "conflict" });
   const before = await Promise.all(f.records.map(note => f.store.read(note.id)));
-  await expect(f.store.partitionProfile({ commandId: "partition-full-plan", mode: "migrate", assignments })).rejects.toThrow();
+  // V2 placement does not add a ninth tag: overflow is refused by the actual note writer.
+  await expect(f.store.updateNote({ commandId: "partition-overflow-tags", recordId: full.id, expectedRevision: full.revisionId, record: { ...full, content: { ...full.content, tags: [...full.content.tags!, "ninth-label"] } } })).rejects.toThrow();
+  expect(await Promise.all(f.records.map(note => f.store.read(note.id)))).toEqual(before);
+  const assignments = f.assignments.map((item, index) => ({ ...item, expectedRevision: before[index]!.revisionId }));
+  expect(await f.store.partitionProfile({ commandId: "partition-full-plan", mode: "reorganize", assignments })).toEqual({ changes: [] });
   expect(await Promise.all(f.records.map(note => f.store.read(note.id)))).toEqual(before);
   const state = join((await f.workspace.describe()).root, "state", "knowledge");
-  for (const note of f.records.slice(0, -1)) expect(await readdir(join(state, "records", note.id))).toHaveLength(2);
+  for (const note of f.records.slice(0, -1)) expect(await readdir(join(state, "records", note.id))).toHaveLength(3 + 1);
+  expect(await readdir(join(state, "records", full.id))).toHaveLength(3 + 1 + 1);
 });

@@ -1,7 +1,11 @@
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { workspaceModule } from "../../workspace/workspace-module.js";
 import { expect, it, vi } from "vitest";
 import * as durability from "../../util/durable-json.js";
-import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, recordCase, say, command, history, undo } from "../../../test-support/home-profile-fixture.js";
+import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, recordCase, say, command, history, undo, maintainer } from "../../../test-support/home-profile-fixture.js";
 
 profileReportFile("test-results/home-profile/hierarchy.json");
 
@@ -9,16 +13,19 @@ it("malformed partition labels leave valid discovery/read intact and disclose ex
   const f = await fixture("hierarchy-malformed");
   const seeded = [];
   for (const [title, labels] of [["Valid context stays readable.", ["kind-fact", "home-file-core"]], ["Bad file remains recoverable.", ["kind-fact", "home-file-unknown"]], ["Ambiguous file stays unassigned.", ["kind-fact", "home-file-core", "home-file-home"]], ["Unknown kind remains a canonical note.", ["kind-unknown"]]] as const) {
-    seeded.push((await f.store.createNote({ commandId: command("malformed-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "agent", source: "malformed-fixture", evidence: [] }, relations: [], content: { title, role: "fact", confirmed: false, tags: ["home-profile", ...labels] } } })).record);
+    const record = { kind: "note" as const, scope: "personal" as const, provenance: { actor: "agent" as const, source: "malformed-fixture", evidence: [] }, relations: [], content: { title, role: "fact" as const, confirmed: false, tags: ["home-profile", ...labels] } };
+    seeded.push(labels.length === 2 && labels[1] === "home-file-core"
+      ? (await f.store.createNote({ commandId: command("valid-seed"), record: { ...record, content: { ...record.content, tags: ["home-profile", "kind-fact"], profile: { version: 2, path: ["communication"] } } } })).record
+      : await legacyProfileFixture(f.store, command("malformed-seed"), record));
   }
   const turn = await homeActivation(f, "Inspect the index without choosing a repair.", [profileCall({ action: "read" }, "malformed-index"), say("inspection only")]);
   const result = turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "malformed-index")?.details as { status: string; index: string; unclassified: number };
   expect(result.status).toBe("read");
-  expect(result.index).toContain("core: 1 active / 1 total");
+  expect(result.index).toContain("Communication (communication): 1 active / 1 total");
   expect(result.unclassified).toBe(3);
   for (const note of seeded.slice(1)) { expect(result.index).toContain(note.id); expect(result.index).toContain(note.revisionId); }
   for (const note of seeded) expect(turn.first.systemPrompt).not.toContain(note.kind === "note" ? note.content.title : "unexpected");
-  const read = await homeActivation(f, "Read only Core.", [profileCall({ action: "read", file: "core" }, "malformed-core"), say("read")]);
+  const read = await homeActivation(f, "Read only Communication, not malformed Prior organization.", [profileCall({ action: "read", path: "communication" }, "malformed-core"), say("read")]);
   const core = read.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "malformed-core")?.details as { items: Array<{ id: string }> };
   expect(core.items.map(item => item.id)).toEqual([seeded[0]!.id]);
   expect(await Promise.all(seeded.map(note => f.store.read(note.id)))).toEqual(seeded);
@@ -30,7 +37,7 @@ it("file and diagnostic metadata both page without inserting note text or droppi
   const scoped = [], diagnostics = [];
   for (let index = 0; index < 17; index++) {
     for (const valid of [true, false]) {
-      const record = (await f.store.createNote({ commandId: command("metadata-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "agent", source: "metadata-pages", evidence: [] }, relations: [], content: { title: `Context body ${valid ? "scoped" : "diagnostic"} ${index}.`, role: "fact", confirmed: false, tags: ["home-profile", "kind-fact", valid ? `home-file-scopes-s${index}` : "home-file-unknown"] } } })).record;
+      const record = (await f.store.createNote({ commandId: command("metadata-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "agent", source: "metadata-pages", evidence: [] }, relations: [], content: { title: `Context body ${valid ? "scoped" : "diagnostic"} ${index}.`, role: "fact", confirmed: false, tags: ["home-profile", valid ? "kind-fact" : "kind-unknown"], profile: { version: 2, path: ["engineering", `s${index}`] } } } })).record;
       (valid ? scoped : diagnostics).push(record);
     }
   }
@@ -39,13 +46,28 @@ it("file and diagnostic metadata both page without inserting note text or droppi
     const turn = await homeActivation(f, "Read metadata only.", [profileCall({ action: "read", offset }, `metadata-page-${offset}`), say("read")]);
     const result = turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === `metadata-page-${offset}`)?.details as { status: string; index: string };
     expect(result.status).toBe("read");
-    expect(result.index.split("\n").filter(line => line.startsWith("- ")).length).toBeLessThanOrEqual(32);
+    expect(result.index.split("\n").filter(line => line.startsWith("- ")).length).toBeLessThanOrEqual(16);
+    expect(Buffer.byteLength(result.index)).toBeLessThanOrEqual(8192);
     for (const note of [...scoped, ...diagnostics]) if (note.kind === "note") expect(result.index).not.toContain(note.content.title);
     windows.push(result.index);
   }
   expect(windows[0]).toContain("offset=16");
   expect(windows[1]).not.toContain("More metadata");
-  for (let index = 0; index < scoped.length; index++) expect(windows.join("\n")).toContain(`- scopes/s${index}:`);
+  expect(windows.join("\n")).toContain("Engineering (engineering): 17 active / 17 total");
+  // Areas aggregate metadata in v2; explicit cursor pages, not invented file rows,
+  // must retain every scoped reference across the 16-note boundary.
+  const readIds: string[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 4; page++) {
+    const turn = await homeActivation(f, "Read the next Engineering page.", [profileCall({ action: "read", path: "engineering", ...(cursor ? { cursor } : {}) }, `scoped-page-${page}`), say("read")]);
+    const result = turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === `scoped-page-${page}`)?.details as { items: Array<{ id: string }>; nextCursor?: string };
+    expect(result.items.length).toBeLessThanOrEqual(16);
+    readIds.push(...result.items.map(item => item.id));
+    cursor = result.nextCursor;
+    if (!cursor) break;
+  }
+  expect(cursor).toBeUndefined();
+  expect(readIds.sort()).toEqual(scoped.map(note => note.id).sort());
   for (const note of diagnostics) expect(windows.join("\n")).toContain(`id=${note.id} revisionId=${note.revisionId}`);
   expect(await Promise.all([...scoped, ...diagnostics].map(note => f.store.read(note.id)))).toEqual([...scoped, ...diagnostics]);
   recordCase("paged-file-and-diagnostic-discovery", { metadataWindowBytes: windows.map(value => Buffer.byteLength(value)), scopedNotes: scoped.length, diagnosticNotes: diagnostics.length });
@@ -53,25 +75,37 @@ it("file and diagnostic metadata both page without inserting note text or droppi
 
 it("the real Home profile tool retries one original label group and native Changes Undo restores malformed labels at their exact positions", async () => {
   const f = await fixture("hierarchy-organize-tool");
-  const original = (await f.store.createNote({ commandId: command("organize-seed"), record: { kind: "note", scope: "personal",
+  const original = await legacyProfileFixture(f.store, command("organize-seed"), { kind: "note", scope: "personal",
     provenance: { actor: "user", source: "explicit-standing-rule", evidence: [] }, relations: [],
     content: { title: "Never publish without approval.", body: "Preserve the full binding instruction.", role: "decision", confirmed: true,
-      tags: ["home-file-unknown", "home-profile", "kind-standing-decision", "home-file-home", "fixture-label"] } } })).record;
+      tags: ["home-file-unknown", "home-profile", "kind-standing-decision", "home-file-home", "fixture-label"] } });
+  const first = await homeActivation(f, "Propose this exact release placement, preserving the confirmed instruction.", [
+    profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }], reason: "Explicit placement-only organization" }, "organize-tool-first"), say("waiting for review"),
+  ]);
+  const proposal = first.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-first")?.details as { status: string; approval: { requestId: string; digest: string } };
+  expect(proposal.status).toBe("pending");
+  expect(await f.store.read(original.id)).toEqual(original);
   await mkdir(f.record.path, { recursive: true });
   const parent = await stat(f.record.path);
   const sync = durability.syncDurably;
+  let failed = false;
   const fault = vi.spyOn(durability, "syncDurably").mockImplementation(async handle => {
     const actual = await handle.stat();
-    if (actual.dev === parent.dev && actual.ino === parent.ino) throw new Error("Owned tool audit publication fault");
+    if (!failed && actual.dev === parent.dev && actual.ino === parent.ino) { failed = true; throw new Error("Owned tool audit publication fault"); }
     await sync(handle);
   });
-  const first = await homeActivation(f, "Explicitly organize this instruction as release context; keep its existing authority.", [
-    profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, file: "scopes/release" }], reason: "Explicit label-only organization" }, "organize-tool-first"), say("retry needed"),
-  ]);
-  const pending = first.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-first")?.details as { status: string; commandId: string };
-  expect(pending.status).toBe("retry_required");
+  f.home.push(say("The reviewed operation needs its original publication retry."));
+  await expect(f.service.invoke(maintainer, "settings.decide", { commandId: command("approve-organize"), requestId: proposal.approval.requestId, digest: proposal.approval.digest, approved: true })).rejects.toThrow("Owned tool audit publication fault");
+  await waitFor(() => !f.slot.isBusy && f.slot.snapshot().phase === "idle" && f.home.length === 0 || undefined, "failed approval outcome delivered and Home idle");
+  const directory = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "knowledge", "profile-backups");
+  const backups = await Promise.all((await readdir(directory)).map(async name => JSON.parse(await readFile(join(directory, name), "utf8")) as { operation: { commandId: string; envelope?: { context?: { actor?: { toolCallId?: string } } } } }));
+  const originalOperations = backups.filter(backup => backup.operation.envelope?.context?.actor?.toolCallId === "organize-tool-first");
+  expect(originalOperations).toHaveLength(1);
+  const pending = originalOperations[0]!.operation;
   expect(await history(f)).toEqual([]);
-  const committed = await f.store.read(original.id);
+  const committed = await f.store.read(original.id) as typeof original;
+  expect(committed).toEqual({ ...original, revisionId: committed.revisionId, content: { ...original.content,
+    tags: original.content.tags!.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: ["engineering", "release"] } } });
   fault.mockRestore();
   const next = await homeActivation(f, "Retry only the original organization operation.", [profileCall({ action: "retry", commandId: pending.commandId }, "organize-tool-retry"), say("acknowledged")]);
   const organized = next.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-retry")?.details as { status: string; commandId: string; changeIds: string[] };
@@ -82,7 +116,8 @@ it("the real Home profile tool retries one original label group and native Chang
   expect(audit).toHaveLength(1);
   expect(audit[0]).toMatchObject({ commandId: pending.commandId, actor: { kind: "home", toolCallId: "organize-tool-first" },
     before: { text: "Never publish without approval.", confirmed: true, fileLabels: [{ index: 0, tag: "home-file-unknown" }, { index: 3, tag: "home-file-home" }] },
-    after: { text: "Never publish without approval.", confirmed: true, fileLabels: [{ index: 3, tag: "home-file-scopes-release" }] } });
+    after: { text: "Never publish without approval.", confirmed: true, profile: { version: 2, path: ["engineering", "release"] } } });
+  expect(audit[0]!.after).not.toHaveProperty("fileLabels");
   await undo(f, organized.changeIds[0]!, "native-undo-labels");
   const restored = await f.store.read(original.id);
   expect({ ...restored, revisionId: original.revisionId }).toEqual(original);
@@ -107,20 +142,20 @@ it("new profile content is discoverable but never automatically inserted into Ho
 
 it("Home cannot rewrite existing confirmed instruction-kind authority or promote its own inference", async () => {
   const f = await fixture("hierarchy-binding");
-  const original = (await f.store.createNote({ commandId: command("binding-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "user", source: "explicit-standing-rule", evidence: [], reason: "Maintainer explicitly confirmed this standing constraint." }, relations: [], content: { title: "Never publish without approval.", body: "Keep this exact binding constraint intact.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision", "home-file-core"] } } })).record;
+  const original = (await f.store.createNote({ commandId: command("binding-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "user", source: "explicit-standing-rule", evidence: [], reason: "Maintainer explicitly confirmed this standing constraint." }, relations: [], content: { title: "Never publish without approval.", body: "Keep this exact binding constraint intact.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision"], profile: { version: 2, path: ["communication"] } } } })).record;
   for (const [index, operation] of [{ action: "refine", text: "Publish without asking." }, { action: "supersede", kind: "standing-decision", text: "Approval is optional." }, { action: "retire", reason: "Assumed irrelevant." }].entries()) {
     const callId = `binding-refusal-${index}`;
-    const turn = await homeActivation(f, "Consider changing this rule.", [profileCall({ ...operation, id: original.id }, callId), say("review needed")]);
-    expect(turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === callId)?.details).toMatchObject({ status: "refused" });
+    const turn = await homeActivation(f, "Consider changing this rule.", [profileCall({ ...operation, id: original.id, reason: "reason" in operation ? operation.reason : "Review the exact proposed authority change" }, callId), say("review needed")]);
+    expect(turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === callId)?.details).toMatchObject({ status: "pending" });
     expect(await f.store.read(original.id)).toEqual(original);
   }
-  await homeActivation(f, "Record this as a proposal, not authority.", [profileCall({ action: "learn", kind: "standing-decision", file: "home", text: "Proposal: approval might be optional for fixtures." }, "binding-proposal"), say("proposal saved")]);
+  await homeActivation(f, "Record this as a proposal, not authority.", [profileCall({ action: "learn", kind: "standing-decision", text: "Proposal: approval might be optional for fixtures." }, "binding-proposal"), say("proposal saved")]);
   const notes = await profileNotes(f);
   expect(notes.find(note => note.id === original.id)).toEqual(original);
   const proposed = notes.find(note => note.id !== original.id)!;
   expect(proposed.content.confirmed).toBe(false);
   expect(proposed.provenance.actor).toBe("agent");
-  expect(proposed.content.tags).toContain("home-file-home");
+  expect(proposed.content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
 });
 
 it("explicit reads preserve exact standing-rule status/provenance and isolate named scopes", async () => {
