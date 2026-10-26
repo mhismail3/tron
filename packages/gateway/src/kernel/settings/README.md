@@ -42,8 +42,10 @@ consume requests; canonical custom-entry request IDs acknowledge delivery within
 explicit requester-ID scope. Home supplies its chapter ledger and fitting-prefix predicate;
 ordinary runtimes supply their singleton identity. Admission reserves at most 400 outcome
 slots (pending and settled together), refusing new requests rather than evicting old ones. Approval
-actions claim execution durably before effects; interrupted executions fail with uncertain
-effects instead of replaying.
+actions claim execution durably before effects. The first awaited `start()` recovers
+pre-existing claims as uncertain failures without replay; repeated start is inert.
+Ordinary selection, expiry and arming exclude execution claims, so delivery does not
+join this owner's live action effects.
 `scope-resolution.ts` owns binding admission from declared Session/Project permissions,
 canonical targets, the public/storage scope mapping and the canonical sorted-qualifier
 instance identity used by resolution badges and outside-change observation.

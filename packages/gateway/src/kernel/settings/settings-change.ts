@@ -213,6 +213,10 @@ export class SettingsChangePath {
    * Merely opening settings for inspection must never expire or rewrite stores. */
   async start(): Promise<void> {
     if (this.disposed) throw new GatewayError("conflict", "Settings approvals are disposed");
+    if (this.started) return;
+    // Only activation can classify a pre-existing execution claim as interrupted.
+    // Foreground readers must never join/recover this owner's live effects.
+    await this.expireDue({ interruptedActions: true });
     this.started = true;
     await this.armExpiry();
   }
@@ -245,7 +249,7 @@ export class SettingsChangePath {
       if (this.disposed || !this.started) return;
       const pending = await this.approvals.pending();
       if (this.disposed) return;
-      this.scheduleExpiry(pending.map(request => request.executionStartedAt ? this.now().getTime() : Date.parse(request.expiresAt)));
+      this.scheduleExpiry(pending.filter(request => !request.executionStartedAt).map(request => Date.parse(request.expiresAt)));
     });
     return this.armWork;
   }
@@ -667,14 +671,14 @@ export class SettingsChangePath {
 
   /** Expiry uses the same target stripe as decision admission and effects. A
    * timer may become due during apply, but cannot contradict an admitted decision. */
-  private async expireDue(filter: { target?: SettingsTarget; requesterSessionIds?: readonly string[] } = {}): Promise<void> {
+  private async expireDue(filter: { target?: SettingsTarget; requesterSessionIds?: readonly string[]; interruptedActions?: true } = {}): Promise<void> {
     if (this.disposed) throw new GatewayError("conflict", "Settings approvals are disposed");
     const work: Promise<void>[] = [];
     for (const request of await this.approvals.pending()) {
       if (this.disposed) return;
       if (filter.target && !deepEqual(request.target, filter.target)) continue;
       if (filter.requesterSessionIds && (!request.actor.sessionId || !filter.requesterSessionIds.includes(request.actor.sessionId))) continue;
-      if (!request.executionStartedAt && Date.parse(request.expiresAt) > this.now().getTime()) continue;
+      if (filter.interruptedActions ? !request.executionStartedAt : request.executionStartedAt || Date.parse(request.expiresAt) > this.now().getTime()) continue;
       let pending = this.expiryWork.get(request.requestId);
       if (!pending) {
         pending = this.mutexFor(request.target).run(async () => {
