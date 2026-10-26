@@ -490,9 +490,11 @@ describe("settings risk gate", () => {
     expect(pending.status).toBe("pending");
     expect((await observe()).images).toBe(0);
     const approval = (await f.approvals())[0]!;
+    if (kind === "Home") f.faux.setResponses([fauxAssistantMessage("Approval outcome received.")]);
     await f.service.invoke(phone(), "settings.decide", {
       commandId: commandId(), requestId: approval.requestId, digest: approval.digest, approved: true,
     });
+    if (kind === "Home") await f.homeOutcome(slot, approval.requestId);
     expect((await observe()).images).toBeGreaterThan(0);
     // Narrowing during a model/tool loop must affect the next request in the
     // same turn, not only the next user prompt.
