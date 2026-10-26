@@ -50,11 +50,11 @@ async function gateway(contextWindow?: number) {
     apply: async () => ({ summary: "Applied once" }),
   });
   const approvals = new SettingsApprovals(f.tronHome);
-  const request = (label: string, requester = home.id) => settingsChanges.requestAction("fixture.recovery", label,
+  const request = (label: string, requester = home.id) => f.settings.settingsChanges.requestAction("fixture.recovery", label,
     { actor: { kind: requester === home.id ? "home" : "agent", id: requester, sessionId: requester }, reason: "Real delivery recovery proof" });
-  const decide = (held: Awaited<ReturnType<typeof request>>, approved = true) => settingsChanges.decide(held.approval!.requestId,
+  const decide = (held: Awaited<ReturnType<typeof request>>, approved = true) => f.settings.settingsChanges.decide(held.approval!.requestId,
     { digest: held.approval!.digest, approved, decidedBy: { kind: "ui", id: "maintainer" } });
-  return { ...f, home, settingsChanges, approvals, request, decide, received, providerInputs, respond, timers, advance: (ms: number) => { clock += ms; } };
+  return { ...f, get settings() { return f.settings; }, home, get settingsChanges() { return f.settings.settingsChanges; }, approvals, request, decide, received, providerInputs, respond, timers, advance: (ms: number) => { clock += ms; } };
 }
 
 describe("settings outcome recovery at the real Registry/Pi/store boundary", () => {
@@ -223,6 +223,43 @@ describe("settings outcome recovery at the real Registry/Pi/store boundary", () 
       expect(f.providerInputs.filter(body => body === String(outcomes(f.home)[0]!.content))).toHaveLength(1);
       evidence.push({ case: "live-effect-independent-outcome", live: active.approval!.requestId, delivered: settled.approval!.requestId });
     } finally { release(); await applying; await restarting; }
+  });
+
+  it("a cold selecting wake cannot outlive Stop and retirement of an intervening runtime", async () => {
+    const f = await gateway(); const held = await f.request("cold Stop during selection");
+    const cold = await f.restartToReadiness(); const owner = homeOwnerOf(cold);
+    expect(cold.runtimeEntries().some(([id]) => id === f.home.id)).toBe(false);
+    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; }); let selecting = false;
+    const take = f.settingsChanges.takeOutcomes.bind(f.settingsChanges);
+    vi.spyOn(f.settingsChanges, "takeOutcomes").mockImplementation(async (...args) => {
+      const message = await take(...args);
+      if (message && !selecting) { selecting = true; await gate; }
+      return message;
+    });
+    try {
+      await f.decide(held, false); await owner.recoverTasks();
+      await waitFor(() => selecting || undefined, "cold actual outbox selection held without constructing a runtime");
+      expect(cold.runtimeEntries().some(([id]) => id === f.home.id)).toBe(false);
+      const intervening = await cold.acquire(f.home.id); const calls = f.faux.state.callCount;
+      await intervening.abort("agent"); await waitFor(() => !intervening.isBusy || undefined, "actual cold Stop reaches native quiescence");
+      expect(await cold.retireIdleRuntime({ sessionId: f.home.id, slot: intervening, reason: "idle", eligible: () => true })).toBe(true);
+      const replacement = await cold.acquire(f.home.id); expect(replacement).not.toBe(intervening);
+      release(); await (owner as unknown as { wakeDrain?: Promise<void> }).wakeDrain;
+      await waitFor(() => !replacement.isBusy || undefined, "cold pending attempt reaches native quiescence");
+      expect(outcomes(replacement)).toHaveLength(0); expect(f.faux.state.callCount).toBe(calls);
+      expect((await f.approvals.takeOutcomes([f.home.id])).map(request => request.requestId)).toEqual([held.approval!.requestId]);
+      owner.requestWake();
+      await waitFor(() => f.received.some(body => body.includes(held.approval!.requestId)) || undefined, "a genuinely new wake can deliver after Stop");
+      await (owner as unknown as { wakeDrain?: Promise<void> }).wakeDrain;
+      await waitFor(() => !replacement.isBusy || undefined, "fresh cold wake provider and native work settle");
+      expect(outcomes(replacement)).toHaveLength(1);
+      expect(f.providerInputs.filter(body => body === String(outcomes(replacement)[0]!.content))).toHaveLength(1);
+      const entries = replacement.canonicalSessionEntries(); const delivered = entries.indexOf(outcomes(replacement)[0]!);
+      expect(entries.slice(delivered + 1).some(entry => entry.type === "message" && entry.message.role === "assistant"
+        && textOf(entry.message).includes("Outcome receipt confirmed."))).toBe(true);
+      expect(await f.approvals.takeOutcomes([f.home.id])).toEqual([]);
+      evidence.push({ case: "cold-stop-retirement", requestId: held.approval!.requestId });
+    } finally { release(); }
   });
 
   it("Stop cancels an already selecting settings wake instead of reviving Home", async () => {
