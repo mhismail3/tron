@@ -756,8 +756,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     };
   }
 
-  /** Changes can decide the same diff while its tool is waiting. The live host
-   * form is the authority for borrowing the already-owned running lane. */
+  /** Changes can decide the same diff while its tool is waiting. The exact live
+   * form authorizes the tool's in-turn appliers, without acquiring a second runtime
+   * lane; the settings owner's target stripe still serializes the decision. */
   settingsApprovalContext(requestId: string): Pick<ChangeContext, "session" | "homeChapter"> | undefined {
     if (!this.ui.interactions().some(interaction => interaction.method === "form" && interaction.form.questions[0]?.id === requestId)) return undefined;
     const session = this.settingsToolSource();
