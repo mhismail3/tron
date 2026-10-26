@@ -143,7 +143,8 @@ export class ProjectLifecycle {
     catch { throw new GatewayError("conflict", `${executable === this.githubExecutable ? "GitHub" : "Git"} command did not complete; inspect project state before retrying`); }
   }
   private git(path: string, args: string[]): Promise<string> {
-    return this.command("git", ["-c", "core.hooksPath=/dev/null", ...args], path);
+    // Even read-only log inspection can launch a repository-configured verifier.
+    return this.command("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "log.showSignature=false", ...args], path);
   }
   private async inspect(action: Action) {
     const path = join(this.workspace, action.name);

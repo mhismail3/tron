@@ -60,7 +60,8 @@ request. To retry a failed creation's trust phase, explicitly request `trust`.
   they are not a sandbox against another process with the same Mac user's authority
   maliciously renaming directories between OS calls. Errors retain paths for inspection.
 - Git subprocesses are bounded, noninteractive and ignore inherited `GIT_*` selectors;
-  hooks/templates do not execute. GitHub stderr/credential-bearing config is not returned.
+  hooks/templates and repository-configured log signature programs do not execute.
+  GitHub stderr/credential-bearing config is not returned.
 - Existing generic iOS approval chips/sheets show action items; no custom UI is introduced.
 
 ## Entry points

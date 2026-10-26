@@ -236,6 +236,24 @@ describe("Gateway project lifecycle", () => {
     expect((await f.request({ action: "create", name: "escaped" })).isError).toBe(true);
   });
 
+  it("inspection of untrusted claim refs never runs repository-configured signature programs", async () => {
+    const f = await fixture();
+    await f.create("signature-config");
+    const marker = join(f.root, "signature-program-ran");
+    const executable = join(f.root, "gpg-fixture");
+    await writeFile(executable, `#!/bin/sh\nprintf ran > ${JSON.stringify(marker)}\nexit 1\n`, { mode: 0o700 });
+    const tree = await f.git("signature-config", ["write-tree"]);
+    const object = join(f.root, "signed-commit");
+    await writeFile(object, `tree ${tree}\nauthor Fixture <fixture@example.invalid> 1 +0000\ncommitter Fixture <fixture@example.invalid> 1 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n fixture\n -----END PGP SIGNATURE-----\n\nClaim fixture\n\nWork-Claim-Session: fixture-worker\n`);
+    const commit = await f.git("signature-config", ["hash-object", "-t", "commit", "-w", object]);
+    await f.git("signature-config", ["update-ref", "refs/heads/feat/42-worker", commit]);
+    await f.git("signature-config", ["config", "--local", "log.showSignature", "true"]);
+    await f.git("signature-config", ["config", "--local", "gpg.program", executable]);
+    expect((await f.request({ action: "trust", name: "signature-config" })).isError).toBe(true);
+    await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await f.trust.inspect(f.path("signature-config"))).effectiveDecision).toBe(false);
+  });
+
   it("partial GitHub failure retains an untrusted project and refuses to silently recreate an existing remote", async () => {
     const f = await fixture(true);
     const executable = join(f.root, "gh-fixture");
