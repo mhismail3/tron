@@ -43,7 +43,8 @@ enum PendingExtensionInteractionToolPresentation {
                 tool.isRunning
                     && toolOperationID(tool) == operationID
                     && (ownersMatch(interaction: interaction, tool: tool) || hostsNestedAskUserForm(interaction, tool))
-                    && (interaction.method != .form || isAskUser(tool) || hostsNestedAskUserForm(interaction, tool))
+                    && (interaction.method != .form || isAskUser(tool) || hostsNestedAskUserForm(interaction, tool)
+                        || (tool.toolName == "settings" && interaction.form?.presentation == .approval))
             }
         }
         if operationMatches.count == 1 { return operationMatches[0] }

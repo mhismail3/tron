@@ -171,14 +171,18 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   advertising it ([push relay](../../push-relay/README.md#notification-categories)). A
   `settings` tool `action: "request"` holds a change at any tier (`tierBasis.requested`)
   and blocks the calling turn on the same semantic form sheet as `ask_user`. The sheet
-  shows scope, layer, reason and exact diff. Its approval presentation uses labeled
+  shows scope, layer, reason and the full before/after JSON values, not abbreviated
+  display summaries. Approval context is literal selectable text, never Markdown;
+  a diff over the form\'s 32 KiB capacity is explicitly refused and its request retired.
+  Its approval presentation uses labeled
   toolbar actions: Deny/X on the left in destructive color, Approve/checkmark on the
   right in success color; neither is duplicated in the body. Swipe dismissal only
   closes the local sheet: the pending tool can reopen it and the turn keeps waiting
   without approving or denying. Only an explicit client decision admits the change. `change` also blocks when its normal tier needs
   approval. The original tool result returns approved/applied, declined, expired or
   superseded explicitly, with no separate outcome wake. Stop retires the form and
-  supersedes its still-pending diff without applying it. Dry run creates no request.
+  supersedes its still-pending diff without applying it. Dry run creates no request;
+  when all plans are refused its result is failed, not a misleading applied/pending status.
   The settings owner retains the digest fence, one-use decision and Changes/undo.
   A turn cannot request its own between-runs SDK configuration (model, thinking,
   tools or context window); runtime admission refuses before opening a form, including

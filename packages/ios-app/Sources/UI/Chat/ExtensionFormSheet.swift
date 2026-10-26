@@ -189,7 +189,7 @@ struct ExtensionFormSheet: View {
 
     private func questionStatus(_ question: ExtensionFormQuestion, index: Int, form: ExtensionFormDescriptor) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            pageProgress(question, index: index, form: form)
+            if form.presentation != .approval { pageProgress(question, index: index, form: form) }
 
             if let expiry {
                 Label(
@@ -244,20 +244,30 @@ struct ExtensionFormSheet: View {
             // Eager stack: self-sizing selectable Markdown in a lazy stack
             // re-estimates heights mid-scroll and makes the page jump.
             VStack(alignment: .leading, spacing: 16) {
-                if form.presentation != .approval { questionStatus(question, index: index, form: form) }
+                questionStatus(question, index: index, form: form)
 
                 // Agent-authored text may carry URLs, commands and IDs the user
                 // must act on: shared Markdown with native selection and Copy.
                 if let context = question.context, !context.isEmpty {
-                    TronMarkdownView(
-                        text: context,
-                        streaming: false,
-                        textStyle: ChatSelectableTextStyle(
-                            size: TronTypography.sizeBodySM + 0.3,
-                            color: .tronTextSecondary
-                        ),
-                        selectableText: true
-                    )
+                    if form.presentation == .approval {
+                        // The exact digest-bound values are data, not authored
+                        // Markdown: preserve URLs, markup, whitespace and every item.
+                        ChatSelectableInlineText(
+                            inline: .init(source: context, attributedString: nil),
+                            style: ChatSelectableTextStyle(size: TronTypography.sizeBodySM + 0.3, color: .tronTextSecondary),
+                            onAnnotate: nil
+                        )
+                    } else {
+                        TronMarkdownView(
+                            text: context,
+                            streaming: false,
+                            textStyle: ChatSelectableTextStyle(
+                                size: TronTypography.sizeBodySM + 0.3,
+                                color: .tronTextSecondary
+                            ),
+                            selectableText: true
+                        )
+                    }
                 }
 
                 TronMarkdownView(

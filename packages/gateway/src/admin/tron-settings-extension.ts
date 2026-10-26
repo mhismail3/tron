@@ -158,7 +158,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
             return choice === "approve" || choice === "deny" ? choice : undefined;
           }, signal), ...(worker ? { worker } : {}) };
         }
-        const text = result.dryRun ? `Dry run: tier ${result.tier}.`
+        const text = result.dryRun ? result.status === "failed" ? "Dry run refused; nothing changed." : `Dry run: tier ${result.tier}.`
           : result.status === "approved" || result.status === "applied" ? `Applied at tier ${result.tier}.${signalText(result)}`
           : `Settings approval ${result.status}; nothing changed.`;
         return { content: [{ type: "text", text: `${text}\n${JSON.stringify(result)}` }], details: result };

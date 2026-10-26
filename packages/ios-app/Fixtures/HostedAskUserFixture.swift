@@ -62,10 +62,15 @@ struct HostedAskUserFixtureView: View {
                             .accessibilityIdentifier("ask-user-mutation-count")
                         Text(receipt.summary)
                             .accessibilityIdentifier("ask-user-receipt")
-                        Button("Reopen Ask User") {
-                            interaction = fixture.interaction
+                        if fixture.form.presentation == .approval {
+                            ToolCard(data: fixture.pendingSettingsTool)
+                                .environment(\.canonicalResourceSessionID, sessionID)
+                                .environment(\.pendingExtensionInteractionPresenter, { value in interaction = value })
+                                .accessibilityIdentifier("settings-approval-pending-tool")
+                        } else {
+                            Button("Reopen Ask User") { interaction = fixture.interaction }
+                                .accessibilityIdentifier("ask-user-reopen")
                         }
-                        .accessibilityIdentifier("ask-user-reopen")
                         if interaction == nil {
                             Text("Form closed")
                         }
@@ -164,6 +169,14 @@ private struct HostedAskUserFixture {
     let receipt: HostedAskUserFixtureReceipt
     let model: AppModel
 
+    var pendingSettingsTool: ChatToolPresentation {
+        ChatToolPresentation(id: "hosted-settings-call", title: "Settings", toolName: "settings", subtitle: "Running",
+            request: nil, response: nil, content: "", fallbackContent: nil, error: false,
+            startedAt: nil, completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil,
+            extensionOrigin: ExtensionToolOrigin(source: "inline", owner: interaction.owner),
+            toolSegmentId: "tool-segment:\"hosted-ask-user-operation\"")
+    }
+
     @MainActor
     init() {
         let receipt = HostedAskUserFixtureReceipt()
@@ -207,7 +220,9 @@ private struct HostedAskUserFixture {
             version: 1, title: "Settings approval",
             questions: [ExtensionFormQuestion(
                 id: "settings-approval", question: "Approve these settings changes?",
-                context: "Scope: Home\nReason: Retry a transient failure\n\nMaximum retries (run.retry.maxRetries)\nLayer: Session\nNot set → 3 retries\n\nApprove applies only this diff. Deny changes nothing.",
+                context: "Scope: Home\nReason: Retry a transient failure\n\nRetries (run.retry.maxRetries)\nLayer: Session\nBefore:\nnull\nAfter:\n3\n\nApprove applies only this diff. Deny changes nothing."
+                    + (ProcessInfo.processInfo.arguments.contains("-tron-settings-approval-literal")
+                       ? "\n[label](https://example.test/full-target) ![image](https://example.test/raw.png)" : ""),
                 options: [ExtensionFormOption(id: "approve", label: "Approve", description: nil),
                           ExtensionFormOption(id: "deny", label: "Deny", description: nil)],
                 multiSelect: false, allowOther: false
@@ -221,7 +236,8 @@ private struct HostedAskUserFixture {
             method: .form,
             title: presentedForm.title,
             form: presentedForm,
-            owner: ExtensionOwner(id: "tron-ask-user", title: "Ask User", source: AskUserToolPresentation.tronSource),
+            owner: settingsApproval ? ExtensionOwner(id: "hosted-settings-owner", title: "Tron Settings", source: "inline")
+                : ExtensionOwner(id: "tron-ask-user", title: "Ask User", source: AskUserToolPresentation.tronSource),
             invocationId: "hosted-ask-user-invocation",
             operationId: "hosted-ask-user-operation"
         )

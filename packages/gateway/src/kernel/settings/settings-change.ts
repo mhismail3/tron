@@ -351,7 +351,7 @@ export class SettingsChangePath {
       if (context.dryRun) {
         let next = 0;
         return {
-          dryRun: true as const, status: held ? "pending" as const : "applied" as const, tier: held ? "approve" as const : tier,
+          dryRun: true as const, status: !planned.length ? "failed" as const : held ? "pending" as const : "applied" as const, tier: planned.length && held ? "approve" as const : tier,
           changes: requests.map((request, index) => {
             const error = errors.get(index);
             if (error) return { changeId: "", key: request.key, layer: request.layer, status: "failed" as const, tier: "quiet" as const, error: { code: error.code, message: error.message } };
