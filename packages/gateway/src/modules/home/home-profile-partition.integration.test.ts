@@ -234,6 +234,19 @@ it("retains original Undo links across a real postcommit Undo crash and cold pub
   evidence.push({ case: "original-undo-crash-cold-retry", originalUndoOfPreserved: true, domainNotRepeated: true, undoEntries });
 }, 60_000);
 
+it("refuses recovery through a replaced backup-directory symlink without publishing or rewriting anything", async () => {
+  const { f, profile, context, request } = await setup();
+  const applied = await profile.partition(f.settings.settingsChanges, request, context);
+  const directory = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "knowledge", "profile-backups");
+  const before = await Promise.all(request.assignments.map(item => knowledge!.store.read(item.id)));
+  await fs.rename(directory, `${directory}-original`);
+  await fs.symlink(`${directory}-original`, directory, "dir");
+  await expect(profile.retryPartition(f.settings.settingsChanges, context.commandId, "home")).rejects.toThrow(/Unsafe profile backup directory/);
+  expect(await Promise.all(request.assignments.map(item => knowledge!.store.read(item.id)))).toEqual(before);
+  expect((await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries.map(entry => entry.changeId).sort()).toEqual(applied.changes.map(change => change.changeId).sort());
+  evidence.push({ case: "unsafe-recovery-directory-refused", unchangedHeadsAndAudit: true });
+}, 60_000);
+
 it("preflights the complete Changes group before backup/body publication", async () => {
   const { f, profile, originals, context, request } = await setup();
   await expect(profile.partition(f.settings.settingsChanges, request, { ...context, reason: "x".repeat(1024 * 1024) })).rejects.toThrow(/bound/);

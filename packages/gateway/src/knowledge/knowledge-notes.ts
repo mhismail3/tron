@@ -72,6 +72,10 @@ function assignmentTags(note: Note, assignment: ProfileAssignment): string[] {
 }
 /** A recovery read is explicit and carries no domain side effect. */
 export async function readProfileOperation(directory: string, commandId: string) {
+  // Secure JSON checks its final entry, not its ancestors. A recovery read must
+  // enforce the same owner-only real directory as the original backup writer.
+  const status = await lstat(directory).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
+  if (status && (!status.isDirectory() || status.isSymbolicLink() || status.uid !== process.getuid?.() || (status.mode & 0o777) !== 0o700)) refuse("Unsafe profile backup directory");
   const saved = await readSecureJson<PartitionBackup>(join(directory, `${profileOperationKey(commandId)}.json`), BACKUP_BYTES);
   const plan = saved.present ? saved.value : refuse("No backed-up profile operation with this command ID");
   if (plan.version !== 1 || plan.operation?.commandId !== commandId || plan.digest !== planDigest(plan.operation.mode, plan.assignments, plan.operation)
