@@ -47,7 +47,12 @@ export async function reviewSettingsApproval(input: {
           return await path.decide(requestId, { digest: request.digest, approved: choice === "approve", decidedBy: { kind: "ui", id: `interaction:${requestId}` }, ...await input.context(request) });
         } catch (error) {
           const settled = await read();
-          if (settled.status === "pending") throw error;
+          if (settled.status === "pending") {
+            // A vanished target/context ends this continuation too. Retire its
+            // owned diff before surfacing the failure, rather than orphaning it.
+            await path.cancelApproval(requestId, requesterSessionId);
+            throw error;
+          }
           // A tap can lose to expiry or a newer diff while awaiting the target
           // stripe. Return that explicit terminal outcome, not an opaque tool error.
           return terminalResult(settled);
