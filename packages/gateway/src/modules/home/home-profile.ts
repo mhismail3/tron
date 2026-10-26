@@ -43,7 +43,7 @@ export type ProfileNote = KnowledgeRecord & { kind: "note" };
 export interface HomeProfileItem {
   id: string;
   revisionId: string;
-  file: ProfileFile | undefined;
+  file: ProfileFile | null | undefined;
   kind: HomeProfileKind;
   text: string;
   confirmed: boolean;
@@ -57,8 +57,10 @@ export interface HomeProfileItem {
 
 export interface HomeProfileRead {
   items: HomeProfileItem[];
-  /** Profile-tagged notes without one valid kind label; reads must disclose incompleteness. */
+  /** Existing native-list count: notes without one recognized kind. */
   unclassified: number;
+  /** Mechanical metadata failures, with exact canonical references for explicit repair. */
+  diagnostics: Array<{ id: string; revisionId: string; issues: Array<"kind" | "partition"> }>;
 }
 
 /** Every profile note in the personal scope, classified. A pure read through Knowledge's
@@ -84,20 +86,25 @@ export async function readHomeProfile(knowledge: KnowledgeService): Promise<Home
   }
   const profileIds = new Set(notes.map(note => note.id));
   const items: HomeProfileItem[] = [];
-  let unclassified = 0;
+  const diagnostics: HomeProfileRead["diagnostics"] = [];
   for (const note of notes) {
     const tags = note.content.tags ?? [];
     const kinds = HOME_PROFILE_KINDS.filter((kind) => tags.includes(kindTag(kind)));
-    if (kinds.length !== 1) { unclassified += 1; continue; }
+    const file = profileFile(tags);
+    const issues: HomeProfileRead["diagnostics"][number]["issues"] = [];
+    if (kinds.length !== 1) issues.push("kind");
+    if (file === null) issues.push("partition");
+    if (issues.length) diagnostics.push({ id: note.id, revisionId: note.revisionId, issues });
+    if (kinds.length !== 1) continue;
     const by = supersededBy.get(note.id);
     const status: HomeProfileStatus = note.content.retired ? "retired" : by ? "superseded" : "active";
     const supersedes = note.relations.find(relation => relation.type === "supersedes" && profileIds.has(relation.recordId))?.recordId;
-    items.push({ id: note.id, revisionId: note.revisionId, file: profileFile(tags), kind: kinds[0]!, text: note.content.title, confirmed: note.content.confirmed, status,
+    items.push({ id: note.id, revisionId: note.revisionId, file, kind: kinds[0]!, text: note.content.title, confirmed: note.content.confirmed, status,
       ...(supersedes ? { supersedes } : {}), ...(by ? { supersededBy: by } : {}), record: note });
   }
   items.sort((left, right) => HOME_PROFILE_KINDS.indexOf(left.kind) - HOME_PROFILE_KINDS.indexOf(right.kind)
     || left.record.createdAt.localeCompare(right.record.createdAt) || left.id.localeCompare(right.id));
-  return { items, unclassified };
+  return { items, unclassified: diagnostics.filter(item => item.issues.includes("kind")).length, diagnostics: diagnostics.sort((left, right) => left.id.localeCompare(right.id)) };
 }
 
 function kindTag(kind: HomeProfileKind): string {

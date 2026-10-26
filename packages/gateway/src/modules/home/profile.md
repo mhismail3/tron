@@ -11,8 +11,8 @@ complete migration. No existing label, content or historical revision is removed
 
 Each activation carries a metadata-only discovery index: file names, active/total
 classified counts, revision fingerprints and explicit read instructions. The index
-pages sixteen files at a time; it discloses more files rather than silently dropping
-them. It contains no note titles or bodies. A fingerprint changes when a note's
+pages at most sixteen files and sixteen diagnostic references at a time; `offset`
+advances both metadata windows and discloses remaining rows rather than dropping them. It contains no note titles or bodies. A fingerprint changes when a note's
 revision changes, not because a classifier reinterpreted its text.
 
 Home reads `profile {action:"read", file:"core"}` (or `home` or `scopes/<name>`)
@@ -20,8 +20,11 @@ when it needs the content. Omitting `file` reads the index. `offset` pages the i
 or the chosen file. File reads return up to sixteen exact records with IDs,
 revisions, kind, status, confirmation, full note content and provenance; `nextOffset`
 identifies remaining records. Retired/superseded records stay readable with their
-status, never silently active. An invalid kind-label set is reported as unclassified,
-not inferred into a kind. Unavailable/corrupt Knowledge is not an empty profile.
+status, never silently active. Invalid kind or partition labels produce exact
+ID/revision diagnostic references for explicit Knowledge reads and repair, not an
+inferred kind or Core assignment. Malformed metadata never hides healthy records;
+only genuinely unlabelled flat notes read under Core. The existing native list's
+unclassified count remains kind-only. Unavailable/corrupt Knowledge is not an empty profile.
 
 Home chooses interpretation, relevance and worker brief content. Gateway performs
 no semantic selection, inferred scope routing or automatic content insertion, and
@@ -50,8 +53,11 @@ authority. Contextual fact edits retain their existing evidence/confirmation rul
 `KnowledgeStore.partitionProfile` owns the admitted SQL transaction. Its caller
 supplies every ID, exact expected head and destination; storage never infers a
 mapping from text, kind, confirmation or project. Complete migration includes
-inactive members. Excluded records, stale/incomplete mappings, invalid labels or
-bounds refuse before mutation rather than being silently omitted or truncated.
+inactive members. Excluded records, stale/incomplete mappings, invalid destination
+labels or bounds refuse before mutation rather than being silently omitted or truncated.
+Explicit reorganization can repair malformed stored partition labels: it replaces
+only `home-file-*` labels, retaining every other value and the original histories.
+No repair destination is inferred, and reads never normalize stored labels.
 
 An owner-only bounded recovery backup contains every original head and immutable
 historical revision plus every prepared replacement identity. It is synchronized

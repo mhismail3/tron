@@ -137,6 +137,20 @@ it("a valid-JSON but altered backup cannot rewrite text or discard a historical 
   await writeFile(result.backup, bytes);
 });
 
+it("malformed partition labels can be explicitly normalized without inferring a destination or changing other data", async () => {
+  const f = await fixture();
+  const note = f.records[0]!;
+  if (note.kind !== "note") throw new Error("Expected note");
+  const malformed = (await f.store.updateNote({ commandId: "partition-malformed-seed", recordId: note.id, expectedRevision: note.revisionId, record: { ...note, content: { ...note.content, tags: [...note.content.tags!, "home-file-core", "home-file-home"] } } })).record;
+  const result = await f.store.partitionProfile({ commandId: "partition-explicit-repair", mode: "reorganize", assignments: [{ id: malformed.id, expectedRevision: malformed.revisionId, file: "scopes/repaired" }] });
+  const after = await f.store.read(note.id);
+  expect(after).toEqual({ ...malformed, revisionId: after!.revisionId, content: { ...malformed.content, tags: [...note.content.tags!, "home-file-scopes-repaired"] } });
+  expect(await Promise.all(f.records.slice(1).map(record => f.store.read(record.id)))).toEqual(f.records.slice(1));
+  const backup = JSON.parse(await readFile(result.backup!, "utf8"));
+  expect(backup.originals[0].record).toEqual(malformed);
+  expect(backup.originals[0].history).toHaveLength(3);
+});
+
 it("profile receipt references are invalidated by forget, and cannot resurrect or replay forgotten data", async () => {
   const f = await fixture();
   const request = { commandId: "partition-forget-original", mode: "migrate" as const, assignments: f.assignments };

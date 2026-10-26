@@ -68,12 +68,12 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
         const owner = knowledge();
         if (!owner) return answer({ status: "unavailable", action: "read" }, "Knowledge is unavailable; no profile content was selected.");
         const read = await readHomeProfile(owner);
-        if (!request.file) return answer({ status: "read", items: [], unclassified: read.unclassified, index: profileIndex(read, request.offset) }, profileIndex(read, request.offset));
+        if (!request.file) return answer({ status: "read", items: [], unclassified: read.diagnostics.length, index: profileIndex(read, request.offset) }, profileIndex(read, request.offset));
         const file = request.file as ProfileFile;
         const offset = request.offset ?? 0;
-        const all = read.items.filter(item => (item.file ?? "core") === file);
+        const all = read.items.filter(item => item.file === file || (item.file === undefined && file === "core"));
         const items = all.slice(offset, offset + 16).map(item => ({ ...profileListItem(item), file, provenance: item.record.provenance, content: item.record.content }));
-        const details = { status: "read" as const, file, items, unclassified: read.unclassified, ...(offset + items.length < all.length ? { nextOffset: offset + items.length } : {}) };
+        const details = { status: "read" as const, file, items, unclassified: read.diagnostics.length, ...(offset + items.length < all.length ? { nextOffset: offset + items.length } : {}) };
         return answer(details, JSON.stringify(details));
       }
       const changes = access();

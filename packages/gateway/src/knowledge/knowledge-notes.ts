@@ -10,11 +10,12 @@ export const PROFILE_FILE_TAG = "home-file-";
 export const PROFILE_FILE_PATTERN = "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$";
 const FILE_NAME = new RegExp(PROFILE_FILE_PATTERN);
 export function validProfileFile(file: string): file is ProfileFile { return FILE_NAME.test(file); }
-export function profileFile(tags: readonly string[] = []): ProfileFile | undefined {
+/** undefined is an unlabelled flat note; null is malformed metadata, never Core. */
+export function profileFile(tags: readonly string[] = []): ProfileFile | null | undefined {
   const labels = tags.filter(tag => tag.startsWith(PROFILE_FILE_TAG));
   if (!labels.length) return undefined;
   const file = labels[0]!.slice(PROFILE_FILE_TAG.length).replace(/^scopes-/, "scopes/");
-  if (labels.length !== 1 || !validProfileFile(file)) throw new GatewayError("invalid_request", "Profile note has invalid partition labels");
+  if (labels.length !== 1 || !validProfileFile(file)) return null;
   return file;
 }
 export function profileFileTags(tags: readonly string[], file?: ProfileFile): string[] {

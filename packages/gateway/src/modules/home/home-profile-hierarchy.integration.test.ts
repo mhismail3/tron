@@ -1,7 +1,53 @@
 import { expect, it } from "vitest";
-import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, say, command } from "../../../test-support/home-profile-fixture.js";
+import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, recordCase, say, command } from "../../../test-support/home-profile-fixture.js";
 
 profileReportFile("test-results/home-profile/hierarchy.json");
+
+it("malformed partition labels leave valid discovery/read intact and disclose exact repair references", async () => {
+  const f = await fixture("hierarchy-malformed");
+  const seeded = [];
+  for (const [title, labels] of [["Valid context stays readable.", ["kind-fact", "home-file-core"]], ["Bad file remains recoverable.", ["kind-fact", "home-file-unknown"]], ["Ambiguous file stays unassigned.", ["kind-fact", "home-file-core", "home-file-home"]], ["Unknown kind remains a canonical note.", ["kind-unknown"]]] as const) {
+    seeded.push((await f.store.createNote({ commandId: command("malformed-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "agent", source: "malformed-fixture", evidence: [] }, relations: [], content: { title, role: "fact", confirmed: false, tags: ["home-profile", ...labels] } } })).record);
+  }
+  const turn = await homeActivation(f, "Inspect the index without choosing a repair.", [profileCall({ action: "read" }, "malformed-index"), say("inspection only")]);
+  const result = turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "malformed-index")?.details as { status: string; index: string; unclassified: number };
+  expect(result.status).toBe("read");
+  expect(result.index).toContain("core: 1 active / 1 total");
+  expect(result.unclassified).toBe(3);
+  for (const note of seeded.slice(1)) { expect(result.index).toContain(note.id); expect(result.index).toContain(note.revisionId); }
+  for (const note of seeded) expect(turn.first.systemPrompt).not.toContain(note.kind === "note" ? note.content.title : "unexpected");
+  const read = await homeActivation(f, "Read only Core.", [profileCall({ action: "read", file: "core" }, "malformed-core"), say("read")]);
+  const core = read.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "malformed-core")?.details as { items: Array<{ id: string }> };
+  expect(core.items.map(item => item.id)).toEqual([seeded[0]!.id]);
+  expect(await Promise.all(seeded.map(note => f.store.read(note.id)))).toEqual(seeded);
+  recordCase("malformed-partition-isolation", { diagnosticNotes: result.unclassified, coreReadIds: core.items.map(item => item.id), unchangedRevisions: seeded.map(note => note.revisionId) });
+});
+
+it("file and diagnostic metadata both page without inserting note text or dropping references", async () => {
+  const f = await fixture("hierarchy-pages");
+  const scoped = [], diagnostics = [];
+  for (let index = 0; index < 17; index++) {
+    for (const valid of [true, false]) {
+      const record = (await f.store.createNote({ commandId: command("metadata-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "agent", source: "metadata-pages", evidence: [] }, relations: [], content: { title: `Context body ${valid ? "scoped" : "diagnostic"} ${index}.`, role: "fact", confirmed: false, tags: ["home-profile", "kind-fact", valid ? `home-file-scopes-s${index}` : "home-file-unknown"] } } })).record;
+      (valid ? scoped : diagnostics).push(record);
+    }
+  }
+  const windows = [];
+  for (const offset of [0, 16]) {
+    const turn = await homeActivation(f, "Read metadata only.", [profileCall({ action: "read", offset }, `metadata-page-${offset}`), say("read")]);
+    const result = turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === `metadata-page-${offset}`)?.details as { status: string; index: string };
+    expect(result.status).toBe("read");
+    expect(result.index.split("\n").filter(line => line.startsWith("- ")).length).toBeLessThanOrEqual(32);
+    for (const note of [...scoped, ...diagnostics]) if (note.kind === "note") expect(result.index).not.toContain(note.content.title);
+    windows.push(result.index);
+  }
+  expect(windows[0]).toContain("offset=16");
+  expect(windows[1]).not.toContain("More metadata");
+  for (let index = 0; index < scoped.length; index++) expect(windows.join("\n")).toContain(`- scopes/s${index}:`);
+  for (const note of diagnostics) expect(windows.join("\n")).toContain(`id=${note.id} revisionId=${note.revisionId}`);
+  expect(await Promise.all([...scoped, ...diagnostics].map(note => f.store.read(note.id)))).toEqual([...scoped, ...diagnostics]);
+  recordCase("paged-file-and-diagnostic-discovery", { metadataWindowBytes: windows.map(value => Buffer.byteLength(value)), scopedNotes: scoped.length, diagnosticNotes: diagnostics.length });
+});
 
 it("new profile content is discoverable but never automatically inserted into Home", async () => {
   const f = await fixture("hierarchy-default");

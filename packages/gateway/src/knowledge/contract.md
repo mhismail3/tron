@@ -240,5 +240,7 @@ owner-only ≤ 64 MiB backup before any body mutation, then one SQL head commit.
 Recovery validates exact originals/history and adopts those same identities;
 rescanned identical destinations create no revisions. Invalid, stale, incomplete,
 excluded or over-bound plans refuse without truncation or inferred classification.
+Malformed stored partition labels remain diagnostic/unassigned until an explicit
+reorganization replaces just those owner labels; valid records remain discoverable.
 This is storage recovery, not canonical Changes/undo publication; the
 [Home profile owner](../modules/home/profile.md) owns that audit boundary.
