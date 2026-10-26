@@ -128,7 +128,7 @@ extension RealGatewayPairAndChatUITests {
         let field = app.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 15), app.debugDescription)
         field.typeText(name)
-        let model = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS 'tron-e2e/'", name)).firstMatch
+        let model = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@ AND label CONTAINS 'tron-e2e/'", name)).firstMatch
         XCTAssertTrue(model.waitForExistence(timeout: 30), app.debugDescription)
         model.tap()
         XCTAssertTrue(app.buttons["Save"].waitForExistence(timeout: 15), app.debugDescription)
