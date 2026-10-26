@@ -192,6 +192,23 @@ describe("blocking settings approval", () => {
     } finally { await f.home.abort("agent"); await f.prompting; }
   });
 
+  it("astral tags and other default-ignorable characters cannot hide reason or value text", async () => {
+    const value = "visible\u{e0041}\u2060\u00ad\u180e\u115f\u1160\u3164\ufff9\ufffa\ufffbend";
+    const f = await pendingApproval({}, [
+      { key: "context.compaction.instructions", layer: "session", op: "set", value },
+    ], true, "Reason\u{e0041}\u2060tail");
+    try {
+      const context = f.interaction.form!.questions[0]!.context!;
+      expect(context).toContain("Reason\\udb40\\udc41\\u2060tail");
+      expect(context).toContain("visible\\udb40\\udc41\\u2060\\u00ad\\u180e\\u115f\\u1160\\u3164\\ufff9\\ufffa\\ufffbend");
+      expect(context).toContain("Approve applies only this diff. Deny changes nothing.");
+      f.answer("deny");
+      await f.prompting;
+      await waitFor(() => !f.home.isBusy, "astral escaped diff denial settles");
+      await saveCase("astral-format-diff", { interaction: f.interaction });
+    } finally { await f.home.abort("agent"); await f.prompting; }
+  });
+
   it("a mixed valid/refused dry run fails the whole bundle just like its real request", async () => {
     const f = await fixture();
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
