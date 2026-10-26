@@ -25,6 +25,7 @@ extension RealGatewayPairAndChatUITests {
             XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
             gear.tap()
             XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
+            expandAgentSheet(app, title: "Global Settings")
             keepScreenshot(app, name: "2010-global-root-top-\(appearance)")
             let agentSettings = app.buttons["settings-link-Agent Settings"]
             revealBelowNavigationBar(app, agentSettings)
@@ -32,6 +33,7 @@ extension RealGatewayPairAndChatUITests {
             keepScreenshot(app, name: "2010-global-root-system-\(appearance)")
             agentSettings.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Agent Settings"].waitForExistence(timeout: 30), app.debugDescription)
+            expandAgentSheet(app, title: "Agent Settings")
             keepScreenshot(app, name: "2010-agent-settings-top-\(appearance)")
             for (role, label) in [("worker", "Worker models"), ("subagent", "Subagent models"), ("background", "Background models")] {
                 let row = app.descendants(matching: .any)["settings-row-model.queue_role_\(role)_"]
@@ -40,6 +42,7 @@ extension RealGatewayPairAndChatUITests {
                 XCTAssertTrue(edit.waitForExistence(timeout: 15), "Queue has no editor: \(row.debugDescription)")
                 edit.tap()
                 XCTAssertTrue(app.navigationBars.staticTexts[label].waitForExistence(timeout: 15), app.debugDescription)
+                expandAgentSheet(app, title: label)
                 keepScreenshot(app, name: "2010-queue-\(role)-empty-\(appearance)")
                 addQueueModel(app, named: "Tron E2E Model")
                 addQueueModel(app, named: "Tron E2E Alternate")
@@ -74,6 +77,17 @@ extension RealGatewayPairAndChatUITests {
             for _ in 0..<5 { app.swipeUp() }
             keepScreenshot(app, name: "2010-agent-settings-more-\(appearance)")
             app.terminate()
+        }
+    }
+
+    @MainActor
+    private func expandAgentSheet(_ app: XCUIApplication, title: String) {
+        let heading = app.navigationBars.staticTexts[title].firstMatch
+        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        for _ in 0..<3 where heading.frame.minY > 120 {
+            origin.withOffset(CGVector(dx: 60, dy: heading.frame.midY))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: heading)], timeout: 2)
         }
     }
 

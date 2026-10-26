@@ -5,7 +5,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { fauxProvider } from "@earendil-works/pi-ai";
+import { fauxProvider, fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { ModelQueueOwner } from "../providers/model-queue.js";
+import { ProviderUsageOwner } from "../providers/provider-usage.js";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../kernel/resources/trust-service.js";
@@ -114,7 +116,7 @@ async function fixture() {
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
     broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
-  return { root, tronHome, agentDir, project, trust, registry, service, settingsModel, settingsChanges, model, modelKey, faux };
+  return { root, tronHome, agentDir, project, trust, registry, service, settingsModel, settingsChanges, modelRuntime, model, modelKey, faux };
 }
 
 /** What pi's own SettingsManager resolves for each key it owns: the oracle. */
@@ -344,6 +346,11 @@ describe("settings renderer contract", () => {
   it("offers canonical queue editors at Global and Home, preserving ordered saves, empty overrides and inheritance", async () => {
     const f = await fixture();
     const evidence: unknown[] = [];
+    f.registry.setSettings(f.settingsModel, f.settingsChanges);
+    const queue = new ModelQueueOwner({ runtime: f.modelRuntime, usage: new ProviderUsageOwner(),
+      queue: role => f.registry.modelQueueOf(role, "home") });
+    f.faux.setResponses(Array.from({ length: 3 }, () => async (_context, _options, _state, model) =>
+      fauxAssistantMessage(`Queue editor provider request: ${model.id}`)));
     for (const role of ["worker", "subagent", "background"] as const) {
       const key = `model.queue[role=${role}]`;
       const resolve = async (target: { kind: "global" | "home" }) => await f.service.invoke(subscribed(), "settings.resolve", {
@@ -371,6 +378,13 @@ describe("settings renderer contract", () => {
       await change("global", "set", values);
       expect(row(await resolve({ kind: "home" }), key).value).toEqual(values);
       await change("home", "set", [...values].reverse());
+      expect(await f.registry.modelQueueOf(role, "home")).toEqual([...values].reverse());
+      const completion = await queue.complete(role, () => ({ context: {
+        messages: [{ role: "user", content: "Verify saved queue routing", timestamp: Date.now() }],
+      } }));
+      expect(`${completion.model.provider}/${completion.model.id}`).toBe(values[1]);
+      expect(completion.message.content).toContainEqual({ type: "text", text: `Queue editor provider request: ${completion.model.id}` });
+      evidence.push({ role, effectiveModel: completion.model.id, message: completion.message });
       expect(row(await resolve({ kind: "home" }), key).value).toEqual([...values].reverse());
       expect(row(await resolve({ kind: "global" }), key).value).toEqual(values);
       await change("home", "set", [values[1]!]);

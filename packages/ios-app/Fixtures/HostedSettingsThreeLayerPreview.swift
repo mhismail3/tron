@@ -105,7 +105,7 @@ struct HostedSettingsThreeLayerPreview: View {
 
     private var settings: some View {
         page(home ? "Home Settings" : "Session Settings") {
-            SettingsGroupCard(.agent) {
+            TronSettingsGroup("Settings", accent: .tronPrimary) {
                 link("Models", "Models, thinking, and workers", "cpu") { modelRows }
                 if !home {
                     TronSettingsDivider()
