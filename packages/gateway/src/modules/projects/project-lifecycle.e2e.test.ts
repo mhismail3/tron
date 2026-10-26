@@ -163,6 +163,24 @@ describe("Gateway project lifecycle", () => {
     evidence.push({ nativeEligibility: { row, unsupported, linked, names } });
   });
 
+  it("native folder paths and cursors are exact and never trim into another project", async () => {
+    const f = await fixture();
+    await f.decide(await f.create("exact-native"));
+    await mkdir(f.path("exact-native "));
+    await mkdir(f.path("z-native"));
+    const row = await f.service.invoke(phone, "projects.inspect", { cwd: f.path("exact-native ") }) as unknown as NativeRow;
+    expect(row.path).toBe(f.path("exact-native "));
+    expect(Object.values(row.eligibility).every(item => !item.allowed)).toBe(true);
+    const first = await f.service.invoke(phone, "projects.list", { limit: 1 }) as unknown as NativePage;
+    const second = await f.service.invoke(phone, "projects.list", { limit: 1, after: first.nextCursor }) as unknown as NativePage;
+    const third = await f.service.invoke(phone, "projects.list", { limit: 1, after: second.nextCursor }) as unknown as NativePage;
+    expect([first, second, third].flatMap(page => page.projects.map(project => project.name))).toEqual(["exact-native", "exact-native ", "z-native"]);
+    expect(third.nextCursor).toBeNull();
+    await expect(f.service.invoke(phone, "projects.request", { commandId: `native-exact-${++command}`,
+      action: "untrust", name: "exact-native ", reason: "Never reinterpret an unsupported folder" })).rejects.toMatchObject({ code: "invalid_request" });
+    expect((await f.trust.inspect(f.path("exact-native"))).effectiveDecision).toBe(true);
+  });
+
   it("native reads cancel on disconnect while accepted commands survive and cannot spoof their actor or approval", async () => {
     const f = await fixture();
     const controller = new AbortController();

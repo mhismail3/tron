@@ -82,7 +82,9 @@ routing uses the same owner as the agent tool, not a tool invocation from the UI
 - `projects.list({limit?, after?})` returns `{workspace, projects, nextCursor}`.
   Limit is 1–50 (default 25); cursor is the last returned name. It sorts visible
   direct Workspace folders/symlinks, scanning at most 1,000 entries. Hidden
-  archives are not listed. Reads never adopt folders, grant trust or reserve moves.
+  archives are not listed. Folder paths/names and cursors retain exact whitespace;
+  unsupported names are never trimmed into another project. Reads never adopt
+  folders, grant trust or reserve moves.
 - `projects.inspect({cwd})` reads one absolute folder path, including saved folders
   outside Workspace. Each row is `{name, path, trust, eligibility}`; trust is the
   existing TrustInspection or null for unsafe/uninspectable paths. Eligibility has
