@@ -30,7 +30,23 @@ result and worker-state interfaces. `settings-types.ts` owns value validation, f
 ordered queue summaries, Pi-compatible tool-selection composition and neutral resolver inputs
 (store snapshots, outside marks, floor overrides, Git state and option/format sources). `settings-record.ts` owns append-only audit
 segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
-approvals, their admission bounds, settlement, expiry and untold outcomes.
+approvals (settings changes and registered approval actions), their admission bounds,
+settlement, expiry and untold outcomes; composition calls `settings-change.ts`'s `start()`
+to arm one timer for the earliest pending deadline and `onOutcome` nudges Home when an
+outcome settles. Known later deadlines are armed before expiry I/O, so a transient failure
+cannot disarm them and a persistently bad store is not retried immediately.
+Constructing an inspection-only owner starts no background work.
+Expiry shares each target's decision stripe. `dispose()` cancels/fences arming and joins
+accepted expiry work before composition releases the stores. Outcome selection does not
+consume requests; canonical custom-entry request IDs acknowledge delivery within an
+explicit requester-ID scope. Home supplies its chapter ledger and fitting-prefix predicate;
+ordinary runtimes supply their singleton identity. Admission reserves at most 400 outcome
+slots (pending and settled together), refusing new requests rather than evicting old ones. Approval
+actions claim execution durably before effects. The first awaited `start()` recovers
+pre-existing claims as uncertain failures without replay; concurrent/repeated start
+and dispose join that recovery through the existing arm-work owner.
+Ordinary selection, expiry and arming exclude execution claims, so delivery does not
+join this owner's live action effects.
 `scope-resolution.ts` owns binding admission from declared Session/Project permissions,
 canonical targets, the public/storage scope mapping and the canonical sorted-qualifier
 instance identity used by resolution badges and outside-change observation.
@@ -46,7 +62,7 @@ validation; admin owns the migration transaction, backups and publication.
 ## Contract
 
 `SettingsToolAccess` resolves and changes the current session settings and drains
-its pending outcomes. Admin loads stores, supplies runtime option/format sources
+its pending outcomes as one typed `SettingsOutcomeMessage` (`tool-contract.ts`). Admin loads stores, supplies runtime option/format sources
 and applies concrete store bindings; the kernel owns read/change policy and
 transaction order. The session runtime
 supplies its own identity and appliers. Audit records
@@ -62,16 +78,34 @@ are not settings truth, and pending approvals never apply themselves.
 `SettingsToolAccess`, `ChangeRequest`, `ChangeResult`, `Resolution`,
 `SettingsModel`, `SettingsChangePath`, `SettingsChangeRecord`, `SettingsApprovals`.
 
+## Committed Home audit publication
+
+Home calls `validateSubjectAudit(writes, context, replayAt)` before domain effects,
+then freezes those original ordered `SubjectWrite[]`, `SubjectContext` and timestamp
+in its existing backup. After proving the domain committed, it calls
+`publishSubjectAudit(writes, context, replayAt)` for initial publication or audit-only
+recovery. Do not nest it inside `auditSubject` or replay domain effects. Command ID
+is the sole operation identity; duplicate write IDs and changed replay inputs refuse.
+The existing Changes mutex publishes one identity-addressed, closed group through
+one index cut, bounded to 1 MiB. Retry proves the same file, directory and index
+are durable, including an already indexed group. Normal Home undo reads the whole
+group. Home owns its opaque envelope, validation and forget/privacy handling;
+Knowledge remains the sole snapshot/backup/cleanup owner. This API creates no
+backup, migration journal or domain recovery engine.
+
 ## Signals
 
 Callers own persistence failure diagnostics; these stores propagate write failures.
+`TRON_SETTINGS_EXPIRY_FAILED` means a background expiry attempt failed; retained requests
+are revisited at the next known deadline or foreground admission, not in a tight retry loop.
 
 ## Verify
 
 ```bash
 scripts/tron test gateway src/admin/settings-approvals.lock.integration.test.ts \
   src/admin/admin.store.lock.integration.test.ts \
-  src/admin/settings-change.integration.test.ts src/admin/settings-migration.e2e.test.ts
+  src/admin/settings-change.integration.test.ts src/admin/settings-migration.e2e.test.ts \
+  src/admin/settings-subject-audit.e2e.test.ts
 ```
 
 The real settings and run locks cover consumers of this contract.

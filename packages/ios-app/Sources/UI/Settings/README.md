@@ -9,8 +9,9 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
-  `SettingsChoiceSlider`, `SettingsNumberSlider`, `SettingsAutosave`.
-- Audit and approvals: `SettingsChangesView`, `SettingsChangeRow`, `SettingsApprovalsSection`.
+  `SettingsChoiceSlider`, `SettingsAutosave`.
+- Audit and approvals: `SettingsChangesView`, `SettingsChangeRow`, `SettingsApprovalSheet`
+  and `SettingsApprovalRequestSummary` (in `SettingsApprovalsSection.swift`).
 - Agent configuration: `ConfigurationSlider(Surface)`,
   `CustomModelsSettingsView` with `CustomModelDraftTransformation`, `DefaultToolsSettingsSection`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
@@ -28,9 +29,10 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Compaction, Trusted Projects, More Settings), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
   System (slate: Mac Terminal, Push Notifications, Setup, Logs). The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
-  Models includes thinking budgets and offered models beside worker queues. More Settings starts
-  with Agent changes (Agent approvals), then connection, queue and retry controls; there is no
-  Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
+  Models contains direct model/thinking and the task budget. Routine settings have no editor
+  exposure; explicit values retain read-only Reset/Revert and Project inspection. Compaction
+  appears only while retained values need inspection or Revert. More Settings contains Agent
+  changes and the HTTP proxy; there is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
   groups without duplicating them in More Settings.
   Notifications and Changes sit in the toolbar. Dashboard Settings exposes only global scope.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
@@ -38,18 +40,23 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   (the nearest saved decision governs).
 - **Appearance.** Theme selection writes iPhone-local UserDefaults immediately and reloads in
   a fresh process. Emerald, Deep Burgundy and Olive Gold share adaptive primary roles;
-  semantic statuses and resource identities do not change with the theme. Section layouts use
+  semantic statuses and resource identities do not change with the theme. Explicit theme
+  selection also applies its bundled alternate app icon, with iOS's automatic change alert.
+  Selection rows serialize while UIKit applies the icon; failure leaves the theme applied and
+  explains how to retry. Restores and Light/Dark/Auto changes do not request icon changes.
+  Home Screen light/dark/clear/tinted renditions remain system/user-controlled and need not match
+  the in-app color mode. Section layouts use
   `TronSettingsSections`, including renderer-driven and conditional groups. Settings subsheets
   opt in with `hidesLoneHeading: true`: one container has no heading, multiple containers retain
   their headings, and explanatory detail remains. Top-level settings keep all group headings.
-- **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `number`, `text`,
+- **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `text`,
   `secret`, `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
   order. An unimplemented control renders its `display` read-only; an
-  undeclared group shows under its id: a value is never hidden. Options come from
+  undeclared group shows under its id. The Gateway declaration owns row exposure. Options come from
   `settings.options`, re-requested when a `dependsOn` key changes; catalog pages fence every
   completion and stop on repeated cursors. Choices open picker sheets of `TronCatalogOptionRow`
-  (native menus fail inside nested sheets, #877); numbers and ordered choices use the shared
-  anchored slider with Gateway-served bounds; a tap anywhere outside it closes and saves it, even
+  (native menus fail inside nested sheets, #877); ordered choices use the shared
+  anchored slider with Gateway-served choices; a tap anywhere outside it closes and saves it, even
   below a short embedded section. Embedded renderers inherit the enclosing sheet's slider host;
   only standalone renderers install one, so the editor uses the sheet viewport rather than its card.
   Session and Home settings place sections in Global's group
@@ -63,7 +70,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView` (scopes:
   Project, Session, Global); Home writes its saved settings, a chat its own Session scope.
   Both reuse Global's renderer and editors. Manage model cards select the three chat-model keys:
-  catalog header/Switch Model, Effort and the current model-qualified Context Window. They use the
+  catalog header/Switch Model, Effort and an explicit model-qualified Context Window for inspection/Revert. They use the
   same writes, approvals and Revert path; changing the card changes no scope semantics. The model
   header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
   Home Settings has one untitled Settings container (Models: workers/delegation only, Tools, More Settings).
@@ -76,10 +83,16 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Project/Session/Global, pins approvals above history and keeps last-look per Mac. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
   entries never show their definition.
-- **Approvals.** `SettingsApprovalsSection` re-reads `settings.approvals` on its revision and
-  decides with `settings.decide` bound to the request digest, showing only Gateway text. It is
-  mounted in both Manage Home and Manage Session. The `settings-approval` push stages a decision for
-  two minutes; one matching request still needs an explicit confirmation tap.
+- **Approvals.** Chat request/outcome chips, push review and Changes reuse `SettingsApprovalSheet`.
+  It re-reads `settings.approvals` and displays the Gateway's exact values or registered action
+  preview. Only its red X/green check submits `settings.decide` with that displayed digest through
+  `SettingsTrustCoordinator`'s receipt owner; pending has no Done or bottom action bar, and swipe
+  dismissal leaves it pending. A two-minute push intent opens current requester candidates, never
+  auto-decides. Manage Home/Session have no duplicate waiting sections. Proven receipts and canonical
+  outcomes are read-only; missing pending state is not a terminal result. Historical request chips
+  resolve a bounded history cut by request ID and every original change ID; incomplete cuts remain
+  unavailable. Failure text retains uncertainty and is selectable/wrapping. Global Changes keeps
+  fenced Undo for applied/approved values, never registered actions.
 - **Providers.** Configured above Available. Connect/Configure opens one sheet showing every
   advertised method; the visible sheet owns the operation's prompts, and an answered choice
   restarts with `replaceOperationId` (`ProviderAuthSelectionTrail`). Usage rows reserve a skeleton
@@ -118,7 +131,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 ## Invariants
 
 - No per-key native editors, defaults, placement lists or guidance: the Gateway schema is the
-  single source, and nothing is hidden.
+  single source for editing exposure, retained overrides and Project inspection.
 - Opening or dismissing a sheet never writes.
 - Accepted mutations stay with their receipt owner; presentation reads are disposable and fenced.
 - iOS never handles provider tokens or credential values.
@@ -147,10 +160,17 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testSettingsRowInspectionAndActionsStayIndependent \
   --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
 scripts/ios-gateway-e2e-test run-ui \
-  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testChatSettingsServeEveryKeyAndEditAtChatLayer \
-  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testMacSettingsServeEveryKeyAndEditAtMacLayer \
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testRoutineEditorsDisappearAndExplicitGlobalValueResets \
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testSessionSettingsOmitsInheritedRoutineEditors \
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testGlobalSettingsServeExposedEditorsAndEditAtGlobalScope \
   --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsExposeReadOnlyOverrides
 ```
+
+`TronSettingsScopeRowsUITests` checks read-only queue values, independent Revert and Project
+inspection. `TronSmokeUITests` keeps direct model/thinking, shared list/numeric-map editing,
+approvals and Changes coverage. The surviving memory/provider/queued-editor journeys in
+`TronForegroundCaptureUITests` own native-stack refresh, draft/focus preservation and invalid-child
+retirement; retired Worker thinking and Transport editor cases do not define that lifecycle.
 
 Hosted values are scripted, not persistence evidence. Real-UI journeys read their key inventory
 from the fixture Gateway's built schema. The [three-layer design](../../../../gateway/docs/settings-three-layer-design.md)

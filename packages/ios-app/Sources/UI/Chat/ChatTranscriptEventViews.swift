@@ -42,8 +42,8 @@ extension View {
 
 /// One visual language for transcript events that are not conversation turns.
 /// Detail-bearing events are buttons with Liquid Glass; informational events
-/// remain noninteractive and flat. Error notices use a rounded rectangle so
-/// multiline diagnostics do not read like an oversized capsule.
+/// remain noninteractive and flat. Provider errors keep their flat rounded
+/// surface and the same centered alignment as other transcript event pills.
 struct ChatNotificationView: View {
     let presentation: ChatNotificationPresentation
     @Environment(AppModel.self) private var model
@@ -57,7 +57,7 @@ struct ChatNotificationView: View {
     }
 
     private var resolvedMaterial: ChatNotificationMaterial {
-        showsDetailAction ? .glass : presentation.material
+        presentation.errorRun != nil ? .flat : (showsDetailAction ? .glass : presentation.material)
     }
 
     var body: some View {
@@ -81,6 +81,7 @@ struct ChatNotificationView: View {
             )
             .allowsHitTesting(showsDetailAction)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+            .accessibilityIdentifier(presentation.errorRun.map { "chat-error-run-\($0.occurrences[0].id)" } ?? "")
             .contentTransition(.interpolate)
             // A runtime notification that stops showing progress is the one
             // notification change that animates. The transcript row renders
@@ -125,7 +126,8 @@ struct ChatNotificationView: View {
         ChatCompactPillSurface(
             tone: presentation.tone,
             material: resolvedMaterial,
-            interactive: showsDetailAction
+            interactive: showsDetailAction,
+            cornerRadiusOverride: presentation.errorRun == nil ? nil : ChatToolChipShapePolicy.cornerRadius
         ) {
             ChatCompactPillLabel(
                 icon: presentation.icon,
@@ -133,14 +135,21 @@ struct ChatNotificationView: View {
                 detail: presentation.detail,
                 tone: presentation.tone,
                 showsProgress: presentation.showsProgress,
-                titleWeight: .semibold,
+                titleWeight: presentation.errorRun == nil ? .semibold : .bold,
                 detailStyle: presentation.hasDetailSheet ? .summary : .status
-            )
+            ) {
+                if let run = presentation.errorRun, run.occurrences.count > 1 {
+                    Text("×\(run.occurrences.count)")
+                        .font(TronTypography.secondaryCodeDescription)
+                        .foregroundStyle(presentation.tone.primaryColor)
+                }
+            }
         }
     }
 
     private var accessibilityLabel: String {
-        [presentation.title, presentation.detail].compactMap { $0 }.joined(separator: ", ")
+        let count = presentation.errorRun.map { "\($0.occurrences.count) \($0.occurrences.count == 1 ? "error" : "errors")" }
+        return [presentation.title, presentation.detail, count].compactMap { $0 }.joined(separator: ", ")
     }
 
 }
@@ -153,7 +162,18 @@ struct ChatNotificationDetailSheet: View {
     let detailID: UUID
     @Environment(\.dismiss) private var dismiss
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if let run = presentation.errorRun {
+            ChatDetailSheet(title: run.sheetTitle, accent: presentation.tone.surfaceColor) {
+                ChatProviderErrorDetails(run: run).id(detailID)
+            }
+            .tronSettingsVisualTheme(accent: presentation.tone.surfaceColor)
+        } else {
+            ordinaryDetail
+        }
+    }
+
+    private var ordinaryDetail: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {

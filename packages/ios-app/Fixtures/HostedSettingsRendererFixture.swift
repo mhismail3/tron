@@ -117,7 +117,9 @@ struct HostedSettingsRendererFixture: View {
         NavigationStack {
             if ready {
                 Group {
-                    if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
+                    if ProcessInfo.processInfo.arguments.contains("-theme-icon-boundary") {
+                        HostedThemeIconFixture()
+                    } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
                        ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
                         let surface = ProcessInfo.processInfo.arguments[index + 1]
                         if surface.hasPrefix("worker-") {
@@ -138,6 +140,8 @@ struct HostedSettingsRendererFixture: View {
                         providerReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
                         PushNotificationsSettingsView()
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-inline-approval-boundary") {
+                        HostedInlineApprovalBoundaryFixture()
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
                         SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
@@ -237,9 +241,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var toolWrite = "none"
     func lastToolWrite() -> String { toolWrite }
     private var thinking = "high"
-    private var retries = 6
     private var invalidValue = ""
-    private var transport = "sse"
     private var blockImages = false
     private var focusMode = "calm"
     private var hasSecret = false
@@ -376,6 +378,17 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     }
 
     private func historyPage(_ params: [String: JSONValue]) -> JSONValue {
+        if ProcessInfo.processInfo.arguments.contains("-settings-inline-approval-boundary") {
+            return .object(["entries": .array(decided.keys.sorted().map { id in
+                .object(["changeId": .string("settled-\(id)"), "requestId": .string(id), "refersTo": .string("pending-\(id)"),
+                    "at": .string(ISO8601DateFormatter().string(from: Date())), "actor": .object(["kind": .string("agent")]),
+                    "target": .object(["kind": .string("global")]), "layer": .string("global"), "key": .string("run.retry.maxRetries"),
+                    "op": .string("set"), "tier": .string("approve"), "status": .string(decided[id] == true ? "approved" : "declined"),
+                    "before": .number(4), "after": .number(6), "presentation": .object([
+                        "label": .string("Request \(id)"), "actor": .string("Fixture agent"), "layer": .string("Global"),
+                        "display": .object(["before": .string("4 retries"), "after": .string("6 retries")])])])
+            }), "nextCursor": .null])
+        }
         guard params["key"] != nil || params["cursor"]?.stringValue == "fixture-next" else {
             return .object(["entries": .array([]), "nextCursor": .string("fixture-next")])
         }
@@ -499,18 +512,12 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             key("tools.active", group: "tools", value: .array(activeTools.map(JSONValue.string)), display: activeTools.joined(separator: ", "),
                 layer: HostedExtensionsReview.project ? "project" : "global", set: !HostedExtensionsReview.project, presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
                     extra: ["optionsSource": .object(["name": .string("catalog.tools"), "dependsOn": .array([])])])),
-            key("run.retry.maxRetries", group: "run", subgroup: "Retry", value: .number(Double(retries)), display: "\(retries) retries",
-                set: true, presentation: presentation("Retries", "How many times a failed request is retried.", 10, "essential", "number",
-                    extra: ["range": .object(["min": .number(0), "max": .number(100), "unit": .string("retries")]),
-                            "optionsSource": .object(["name": .string("fixture.retryRange"), "dependsOn": .array([])])])),
-            key("run.futureNumber", group: "run", value: .number(1), display: "Future numeric value",
-                presentation: presentation("Future number", "An unsupported numeric range remains visible.", 30, "advanced", "number",
-                    extra: ["range": .object(["min": .number(0), "max": .number(1e30)])])),
+            key("run.retry.maxRetries", group: "run", subgroup: "Retry", value: .number(6), display: "6 retries",
+                set: true, presentation: presentation("Retries", "How many times a failed request is retried.", 10, "essential", nil)),
             key("lab.invalidValue", group: "lab", value: .string(invalidValue), display: invalidValue.isEmpty ? "Ready" : invalidValue,
                 presentation: presentation("Validation", "A fixture value used to prove Gateway refusal.", 5, "essential", "text")),
-            key("run.transport", group: "run", value: .string(transport), display: transport == "sse" ? "Server-sent events" : "WebSocket",
-                presentation: presentation("Transport", "How requests reach the provider.", 20, "advanced", "choice",
-                    extra: ["options": .array([choice("sse", "Server-sent events"), choice("websocket", "WebSocket")])])),
+            key("run.transport", group: "run", value: .string("sse"), display: "Server-sent events", set: true,
+                presentation: presentation("Transport", "How requests reach the provider.", 20, "advanced", nil)),
             key("lab.focusMode", group: "lab", subgroup: "Experiments", value: .string(focusMode), display: focusMode.capitalized,
                 badges: [.object(["kind": .string("sparkle"), "label": .string("New")])],
                 presentation: presentation("Focus mode", "A choice this app was never told about.", 10, "essential", "choice",
@@ -576,10 +583,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 // The Gateway lists a chosen tool its catalog no longer offers, so it can be cleared.
                 .object(["value": .string(name), "label": .string(name), "disabledReason": .string("Not available here")])
             })])
-        case "run.retry.maxRetries":
-            return .object(["key": .string(key), "source": .string("fixture.retryRange"), "dependsOn": .array([]),
-                            "options": .array([]), "range": .object(["min": .number(0), "max": .number(10),
-                            "step": .number(2), "unit": .string("retries")])])
         case "model.thinking":
             // A model without reasoning offers no levels.
             let levels = model == "pro" ? [("off", "Off"), ("low", "Low"), ("medium", "Medium"), ("high", "High")] : []
@@ -607,9 +610,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             switch key {
             case "model.ref": model = value?.objectValue?["id"]?.stringValue ?? (change["op"]?.stringValue == "unset" ? "lite" : model)
             case "model.thinking": thinking = value?.stringValue ?? thinking
-            case "run.retry.maxRetries": retries = value?.intValue ?? retries
             case "lab.invalidValue": invalidValue = value?.stringValue ?? invalidValue
-            case "run.transport": transport = value?.stringValue ?? transport
             case "context.images.block": blockImages = value?.boolValue ?? blockImages
             case "tools.active":
                 activeTools = value?.arrayValue?.compactMap(\.stringValue) ?? activeTools
@@ -649,13 +650,15 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         return .object(object)
     }
 
-    private func presentation(_ label: String, _ help: String, _ order: Int, _ importance: String, _ control: String,
+    private func presentation(_ label: String, _ help: String, _ order: Int, _ importance: String, _ control: String?,
                               extra: [String: JSONValue] = [:]) -> JSONValue {
-        .object([
+        var fields: [String: JSONValue] = [
             "label": .string(label), "help": .string(help), "order": .number(Double(order)), "importance": .string(importance),
-            "control": .string(control), "valueKind": .string("fixture"),
+            "valueKind": .string("fixture"),
             "sessionOverridable": .bool(false), "projectSettable": .bool(false), "editable": .bool(true),
-        ].merging(extra) { $1 })
+        ]
+        if let control { fields["control"] = .string(control) }
+        return .object(fields.merging(extra) { $1 })
     }
 
     private func choice(_ value: String, _ label: String) -> JSONValue { .object(["value": .string(value), "label": .string(label)]) }

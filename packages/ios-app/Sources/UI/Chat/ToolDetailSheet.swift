@@ -483,9 +483,9 @@ struct ToolDetailCodeBlock: View {
     }
 }
 
-/// Chrome shared by sheets a tool detail opens: inline principal title (no
-/// reserved large-title region), Done, no drag indicator, parent insets.
-private struct ToolDetailChildSheet<Content: View>: View {
+/// Shared chat-detail shell for provider errors and nested tool calls: inline
+/// title, Done, native detents, top chrome and the standard content insets.
+struct ChatDetailSheet<Content: View>: View {
     let title: String
     var icon: String?
     let accent: Color
@@ -589,7 +589,7 @@ struct NestedToolCallDetailSheet: View {
     }
 
     var body: some View {
-        ToolDetailChildSheet(
+        ChatDetailSheet(
             title: ToolDetailPresentation.displayTitle(for: call.toolName),
             icon: ToolDetailPresentation.sheetTitleIcon(for: call.toolName),
             accent: accent

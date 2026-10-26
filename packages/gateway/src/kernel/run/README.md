@@ -23,7 +23,9 @@ K5 owns worker report/budget/reminder finish-turn policy and resumed-worker
 lease/bind/failure-release orchestration. Native pipeline installation passes the
 same frame, SDK runtime object and captured report owner, without copied state or
 an early diagnostic-sink read. Native `bindTaskWorker` remains the actual lane-protected validation/rebuild/publication
-backend; Registry has no worker-resume wrapper.
+backend; Registry has no worker-resume wrapper. Home uses the actual SessionOperations
+for canonical worker reads, leases and mutation ordering, with no duplicate worker input.
+K5 owns cold artifact proof; Native supplies the admitted resource input, not a proof wrapper.
 K5 also owns canonical subagent settlement. Its runtime port reads the actual
 native canonical/activity/controller projections and work owner, then calls native
 canonical append; no Slot settlement wrapper or duplicate token index exists.
@@ -56,6 +58,19 @@ actual K3 host; native frames do not select product modules or keep another list
 
 - `invocation-receipts.ts` and `context-delivery-receipts.ts`: canonical receipt
   parsing, folding, owned terminal facts and canonical inbox delivery; persisted bytes remain stable.
+  Settings wakes bind the actual admitted input and use `gateway:settings` attribution.
+  Home selects outcomes through its bounded, cancellable input envelope for both user
+  turns and wakes; the native before-agent-start hook selects only ordinary requesters.
+  A wake captures its actual request-policy cancellation cell and epoch before
+  asynchronous selection. Native Stop and retirement invalidate that same logical
+  lifetime across physical frame replacement; lane and SDK-send cuts reject stale
+  preparation. Ordinary sessions retain their physical cancellation lifetime.
+  Ordinary outcome acknowledgement requires the bounded canonical reader's durable
+  file-and-directory proof; failed proof defers without refusing the prompt.
+  Root supplies its actual settings instances directly to Home and installs the
+  same owners in Registry; there is no public Registry settings read detour.
+  Root starts expiry after initialization/observer setup. Registry disposal joins
+  that installed engine before releasing shared stores or Home's workspace.
 - `run-markers.ts`: durable per-operation crash/interruption evidence.
 - `run-persistence.ts`: sole pending-receipt join and durable-write fence, bounded
   retry/retention, conflicts and actual SDK stop/diagnostic cuts through the native frame.

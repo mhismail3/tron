@@ -10,13 +10,16 @@ const owner = new HomeOwner({
   trust: {} as never,
   workspace: new TronWorkspace(tronHome),
   // The crash path only seals a chapter, which never dispatches a task.
-  taskSessions: {} as never, taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
+  taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
   // Sealing never materializes a successor runtime or watches global resources.
-  runtimes: {} as never, agentDir: "/nonexistent-agent-dir",
+  runtimes: {
+    serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
+    noteSessionListChanged: () => {},
+    liveRuntime: () => undefined,
+  } as never, agentDir: "/nonexistent-agent-dir",
   // The crash path never reaches a learned-profile read, so no Knowledge owner exists.
   knowledge: () => undefined,
   sessions: {
-    serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
     chapterMetrics: async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true }),
     hasConversation: async () => false,
   } as never,

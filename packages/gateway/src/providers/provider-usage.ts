@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { upstreamAccountRefusal } from "../util/upstream-error.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 
 export const PROVIDER_USAGE_CAPABILITY = "provider-usage.v1";
@@ -402,9 +403,9 @@ function parseAnthropicOAuthUsage(body: unknown) {
  * page) is a refused read that proves nothing about the plan (#1337).
  */
 function openCodeGoForbidden(body: unknown): { status: ProviderStatus; message: string } | undefined {
-  const type = object(object(body)?.error)?.type;
-  if (type === "EntitlementError") return { status: "unsupported", message: "OpenCode Go reports no active Go subscription for this account" };
-  if (type === "AuthError") return undefined;
+  const refusal = upstreamAccountRefusal(body);
+  if (refusal === "entitlement") return { status: "unsupported", message: "OpenCode Go reports no active Go subscription for this account" };
+  if (refusal === "credential") return undefined;
   return { status: "unavailable", message: "OpenCode Go refused the usage request" };
 }
 function parseOpenCodeGo(body: unknown) {

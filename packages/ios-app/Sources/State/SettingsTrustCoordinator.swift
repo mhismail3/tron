@@ -184,18 +184,22 @@ final class SettingsTrustCoordinator {
     /// The maintainer's decision on one pending change, bound to the exact diff
     /// he saw by its digest. That diff is the decision's whole fence: the Gateway
     /// re-checks it against the stores, so no chat needs to be open to decide.
-    func decideApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws {
+    @discardableResult
+    func decideApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws -> SettingsChangeResult {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
         let params: [String: JSONValue] = [
             "commandId": .string(commandID), "requestId": .string(request.requestId),
             "digest": .string(request.digest), "approved": .bool(approved),
         ]
-        _ = try await mutationExecutor.performValue(method: "settings.decide", commandID: commandID) {
+        let value = try await mutationExecutor.performValue(method: "settings.decide", commandID: commandID) {
             try await client.requestValue("settings.decide", JSONValue.object(params))
         }
         try requireProfile(admittedProfileGeneration)
         approvalsRevision &+= 1
+        let result = try value.decode(SettingsChangeResult.self)
+        try result.throwIfRefused()
+        return result
     }
 
     /// Brings a target's snapshot up to `freshness`. A current snapshot is not read
@@ -225,7 +229,7 @@ final class SettingsTrustCoordinator {
     private func options(for resolution: SettingsResolution, target: JSONValue) async -> [String: SettingsOptionsResponse] {
         let sourced = resolution.keys.filter { setting in
             setting.presentation?.optionsSource != nil
-                && [.choice, .number, .checklist].contains(SettingsRowControl(negotiated: setting.presentation?.control))
+                && [.choice, .checklist].contains(SettingsRowControl(negotiated: setting.presentation?.control))
         }
         let client = client
         return await withTaskGroup(of: (String, SettingsOptionsResponse?).self) { group in

@@ -77,15 +77,11 @@ extension EnvironmentValues {
 }
 
 struct ConfigurationSliderRequest {
-    enum Editor {
-        case number(SettingsNumberSliderRequest)
-        case choice(SettingsChoiceSliderRequest)
-    }
     let session: ConfigurationSliderPresentation.Session
     let anchor: Anchor<CGRect>
     let sourceVerticalInset: CGFloat
     let accent: Color
-    let editor: Editor
+    let editor: SettingsChoiceSliderRequest
 }
 
 struct ConfigurationSliderPreference: PreferenceKey {
@@ -96,7 +92,7 @@ struct ConfigurationSliderPreference: PreferenceKey {
 }
 
 extension View {
-    /// Install outside scrolling content: both controls share one overlay and
+    /// Install outside scrolling content: choices use one overlay and
     /// cannot relayout rows, leak outside taps, or leave a hidden second editor.
     @ViewBuilder
     func tronConfigurationSliderHost(_ presentation: ConfigurationSliderPresentation,
@@ -120,16 +116,8 @@ private struct ConfigurationSliderHost: ViewModifier {
                 if let request, request.session == presentation.session {
                     GeometryReader { geometry in
                         let source = geometry[request.anchor].insetBy(dx: 0, dy: request.sourceVerticalInset)
-                        Group {
-                            switch request.editor {
-                            case .number(let editor):
-                                SettingsNumberSliderEditor(request: editor, anchor: request, source: source,
-                                                          availableSize: geometry.size, presentation: presentation)
-                            case .choice(let editor):
-                                SettingsChoiceSliderEditor(request: editor, anchor: request, source: source,
-                                                     availableSize: geometry.size, presentation: presentation)
-                            }
-                        }
+                        SettingsChoiceSliderEditor(request: request.editor, anchor: request, source: source,
+                                                  availableSize: geometry.size, presentation: presentation)
                         .id(request.session.id)
                     }
                     .transition(.identity)
@@ -170,18 +158,12 @@ struct ConfigurationSliderContainer<Content: View>: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
-    @ScaledMetric(relativeTo: .body) private var referencePanelHeight: CGFloat = 170
     @ScaledMetric(relativeTo: .body) private var choicePanelHeight: CGFloat = 140
     @AccessibilityFocusState private var sliderFocused: Bool
 
     private var target: CGRect {
         let width = min(480, max(1, availableSize.width - 36))
-        let preferredHeight: CGFloat
-        switch anchor.editor {
-        case .number(let request): preferredHeight = request.referenceValue == nil ? choicePanelHeight : referencePanelHeight
-        case .choice: preferredHeight = choicePanelHeight
-        }
-        let height = min(preferredHeight, max(1, availableSize.height - 24))
+        let height = min(choicePanelHeight, max(1, availableSize.height - 24))
         return CGRect(
             x: min(max(18, source.maxX - width), max(18, availableSize.width - width - 18)),
             y: min(max(12, source.midY - height / 2), max(12, availableSize.height - height - 12)),

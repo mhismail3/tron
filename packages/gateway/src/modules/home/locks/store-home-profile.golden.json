@@ -5,7 +5,7 @@
   "files": [
     {
       "path": "gateway/settings/changes/000000.jsonl",
-      "content": "<5353 bytes>"
+      "content": "<5853 bytes>"
     },
     {
       "path": "gateway/settings/changes/index.json",
@@ -38,7 +38,8 @@
           "role": "fact",
           "tags": [
             "home-profile",
-            "kind-fact"
+            "kind-fact",
+            "home-file-core"
           ],
           "title": "Works from an iPhone"
         },
@@ -66,7 +67,8 @@
           "role": "decision",
           "tags": [
             "home-profile",
-            "kind-standing-decision"
+            "kind-standing-decision",
+            "home-file-core"
           ],
           "title": "Lands with plain Git"
         },
@@ -101,7 +103,8 @@
           "role": "fact",
           "tags": [
             "home-profile",
-            "kind-fact"
+            "kind-fact",
+            "home-file-core"
           ],
           "title": "Works from an iPhone"
         },
@@ -136,7 +139,8 @@
           "role": "preference",
           "tags": [
             "home-profile",
-            "kind-preference"
+            "kind-preference",
+            "home-file-core"
           ],
           "title": "Prefers concise answers"
         },
@@ -171,7 +175,8 @@
           "role": "decision",
           "tags": [
             "home-profile",
-            "kind-standing-decision"
+            "kind-standing-decision",
+            "home-file-core"
           ],
           "title": "Lands with plain Git after tests"
         },
@@ -204,7 +209,8 @@
           "role": "preference",
           "tags": [
             "home-profile",
-            "kind-preference"
+            "kind-preference",
+            "home-file-core"
           ],
           "title": "Prefers concise answers"
         },
@@ -236,6 +242,7 @@
     "items": [
       {
         "confirmed": true,
+        "file": "core",
         "id": "<id>",
         "kind": "preference",
         "revisionId": "<id>",
@@ -244,6 +251,7 @@
       },
       {
         "confirmed": false,
+        "file": "core",
         "id": "<id>",
         "kind": "standing-decision",
         "revisionId": "<id>",
@@ -253,6 +261,7 @@
       },
       {
         "confirmed": true,
+        "file": "core",
         "id": "<id>",
         "kind": "standing-decision",
         "revisionId": "<id>",
@@ -262,6 +271,7 @@
       },
       {
         "confirmed": false,
+        "file": "core",
         "id": "<id>",
         "kind": "fact",
         "revisionId": "<id>",

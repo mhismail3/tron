@@ -849,20 +849,6 @@ struct ChatTranscriptPageRequest: Equatable {
     }
 }
 
-enum ChatProviderErrorPresentation {
-    static let unspecifiedNotFound = "The model provider returned an unspecified Not Found error. Check the selected model and provider connection, then try again."
-
-    static func message(_ raw: String) -> String {
-        let normalized = raw
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: ":", with: "")
-        return normalized == "error not found" || normalized == "not found"
-            ? unspecifiedNotFound
-            : raw
-    }
-}
-
 struct ChatStreamingResponseSignature: Equatable {
     let itemID: String
     let parts: [ChatMessagePart]
@@ -876,7 +862,7 @@ struct ChatStreamingResponseSignature: Equatable {
         }
         let visibleError = (item.errorMessage ?? "").isEmpty
             ? nil
-            : item.errorMessage.map(ChatProviderErrorPresentation.message)
+            : item.errorMessage
         guard !visibleParts.isEmpty || visibleError != nil else { return nil }
         itemID = item.id
         parts = visibleParts
@@ -941,6 +927,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     /// A nested `ask_user` call (for example from codemode) is still running inside this
     /// call, so its pending question opens from this row (#929).
     let hostsRunningNestedAskUser: Bool
+    let approvalRequest: SettingsApprovalReference?
     let display: DisplayProjection?
     let requestedDisplaySurface: DisplaySurface?
     let extensionOrigin: ExtensionToolOrigin?
@@ -970,6 +957,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         hostsRunningNestedAskUser = nested.contains {
             $0.objectValue?["toolName"]?.stringValue == "ask_user" && $0.objectValue?["status"]?.stringValue == "running"
         }
+        approvalRequest = tool.error || tool.isRunning ? nil : SettingsApprovalReference(result: tool.details ?? tool.response)
         display = tool.display
         requestedDisplaySurface = tool.display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? DisplayPresentationPolicy.invocationSurface(toolName: tool.toolName, request: tool.request)
@@ -1292,6 +1280,7 @@ enum ChatNotificationTone: Hashable, Sendable {
     case purple
     case subagent
     case warning
+    case success
     case error
     case neutral
 }
@@ -1317,6 +1306,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
     /// Compaction summaries remain interactive, but their long-form sheet
     /// content keeps the rounded container with flat rather than glass styling.
     let detailUsesGlassSurface: Bool
+    let errorRun: ChatProviderErrorRun?
 
     init(
         id: String,
@@ -1328,7 +1318,8 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         tone: ChatNotificationTone,
         material: ChatNotificationMaterial,
         expandsOnTruncation: Bool = false,
-        detailUsesGlassSurface: Bool = true
+        detailUsesGlassSurface: Bool = true,
+        errorRun: ChatProviderErrorRun? = nil
     ) {
         self.id = id
         self.semanticID = semanticID
@@ -1340,9 +1331,10 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         self.material = material
         self.expandsOnTruncation = expandsOnTruncation
         self.detailUsesGlassSurface = detailUsesGlassSurface
+        self.errorRun = errorRun
     }
 
-    var hasDetailSheet: Bool { material == .glass && body?.isEmpty == false }
+    var hasDetailSheet: Bool { errorRun != nil || (material == .glass && body?.isEmpty == false) }
     var showsProgress: Bool {
         semanticID == nil && (
             id == "runtime-working"
@@ -1619,6 +1611,15 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     /// liveness. A paged or temporarily partial finalized group is still
     /// historical evidence when every visible descriptor is terminal.
     var isRunning: Bool { tools.contains(where: \.isRunning) }
+    /// The projector assembles runs in canonical transcript/group order, not
+    /// result-arrival order. Within the final group, its declared invocation
+    /// index wins even when descriptors or mutable timing metadata disagree.
+    var latestInvocation: ChatToolDescriptor? {
+        guard let last = tools.last else { return nil }
+        guard last.groupFinalized == true, let groupID = last.groupId else { return last }
+        return tools.filter { $0.groupFinalized == true && $0.groupId == groupID }
+            .max { ($0.groupIndex ?? -1) < ($1.groupIndex ?? -1) }
+    }
     var failureCount: Int {
         tools.reduce(into: 0) { count, tool in
             count += (tool.error ? 1 : 0) + (tool.toolName == "codemode" ? tool.nestedFailureCount : 0)

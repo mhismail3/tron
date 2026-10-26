@@ -29,8 +29,6 @@ extension HomeSheet {
     @ViewBuilder func usageHeader(_ read: HomeManageDTO) -> some View {
         if let sessionID, let snapshot = model.sessionContextPresentation(for: sessionID) {
             HomeContextSummaryCard(snapshot: snapshot, read: read)
-            // Home-originated and Home-task settings requests belong to Manage Home.
-            .settingsApprovals(.home)
         } else {
             TronLoadingState(label: "Loading Home chat…")
         }

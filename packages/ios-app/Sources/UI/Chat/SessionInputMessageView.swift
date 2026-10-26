@@ -257,6 +257,7 @@ struct InboundContextMessagePresentation: Equatable {
 /// change its tone and label but never change direction.
 struct InboundProducerMessageView: View {
     let item: TranscriptItem
+    @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
     @State private var showingDetails = false
 
     private var presentation: InboundContextMessagePresentation {
@@ -270,6 +271,14 @@ struct InboundProducerMessageView: View {
     private var tone: ChatNotificationTone { presentation.tone }
 
     var body: some View {
+        if sheetRoutes != nil, item.semantic?.origin.kind == .gateway,
+           item.customType == "tron.settings-outcome.v1",
+           let message = SettingsApprovalOutcomeMessage(details: item.details) {
+            SettingsApprovalOutcomeChip(message: message)
+        } else { contextChip }
+    }
+
+    private var contextChip: some View {
         Button { showingDetails = true } label: {
             ChatCompactPillSurface(
                 tone: tone,

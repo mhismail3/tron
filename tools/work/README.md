@@ -3,7 +3,9 @@
 Workers own a branch and worktree. They choose and run the tests relevant to the
 change directly. No worker waits for another worker's tests. There is no gate,
 check receipt, shared CPU/memory admission, merge queue, hosted check workflow,
-post-merge checker or automatic revert.
+automatic post-merge checker or revert. An explicitly invoked local
+[verification batch](../verify/README.md#explicit-mac-batches) records broad coverage
+after affected checks land; it never admits or blocks a worker.
 
 ## Start
 
@@ -88,7 +90,8 @@ git add <files>
 git commit -m '<change>'
 git fetch origin
 git rebase origin/main          # or git merge --no-edit origin/main
-# Run only the directly relevant tests, as judged by the worker.
+scripts/tron verify --plan      # mechanical none/partial/full rule
+scripts/tron verify             # affected evidence now; broad risk coverage in a later explicit batch
 git push origin HEAD:main
 ```
 

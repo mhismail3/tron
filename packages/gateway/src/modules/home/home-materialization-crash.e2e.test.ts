@@ -114,18 +114,19 @@ async function fixture() {
   const workspace = new TronWorkspace(join(root, "workspace"));
   const sessions: HomeSessionPort = {
     createHomeSession: async () => sessionId,
-    currentSessionModel: () => null,
     homeModel: async () => undefined, chooseHomeModel: async () => {},
-    sessionPresent: async () => true,
-    sessionFile: async () => expectedPath,
-    hasLiveRuntime: () => false,
     chapterMetrics: async () => ({ bytes: 0, entries: 0, quiescent: true }),
     hasConversation: async () => manager.getEntries().some(entry => entry.type === "message"),
-    serializeSessionMutation: async (_id, commit) => commit(),
-    replaceRuntimeForProfile: async (_id, commit) => commit(),
     retireHomeRuntimes: async () => {},
   };
-  const owner = new HomeOwner({ tronHome, trust, workspace, sessions, taskSessions: {} as RuntimeRegistry, taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }), runtimes: {} as never, agentDir: "/nonexistent-agent-dir", memoryModels: async () => [], memorySummarizer: () => async () => { throw new Error("unused"); } });
+  const owner = new HomeOwner({ tronHome, trust, workspace, sessions, taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }), runtimes: {
+    sessionPresent: async () => true,
+    sessionFile: async () => expectedPath,
+    serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
+    replaceRuntimeForProfile: async (_id: string, commit: () => Promise<void>) => commit(),
+    noteSessionListChanged: () => {},
+    liveRuntime: () => undefined,
+  } as never, agentDir: "/nonexistent-agent-dir", memoryModels: async () => [], memorySummarizer: () => async () => { throw new Error("unused"); } });
   await owner.initialize();
   const flushConversation = () => {
     manager.appendThinkingLevelChange("off");

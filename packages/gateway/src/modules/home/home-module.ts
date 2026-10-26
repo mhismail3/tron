@@ -32,7 +32,7 @@ import type { HomeMemoryDiagnostic } from "./home-memory.js";
 import type { HomeRequestRecord } from "./home-request-policy.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
-import type { RuntimeRegistry, SessionOperations } from "../../kernel/session/runtime-registry.js";
+import type { SessionOperations } from "../../kernel/session/runtime-registry.js";
 import type { ModelRuntime } from "../../kernel/pi/coding-agent.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
@@ -80,20 +80,13 @@ export interface HomeComposition {
   homeWebTransport?: WebResearchTransport | undefined;
 }
 
-/** Actual native owners, not callbacks forwarding into a second session facade. */
-export interface HomeNativeOwners {
-  sessions: SessionOperations;
-  /** HomeTaskDispatcher consumes the native worker API until K5 owns delegation. */
-  workers: RuntimeRegistry;
-}
-
 /** Home's one owner, built on first use over the composition and the registry's ports. */
-export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeComposition, native: () => HomeNativeOwners): () => HomeOwner {
+export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeComposition, native: () => SessionOperations): () => HomeOwner {
   let owner: HomeOwner | undefined;
   return () => {
     if (owner) return owner;
     const composition = inputs();
-    const { sessions, workers } = native();
+    const sessions = native();
     const taskInputs: HomeTaskPolicyInputs = {
       settings: () => composition.settings()?.model,
       modelRuntime: () => composition.modelRuntime,
@@ -102,16 +95,21 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
     const memoryModels = () => sessions.modelQueueOf("background", "home");
     owner = new HomeOwner({
       tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
+      settingsOutcomes: () => composition.settings()?.changes,
       sessions: {
-        currentSessionModel: sessionId => sessions.liveRuntime(sessionId)?.snapshot().model ?? null,
-        sessionPresent: sessionId => sessions.sessionPresent(sessionId),
-        homeChaptersChanged: () => sessions.noteSessionListChanged(),
-        sessionFile: sessionId => sessions.sessionFile(sessionId),
-        hasLiveRuntime: sessionId => sessions.liveRuntime(sessionId) !== undefined,
-        waitingForUser: sessionId => sessions.liveRuntime(sessionId)?.catalogWaitingForUser ?? false,
-        replaceRuntimeForProfile: (sessionId, commit) => sessions.replaceRuntimeForProfile(sessionId, commit),
-        serializeSessionMutation: (sessionId, commit) => sessions.serializeSessionMutation(sessionId, commit),
-        wakeHome: async sessionId => (await sessions.acquire(sessionId)).admitHomeWake(),
+        wakeHome: sessionId => {
+          const captured = sessions.liveRuntime(sessionId);
+          const inputCancellation = owner!.requestPolicyFor(sessionId)?.inputCancellation;
+          const cancellationEpoch = inputCancellation ? inputCancellation.epoch : 0;
+          return async () => {
+            if (!inputCancellation) throw new GatewayError("cancelled", "Home wake request lifetime is unavailable");
+            const slot = await sessions.acquire(sessionId);
+            if ((captured && captured !== slot) || slot.runAbort.inputCancellation !== inputCancellation) {
+              throw new GatewayError("cancelled", "Home wake runtime changed before admission");
+            }
+            return slot.admitHomeWake(inputCancellation, cancellationEpoch);
+          };
+        },
         createHomeSession: async (cwd) => (await sessions.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
         retireHomeRuntimes: async () => {
           // Publication recovery runs after construction of the canonical owner.
@@ -183,7 +181,6 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
       }),
       ...(composition.homeMemoryDiagnostic ? { memoryDiagnostic: composition.homeMemoryDiagnostic } : {}),
       ...(composition.homeRequestDiagnostic ? { requestDiagnostic: composition.homeRequestDiagnostic } : {}),
-      taskSessions: workers,
       ...(composition.notifications ? { notifications: composition.notifications } : {}),
       ...(composition.machineId ? { machineId: composition.machineId } : {}),
       ...(composition.homeTaskDiagnostic ? { taskDiagnostic: composition.homeTaskDiagnostic } : {}),
@@ -263,7 +260,8 @@ export function homeProfileChanges(session: SessionContext, changes: SettingsCha
 
 /** What Home's two modules read per runtime: the composition's inputs, the
  * registry's generic ports and the search owner, resolved at each call. */
-export interface HomeModuleOwners extends HomeNativeOwners {
+export interface HomeModuleOwners {
+  sessions: SessionOperations;
   composition: HomeComposition;
   search: HomeModuleServices["search"];
 }
@@ -281,7 +279,7 @@ export function createHomeModules(owners: () => HomeModuleOwners): { home: Modul
     return { ...homeModuleServices(homeOwner(), current.composition, current.sessions), search: current.search };
   };
   return { owner: homeOwner, research: createHomeResearchModule(services), home: createHomeModule(services, host => {
-    owner = homeOwnerFactory(host.contract(workspaceModule), () => owners().composition, owners);
+    owner = homeOwnerFactory(host.contract(workspaceModule), () => owners().composition, () => owners().sessions);
   }) };
 }
 

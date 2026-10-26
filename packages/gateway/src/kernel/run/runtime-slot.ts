@@ -63,7 +63,9 @@ import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTas
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
 import type { SessionSettingsSource, SettingsModel } from "../settings/settings-model.js";
-import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../settings/tool-contract.js";
+import { SETTINGS_OUTCOME_MESSAGE, settingsOutcomeRequestIds, type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../settings/tool-contract.js";
+import { visitCanonicalSessionEntries } from "../session/canonical-reader.js";
+import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
 import type { Actor } from "../settings/settings-record.js";
 import { piBuiltinExtensions } from "../host/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../host/extension-adapters.js";
@@ -603,7 +605,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   private explicitProfile: { sessionId: string; profile: SessionProfile } | undefined;
   public readonly canonicalAppendContext: CanonicalAppendContext;
   /** The Home wake whose trigger is being sent: its canonical binding and receipt follow its message_end. */
-  private homeWakeTrigger: { eventId: string; taskId: string; operationId: string } | undefined;
+  private homeWakeTrigger: { input: InputTrigger; operationId: string } | undefined;
   /** Whether the admitted operation is a wake, so the activation's idle notice names it. */
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
@@ -934,6 +936,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
             // effect through the same in-turn appliers as an ordinary chat's.
             ...(this.usesHomeSettings ? { homeChapter: { ...this.settingsSource(), sessionId: this.id, mutate: operation => operation({ appliers: source().appliers }) } } : {}),
             ...(input.dryRun ? { dryRun: true } : {}),
+            ...(input.request ? { request: true } : {}),
           });
         }
         const { task, slot, target: workerTarget } = await worker(input.taskId, "change");
@@ -942,10 +945,33 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId, taskId: task.taskId },
           reason: input.reason, web: input.web, session: slot.taskWorkerSettingsSession(),
           ...(input.dryRun ? { dryRun: true } : {}),
+          ...(input.request ? { request: true } : {}),
         });
         return { ...result, worker: { ...task, ...slot.taskWorkerSettingsState() } };
       },
-      takeOutcomes: () => owners.changes.takeOutcomes(this.id),
+      takeOutcomes: async delivered => {
+        // Home admits settings messages through its bounded, cancellable input
+        // envelope for both user turns and wakes; the native hook is ordinary-only.
+        if (this.usesHomeSettings) return undefined;
+        const path = this.sessionFile;
+        if (!path) return delivered?.length ? undefined : owners.changes.takeOutcomes([this.id], []);
+        const durable = new Set<string>();
+        try {
+          await visitCanonicalSessionEntries({ path, sessionId: this.id, maxLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES, durable: true,
+            visit: entry => { for (const id of settingsOutcomeRequestIds([entry.raw])) durable.add(id); } });
+        } catch (error) {
+          // A new conversation has no file until its first prompt is saved. It
+          // can select an untold outcome, but cannot acknowledge any delivery.
+          if ((error as NodeJS.ErrnoException).code === "ENOENT" && !delivered?.length) return owners.changes.takeOutcomes([this.id], []);
+          // An unreadable or unsynchronized cut proves nothing. Keep the outbox
+          // pending, without refusing this prompt or appending a duplicate.
+          return undefined;
+        }
+        // SDK visibility can precede canonical durability. Unproven delivery
+        // IDs cannot retire an outcome or cause its selection a second time.
+        if (delivered?.some(id => !durable.has(id))) return undefined;
+        return owners.changes.takeOutcomes([this.id], delivered ?? [...durable]);
+      },
     };
   }
 
@@ -3431,7 +3457,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           // returns. A wake's trigger is persisted by its run, so its receipts must
           // exist before the run's reply can complete the operation.
           const trigger = this.homeWakeTrigger;
-          if (trigger && (event.message.details as { eventId?: unknown } | undefined)?.eventId === trigger.eventId) this.bindHomeWakeTrigger(trigger);
+          if (trigger && (event.message.details as { eventId?: unknown } | undefined)?.eventId === trigger.input.message.details.eventId) this.bindHomeWakeTrigger(trigger.input, trigger.operationId);
         } else if (event.message.role === "custom") {
           // Custom callbacks are serial. Stored sends already exposed their
           // exact canonical ID at message_start; triggered sends append as soon
@@ -5628,10 +5654,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   /** Starts one Home wake: the inbox's pending results start the run. */
-  async admitHomeWake(): Promise<{ delivered: boolean }> {
+  async admitHomeWake(inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number): Promise<{ delivered: boolean }> {
     let delivered = false;
     await this.prompt("", [], undefined, undefined, undefined, {
-      kind: "homeWake", operationId: randomUUID(), origin: { kind: "gateway", ownerId: "home", title: "Home", confidence: "boundary" },
+      kind: "homeWake", inputCancellation, cancellationEpoch, operationId: randomUUID(), origin: { kind: "gateway", ownerId: "home", title: "Home", confidence: "boundary" },
       onDelivered: (value) => { delivered = value; },
     });
     return { delivered };
@@ -5656,19 +5682,24 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   /** Starts a wake's run with its trigger, or completes an operation with nothing to deliver. */
   public startHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger | undefined,
-    accept: (accepted: boolean) => void): Promise<void> {
+    accept: (accepted: boolean) => void, inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number): Promise<void> {
     accept(true);
-    return trigger ? this.sendHomeWake(session, operationId, trigger) : Promise.resolve();
+    return trigger ? this.sendHomeWake(session, operationId, trigger, inputCancellation, cancellationEpoch) : Promise.resolve();
   }
 
   /** Pi appends the trigger and runs the turn. Refuses to leave an inbox result admitted
    * when the trigger never reached the canonical session: it returns to pending first, so
    * a terminal receipt cannot settle it as outcome-unknown. */
-  private async sendHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger): Promise<void> {
+  private async sendHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger, inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number): Promise<void> {
     const eventId = trigger.message.details.eventId;
     this.inboxAttributedMessages.add(eventId);
-    this.homeWakeTrigger = { eventId, taskId: trigger.taskId, operationId };
+    this.homeWakeTrigger = { input: trigger, operationId };
     try {
+      // Stop may win while admission awaits receipt, settings or inbox I/O.
+      // Keep this inside the existing trigger-release fence, before SDK append.
+      if (this.runAbort.inputCancellation !== inputCancellation || inputCancellation.epoch !== cancellationEpoch) {
+        throw new GatewayError("cancelled", "Home wake stopped before delivery");
+      }
       await session.sendCustomMessage(trigger.message, { triggerTurn: true });
       if (!this.hasCanonicalCustomMessage(eventId)) throw new GatewayError("conflict", "Home wake trigger was not persisted");
     } catch (error) {
@@ -5687,12 +5718,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   /** Persists the wake's canonical binding (its invocation to the trigger result) and the
    * trigger's delivery receipt. Both are lane work, so they precede the reply's terminal receipt. */
-  private bindHomeWakeTrigger(trigger: { eventId: string; taskId: string; operationId: string }): void {
+  private bindHomeWakeTrigger(trigger: InputTrigger, operationId: string): void {
     void this.lane.run(async () => {
       const candidate = this.sessionManager.getBranch().find(entry => entry.type === "custom_message"
-        && (entry.details as { eventId?: unknown } | undefined)?.eventId === trigger.eventId);
+        && (entry.details as { eventId?: unknown } | undefined)?.eventId === trigger.message.details.eventId);
       if (!candidate) throw new Error("canonical Home wake trigger is unavailable");
-      const invocation = this.runInvocations.invocationForOperation(trigger.operationId);
+      const invocation = this.runInvocations.invocationForOperation(operationId);
       if (!invocation) throw new Error("canonical invocation start receipt is unavailable");
       await this.persistCanonicalCustomEntry(
         INVOCATION_RECEIPT_TYPE,
@@ -5701,7 +5732,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           receiptId: `binding:${invocation.invocationId}`,
           receiptKind: "binding",
           invocationId: invocation.invocationId,
-          operationId: trigger.operationId,
+          operationId,
           sessionId: this.id,
           source: "homeWake",
           canonicalEntryId: candidate.id,
@@ -5709,11 +5740,13 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           createdAt: new Date().toISOString(),
         })),
         `binding:${invocation.invocationId}`,
-        this.runWork.get(trigger.operationId),
+        this.runWork.get(operationId),
       );
+      const settings = candidate.type === "custom_message" && candidate.customType === SETTINGS_OUTCOME_MESSAGE;
+      const source = settings ? "gateway:settings" : "gateway:home-task";
       await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
-        safeJson(makeContextDeliveryReceipt(candidate.id, "stored", { source: "gateway:home-task",
-          owner: { id: trigger.taskId, title: "Home task", source: "gateway:home-task" } })), candidate.id);
+        safeJson(makeContextDeliveryReceipt(candidate.id, "stored", { source,
+          owner: { id: trigger.taskId, title: settings ? "Settings" : "Home task", source } })), candidate.id);
     });
   }
 
@@ -5859,12 +5892,13 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
    * budget, fencing Stop until the SDK owns cancellation; never reload resources. */
   private async navigateTreeWithSettings(targetId: string, options: Parameters<AgentSession["navigateTree"]>[1]) {
     const session = this.runtime.session;
-    const cancellationEpoch = this.runAbort.cancellationEpoch;
+    const inputCancellation = this.runAbort.inputCancellation;
+    const cancellationEpoch = inputCancellation.epoch;
     const owners = this.dependencies.settings();
     if (options?.summarize && owners) {
       const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, this.settingsSource(), ["context.branchSummary.reserveTokens"], { storeState: false });
       if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during branch-summary settings resolution");
-      if (this.runAbort.cancellationEpoch !== cancellationEpoch) throw new GatewayError("cancelled", "Branch summarization was stopped during settings resolution");
+      if (this.runAbort.inputCancellation !== inputCancellation || inputCancellation.epoch !== cancellationEpoch) throw new GatewayError("cancelled", "Branch summarization was stopped during settings resolution");
       const reserveTokens = resolved.keys[0]?.value;
       if (typeof reserveTokens !== "number") throw new GatewayError("conflict", "Branch-summary reserve is unavailable");
       session.settingsManager.applyOverrides({ branchSummary: { reserveTokens } });
@@ -6474,6 +6508,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   private async disposeRuntime(): Promise<void> {
+    this.runAbort.cancelPreparations();
     this.runTerminal.operationObservations.clear();
     // Borrowed Home views have no attachment to detach; the shared Gateway
     // installation outlives this slot and is retired by its own runtime owner.

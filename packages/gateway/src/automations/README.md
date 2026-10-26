@@ -31,7 +31,10 @@ sync the file and its directory before acknowledgement.
   worktrees or branches.
 - **Dispatch.** Every run snapshots its target and concrete session ID before dispatch
   (workspace runs get a predetermined UUID created through
-  `RuntimeRegistry`/`RuntimeSlot` via `DelegationOperations`). Scheduled prompts never
+  `RuntimeRegistry`/`RuntimeSlot`). Existing-session leases, prompt admission and canonical
+  recovery/marker reads use those native owners directly. Shared K5 `DelegationOperations`
+  orders durable acknowledgement before lease release; it has no forwarding admission
+  or evidence facade. Scheduled prompts never
   steer or enqueue into an active turn; a busy target waits durably. Resource actions
   revalidate the typed skill or prompt inside the slot and carry automation
   provenance. Extension commands, attachments, shell, webhooks, deployment and Gateway

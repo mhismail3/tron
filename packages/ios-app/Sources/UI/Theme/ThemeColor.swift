@@ -1,5 +1,3 @@
-import SwiftUI
-
 /// App identity only. Success, warnings, errors and resource identities stay semantic.
 enum ThemeColor: String, CaseIterable, Identifiable, Sendable {
     case emerald, burgundy, oliveGold
@@ -15,17 +13,9 @@ enum ThemeColor: String, CaseIterable, Identifiable, Sendable {
     var darkHex: String {
         switch self { case .emerald: "#6EE7B7"; case .burgundy: "#BE4377"; case .oliveGold: "#D9CB75" }
     }
-    var ink: Color { Color(lightHex: lightHex, darkHex: darkHex) }
 
-    /// Burgundy glass uses a deeper wine pigment independent of foreground ink.
-    var surfaceTint: Color {
-        self == .burgundy ? Color(lightHex: lightHex, darkHex: "#5B1735") : ink
+    /// Bundled Icon Composer names. The generator consumes this same palette.
+    var appIconName: String {
+        switch self { case .emerald: "AppIcon"; case .burgundy: "AppIconBurgundy"; case .oliveGold: "AppIconOliveGold" }
     }
-}
-
-extension Color {
-    /// Reading the observable owner here registers the consuming SwiftUI body;
-    /// changing identity never recreates the chat, navigation stack or composer.
-    @MainActor static var tronPrimary: Color { AppearanceSettings.shared.themeColor.ink }
-    @MainActor static var tronPrimarySurface: Color { AppearanceSettings.shared.themeColor.surfaceTint }
 }

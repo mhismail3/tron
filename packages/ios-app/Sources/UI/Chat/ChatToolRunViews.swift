@@ -6,6 +6,7 @@ struct ToolCard: View {
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.pendingExtensionInteractionPresenter) private var presentPendingInteraction
     @Environment(\.displayPresentationHandler) private var presentDisplay
+    @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
     let title: String
     let subtitle: String
     let content: String
@@ -71,6 +72,11 @@ struct ToolCard: View {
     }
 
     var body: some View {
+        Group {
+        if !error, !isRunning, sheetRoutes != nil,
+           let reference = timing?.approvalRequest ?? SettingsApprovalReference(result: response) {
+            SettingsApprovalRequestChip(reference: reference, onOpenDetails: openDetails)
+        } else {
         ChatCompactPillSurface(
             tone: tone,
             material: .glass,
@@ -105,6 +111,8 @@ struct ToolCard: View {
         #if HOSTED_TEST
         .modifier(HostedToolActionProbeModifier(id: "card:\(detailTool.id)", action: openDetails))
         #endif
+        }
+        }
         .toolDetailSheet(
             route: $detailPresentation,
             instance: detailTool.id,
@@ -210,6 +218,7 @@ struct ToolDisplayHandoff {
 enum ToolRunSegment: Identifiable, Equatable {
     /// Consecutive generic calls, shown as one grouped tool chip.
     case tools(ChatToolRunPresentation)
+    case approval(ChatToolDescriptor)
     /// Consecutive display calls, shown as one horizontally scrolling chip row.
     case displays([ChatToolDescriptor])
     /// A completed inline display whose card spans the transcript width, as it
@@ -219,13 +228,14 @@ enum ToolRunSegment: Identifiable, Equatable {
     var id: String {
         switch self {
         case .tools(let run): "tools:" + (run.tools.first?.id ?? run.anchorID)
+        case .approval(let tool): "approval:" + tool.id
         case .displays(let tools): "displays:" + (tools.first?.id ?? "")
         case .wideDisplay(let tool): "display:" + tool.id
         }
     }
 
     static func segments(of run: ChatToolRunPresentation) -> [ToolRunSegment] {
-        guard run.tools.contains(where: { $0.toolName == "display" }) else { return [.tools(run)] }
+        guard run.tools.contains(where: { $0.toolName == "display" || $0.approvalRequest != nil }) else { return [.tools(run)] }
         var segments: [ToolRunSegment] = []
         var generic: [ChatToolDescriptor] = []
         var displays: [ChatToolDescriptor] = []
@@ -244,7 +254,10 @@ enum ToolRunSegment: Identifiable, Equatable {
             displays.removeAll()
         }
         for tool in run.tools {
-            if tool.toolName != "display" {
+            if tool.approvalRequest != nil {
+                flushGeneric(); flushDisplays()
+                segments.append(.approval(tool))
+            } else if tool.toolName != "display" {
                 flushDisplays()
                 generic.append(tool)
             } else if DisplayToolView.rendersFullWidth(tool) {
@@ -284,6 +297,10 @@ struct ToolRunView: View {
                             run: subrun,
                             action: { activate(subrun) }
                         )
+                    case .approval(let tool):
+                        if let reference = tool.approvalRequest {
+                            SettingsApprovalRequestChip(reference: reference, onOpenDetails: { openDetails(singleCallRun(tool)) })
+                        }
                     case .displays(let tools):
                         ChatChipStrip {
                             ForEach(tools, id: \.id) { tool in stripDisplayView(tool) }
@@ -300,7 +317,7 @@ struct ToolRunView: View {
     private func displayView(_ tool: ChatToolDescriptor) -> some View {
         DisplayToolView(
             tool: tool,
-            onOpenTechnicalDetails: { openDetails(displayRun(tool)) }
+            onOpenTechnicalDetails: { openDetails(singleCallRun(tool)) }
         )
         .environment(\.displayPresentationHandler, displayHandler(for: tool))
     }
@@ -312,14 +329,13 @@ struct ToolRunView: View {
            DisplayPresentationPolicy.effectiveSurface(for: display) == .inline {
             displayView(tool)
         } else {
-            DisplayStripThumbnail(tool: tool, onOpenTechnicalDetails: { openDetails(displayRun(tool)) })
+            DisplayStripThumbnail(tool: tool, onOpenTechnicalDetails: { openDetails(singleCallRun(tool)) })
                 .environment(\.displayPresentationHandler, displayHandler(for: tool))
         }
     }
 
-    /// A display's technical details open as that call alone, never as the
-    /// grouped run it shares a row with.
-    private func displayRun(_ tool: ChatToolDescriptor) -> ChatToolRunPresentation {
+    /// An inline approval/display keeps technical details scoped to its own call.
+    private func singleCallRun(_ tool: ChatToolDescriptor) -> ChatToolRunPresentation {
         run.tools.count == 1 ? run : ChatToolRunPresentation(tools: [tool], anchorID: "\(run.anchorID)~\(tool.id)", visibleCallsOnly: true)
     }
 
@@ -440,16 +456,28 @@ struct LiveToolRunDetails: View {
 /// Read-only child transcripts share the canonical run chip and detail sheets
 /// without manufacturing a mutable main-chat installation tag.
 struct ReadOnlyToolRunView: View {
+    @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
     let run: ChatToolRunPresentation
     let tools: [ChatToolPresentation]
     @State private var showsDetails = false
     @State private var detailDetent: PresentationDetent = .medium
 
     var body: some View {
-        ToolActivityChip(
-            run: run,
-            action: { if !resolvedTools.isEmpty { showsDetails = true } }
-        )
+        Group {
+            if sheetRoutes != nil, run.tools.contains(where: { $0.approvalRequest != nil }) {
+                VStack(alignment: .leading, spacing: ChatTranscriptLayoutConstants.rowSpacing) {
+                    ForEach(ToolRunSegment.segments(of: run)) { segment in
+                        switch segment {
+                        case .approval(let tool):
+                            if let reference = tool.approvalRequest { SettingsApprovalRequestChip(reference: reference, onOpenDetails: openDetails) }
+                        case .tools(let value): ToolActivityChip(run: value, action: openDetails)
+                        case .displays(let tools): ToolActivityChip(run: subrun(tools), action: openDetails)
+                        case .wideDisplay(let tool): ToolActivityChip(run: subrun([tool]), action: openDetails)
+                        }
+                    }
+                }
+            } else { ToolActivityChip(run: run, action: openDetails) }
+        }
         .tronManagedSheet(
             isPresented: $showsDetails,
             identity: "chat.read-only-tool-run.\(run.id)"
@@ -483,6 +511,12 @@ struct ReadOnlyToolRunView: View {
                 ToolRunDetailSheet(run: run, tools: resolvedTools)
             }
         }
+    }
+
+    private func openDetails() { if !resolvedTools.isEmpty { showsDetails = true } }
+
+    private func subrun(_ tools: [ChatToolDescriptor]) -> ChatToolRunPresentation {
+        ChatToolRunPresentation(tools: tools, anchorID: "\(run.anchorID)~\(tools.first?.id ?? "")", visibleCallsOnly: true)
     }
 
     private var resolvedTools: [ChatToolPresentation] {

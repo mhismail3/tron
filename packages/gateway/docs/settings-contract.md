@@ -166,9 +166,41 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   never lower, within 1.5 s, seeing only key, layer, actor kind, floor, web mark, a redacted
   reason and a lossy diff.
 - **Approvals** (`settings.approvals`, `settings.decide`) bind a digest of target and
-  `before`/`after`; a newer request supersedes; the push carries `settings-approval` only to a
-  relay advertising it ([push relay](../../push-relay/README.md#notification-categories)); the
-  requester hears each declined, expired or superseded change once (`tron.settings-outcome.v1`).
+  `before`/`after` (the decision's whole fence: no client fence); a newer request supersedes;
+  only the maintainer's client decides; the push carries `settings-approval` only to a relay
+  advertising it ([push relay](../../push-relay/README.md#notification-categories)). A
+  `settings` tool `action: "request"` holds a change at any tier (`tierBasis.requested`)
+  and returns without waiting for the tap. Its dry run validates without creating a
+  request; `change` keeps its normal tier. Chat presents the request, not a direction to
+  open Settings. A timer expires a
+  request at its 24-hour deadline; a transient expiry failure keeps later known deadlines
+  armed without immediately retrying a persistently bad store. Every outcome (approved and
+  applied, declined, failed, superseded, expired) stays queued as `tron.settings-outcome.v1`;
+  `details.requests[]` carry status, requester, reason, failure and display `before`/`after`.
+  The approvals store is the sole outbox: at most 400 accepted requests reserve capacity
+  until delivery, and further admission is `busy`, never eviction of an untold outcome.
+  Selection is non-destructive. Exact request IDs from a successfully completed durable
+  canonical read acknowledge delivery; refusal or a pre-append crash retains the request.
+  Home owns selection for both user inputs and autonomous wakes, using the existing
+  token/byte/entry envelope and activation cancellation signal to choose a fitting ordered
+  prefix. Each wake captures its existing request-policy cancellation cell and epoch
+  synchronously before selection. The same policy survives native runtime retirement;
+  Stop invalidates that attempt, not a future new nudge or a reserved successor.
+  Task recovery refusal does not disable the independent settings subscription.
+  Home's chapter ledger supplies original requester identities after rollover; the current
+  chapter proves and acknowledges its delivered IDs before sealing, without rewriting old
+  chapters or scanning all historical canonical files.
+- **Approval actions** (`registerAction`, `requestAction`): an owner's maintainer-gated
+  operation that is not a stored value shares the store, digest, expiry, decision, record
+  (`action: true`, key = subject, never undoable) and outcomes; `plan` binds an exact preview,
+  re-checked at decide (a moved state supersedes). A durable execution claim precedes
+  `apply`; the first awaited owner start recovers pre-existing execution claims as failed
+  with possibly completed effects, never replayed. Normal delivery/expiry does not join or
+  recover this owner's live effects. Action failures instruct inspection before retry rather than promising
+  that no effects occurred. Expiry and decision admission share the target stripe.
+- **One key id rule:** resolve, dry run and change take the declared id
+  (`model.thinking[role=chat]`); a plain id with fixed instances is refused naming them, and a
+  qualifier contradicting a fixed one is refused.
 - **A running Home task worker** can be changed by Home (`taskId`) or the maintainer: model,
   thinking and Run keys apply from its next request with one fenced `Settings changed` steer
   (`signal`: `queued`, `not-running`, `failed`); context window and tools are `busy` until it
@@ -223,15 +255,21 @@ Words and values come from the schema and resolver; iOS decides only layout.
 `settings.resolve` serves sections (Model, Workers & delegation, Compaction, Tools,
 Agent changes, Connection, Trusted Projects, Mac Terminal, Accounts, Sources, Storage) and badges `{ kind, label, detail?, action? }`
 (Layer, Source, Scope, Authority, State; unknown kinds render neutrally; actions go through
-`settings.change`). Controls: `toggle`, `choice`, `number`, `text`, `secret`, `list`,
+`settings.change`). Controls: `toggle`, `choice`, `text`, `secret`, `list`,
 `checklist`, `catalog`, `readOnly`; the client sends what it implements and gets the declared
 control, its `fallback`, or `readOnly` with "Update Tron to edit". Stopped-runtime settings with
-no writer are not Settings rows. `sessionOverridable`/`projectSettable` grant scopes; `editable`
+no writer are not Settings rows. A declaration without a `control` has no routine editing row:
+renderer responses retain only its explicit local values (read-only with independent Reset/Revert)
+and Project inspection. Their presentation omits `control`; this does not grant a writer or scope.
+An empty section has no navigation destination. Direct chat model/thinking, safety controls,
+approvals and Changes/undo remain. `sessionOverridable`/`projectSettable` grant scopes; `editable`
 is the target's binding/writer capability, not a second client-side permission list. Override
 presence is explicit even for equal/false/zero values. Applied Project values serve their exact
 file/key; ignored fields serve bounded value-free diagnostics. Untrusted/unreadable Project notices
 name their file and never make a Session editor look Project-owned.
-`settings.options` pages options; `dryRun` returns per-key errors and the tier. Changes list
+`settings.options` pages options only for declared controls; a key without an editor has no
+options endpoint. Its canonical type, validation and runtime clamping still apply to changes.
+`dryRun` returns per-key errors and the tier. Changes list
 pending approvals first. Global writes Global, Session the Session scope, Home its saved settings;
 Project is inspection only. Session/Home reuse Global's renderer and editors; Project-owned rows
 have a read-only value and separate Project info pill, explicit overrides have Overridden/Revert,

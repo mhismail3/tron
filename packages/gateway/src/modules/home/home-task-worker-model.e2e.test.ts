@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setModelQueue, settingsDependencies } from "../../../test-support/settings-dependencies.js";
+import { setModelQueue } from "../../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Model, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { DelegationOperations } from "../../kernel/delegation/delegation-operations.js";
 import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../sessions/session-settings.js";
@@ -29,7 +29,7 @@ const queueOwners = (f: Awaited<ReturnType<typeof fixture>>) =>
   ({ registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway });
 
 function installSettings(f: Awaited<ReturnType<typeof fixture>>) {
-  return settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => homeOwnerOf(f.registry), registry: f.registry }).settingsModel;
+  return f.settings.settingsModel;
 }
 
 function textOf(message: { content: unknown }): string {
@@ -99,7 +99,7 @@ function validModelList(refusal: Error): string[] {
 describe("Home delegation chooses the worker's model and thinking level", () => {
   it("keeps ordinary subagent and Knowledge queues independent of Home profile", async () => {
     const f = await fixture();
-    const owners = settingsDependencies({ ...queueOwners(f), home: () => homeOwnerOf(f.registry) });
+    const owners = f.settings;
     const mac = `${f.model.provider}/${f.model.id}`;
     const home = `${f.model.provider}/${TASK_REASONING_MODEL_ID}`;
     for (const role of ["subagent", "background"] as const) {
@@ -131,7 +131,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
         } },
     } });
     await setModelQueue(queueOwners(f), "worker", [`${f.model.provider}/${TASK_REASONING_MODEL_ID}`]);
-    await f.registry.settings!.changes.change({ kind: "home" }, [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "high" }],
+    await f.settings.settingsChanges.change({ kind: "home" }, [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "high" }],
       { actor: { kind: "ui", id: "fixture" } });
     const { observed, homeContexts, refusals } = await delegateThroughHome(f, { taskId: "typed-not-prose", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "typed-not-prose");
@@ -536,7 +536,7 @@ describe("Home task budget", () => {
   const turn = (output: number, id: string) => fauxAssistantMessage([fauxToolCall("read", { path: "missing" }, { id })],
     { stopReason: "toolUse", usage: { input: 2, output, cacheRead: 0, cacheWrite: 0 } } as never);
   const install = (f: Awaited<ReturnType<typeof fixture>>) =>
-    settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => homeOwnerOf(f.registry), registry: f.registry }).settingsChanges;
+    f.settings.settingsChanges;
   const setBudget = (changes: ReturnType<typeof install>, value: Record<string, number> | undefined, context: Parameters<ReturnType<typeof install>["change"]>[2] = ui) =>
     changes.change({ kind: "home" }, [{ key: "permissions.budget.task", layer: "session", op: value ? "set" : "unset", ...(value ? { value } : {}) }], context);
 

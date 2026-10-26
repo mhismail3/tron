@@ -4,6 +4,8 @@ import type { AgentSession } from "../pi/coding-agent.js";
 /** The request stages and activation lifecycle one profile owns. Its evidence
  * remains module-owned; the kernel never interprets or persists that view. */
 export interface RequestPolicy {
+  /** Native cancellation survives physical runtime retirement with this request lifetime. */
+  readonly inputCancellation: { epoch: number };
   admit(operationId: string, boundaryEntryId: string | null, systemBase: string, kind: "user" | "wake"): void;
   settle(operationId: string | undefined): void;
   cancel(operationId: string | undefined): void;

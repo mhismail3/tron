@@ -4068,10 +4068,6 @@ extension AppModel {
         try await settingsTrust.setTrust(target: target, decision: decision)
     }
 
-    func settingsApprovals(scope: SettingsApprovalScope) async throws -> [SettingsApprovalRequest] {
-        try await settingsTrust.pendingApprovals().filter(scope.includes)
-    }
-
     func allSettingsApprovals() async throws -> [SettingsApprovalRequest] {
         try await settingsTrust.pendingApprovals()
     }
@@ -4095,7 +4091,8 @@ extension AppModel {
     }
 
     /// Approves or declines one pending change, bound to the exact diff shown.
-    func decideSettingsApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws {
+    @discardableResult
+    func decideSettingsApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws -> SettingsChangeResult {
         try await settingsTrust.decideApproval(request, approved: approved)
     }
 

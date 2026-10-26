@@ -285,6 +285,8 @@ interface RewrittenContext {
 const MAXIMUM_RECORDED_TRANSFORMS = 64;
 
 export class HomeRequestPolicy {
+  /** Native Stop/disposal invalidates pending inputs across physical runtime replacement. */
+  readonly inputCancellation = { epoch: 0 };
   private activation: ActivationState | undefined;
   /** The last settled activation's evidence, kept so `home.context` can report
    * it after the run ends. Replaced whole, never merged field by field. */

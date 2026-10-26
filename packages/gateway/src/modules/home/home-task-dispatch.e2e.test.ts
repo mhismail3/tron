@@ -19,7 +19,7 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { RunMarkerStore } from "../../kernel/run/run-markers.js";
 import { stopTaskWorker, taskWorkerSteeringInput } from "../../kernel/delegation/worker-control.js";
 import { SessionCatalog } from "../../sessions/session-catalog.js";
-import { OWNED_OPERATION_DEADLINE_MS, DelegationOperations, type DelegationOperationsOver } from "../../kernel/delegation/delegation-operations.js";
+import { OWNED_OPERATION_DEADLINE_MS, DelegationOperations } from "../../kernel/delegation/delegation-operations.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayLogger } from "../../transport/logger.js";
@@ -1855,7 +1855,7 @@ describe("Home task production dispatch", () => {
       vi.spyOn(tasks.store, "restoreEpoch").mockImplementation(() => created() ? hold(restoreEpoch) : restoreEpoch());
     } else {
       const createWorker = DelegationOperations.prototype.createWorker;
-      vi.spyOn(DelegationOperations.prototype, "createWorker").mockImplementation(function (this: DelegationOperationsOver<RuntimeRegistry>, ...args) { return hold(() => createWorker.apply(this, args)); });
+      vi.spyOn(DelegationOperations.prototype, "createWorker").mockImplementation(function (this: RuntimeRegistry["delegation"], ...args) { return hold(() => createWorker.apply(this, args)); });
     }
     let workerPrompts = 0; let homeRequests = 0;
     const response = (context: unknown) => {

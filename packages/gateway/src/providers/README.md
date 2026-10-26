@@ -92,6 +92,12 @@ and before worker controls, reading canonical fixed settings and the worker fact
   [runtime configuration](../admin/runtime-configuration.md#context-windows).
   Model fallback queues: [settings contract](../../docs/settings-contract.md).
 
+Provider queues and usage adapters consume the common upstream-error vocabulary
+in `util/upstream-error.ts`; transcript projections use that same classification.
+Queue eligibility still treats both usage caps and throttling as usage-limit
+failures. OpenCode Go's usage endpoint retains its distinct entitlement/auth/other
+403 outcomes; transcript copy never interprets every 403 as a subscription issue.
+
 ## Invariants
 
 - Raw credentials and provider response bodies never leave the Mac or reach logs.

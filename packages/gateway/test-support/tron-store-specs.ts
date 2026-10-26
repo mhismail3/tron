@@ -20,7 +20,6 @@ import { EPISODIC_DEFAULTS } from "../src/episodic/episodic-contract.js";
 import { EpisodicMemory } from "../src/episodic/episodic-memory.js";
 import { EpisodicStore } from "../src/episodic/episodic-store.js";
 import { KnowledgeService } from "../src/knowledge/knowledge-service.js";
-import type { RuntimeRegistry } from "../src/kernel/session/runtime-registry.js";
 import { episodicHostAssigned, singleChapterSource } from "./episodic-chapter-source.js";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -108,16 +107,21 @@ function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
     trust: new TrustService(join(home, "agent")),
     workspace,
     // Designation and status never dispatch a task, so the task namespace is never read.
-    taskSessions: {} as RuntimeRegistry, taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
+    taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
     // Designation and status never materialize a successor runtime or watch global resources.
-    runtimes: {} as never, agentDir: "/nonexistent-agent-dir",
+    runtimes: {
+      sessionFile: async () => undefined,
+      sessionPresent: async (id: string) => id === CORPUS_IDS.session,
+      serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
+      replaceRuntimeForProfile: async (_sessionId: string, commit: () => Promise<void>) => commit(),
+      noteSessionListChanged: () => {},
+      liveRuntime: () => undefined,
+    } as never, agentDir: "/nonexistent-agent-dir",
     sessions: {
-      createHomeSession: async () => CORPUS_IDS.session, sessionFile: async () => undefined,
-      sessionPresent: async (id) => id === CORPUS_IDS.session, hasLiveRuntime: () => false, currentSessionModel: () => null,
+      createHomeSession: async () => CORPUS_IDS.session,
       chapterMetrics: async () => ({ bytes: 2_048, entries: 4, quiescent: true }), hasConversation: async () => false,
-      serializeSessionMutation: async (_id, commit) => commit(), replaceRuntimeForProfile: async (_sessionId, commit) => commit(),
       homeModel: async () => undefined, chooseHomeModel: async () => {}, retireHomeRuntimes: async () => {},
-      wakeHome: async () => { throw new Error("The corpus Home is never woken"); },
+      wakeHome: () => async () => { throw new Error("The corpus Home is never woken"); },
     },
     memoryModels: async () => [],
     memorySummarizer: () => async () => { throw new Error("The corpus Home summarizes nothing"); },

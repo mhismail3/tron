@@ -46,10 +46,10 @@ export type ModelQueueRole = "worker" | "subagent" | "background";
 
 /** Plan and subscription limits, and throttles: the request may succeed on another
  * provider. Pi's own non-retryable limit patterns (pi-ai utils/retry) plus 429. */
-const USAGE_LIMIT = /GoUsageLimitError|FreeUsageLimitError|usage.?limit|insufficient_quota|quota exceeded|out of budget|subscription_sharing_usage_limit_exceeded|available balance|\b429\b|rate.?limit|too many requests/iu;
+import { UPSTREAM_USAGE_LIMIT } from "../util/upstream-error.js";
 
 export function isUsageLimitError(text: string | undefined): boolean {
-  return typeof text === "string" && USAGE_LIMIT.test(text);
+  return typeof text === "string" && UPSTREAM_USAGE_LIMIT.test(text);
 }
 
 export interface QueueModelState { model: string; available: boolean; reason?: string }

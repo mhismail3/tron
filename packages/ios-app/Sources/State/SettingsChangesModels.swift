@@ -66,6 +66,8 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
     let git: GitState?
     let status: String
     let failure: String?
+    let requestId: String?
+    let action: Bool?
     let undoOf: String?
     /// A later fact's subject: for an outside change, the Tron change whose value it replaced.
     let refersTo: String?

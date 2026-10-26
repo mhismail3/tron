@@ -1,4 +1,5 @@
 import { isAbsolute } from "node:path";
+import { redactedUpstreamError, upstreamErrorInfo } from "../../util/upstream-error.js";
 import type { AgentMessage } from "../pi/agent-core.js";
 import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "../pi/coding-agent.js";
 
@@ -1360,7 +1361,10 @@ export function projectMessage(displayProjection: ToolDisplayProjection,
         modelId: message.model,
         ...(message.thinkingLevel ? { thinkingLevel: message.thinkingLevel } : {}),
         stopReason: message.stopReason,
-        ...(message.errorMessage ? { errorMessage: boundedText(message.errorMessage) } : {}),
+        ...(message.errorMessage ? {
+          errorMessage: boundedText(redactedUpstreamError(message.errorMessage)),
+          errorInfo: upstreamErrorInfo(message.errorMessage, message.provider),
+        } : {}),
         usage: projectJson(message.usage),
         semantic: semanticForMessage("assistant"),
       };

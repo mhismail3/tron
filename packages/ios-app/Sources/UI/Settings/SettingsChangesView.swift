@@ -67,14 +67,7 @@ struct SettingsChangesView: View {
     /// A surface starts loading: its empty state waits for the first read.
     @PresentationState private var loading = true
     @PresentationState private var loadGeneration = 0
-    @PresentationState private var busyIDs: Set<String> = []
-    @PresentationState private var decisionConfirmation: PendingDecision?
-    @PresentationState private var showingDecision = false
-
-    private struct PendingDecision {
-        let request: SettingsApprovalRequest
-        let approved: Bool
-    }
+    @PresentationState private var approvalSelection: SettingsApprovalSelection?
 
     /// Empty filtered pages one load follows before it offers Load more.
     private static let maximumPagesPerLoad = 10
@@ -192,16 +185,8 @@ struct SettingsChangesView: View {
                                          onOpenSession: onOpenSession)
             }
         }
-        .tronConfirmation(decisionConfirmation?.approved == true ? "Approve this change?" : "Decline this change?", isPresented: $showingDecision) {
-            if let item = decisionConfirmation {
-                Button(item.approved ? "Approve change" : "Decline change", role: item.approved ? nil : .destructive) {
-                    Task { await decide(item.request, approved: item.approved) }
-                }
-            }
-        } message: {
-            if let request = decisionConfirmation?.request {
-                Text("\(request.requester) asks to change \(request.changes.map(\.label).joined(separator: ", ")).")
-            }
+        .tronManagedSheet(item: $approvalSelection, identity: { "settings.changes.approval.\($0.id)" }) { selection in
+            SettingsApprovalSheet(selection: selection)
         }
         .task(id: PresentationActivityTaskID(source: loadID, presentationActive: presentationActivity.allowsPresentationPublication)) {
             guard presentationActivity.allowsPresentationPublication else { return }
@@ -293,22 +278,11 @@ struct SettingsChangesView: View {
     }
 
     private func pendingCard(_ request: SettingsApprovalRequest) -> some View {
-        TronGlassCard(accent: .tronAmber) {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(request.changes) { change in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(change.label).font(TronTypography.headline)
-                        if change.redacted == true { Text("New value hidden").foregroundStyle(Color.tronTextSecondary) }
-                        else if let display = change.display { Text("\(display.before) → \(display.after)").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary) }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }
-                Text("Asked by \(request.requester)").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                HStack {
-                    Button("Approve") { confirm(request, approved: true) }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronSuccess))
-                    Button("Decline", role: .destructive) { confirm(request, approved: false) }.buttonStyle(TronActionButtonStyle(role: .destructive, accent: .tronError))
-                }.disabled(busyIDs.contains(request.requestId))
-            }.padding(14)
-        }.accessibilityIdentifier("settings-changes-pending-\(request.requestId)")
+        Button {
+            approvalSelection = .request(SettingsApprovalReference(requestID: request.requestId, changeIDs: request.changes.map(\.changeId)))
+        } label: { SettingsApprovalRequestSummary(request: request) }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("settings-changes-pending-\(request.requestId)")
     }
 
     private func resetAndLoad() async {
@@ -378,25 +352,6 @@ struct SettingsChangesView: View {
         ticket == loadGeneration && !Task.isCancelled && identity == model.knowledgePresentationIdentity
             && foreground == model.foregroundReconciliationGeneration && activity == presentationActivity
             && activity.allowsPresentationPublication
-    }
-
-    private func confirm(_ request: SettingsApprovalRequest, approved: Bool) {
-        decisionConfirmation = PendingDecision(request: request, approved: approved)
-        showingDecision = true
-    }
-
-    private func decide(_ request: SettingsApprovalRequest, approved: Bool) async {
-        guard busyIDs.insert(request.requestId).inserted else { return }
-        defer { busyIDs.remove(request.requestId) }
-        let identity = model.knowledgePresentationIdentity
-        do {
-            try await model.decideSettingsApproval(request, approved: approved)
-            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
-            pending.removeAll { $0.requestId == request.requestId }
-        } catch {
-            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
-            errorMessage = error.localizedDescription
-        }
     }
 
 }
@@ -603,7 +558,7 @@ private struct SettingsChangeDetailView: View {
                     .buttonStyle(.plain)
                     .disabled(undoing)
                     .accessibilityIdentifier("settings.change.applyAgain")
-                } else if entry.redacted != true && entry.status == "applied" {
+                } else if entry.action != true && entry.redacted != true && ["applied", "approved"].contains(entry.status) {
                     Button { showingUndo = true } label: {
                         TronSettingsRow(icon: "arrow.uturn.backward", title: undoing ? "Undoing…" : "Undo")
                     }

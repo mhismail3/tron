@@ -74,7 +74,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   blocks into the sent text; Save hands the keyboard straight to the composer input (#1597). Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937). The context ring opens Manage Session.
 - **Tools.** Calls and results join by `toolCallId` into one chip; consecutive calls with equal
-  nonempty segments form one run chip whose aggregate sheet lists bounded summary rows. Every
+  nonempty segments form one run chip whose aggregate sheet lists bounded summary rows. Resting
+  run tint follows only the latest invocation's error: canonical transcript group order, then finalized
+  `groupIndex` within the last group, never result-arrival or timing metadata. Aggregate failure count,
+  icon and elapsed labels remain cumulative; active runs keep their existing failure/amber tint. Every
   chip opens a top-anchored detail sheet presented above the rows by `ChatTranscriptSheetRoutes`,
   starting at medium per fresh presentation. Edits show one verified diff inline, otherwise a
   Changes sheet; `ToolDiffCountChip` counts belong to that diff. Codemode shows Script, Result
@@ -82,10 +85,34 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   owns display, memory-bounded photo previews and honest load-failure fallback. Technical details hold JSON. `TaskToolDetailPresentation` shows catalog rows/counts,
   status, paged reports and receipts; unknown shapes stay generic. Check-ins lead with the step/summary,
   then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Worker reports render their invocation’s outcome, Markdown summary and acceptance evidence through shared Home sections; opaque receipts stay in Technical details. Report/check-in sheets use `tronPrimary`. `ToolDetailPresentation` owns one name/icon catalog for transcript, nested calls, sheets and resource tools; unknown extension/MCP names are humanized without changing invocation identity. Task reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
+- **Approval chips.** `SettingsApprovalReference` projects only a completed canonical pending
+  tool result's request/change IDs, not prose or an approval cache. `SettingsApprovalChips` reuse
+  compact-pill chrome; request segments keep their original call order and technical details.
+  Gateway-attributed `tron.settings-outcome.v1` contexts open the same read-only sheet; unknown
+  versions/shapes retain the ordinary context viewer. `ChatTranscriptSheetRoutes` owns these sheets
+  above lazy rows, including push review, so scrolling cannot dismiss them. Positive status uses
+  the compact-pill owner's contrast-safe success palette; failures keep the shared error palette.
 - **Thinking and context.** Thinking shows at most four measured lines, opening the full trace on
   tap. Compaction, branch, configuration and extension status share one notification-pill language;
   command pills never show arguments. `custom_message` is right-aligned context; worker results
   read **Worker · task title**; subagent messages use the seafoam **Subagent** chip.
+- **Provider errors.** The projection kernel joins all adjacent assistant-error occurrences,
+  including mixed types. Every visible non-error row (user Continue, model change, assistant
+  content or tool activity) splits a run; empty error text parts do not. The first presentation
+  identity stays stable as a live tail joins and settles; cold/history uses the same assembler.
+  Gateway `errorInfo` owns friendly classification; there is no provider mapping in Swift.
+  One centered compact error pill shows the uniform message or Provider errors and a ×N count.
+  The existing transcript notification route keeps its sheet live above lazy rows.
+  `ChatDetailSheet`, shared with nested tool details, owns navigation/Done, medium/large detents,
+  top chrome and insets. Themed standard sections, glass groups and rows show totals, distinct
+  breakdown and first/last times; native disclosures reveal each occurrence's metadata and
+  selectable `ToolDetailCodeBlock` JSON (or verbatim text). Long payload cards use the shared
+  static-surface policy instead of a tall backdrop filter.
+- **Error design canvas.** Hosted `-tron-chat-errors-preview` renders synthetic single/grouped
+  error pills and detail canvases using the shared compact-pill, list-row and code-block
+  components. `TronChatErrorsPreviewTests` captures light/dark design review only; it does not
+  exercise provider classification or prove live/history grouping. `TronChatProviderErrorStyleUITests`
+  also captures actual hosted ChatView/native sheets in both appearances for visual review.
 - **Haptics.** Live events only, through `TronHaptics`; `ChatLiveHapticLedger` tells live from restored.
 - **Extension interactions.** The mounted route is the sole sheet owner and presents pending
   interactions only after the first ready frame. Forms (one to four questions) keep a device-local
@@ -98,7 +125,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   capability-gated stop (`process-transcript-abort.v1`).
 - **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing), then the
   shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Effort and
-  Context Window); the existing settings renderer owns reads, writes, pending approvals and Revert.
+  Context Window); the existing settings renderer owns reads, writes and Revert; the shared approval
+  sheet owns request review.
   Tool selection uses its `SettingsToolsEditor` with the shared `AvailableToolsList`. Session
   container: Workspace (`workspace-inspector.v1`), Instructions, Resources (tags Global, Project or
   External; Commands and Subagents preview a body whose View All opens the shared reader), Session
@@ -173,9 +201,19 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 
 ## Verify
 
+`TronToolSummaryTintUITests` renders canonical transcript DTOs through mounted ChatView and samples
+native title ink: recovered (count retained), latest failure, no failures, cross-group continuation,
+and active failure/amber. Calls deliberately disagree with collection, result-arrival and timestamp
+ordering. Its capture-only method provides light/dark visual review, not behavioral acceptance.
+
 `TronWorkerToolRegressionTests` exercises custom worker report outcomes/Markdown/evidence,
 check-in attention/Next, friendly transcript chips, aggregate navigation and extension/MCP
 humanization. `TronWorkerToolPreviewTests` captures light/dark native review surfaces only.
+
+`TronInlineApprovalsPreviewTests` captures synthetic request/outcome canvases in light/dark:
+settings, one-use grants, registered actions, interrupted effects and mixed batches. Pending
+canvases use title Approve and top-right red X/green check without a footer bar. These static
+captures are design review only; they do not prove decisions, dismissal, delivery or durability.
 
 `TronSixSmallUIRegressionTests` exercises scoped row ordering, primary toast ink, model ID/type
 metrics and retained search/selection, workspace path/status separation at standard/narrow/accessibility

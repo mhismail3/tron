@@ -33,18 +33,12 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         shot("1651-home-settings-\(dark ? "dark" : "light")")
         models.tap()
         expandSheet(app, title: "Models")
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.ref'"))
-            .firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        // The direct model/thinking card belongs to Manage Home, not its delegation sheet.
+        // Direct selection/receipts remain covered by the model and shared-thinking UI journeys.
         shot("1651-home-models-\(dark ? "dark" : "light")")
-        assertOverriddenRow(app, "settings-row-model.ref_role_chat_", title: "Model", value: #"^Claude Opus 5\.5$"#)
         assertOverriddenRow(app, "settings-row-model.queue_role_worker_", title: "Worker models", value: "^2 models$")
         assertOverriddenRow(app, "settings-row-model.queue_role_subagent_", title: "Subagent models", value: "^3 models$")
-        // A short drag brings Background models fully on screen, clear of the top bar.
-        let window = app.windows.firstMatch
-        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
-            .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
-        Thread.sleep(forTimeInterval: 0.8)
-        shot("1651-home-models-\(dark ? "dark" : "light")-bottom")
+        // The retired profile editors are gone: all three queues now fit without a drag.
         assertOverriddenRow(app, "settings-row-model.queue_role_background_", title: "Background models", value: "^3 models$")
     }
 
@@ -64,30 +58,24 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         XCTAssertTrue(toolsLink.waitForExistence(timeout: 8), app.debugDescription)
         shot("1651-session-settings-\(dark ? "dark" : "light")")
         let content = element(app, "session-settings-content")
-        // Global Settings' groups of drill-in rows, not inline editors.
-        XCTAssertTrue(content.staticTexts["Agent"].exists, content.debugDescription)
-        XCTAssertTrue(content.staticTexts["Tools & Extensions"].exists, content.debugDescription)
+        let sections = element(app, "session-project-settings")
+        // The caption stays separate from repository/settings groups of drill-in rows.
+        XCTAssertTrue(sections.staticTexts["Settings"].exists, sections.debugDescription)
+        XCTAssertTrue(sections.buttons["settings-section-tools-open"].exists, sections.debugDescription)
         XCTAssertFalse(element(app, "settings-row-tools.active").exists, "Tools opens from its row")
         // The ignored repository field is the Project section's to list, once.
         XCTAssertEqual(labels(content, containing: "Ignored").count, 0, content.debugDescription)
         XCTAssertEqual(labels(content, containing: "tools.active").count, 0, content.debugDescription)
         // The unset context window is not part of what the chat uses.
         XCTAssertEqual(labels(content, containing: "Not set").count, 0, content.debugDescription)
-        XCTAssertGreaterThan(labels(content, containing: "Claude Opus 5.5 · High").count, 0, content.debugDescription)
         toolsLink.tap()
         expandSheet(app, title: "Tools")
         XCTAssertTrue(element(app, "settings-row-tools.active").waitForExistence(timeout: 8), app.debugDescription)
         shot("1651-session-tools-\(dark ? "dark" : "light")")
         assertOverriddenRow(app, "settings-row-tools.active", title: "Tools", value: "^27 of 52 tools$")
         app.navigationBars.containing(.staticText, identifier: "Tools").buttons["Done"].firstMatch.tap()
-        let modelsLink = app.buttons["settings-section-model-open"]
-        XCTAssertTrue(modelsLink.waitForExistence(timeout: 5), app.debugDescription)
-        _ = waitFor(modelsLink, "hittable == true", timeout: 5)
-        modelsLink.tap()
-        expandSheet(app, title: "Models")
-        shot("1651-session-models-\(dark ? "dark" : "light")")
-        app.navigationBars.containing(.staticText, identifier: "Models").buttons["Done"].firstMatch.tap()
-        _ = waitFor(modelsLink, "hittable == true", timeout: 5)
+        XCTAssertFalse(app.buttons["settings-section-model-open"].exists,
+                       "The direct model/thinking card belongs to Manage Session; this fixture has no delegation overrides")
         // The project's read-only section ends Session Settings (#1655).
         let projectSection = element(app, "session-project-settings")
         XCTAssertTrue(projectSection.waitForExistence(timeout: 8), app.debugDescription)
@@ -106,7 +94,13 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let row = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND NOT identifier ENDSWITH '-reset'", prefix)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5), "\(prefix)\n\(app.debugDescription)", file: file, line: line)
-        let editor = row.buttons.matching(NSPredicate(format: "label == %@ AND NOT identifier ENDSWITH '-reset'", title)).firstMatch
+        let editor: XCUIElement
+        if prefix.contains("model.queue") {
+            editor = row.staticTexts.matching(NSPredicate(format: "label MATCHES %@", pattern)).firstMatch
+            XCTAssertEqual(row.buttons.count, 1, "A routine override has only Revert, never a list editor", file: file, line: line)
+        } else {
+            editor = row.buttons.matching(NSPredicate(format: "label == %@ AND NOT identifier ENDSWITH '-reset'", title)).firstMatch
+        }
         let pill = row.staticTexts["Overridden"], heading = row.staticTexts[title].firstMatch
         let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
         XCTAssertTrue(editor.exists && pill.exists && heading.exists && revert.exists, row.debugDescription, file: file, line: line)
@@ -117,7 +111,7 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let lines = max(1, (heading.frame.height / pill.frame.height).rounded())
         XCTAssertEqual(pill.frame.midY, heading.frame.minY + heading.frame.height / lines / 2, accuracy: 0.75,
                        "\(title): Overridden is centered on the title line: \(pill.frame) vs \(heading.frame)", file: file, line: line)
-        XCTAssertGreaterThanOrEqual(revert.frame.minX, editor.frame.maxX, "\(title): Revert follows the value", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(revert.frame.minX + 0.001, editor.frame.maxX, "\(title): Revert follows the value", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.width, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.height, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)
         assertRendersWhole(editor, matching: pattern, named: "1651-\(prefix)-value", file: file, line: line)

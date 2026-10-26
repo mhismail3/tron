@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { dispatch, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { setModelQueue, settingsDependencies } from "../../../test-support/settings-dependencies.js";
+import { setModelQueue } from "../../../test-support/settings-dependencies.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { closeSubagentFixtures, launchResults } from "../../../test-support/home-task-subagents-support.js";
 import { modelQueueProjectionPath } from "../../providers/model-queue.js";
@@ -68,7 +68,7 @@ describe("Home task subagents: the subagent model queue", () => {
     await mkdir(join(f.cwd, ".pi", "agents"), { recursive: true });
     await writeFile(join(f.cwd, ".pi", "agents", "queue-child.md"),
       "---\nname: queue-child\ndescription: Scripted queue child\nmodel: tron/subagent\ntools: read\n---\nComplete the scripted task.\n");
-    const settings = settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => homeOwnerOf(f.registry) });
+    const settings = f.settings;
     await setModelQueue({ registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway },
       "subagent", ["queue-child/limited", "queue-child/fallback"]);
     await settings.settingsChanges.change({ kind: "global" }, [{ key: "model.queue[role=subagent]", layer: "global", op: "set", value: ["queue-child/mac"] }],

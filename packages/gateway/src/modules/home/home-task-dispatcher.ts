@@ -6,7 +6,7 @@ import type { AssistantMessage, ImageContent } from "../../kernel/pi/ai.js";
 import { clampThinkingLevel } from "../../kernel/pi/ai.js";
 import type { FileEntry } from "../../kernel/pi/coding-agent.js";
 import type { GatewayWorkHandle } from "../../kernel/run/gateway-work-registry.js";
-import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import type { SessionOperations } from "../../kernel/session/runtime-registry.js";
 import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../../kernel/delegation/owned-operation-terminal.js";
 import type { OwnedOperationDeadline } from "../../kernel/delegation/delegation-operations.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/run/invocation-receipts.js";
@@ -205,7 +205,7 @@ export class HomeTaskDispatcher {
   private readonly setup = new AsyncMutex();
   private recovery: Promise<HomeTaskRecoveryStatus> | undefined;
   constructor(readonly store: HomeTaskStore, readonly authorization: HomeTaskAuthorization,
-    private readonly sessions: RuntimeRegistry, private readonly diagnostic: ((record: HomeTaskDiagnostic) => void) | undefined,
+    private readonly sessions: SessionOperations, private readonly diagnostic: ((record: HomeTaskDiagnostic) => void) | undefined,
     private readonly inbox: WakeInboxOwner, private readonly policy: HomeTaskPolicy) {
     this.pressure = new HostPressure(record => this.diagnostic?.(record));
   }
@@ -296,7 +296,7 @@ export class HomeTaskDispatcher {
         const asyncDirs = homeTaskSubagentLaunches(runEntries).flatMap(launch => launch.asyncDir ? [launch.asyncDir] : []);
         // A malformed settlement fact refuses this evidence rather than being guessed.
         homeTaskSubagentsProjection(entries, task.operationId);
-        detached = !await this.sessions.taskSubagentRunsSettled(asyncDirs);
+        detached = !await this.sessions.delegation.subagentRunsSettled(asyncDirs);
         if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(task.taskId), operationHash: hash(task.operationId), reason: "detached-work-outlived-task" });
         evidenceRead = true;
       } catch (error) {
@@ -526,7 +526,7 @@ export class HomeTaskDispatcher {
     let { task } = launch;
     const { authority, input, title, choice, deferredThinking } = launch;
     const taskId = task.taskId;
-    let lease: Awaited<ReturnType<RuntimeRegistry["acquireOwnedSessionLease"]>> | undefined;
+    let lease: Awaited<ReturnType<SessionOperations["acquireOwnedSessionLease"]>> | undefined;
     let deadline: OwnedOperationDeadline | undefined;
     try {
       const operationId = launch.operationId ?? `task-${randomUUID()}`;
@@ -626,7 +626,7 @@ export class HomeTaskDispatcher {
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
       work.transition("foreground-agent-operation");
-      const admitted = dispatch.admit(slot, `${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Send a short checkin at milestones and about every 30 minutes (step, done, next; optional blocker/refs). It does not pause or finish work. Use needsAttention only for blockers needing Home; it is rate-limited. Use report with explicit evidence to finish. A normal reply is not a task result.`, launch.resume?.images ?? [], undefined, undefined, undefined,
+      const admitted = slot.prompt(`${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Send a short checkin at milestones and about every 30 minutes (step, done, next; optional blocker/refs). It does not pause or finish work. Use needsAttention only for blockers needing Home; it is rate-limited. Use report with explicit evidence to finish. A normal reply is not a task result.`, launch.resume?.images ?? [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {
         await cancellation("admission-refused").catch(() => {});
@@ -1072,9 +1072,12 @@ export class HomeTaskDispatcher {
   /** The operation's subagent counts, read from the worker's canonical evidence and
    * never persisted with the task. A task without a worker or operation launched none. */
   async subagents(task: HomeTaskRecord): Promise<HomeTaskSubagents> {
-    return task.sessionId && task.operationId
-      ? this.sessions.taskWorkerSubagents(task.sessionId, task.operationId)
-      : { started: 0, stoppedAtEnd: 0 };
+    if (task.sessionId && task.operationId) {
+      const sessionId = task.sessionId;
+      const operationId = task.operationId;
+      return homeTaskSubagentsProjection(await this.sessions.readTaskWorkerEntries(sessionId), operationId);
+    }
+    return { started: 0, stoppedAtEnd: 0 };
   }
 
   async result(taskId: string): Promise<HomeTaskRecord> {

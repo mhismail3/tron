@@ -1,15 +1,19 @@
 # Verify
 
-`scripts/tron verify` runs one slice's evidence locally: the static checkers, then
-the tests its manifests select
-([plan §6.2 V2](../../docs/restructure/plan.md#62-scriptstron-verify-v2-the-one-command)).
-The worker owns it. It never queues, waits on another worker, caches a pass,
-writes a receipt or gates a landing.
+`scripts/tron verify` mechanically plans a change, runs its affected checks locally,
+and reports broader coverage needed after landing. The manifests and their dependency
+and dynamic-edge graph are the selection authority. No queue, landing gate, hosted CI,
+automatic scheduler or revert is involved. A previous test pass never substitutes for
+this change's affected checks; only stamped build products are reused.
 
 ```bash
-scripts/tron verify --changed [--base <ref>]   # a slice: the change since merge-base(<ref>, HEAD)
-scripts/tron verify --module <id>               # its owned tests and transitive consumers' locks
-scripts/tron verify --all                       # every lock (milestones, kernel changes)
+scripts/tron verify [--base <ref>]             # affected checks since merge-base(<ref>, HEAD)
+scripts/tron verify --plan                     # tier, paths, reasons and exact commands; dirty trees allowed
+scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also used by mutation sampling
+scripts/tron verify --module <id>               # scoped baseline: owner tests + transitive consumer locks
+scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
+scripts/tron verify --batch --base <green-sha>   # initialize coverage in a dedicated clean main worktree
+scripts/tron verify --batch [--plan]            # next pinned batch since the local last green
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
 scripts/tron verify ... --plan                  # print the selection and steps only
@@ -34,14 +38,19 @@ selections that do not use the Gateway need no Gateway compiler.
 
 ## Run output
 
-It reads the committed state: uncommitted or untracked changes are refused
-(exit 2). Each step prints `[i/N] name …` and its live log path when it starts,
-and its result and time when it ends. The first failure stops the run and prints the log tail. Every
-step's full log is in `test-results/verify/<sha>/`, and the report is
-`test-results/verify/<sha>.json`. The report's `resultDigest` covers the
+Execution reads committed state: uncommitted or untracked changes are refused
+(exit 2). `--plan` additionally includes staged, working and untracked paths; add new
+files to Git before relying on their ownership. Each step prints `[i/N] name …`, its
+live log, result and wall time. The first failure stops the run and prints its tail.
+`test-results/verify/<sha>.json` is atomically updated before/after every step;
+`running` and `interrupted` are not passes. SIGINT/SIGTERM stops and joins the owned
+step process group while retaining partial results. Full logs are in
+`test-results/verify/<sha>/`. Repeating a selection at one SHA overwrites this local
+report; batch evidence is copied separately before another run. The `resultDigest` covers the
 selection, each step's outcome and test count, and the verdict, but not timing,
 so two runs of one commit against one base can be compared (a reused iOS build compares equal to
-the build that stamped it).
+the build that stamped it). Python unittest counts exclude skipped and expected-failure
+cases; a file with no executed passes cannot hide beside a passing neighbour.
 
 ## Static checks (existing tools only)
 
@@ -89,13 +98,33 @@ Small changes run only what can catch a regression in them:
 
 A Swift or Gateway string edit is code: its tests and locks run (locks compare labels).
 
-The run widens to **every lock** when the change touches a module at layer
-L0–L2 (platform, contracts, kernel), `gateway/package` (toolchain),
-`gateway/test-support`, `gateway/pi-sdk`, or an unowned path. Locks are
-`*.lock.integration.test.ts`, the Pi SDK behavior trace and persisted-state
-corpus, and the iOS UI locks (`packages/ios-app/UITests/Locks/`).
-`ios-app/ui-tests` declares a `spawn` dynamic edge to every module built into
-the hosted app, so a change to any of them selects the UI locks.
+### Mechanical tier rule
+
+| Tier | Changed inputs | Evidence before landing |
+|---|---|---|
+| **none** | Empty diff or Markdown only | Static/documentation checks; no executable tests |
+| **partial** | Tests/goldens only, or ordinary owned code (including Swift UI) | Changed tests; golden owner's locks; otherwise owner tests + transitive consumer locks/declarations |
+| **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus all-lock/full-lane coverage in the next explicit batch |
+
+Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
+requires a full batch. Unchanged files in the existing serial `gateway-nested` list
+are deferred, never dropped: production changes selecting them require a full tier.
+A changed serial test file and locks selected by a golden edit run immediately.
+`--all --base <green>` includes every serial file selected by that covered diff,
+including changed tests already run before landing: later integration may affect
+them too. It is not limited to the one nested lock. Explicit `--module` baselines still run
+the complete scoped set. A serial-only selection may pass its affected static checks
+while explicitly reporting deferred tests; it is not a test pass or a green batch. `ios-ui` risk alone does not widen beyond the affected UI build
+and journeys. Renames include both paths; deleted paths use base ownership. Risk is
+read from each changed producer's manifest, not inferred from every reverse consumer.
+An unowned tracked path still fails ownership, not a green partial run. A new module
+without executable evidence still fails; a tier never turns missing evidence into a pass.
+
+`--plan` prints `selection.tier`, paths, reasons, immediate tests, `batchTests`, and
+commands/cwds, `deferredTests` and their exact commands. A successful **full-tier** ordinary run proves affected checks only;
+it does not claim the full batch passed. Locks are `*.lock.integration.test.ts`, the
+Pi trace/persisted-state corpus and `UITests/Locks/`. `ios-app/ui-tests` declares
+`spawn` edges to the hosted app modules, selecting their affected UI locks.
 
 Runners are the existing ones:
 
@@ -136,7 +165,7 @@ other command forms fail selection (exit 2). Harnessed classes retain their
 `ios-lanes` classification. There is no implicit install or alternate runner.
 
 Changed/module selection includes declarations of selected modules and their
-reverse dependency closure; widening and `--all` include every declaration.
+reverse dependency closure; full batch coverage and `--all` include every declaration.
 Markdown/test-only narrowing and lock-only `--update-locks` remain unchanged.
 Files are deduplicated across ownership and declarations, then use normal
 counts, explicit skips and incomplete verdicts. A zero-test Python suite fails
@@ -165,6 +194,48 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
 ownership. Run one simulator job per worktree; verify never waits for another
 worker.
 
+## Explicit Mac batches
+
+Mohsin or an explicitly requested Home task invokes `verify --batch` in a persistent,
+clean worktree on landed main history. Ensure a simulator-job slot is available (at
+most three across workers); the batch itself runs one lane at a time. No daemon or
+schedule is created. Prepare that worktree's pinned Gateway development dependencies;
+no application install, service restart, deployment or OTA command is part of a batch.
+
+First invocation requires an explicit known-green `--base`; later invocations cannot
+override it. One repository-local record at `<git-common-dir>/verify/green.json` owns
+the previous green. A nonwaiting file lock refuses simultaneous batches. The command
+pins HEAD, records **all** commits in `base..HEAD` (including merged branches), then
+runs existing owners serially: all-lock verify, unsigned shipping-iOS compile, the UI
+runner's smoke set on those products, real-Gateway boundary and real-UI journeys, and
+fixture stop. Lanes absent from a repository are not invented; this repository has
+all of them. Mac/relay-specific suites remain their owners' explicitly selected
+checks, not implied coverage. `--skip` is not accepted for batches.
+
+Each lane runs once per batch, not once per covered commit. The next batch reuses that
+worktree's incremental build products after the normal source-stamp checks. Same green
+HEAD runs nothing. Only complete success advances green. There is no prior green if
+initialization fails. Immutable run directories under `<git-common-dir>/verify/batches/`
+retain the exact range, commits/files, commands, wall times, logs and copied verify
+report; no task-worktree cleanup removes them. `--batch --plan` changes no state.
+
+Failure preserves completed lanes immediately and leaves green unchanged. In one
+disposable worktree, the failing lane is rerun at previous green and HEAD with local
+pinned dependencies, then bisected along main's first-parent integration commits only
+when the **same failure signature** reproduces. Other failures/setup errors are
+inconclusive; a failing baseline is pre-existing. A report never invents a culprit:
+it records proven integration/files or candidate commits. The worktree retains its
+incremental products between probes and cleans its own fixture/lane/products on exit.
+If an owner refuses cleanup or cleanup is interrupted, it preserves that worktree and
+journals its exact path and completed cleanup results in `attribution/progress.json`;
+resolve those owned resources before discarding it.
+A privacy-checked `scripts/tron work issue create` files the result; a refused or
+uncertain write is recorded before dispatch in `<git-common-dir>/verify/issue-writes/`,
+keyed by range/lane. Re-running that range retains the previous outcome, including an
+unfinished attempt; resolve uncertain GitHub state manually, never create blindly again.
+No unrelated worker waits,
+main is never reverted, and failed coverage is not silently skipped by changing base.
+
 ## Mutation sampling
 
 `scripts/tron mutate <packages/gateway/src file> [--count 30] [--seed 1465] [--timeout 300]` measures
@@ -189,12 +260,14 @@ known-kill probe proves its vitest runner activates mutants with the pinned vite
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-verify.py` drives verify in
+`scripts/tron test tooling scripts/test-tron-verify.py scripts/test-tron-verify-tiers.py` drives verify in
 disposable repositories whose modules own real Python tests: selection, widening,
 the small-change paths with a known-bad case each, loud and zero-test failures,
 the uncommitted refusal and identical digests. A stand-in `scripts/tron-ios-test`
 keeps the real contract (`build` compiles a real index store with `swiftc` and
 writes the real stamp; `run` writes an XCTest-style `summary.json`) for the iOS
 lane: locks-only selection, one reused build, the real `layers ios`, failing or
-empty summaries, and extension files. Over a fake Gateway runner it covers
+empty summaries, and extension files. Real Git/process fixtures also exercise tiers,
+dirty planning, interrupted descendant cleanup/partial reports, exact green ranges,
+nonwaiting overlap refusal, failure bisection and unavailable issue authority. Over a fake Gateway runner it covers
 `mutate`'s timeout and interrupt. Output is kept in `test-results/verify-cli/`.

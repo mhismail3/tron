@@ -40,6 +40,18 @@ struct SettingsApprovalRequest: Decodable, Equatable, Sendable, Identifiable {
         var id: String { changeId }
     }
 
+    struct Action: Decodable, Equatable, Sendable {
+        struct Item: Decodable, Equatable, Sendable {
+            let label: String
+            let value: String
+            let detail: String?
+        }
+        let subject: String
+        let title: String
+        let items: [Item]
+    }
+
+    let action: Action?
     let requestId: String
     let digest: String
     let createdAt: String
@@ -58,24 +70,6 @@ struct SettingsApprovalRequest: Decodable, Equatable, Sendable, Identifiable {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text)
-    }
-}
-
-/// Which pending changes a surface shows (docs/settings-model.md 7.4 scopes):
-/// Manage Home shows Home's and its task workers'; Manage Session shows the
-/// ones this chat asked for or that would change this chat.
-enum SettingsApprovalScope: Hashable, Sendable {
-    case home
-    case session(String)
-
-    func includes(_ request: SettingsApprovalRequest) -> Bool {
-        switch self {
-        case .home:
-            return request.actor.kind == "home" || request.actor.kind == "worker"
-        case .session(let sessionID):
-            return request.actor.sessionId == sessionID
-                || (request.target.kind == "session" && request.target.sessionId == sessionID)
-        }
     }
 }
 

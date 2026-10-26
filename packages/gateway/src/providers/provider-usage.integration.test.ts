@@ -177,4 +177,24 @@ describe("provider usage across a model catalog refresh", () => {
     // Quota exhaustion is a readable window at 100%, the one usage state that skips.
     expect(await observe("exhausted")).toEqual({ status: "available", message: null, skipped: "Monthly usage 100%" });
   });
+
+  it("does not infer rejected credentials from an unrelated 403 type containing unauthorized prose", async () => {
+    root = await mkdtemp(join(tmpdir(), "gateway-usage-unrelated-403-"));
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false,
+      allowModelNetwork: false, credentials: new OpenCodeGoKey() });
+    const providerUsage = new ProviderUsageOwner({ fetch: async () => new Response(
+      JSON.stringify({ error: { type: "RegionError", message: "Unauthorized region" } }),
+      { status: 403, headers: { "content-type": "application/json" } }
+    ) });
+    service = new GatewayService({ display: {} as never,
+      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root },
+      modelRuntime: runtime, broadcast: () => {}, providerUsage,
+      globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation() },
+      sessions: { recentModelUsage: () => [] },
+      receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation(), status: async () => undefined },
+    } as unknown as GatewayServiceDependencies);
+    expect(await service.invoke(client, "provider.usage", { providerId: "opencode-go" })).toMatchObject({
+      providers: [{ status: "unavailable", message: "OpenCode Go refused the usage request" }],
+    });
+  });
 });

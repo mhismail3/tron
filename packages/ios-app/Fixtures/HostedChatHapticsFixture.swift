@@ -41,9 +41,17 @@ struct HostedChatHapticsFixture: View {
                 if ready { ChatView(sessionID: ChatHapticsGateway.sessionID).id(chatOpening) }
                 HStack {
                     Button("Reopen chat") { chatOpening += 1 }.accessibilityIdentifier("fixture.reopen-chat")
-                    Button("Deliver worker") { Task { await gateway.deliverWorkerResult() } }
-                        .accessibilityIdentifier("fixture.deliver-worker")
-                    Button("Ask question") { Task { await gateway.ask() } }.accessibilityIdentifier("fixture.ask-question")
+                    if HostedChatErrorScenarioFixture.enabled {
+                        Button("Live error") { Task { await gateway.liveError() } }
+                        Button("Settle error") { Task { await gateway.settleError() } }
+                        Button("Mixed error") { Task { await gateway.providerError(mixed: true) } }
+                        Button("Delayed error") { Task { await gateway.delayedError() } }
+                        Button("Continue boundary") { Task { await gateway.errorBoundary() } }
+                    } else {
+                        Button("Deliver worker") { Task { await gateway.deliverWorkerResult() } }
+                            .accessibilityIdentifier("fixture.deliver-worker")
+                        Button("Ask question") { Task { await gateway.ask() } }.accessibilityIdentifier("fixture.ask-question")
+                    }
                 }
                 Text("haptics:\(TronHapticsProbe.shared.summary)").accessibilityIdentifier("fixture.haptics")
                 Text(status).accessibilityIdentifier("fixture.gateway")
@@ -52,6 +60,8 @@ struct HostedChatHapticsFixture: View {
         }
         .environment(model)
         .tronPresentation()
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-error-style-preview")
+            ? (ProcessInfo.processInfo.arguments.contains("-error-preview-dark") ? .dark : .light) : nil)
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: model.enteredBackground()
@@ -92,6 +102,7 @@ private actor ChatHapticsGateway {
 
     private var phase: SessionPhase = .idle
     private var transcript: [JSONValue] = []
+    private var errorStream: JSONValue?
     private var pending: [ExtensionInteraction] = []
     private var sequence = 1
     private var entries = 0
@@ -104,6 +115,10 @@ private actor ChatHapticsGateway {
     private var continuations: [AsyncStream<String>.Continuation] = []
 
     init(history: Bool) {
+        if HostedChatErrorScenarioFixture.enabled {
+            transcript = [HostedChatErrorScenarioFixture.error("error-first")]
+            return
+        }
         guard history else { return }
         // Each event already happened before this chat opened.
         transcript = [Self.message("history-1", "user", "Earlier prompt"),
@@ -159,6 +174,28 @@ private actor ChatHapticsGateway {
             return .success(.object(["answered": .bool(true)]))
         default: return nil
         }
+    }
+
+    func liveError() async {
+        errorStream = HostedChatErrorScenarioFixture.error("error-live")
+        await deliver()
+    }
+    func settleError() async {
+        if let errorStream { transcript.append(errorStream) }
+        errorStream = nil
+        await deliver()
+    }
+    func providerError(mixed: Bool) async {
+        transcript.append(HostedChatErrorScenarioFixture.error(nextID("error"), mixed: mixed))
+        await deliver()
+    }
+    func delayedError() async {
+        try? await Task.sleep(for: .seconds(3))
+        await providerError(mixed: false)
+    }
+    func errorBoundary() async {
+        transcript.append(Self.message(nextID("user"), "user", "Continue"))
+        await providerError(mixed: false)
     }
 
     func deliverWorkerResult() async {
@@ -218,7 +255,8 @@ private actor ChatHapticsGateway {
             stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
                 tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
             queueRevision: 0, queuedItems: [], automaticCompactionEnabled: true, transcript: items, transcriptStart: 0,
-            transcriptTotal: items.count, streaming: nil, leafEntryId: nil,
+            transcriptTotal: items.count,
+            streaming: errorStream.map { try! JSONDecoder.gateway.decode(TranscriptItem.self, from: JSONEncoder.gateway.encode($0)) }, leafEntryId: nil,
             operation: nil, retry: nil, toolExecutions: [],
             extensionPresentation: ExtensionPresentationState(version: 3, hostEpoch: "haptics-host", revision: sequence, capabilities: [], diagnostics: [],
                 semanticState: .init(statuses: [:], working: .init(message: nil, visible: false), hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
