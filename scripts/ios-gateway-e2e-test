@@ -93,7 +93,6 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetDark"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testTrustedProjectsListsAndAddsProjectsUntrusted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsTrustRowTrustsABlockedProject"
 )

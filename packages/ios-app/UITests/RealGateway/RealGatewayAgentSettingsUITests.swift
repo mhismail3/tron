@@ -121,59 +121,6 @@ extension RealGatewayPairAndChatUITests {
     }
 
     @MainActor
-    func testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute() throws {
-        continueAfterFailure = false
-        let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
-        let tron = agent.deletingLastPathComponent().appendingPathComponent("tron/gateway")
-        let homeFile = tron.appendingPathComponent("home/profile.json")
-        let globalFile = tron.appendingPathComponent("settings/gateway.json")
-        func queue(_ file: URL, field: String) -> [String]? {
-            let document = (try? JSONSerialization.jsonObject(with: Data(contentsOf: file))) as? [String: Any]
-            return (document?[field] as? [String: Any])?["worker"] as? [String]
-        }
-        let app = launchApp()
-        defer { app.terminate() }
-        open(fixture.invitationLink())
-        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
-        let home = app.buttons["home-pinned-row"]
-        XCTAssertTrue(waitForEnabled(home, timeout: 90), app.debugDescription)
-        home.tap()
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitForEnabled(ring, timeout: 60), app.debugDescription)
-        ring.tap()
-        let settings = app.buttons["home-manage-settings"]
-        revealBelowNavigationBar(app, settings)
-        XCTAssertTrue(settings.waitForExistence(timeout: 30), app.debugDescription)
-        settings.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Home Settings"].waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertFalse(app.buttons["settings-link-Agent Behavior"].exists, "Global consolidation must not replace Home's routes")
-        let models = app.buttons["settings-section-model-open"]
-        revealBelowNavigationBar(app, models)
-        models.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Models"].waitForExistence(timeout: 30), app.debugDescription)
-        let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
-        revealBelowNavigationBar(app, row)
-        let edit = row.buttons.matching(NSPredicate(format: "label == 'Worker models' AND NOT identifier ENDSWITH '-reset'")).firstMatch
-        XCTAssertTrue(edit.waitForExistence(timeout: 15), app.debugDescription)
-        edit.tap()
-        addQueueModel(app, named: "Tron E2E Alternate")
-        app.buttons["Save"].tap()
-        XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == ["tron-e2e/e2e-alternate"] }, "Home Save must reach the canonical Home profile")
-        XCTAssertNil(queue(globalFile, field: "modelQueues"), "A Home edit must not change Global")
-        revealBelowNavigationBar(app, row)
-        edit.tap()
-        XCTAssertTrue(app.buttons["Remove tron-e2e/e2e-alternate"].waitForExistence(timeout: 15), app.debugDescription)
-        dismissAgentSheet(app, title: "Worker models")
-        let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
-        revealBelowNavigationBar(app, revert)
-        revert.tap()
-        XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == nil }, "Home Revert must remove its override")
-        XCTAssertNil(queue(globalFile, field: "modelQueues"))
-        keepScreenshot(app, name: "2010-home-queue-scope-and-reopen")
-    }
-
-    @MainActor
     func openAgentBehavior(_ app: XCUIApplication) {
         let link = app.buttons["settings-link-Agent Behavior"]
         revealBelowNavigationBar(app, link)

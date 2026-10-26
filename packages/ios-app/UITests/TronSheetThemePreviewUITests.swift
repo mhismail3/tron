@@ -135,12 +135,13 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         close(app)
         open(app, "settings-link-Agent Behavior")
         expand(app, title: "Agent Behavior")
-        for label in ["Worker models", "Subagent models", "Thinking budgets", "Offered models"] {
-            XCTAssertTrue(app.staticTexts[label].exists, "Missing moved model setting: \(label)")
+        for label in ["Worker models", "Subagent models", "Thinking budgets", "Retries"] {
+            XCTAssertTrue(app.staticTexts[label].exists, "Missing combined-sheet setting: \(label)")
         }
-        open(app, "Offered models")
-        XCTAssertTrue(app.navigationBars.staticTexts["Offered models"].waitForExistence(timeout: 5))
-        close(app); close(app)
+        for _ in 0..<7 where !app.staticTexts["Retries"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["Retries"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Retries"].isHittable)
+        close(app)
         open(app, "settings-link-Connections")
         expand(app, title: "Connections")
         open(app, "Details for Fixture")
