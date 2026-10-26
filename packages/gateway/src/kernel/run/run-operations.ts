@@ -259,7 +259,7 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
     this.assertHomePromptAdmission();
-    if (!ownership && !this.taskWorker && this.heldQueue.holdsPromptsForCompaction(text, queueDisplay)) {
+    if (!ownership && !this.ownedTurns.worker && this.heldQueue.holdsPromptsForCompaction(text, queueDisplay)) {
       const result = this.heldQueue.holdPrompt(text, images, behavior, queueDisplay);
       onAdmitted?.(result);
       return result;
@@ -373,7 +373,7 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
   /** A running task worker takes configuration between provider requests (#1336): Pi reads model
    * and thinking per turn and request, so the in-flight request never changes. Compaction refuses. */
   protected liveTaskConfiguration(): boolean {
-    const worker = this.taskWorker;
+    const worker = this.ownedTurns.worker;
     if (!worker?.acceptsSteering || this.disposed || this.shuttingDown || this.trustReloadPending || this.runPersistence.hasBlockedOwnershipWrite) return false;
     if (this.phase === "compacting" || this.activeOperationId !== undefined && this.runAbort.abortedOperations.has(this.activeOperationId)) return false;
     const session = this.runtime.session;
@@ -386,7 +386,7 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
    * boundary here: say so instead of the generic busy refusal (#1336). */
   protected assertNoLiveTaskConfiguration(what: string): void {
     if (!this.liveTaskConfiguration()) return;
-    throw new GatewayError("busy", `A running task worker's ${what} change only between runs: change it after task ${this.taskWorker!.identity.taskId} settles (it applies on resume). Model, thinking and Run settings apply from the worker's next model request.`, true);
+    throw new GatewayError("busy", `A running task worker's ${what} change only between runs: change it after task ${this.ownedTurns.worker!.identity.taskId} settles (it applies on resume). Model, thinking and Run settings apply from the worker's next model request.`, true);
   }
 
   /** Idle configuration, or a running Home task worker's live configuration (#1336). */

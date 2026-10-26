@@ -52,23 +52,23 @@ operations: RunOperations<unknown>,
     if (operations.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
     const session = operations.runtime.session;
     if (ownership?.kind === "homeWake") await operations.assertHomeWakeAdmissible(session);
-    if (operations.taskWorker) {
+    if (operations.ownedTurns.worker) {
       const trust = await operations.dependencies.trust.requireResolved(operations.cwd);
       if (!trust.trusted) throw new GatewayError("trust_required", "Home task target is no longer trusted");
-      if (ownership?.operationId === operations.taskWorker.identity.operationId) {
+      if (ownership?.operationId === operations.ownedTurns.worker.identity.operationId) {
         await operations.persistTaskMarker(operationId);
       } else if ((ownership?.kind === "subagentWake" || operations.ownedTurns.sharedTaskSteering(ownership)) && operations.ownedTurns.waitingTask && operations.ownedTurns.waitingTask.wakeOperationId === undefined
-        && operations.taskWorker.acceptsSteering && operations.activeOperationId === undefined && operations.operation === undefined && !session.isStreaming) {
+        && operations.ownedTurns.worker.acceptsSteering && operations.activeOperationId === undefined && operations.operation === undefined && !session.isStreaming) {
         // The provider's wake, or the maintainer's or Home's message (#929), continues the task this
         // operation holds open between turns; its marker stays the first one.
       } else {
         const fence = ownership?.taskFence;
         // The maintainer and Home share one ordered steering lane per worker (#929): a maintainer
         // message to a running task joins that lane whatever behavior the composer chose.
-        if (!ownership && operations.taskWorker.acceptsSteering) behavior = "steer";
-        if (behavior !== "steer" || operations.ownedTurns.liveTaskOperationId() !== operations.taskWorker.identity.operationId
-          || !session.isStreaming || !operations.taskWorker.acceptsSteering
-          || (fence && (fence.taskId !== operations.taskWorker.identity.taskId || fence.operationId !== operations.taskWorker.identity.operationId))) {
+        if (!ownership && operations.ownedTurns.worker.acceptsSteering) behavior = "steer";
+        if (behavior !== "steer" || operations.ownedTurns.liveTaskOperationId() !== operations.ownedTurns.worker.identity.operationId
+          || !session.isStreaming || !operations.ownedTurns.worker.acceptsSteering
+          || (fence && (fence.taskId !== operations.ownedTurns.worker.identity.taskId || fence.operationId !== operations.ownedTurns.worker.identity.operationId))) {
           throw new GatewayError("conflict", "Stale or settled task operation cannot accept steering");
         }
       }
@@ -228,8 +228,8 @@ operations: RunOperations<unknown>,
           // must also revoke this exact pending prompt at SDK admission; an
           // aborted summary alone does not prevent Agent.prompt() starting.
           if (ownership?.signal?.aborted || operations.runAbort.abortedOperations.has(operationId)
-            || (operations.taskWorker && operationId !== operations.taskWorker.identity.operationId && operations.ownedTurns.waitingTask?.wakeOperationId !== operationId
-              && (!operations.taskWorker.acceptsSteering || operations.ownedTurns.liveTaskOperationId() !== operations.taskWorker.identity.operationId))) {
+            || (operations.ownedTurns.worker && operationId !== operations.ownedTurns.worker.identity.operationId && operations.ownedTurns.waitingTask?.wakeOperationId !== operationId
+              && (!operations.ownedTurns.worker.acceptsSteering || operations.ownedTurns.liveTaskOperationId() !== operations.ownedTurns.worker.identity.operationId))) {
             preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
           } else if (!isExactExtensionCommand && !queuesIntoActiveRun && operations.activeOperationId !== operationId) {
             preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);

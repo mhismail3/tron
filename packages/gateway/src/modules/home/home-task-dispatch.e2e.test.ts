@@ -1527,7 +1527,7 @@ describe("Home task production dispatch", () => {
       await waitFor(() => entered, "SDK preflight barrier");
       const control = { taskId: run.taskId, operationId: run.operationId };
       await expect(homeOwnerOf(f.registry).stopTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
-      await expect(stopTaskWorker(slot.taskWorker, { ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
+      await expect(stopTaskWorker(slot.ownedTurns.worker, { ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
       expect(cancelled).toBe(false);
       const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
         receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
@@ -2244,7 +2244,7 @@ describe("Home task production dispatch", () => {
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.runaway-stop", cancelAndJoin: "failed", elapsedMs: expect.any(Number), spendReference: expect.any(String) }));
     try {
       const before = slot.canonicalSessionEntries().length;
-      await expect((slot as any).taskWorker.accept(slot.id, run.operationId,
+      await expect((slot as any).ownedTurns.worker.accept(slot.id, run.operationId,
         { resultId: "late-result", outcome: "final", text: "late report", evidence: [] },
         (data: unknown) => (slot as any).persistCanonicalCustomEntry("tron-home-task-report", data, "late-report"))).rejects.toThrow(/retired/);
       expect(slot.canonicalSessionEntries()).toHaveLength(before);

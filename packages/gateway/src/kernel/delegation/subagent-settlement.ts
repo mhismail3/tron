@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import { GatewayError } from "../../errors.js";
 import type { JsonValue } from "../../protocol/types.js";
 import type { AgentSession, FileEntry, ToolDefinition } from "../pi/coding-agent.js";
-import type { HomeTaskReportOwner } from "./task-report.js";
+import type { OwnedTurnOwner } from "./owned-turn-owner.js";
 import type { WorkerSettlement } from "./worker-settlement.js";
 import { controlSubagentRun } from "./subagent-control.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices } from "./task-subagents.js";
@@ -11,7 +11,7 @@ import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME
  * activity projection, canonical append and work-token ownership remain there.
  * Work is opaque: settlement passes the exact existing operation owner to append. */
 export interface SubagentSettlementRuntime<Work> {
-  readonly taskWorker?: HomeTaskReportOwner | undefined;
+  readonly ownedTurns: Pick<OwnedTurnOwner, "worker">;
   readonly runtime: { readonly session: AgentSession };
   readonly workerSettlement: WorkerSettlement;
   readonly runWork: { get(operationId: string): Work | undefined };
@@ -32,7 +32,7 @@ export interface SubagentSettlementRuntime<Work> {
  * notice to be recorded, bounded the same way; `noticesUndelivered` counts those still
  * missing at the bound, which never changes the outcome (the run itself is terminal). */
 export async function settleTaskSubagents<Work>(worker: SubagentSettlementRuntime<Work>, operationId: string, deadline: AbortSignal): Promise<{ stoppedAtEnd: number | null; noticesUndelivered: number }> {
-  if (worker.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
+  if (worker.ownedTurns.worker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
   const launched = homeTaskSubagentLaunches(worker.canonicalSessionEntries());
   const targets = worker.asyncStopTargets();
   if (targets.length === 0 && launched.every(launch => launch.asyncDir === undefined)) return { stoppedAtEnd: 0, noticesUndelivered: 0 };

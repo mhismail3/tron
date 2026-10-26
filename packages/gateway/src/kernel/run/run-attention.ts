@@ -64,7 +64,7 @@ export class RunAttentionOwner {
     // A task's root marker belongs to the whole delegated operation, not one
     // reply: notices/reminders can produce several completions before report.
     // Terminal invocation cleanup/task acknowledgement retire the root marker.
-    if (completion.operationId === this.operations.taskWorker?.identity.operationId) return Promise.resolve();
+    if (completion.operationId === this.operations.ownedTurns.worker?.identity.operationId) return Promise.resolve();
     const stamp = this.operations.runPersistence.trackOwnershipWrite(() => this.operations.runPersistence.retryDurableWrite(
       `marker:completion:${completion.operationId}:${completion.id}`,
       () => this.operations.dependencies.markers.reassertAssistantCompletion(
@@ -216,7 +216,7 @@ export class RunAttentionOwner {
         }
       }
       if (lastError !== undefined) throw lastError;
-      if (!completion.operationId?.startsWith("automation:") && completion.operationId !== this.operations.taskWorker?.identity.operationId) {
+      if (!completion.operationId?.startsWith("automation:") && completion.operationId !== this.operations.ownedTurns.worker?.identity.operationId) {
         await this.operations.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
       this.admitCompletionObservation(item);

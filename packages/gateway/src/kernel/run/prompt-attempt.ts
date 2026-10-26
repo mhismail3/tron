@@ -100,7 +100,7 @@ export class PromptAttempt {
       terminalLifecycle === "failed" ? "runtime-prompt-failed" : undefined,
     );
     this.operations.lifecycle.cancelPreflight(operationId);
-    if (!operationId.startsWith("automation:") && operationId !== this.operations.taskWorker?.identity.operationId) {
+    if (!operationId.startsWith("automation:") && operationId !== this.operations.ownedTurns.worker?.identity.operationId) {
       await this.operations.clearMarkerOwnership(operationId);
     }
     // Marker I/O may suspend behind a newer run. Clear only this run's live

@@ -17,6 +17,7 @@ import type { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { ToolProjectionMetadata } from "../projection/projection.js";
 import type { GatewayWorkHandle } from "./gateway-work-registry.js";
 import type { RunMarkerStore } from "./run-markers.js";
+import type { OwnedTurnOwner } from "../delegation/owned-turn-owner.js";
 
 import type { ToolReferences } from "../projection/tool-result.js";
 
@@ -51,13 +52,11 @@ export abstract class RunRuntime<FixedAt> {
     settled(id: string): void;
     assistantResponseCompleted(id: string, completion: CanonicalAssistantCompletion, recovery: boolean, observed: boolean): Promise<void>;
   };
-  abstract readonly taskWorker?: {
-    readonly identity: { readonly taskId: string; readonly operationId: string };
-    readonly acceptsSteering: boolean;
-    readonly reportSealed: boolean;
-    readonly controlsActive: boolean;
-    stop(): Promise<void>;
-  } | undefined;
+  abstract readonly ownedTurns: OwnedTurnOwner;
+  abstract readonly catalogHasActiveSubagents: boolean;
+  abstract readonly isAgentAdmissionSettling: boolean;
+  abstract administrativeDrainBlockers(): readonly { readonly category: string }[];
+  abstract replaceRuntime(): Promise<void>;
   abstract readonly commandReplacement: CommandReplacement | undefined;
   abstract readonly compactionPolicies: WeakMap<AgentSession, CompactionOperationPolicy>;
   abstract readonly homeRequestPolicy: RequestPolicy | undefined;
@@ -79,8 +78,8 @@ export abstract class RunRuntime<FixedAt> {
    * `settled`: a worker session whose last task stopped or ended; a maintainer message
    * resumes it in place rather than being refused (#929). */
   get homeTaskWorkerState(): "none" | "active" | "settled" {
-    if (this.taskWorker?.controlsActive) return "active";
-    return this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)
+    if (this.ownedTurns.worker?.controlsActive) return "active";
+    return this.ownedTurns.worker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)
       ? "settled" : "none";
   }
 
@@ -116,6 +115,7 @@ export abstract class RunRuntime<FixedAt> {
   abstract readonly dependencies: {
     trust: Pick<TrustService, "requireResolved">;
     settings(): unknown;
+    sessionLineage(): { state(sessionId: string): { lineageId?: string | undefined } };
     beforeRunAdmission(id: string): Promise<void>;
     workRegistry: GatewayWorkRegistry;
     markers: RunMarkerStore;
@@ -138,7 +138,7 @@ export abstract class RunRuntime<FixedAt> {
   abstract readonly directBashProcesses: DirectBashProcessOwner | undefined;
   abstract readonly activityHeartbeat: unknown;
   protected abstract readonly bashMetadata: Map<string, ToolProjectionMetadata>;
-  protected abstract assertChapterWritable(): void;
+  abstract assertChapterWritable(): void;
   abstract liveProfile(): SessionProfile;
   protected abstract changeHomeRecipe(key: string, value: unknown, work?: string): Promise<number>;
   protected abstract recordFixedSetting(key: string, value: unknown, origin?: FixedAt): Promise<void>;
