@@ -61,9 +61,14 @@ request. To retry a failed creation's trust phase, explicitly request `trust`.
   idle live sessions. Claims are inspected only in the work tool's canonical branch
   namespace; more than 200 refs refuses bounded inspection. The claim owner must
   release/clean its branch; lifecycle never does.
-- Filesystem checks and reservations exclude Gateway races and existing symlink escapes;
-  they are not a sandbox against another process with the same Mac user's authority
-  maliciously renaming directories between OS calls. Errors retain paths for inspection.
+- Filesystem checks and reservations exclude Gateway races and existing symlink escapes.
+  Same-user processes are trusted: moves are best-effort, not a sandbox against
+  another process with the same Mac user's authority. Such a process can replace a
+  directory between OS calls or modify trusted resources afterward; pathname trust
+  can consequently apply to a replacement. There is no no-TOCTOU guarantee against
+  same-UID writers. An enforceable hostile-writer boundary requires OS authority
+  separation, not another pathname check or advisory lock. Errors retain paths for
+  inspection; inspect retained data before an explicit retry.
 - Git subprocesses are bounded, noninteractive and ignore inherited `GIT_*` selectors;
   hooks/templates and repository-configured log signature programs do not execute.
   GitHub stderr/credential-bearing config is not returned.
