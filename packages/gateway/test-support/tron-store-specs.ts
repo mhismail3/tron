@@ -121,7 +121,7 @@ function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
       createHomeSession: async () => CORPUS_IDS.session,
       chapterMetrics: async () => ({ bytes: 2_048, entries: 4, quiescent: true }), hasConversation: async () => false,
       homeModel: async () => undefined, chooseHomeModel: async () => {}, retireHomeRuntimes: async () => {},
-      wakeHome: async () => { throw new Error("The corpus Home is never woken"); },
+      wakeHome: () => async () => { throw new Error("The corpus Home is never woken"); },
     },
     memoryModels: async () => [],
     memorySummarizer: () => async () => { throw new Error("The corpus Home summarizes nothing"); },

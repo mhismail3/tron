@@ -97,7 +97,15 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
       tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
       settingsOutcomes: () => composition.settings()?.changes,
       sessions: {
-        wakeHome: async sessionId => (await sessions.acquire(sessionId)).admitHomeWake(),
+        wakeHome: sessionId => {
+          const captured = sessions.liveRuntime(sessionId);
+          const cancellationEpoch = captured?.runAbort.cancellationEpoch ?? 0;
+          return async () => {
+            const slot = await sessions.acquire(sessionId);
+            if (captured && captured !== slot) throw new GatewayError("cancelled", "Home wake runtime changed before admission");
+            return slot.admitHomeWake(cancellationEpoch);
+          };
+        },
         createHomeSession: async (cwd) => (await sessions.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
         retireHomeRuntimes: async () => {
           // Publication recovery runs after construction of the canonical owner.

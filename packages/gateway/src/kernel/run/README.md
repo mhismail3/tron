@@ -61,6 +61,8 @@ actual K3 host; native frames do not select product modules or keep another list
   Settings wakes bind the actual admitted input and use `gateway:settings` attribution.
   Home selects outcomes through its bounded, cancellable input envelope for both user
   turns and wakes; the native before-agent-start hook selects only ordinary requesters.
+  A wake carries the native cancellation epoch captured before asynchronous selection;
+  native lane admission and the SDK send boundary both reject a stopped attempt.
   Ordinary outcome acknowledgement requires the bounded canonical reader's durable
   file-and-directory proof; failed proof defers without refusing the prompt.
   Root supplies its actual settings instances directly to Home and installs the
