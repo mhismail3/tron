@@ -4,18 +4,17 @@ import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "./gateway-regis
 /**
  * Tron Home's learned profile (#731), end to end: the `profile` tool called by a
  * faux Home model inside real activations, the real Knowledge store behind it,
- * the injected profile in the next activation's system prompt, and a delegated
- * worker receiving the brief that cites those items.
+ * metadata-only discovery and explicit reads, and a delegated worker receiving
+ * the brief Home deliberately chose from that evidence.
  *
  * Failure modes these cases exist for, written before the code they test:
  *  F1 learn writes a confirmed note, or one without its tag, provenance, or the
  *     triggering maintainer message's entry;
- *  F2 the next activation does not carry the item text verbatim, with its ID,
- *     under the stable heading;
+ *  F2 discovery inserts note text automatically, or an explicit read loses text/identity;
  *  F3 refine, supersede or retire destroys the prior revision or leaves the old
  *     item active;
  *  F4 a retired or superseded item is still changed by profile actions;
- *  F5 an over-bound profile is injected partly (truncated) or whole;
+ *  F5 discovery or paged explicit reads drop over-bound records;
  *  F6 the system prompt changes between activations while the profile is unchanged;
  *  F7 a native confirmation or edit, which models neither tags nor retirement,
  *     removes the item from the profile;
@@ -213,7 +212,8 @@ export async function fixture(label: string): Promise<Fixture> {
   const trust = new TrustService(agentDir);
   await trust.set(project, true);
   let knowledge: KnowledgeService | undefined;
-  const registry = await createTestRegistry({ knowledge: () => knowledge, agentDir,
+  let settings: { model: SettingsModel; changes: SettingsChangePath } | undefined;
+  const registry = await createTestRegistry({ knowledge: () => knowledge, settings: () => settings, agentDir,
     tronHome,
     idleRuntimeMs: 60_000,
     gatewayModelRuntime: runtime,
@@ -239,6 +239,7 @@ export async function fixture(label: string): Promise<Fixture> {
     setTrust: async () => { throw new Error("trust is not changed here"); },
     undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
   });
+  settings = { model: settingsModel, changes: settingsChanges };
   registry.setSettings(settingsModel, settingsChanges);
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const pushes: Array<{ title: string; message: string }> = [];

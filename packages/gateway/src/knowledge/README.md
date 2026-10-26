@@ -31,7 +31,7 @@ connector details: [contract](contract.md).
     catalog-<id>.sqlite                    # canonical transactional catalog
     records/<record-id>/<revision-id>.json # immutable record revisions
     objects/<sha256>                       # immutable content-addressed bytes
-    profile-backups/<plan-digest>.json     # bounded owner-only partition recovery
+    profile-backups/<sha256>.json          # bounded owner-only partition recovery
   ```
 
   A deleted namespace, manifest or catalog in an established workspace is
@@ -52,7 +52,9 @@ connector details: [contract](contract.md).
   preserve exact content, labels, status, provenance and historical revisions. An
   owner-only backup precedes all staged bodies; one SQL commit publishes every
   head. Explicit recovery reuses prepared identities; reads never migrate. Home's
-  canonical Changes/undo owner is separate from this store-level commit
+  original command-addressed opaque audit is in the same backup and digest; forget
+  of any member drops the entire envelope, retaining unrelated recovery snapshots.
+  The canonical Changes/undo owner is separate from this store-level commit
   ([profile contract](../modules/home/profile.md)).
 - **Upgrade.** The user-initiated start of an updated Gateway runs the one explicit
   `upgradeStorage()` (`CATALOG_STORAGE_VERSION` 4); reads refuse an older manifest.

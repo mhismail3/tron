@@ -244,8 +244,13 @@ Forget also redacts forgotten/dependent members from profile backups, retaining
 unrelated recovery snapshots. It invalidates the original atomic plan and queues
 its uncommitted prepared files through the same revision-cleanup table. Existing
 tombstones make backup redaction retryable by `reconcile()` after a crash; no new
-cleanup journal or format is introduced. Unknown envelope shapes require an owned
-privacy contract before they can be forgotten.
+cleanup journal is introduced. The same backup may hold Home's opaque original
+audit envelope, bound into its digest and addressed by original command ID rather
+than assignment equivalence. Forget of ANY member drops that entire envelope
+(including free-form context), invalidating the whole atomic intent, while keeping
+unrelated recovery snapshots. Unknown backup fields refuse cleanup. Explicit
+`profilePartitionRecovery()` proves exact historical committed identities without
+replaying effects, even after later edits; opening never runs domain recovery.
 Malformed stored partition labels remain diagnostic/unassigned until an explicit
 reorganization replaces just those owner labels; valid records remain discoverable.
 This is storage recovery, not canonical Changes/undo publication; the

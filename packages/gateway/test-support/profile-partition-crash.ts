@@ -41,19 +41,21 @@ process.stdout.write(JSON.stringify(result));
 
 /** Test-owned subprocess cuts at real filesystem/SQLite boundaries. It never
  * opens a live workspace or alters a production fault-injection surface. */
-export async function crashProfilePartition(root: string, home: string, assignments: ProfileAssignment[], cut: string, forget?: { recordId: string; expectedRevision: string }): Promise<void> {
+export async function crashProfilePartition(root: string, home: string, assignments: ProfileAssignment[], cut: string, forget?: { recordId: string; expectedRevision: string }, audit?: { context: unknown; undoChangeId?: string }): Promise<void> {
   const hook = join(root, "partition-hook.mjs"), program = join(root, "partition-child.mjs"), input = join(root, "partition-input.json");
-  await writeFile(input, JSON.stringify({ assignments, forget }));
+  await writeFile(input, JSON.stringify({ assignments, forget, audit }));
   await writeFile(hook, `import { registerHooks } from 'node:module';
 registerHooks({ resolve(specifier, context, next) { try { return next(specifier, context); } catch (error) { if (specifier.endsWith('.js')) return next(specifier.slice(0,-3)+'.ts',context); throw error; } } });
 `);
   const storeModule = fileURLToPath(new URL("../src/knowledge/knowledge-store.ts", import.meta.url));
   const workspaceModule = fileURLToPath(new URL("../src/workspace/tron-workspace.ts", import.meta.url));
+  const modules = Object.fromEntries(Object.entries({ profile: "../src/modules/home/home-profile.ts", service: "../src/knowledge/knowledge-service.ts", change: "../src/kernel/settings/settings-change.ts", model: "../src/kernel/settings/settings-model.ts", record: "../src/kernel/settings/settings-record.ts", approvals: "../src/kernel/settings/settings-approvals.ts", adapter: "../src/admin/settings-model.ts", schema: "./settings-schema.ts", trust: "../src/kernel/resources/trust-service.ts" }).map(([key, path]) => [key, fileURLToPath(new URL(path, import.meta.url))]));
+  const sdk = import.meta.resolve("@earendil-works/pi-coding-agent");
   await writeFile(program, `import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
 const [home,input,cut] = process.argv.slice(2);
-const {assignments,forget} = JSON.parse(await fs.readFile(input,'utf8'));
+const {assignments,forget,audit} = JSON.parse(await fs.readFile(input,'utf8'));
 let written = 0;
 const park = () => { process.stdout.write('partition-crash-window\\n'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0); };
 const open = fs.open, rename = fs.rename, exec = DatabaseSync.prototype.exec;
@@ -64,7 +66,7 @@ fs.open = async function(path,...args) {
 };
 fs.rename = async function(from,to) {
   const result = await rename.call(this,from,to);
-  if (String(to).includes('/records/') && String(to).endsWith('.json')) { written++; if (cut === 'mid-body' && written === 7) park(); }
+  if (String(to).includes('/records/') && String(to).endsWith('.json')) { written++; if (cut === 'mid-body' && written === (audit ? 1 : 7)) park(); }
   return result;
 };
 DatabaseSync.prototype.exec = function(sql) {
@@ -80,7 +82,26 @@ const workspace = new TronWorkspace(home);
 await workspace.initialize();
 const store = new KnowledgeStore(workspace);
 if (forget) await store.forget('partition-child-forget',forget.recordId,'Explicit fixture forget',forget.expectedRevision);
-else await store.partitionProfile({ commandId:'partition-child-command', mode:'migrate', assignments });
+else if (audit) {
+  const modules = ${JSON.stringify(modules)};
+  const { HomeProfileItems } = await import(modules.profile);
+  const { KnowledgeService } = await import(modules.service);
+  const { SettingsChangePath } = await import(modules.change);
+  const { SettingsModel } = await import(modules.model);
+  const { SettingsChangeRecord } = await import(modules.record);
+  const { SettingsApprovals } = await import(modules.approvals);
+  const { SettingsStoreAdapter } = await import(modules.adapter);
+  const { TEST_SETTINGS_SCHEMA } = await import(modules.schema);
+  const { TrustService } = await import(modules.trust);
+  const { ModelRuntime } = await import(${JSON.stringify(sdk)});
+  const modelRuntime = await ModelRuntime.create({authPath:home+'/child-auth.json',modelsPath:null,refreshOnCreate:false});
+  const knowledge = new KnowledgeService(store);
+  const profile = new HomeProfileItems(() => knowledge);
+  const model = new SettingsModel(new SettingsStoreAdapter({schema:TEST_SETTINGS_SCHEMA,agentDir:home+'/agent',tronHome:home,trust:new TrustService(home+'/agent'),modelRuntime}));
+  const changes = new SettingsChangePath(model,new SettingsChangeRecord(home),new SettingsApprovals(home),{setTrust:async()=>{throw new Error('Not used');},undoSubject:(entry,context)=>profile.undo(changes,entry,context)});
+  if (audit.undoChangeId) await changes.undo(audit.undoChangeId,audit.context);
+  else await profile.partition(changes,{commandId:audit.context.commandId,mode:'migrate',assignments},audit.context);
+} else await store.partitionProfile({ commandId:'partition-child-command', mode:'migrate', assignments });
 await workspace.dispose();
 throw new Error('Requested crash cut was not reached');
 `);

@@ -1,5 +1,7 @@
-import { expect, it } from "vitest";
-import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, recordCase, say, command } from "../../../test-support/home-profile-fixture.js";
+import { mkdir, stat } from "node:fs/promises";
+import { expect, it, vi } from "vitest";
+import * as durability from "../../util/durable-json.js";
+import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, recordCase, say, command, history, undo } from "../../../test-support/home-profile-fixture.js";
 
 profileReportFile("test-results/home-profile/hierarchy.json");
 
@@ -47,6 +49,46 @@ it("file and diagnostic metadata both page without inserting note text or droppi
   for (const note of diagnostics) expect(windows.join("\n")).toContain(`id=${note.id} revisionId=${note.revisionId}`);
   expect(await Promise.all([...scoped, ...diagnostics].map(note => f.store.read(note.id)))).toEqual([...scoped, ...diagnostics]);
   recordCase("paged-file-and-diagnostic-discovery", { metadataWindowBytes: windows.map(value => Buffer.byteLength(value)), scopedNotes: scoped.length, diagnosticNotes: diagnostics.length });
+});
+
+it("the real Home profile tool retries one original label group and native Changes Undo restores malformed labels at their exact positions", async () => {
+  const f = await fixture("hierarchy-organize-tool");
+  const original = (await f.store.createNote({ commandId: command("organize-seed"), record: { kind: "note", scope: "personal",
+    provenance: { actor: "user", source: "explicit-standing-rule", evidence: [] }, relations: [],
+    content: { title: "Never publish without approval.", body: "Preserve the full binding instruction.", role: "decision", confirmed: true,
+      tags: ["home-file-unknown", "home-profile", "kind-standing-decision", "home-file-home", "fixture-label"] } } })).record;
+  await mkdir(f.record.path, { recursive: true });
+  const parent = await stat(f.record.path);
+  const sync = durability.syncDurably;
+  const fault = vi.spyOn(durability, "syncDurably").mockImplementation(async handle => {
+    const actual = await handle.stat();
+    if (actual.dev === parent.dev && actual.ino === parent.ino) throw new Error("Owned tool audit publication fault");
+    await sync(handle);
+  });
+  const first = await homeActivation(f, "Explicitly organize this instruction as release context; keep its existing authority.", [
+    profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, file: "scopes/release" }], reason: "Explicit label-only organization" }, "organize-tool-first"), say("retry needed"),
+  ]);
+  const pending = first.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-first")?.details as { status: string; commandId: string };
+  expect(pending.status).toBe("retry_required");
+  expect(await history(f)).toEqual([]);
+  const committed = await f.store.read(original.id);
+  fault.mockRestore();
+  const next = await homeActivation(f, "Retry only the original organization operation.", [profileCall({ action: "retry", commandId: pending.commandId }, "organize-tool-retry"), say("acknowledged")]);
+  const organized = next.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-retry")?.details as { status: string; commandId: string; changeIds: string[] };
+  expect(organized).toMatchObject({ status: "organized", commandId: pending.commandId });
+  expect(organized.changeIds).toHaveLength(1);
+  expect(await f.store.read(original.id)).toEqual(committed);
+  const audit = await history(f);
+  expect(audit).toHaveLength(1);
+  expect(audit[0]).toMatchObject({ commandId: pending.commandId, actor: { kind: "home", toolCallId: "organize-tool-first" },
+    before: { text: "Never publish without approval.", confirmed: true, fileLabels: [{ index: 0, tag: "home-file-unknown" }, { index: 3, tag: "home-file-home" }] },
+    after: { text: "Never publish without approval.", confirmed: true, fileLabels: [{ index: 3, tag: "home-file-scopes-release" }] } });
+  await undo(f, organized.changeIds[0]!, "native-undo-labels");
+  const restored = await f.store.read(original.id);
+  expect({ ...restored, revisionId: original.revisionId }).toEqual(original);
+  const undoEntries = (await history(f)).filter(entry => entry.undoOf);
+  expect(undoEntries.map(entry => entry.undoOf)).toEqual(organized.changeIds);
+  recordCase("tool-original-envelope-retry-native-label-undo", { originalCommand: pending.commandId, originalToolCall: "organize-tool-first", changeIds: organized.changeIds, exactMalformedLabelsRestored: true });
 });
 
 it("new profile content is discoverable but never automatically inserted into Home", async () => {

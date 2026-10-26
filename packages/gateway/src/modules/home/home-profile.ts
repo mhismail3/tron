@@ -1,4 +1,4 @@
-import { profileFile, profileFileTags, type ProfileFile } from "../../knowledge/knowledge-notes.js";
+import { profileFile, profileFileTags, profileLabels, type ProfileLabel, type ProfilePartitionRequest, type ProfileFile } from "../../knowledge/knowledge-notes.js";
 import { profileIndex, PROFILE_SECTION_HEADING } from "./home-profile-hierarchy.js";
 import { randomUUID } from "node:crypto";
 import { formatProfileValue } from "../../admin/settings-presentation.js";
@@ -80,6 +80,12 @@ export async function readHomeProfile(knowledge: KnowledgeService): Promise<Home
     cursor = page.nextCursor;
   } while (cursor);
 
+  return classifyProfile(notes);
+}
+
+/** Also classifies the already-admitted bounded partition snapshot; never do an
+ * unbounded second head load ahead of Knowledge's resource admission. */
+function classifyProfile(notes: ProfileNote[]): HomeProfileRead {
   const supersededBy = new Map<string, string>();
   for (const note of notes) {
     for (const relation of note.relations) if (relation.type === "supersedes" && !supersededBy.has(relation.recordId)) supersededBy.set(relation.recordId, note.id);
@@ -128,10 +134,11 @@ function unavailableSection(reason: string): string {
 
 // ---- profile changes: one implementation for Home and the maintainer ------------
 //
-// Every profile change, Home's `profile` tool and the maintainer's `home.profileChange`
-// alike, runs through `HomeProfileItems` inside the settings change path
-// (`SettingsChangePath.auditSubject`), which serializes it, records one audit entry per
-// note it touched and makes it undoable (docs/settings-model.md 6.4). The actor decides
+// Content changes from Home and the maintainer run through HomeProfileItems inside
+// SettingsChangePath.auditSubject. Label-only groups preflight and freeze the same
+// subject's original snapshots in Knowledge's backup, then publish only committed
+// facts through publishSubjectAudit. Both use the existing Changes/Undo surface.
+// The actor decides
 // only what the note says about confirmation: Home's changes stay inferred until the
 // maintainer confirms them, and the maintainer's own edits are confirmed by definition.
 
@@ -151,6 +158,10 @@ export type HomeProfileOp =
   | { action: "supersede"; id: string; kind: HomeProfileKind; text: string; reason?: string; expectedRevision?: string }
   | { action: "retire"; id: string; reason?: string; expectedRevision?: string };
 
+export type HomeProfileRequest = HomeProfileOp
+  | { action: "migrate" | "reorganize"; assignments: ProfilePartitionRequest["assignments"] }
+  | { action: "retry"; commandId: string };
+
 /** Who writes. Home cites the maintainer message its turn answers. */
 export type HomeProfileAuthor =
   | { kind: "home"; sessionId: string; entryId: string }
@@ -166,9 +177,48 @@ export interface HomeProfileValue {
   revisionId: string;
   supersedes?: string;
   supersededBy?: string;
+  /** Exact owner labels AND positions; absent means the original flat note. */
+  fileLabels?: ProfileLabel[];
 }
 
 export interface HomeProfileWrite { id: string; before: HomeProfileValue | null; after: HomeProfileValue | null }
+interface PartitionEnvelope {
+  version: 1;
+  replayAt: string;
+  context: SubjectContext;
+  writes: SubjectWrite[];
+}
+function labelOnlyWrite(before: unknown, after: unknown): boolean {
+  if (!before || !after || typeof before !== "object" || typeof after !== "object") return false;
+  const { revisionId: _before, fileLabels: labelsBefore, ...one } = before as HomeProfileValue;
+  const { revisionId: _after, fileLabels: labelsAfter, ...two } = after as HomeProfileValue;
+  return JSON.stringify(one) === JSON.stringify(two) && JSON.stringify(labelsBefore ?? []) !== JSON.stringify(labelsAfter ?? []);
+}
+function validatePartitionEnvelope(changes: SettingsChangePath, raw: unknown, commandId: string, originals: ProfileNote[], prepared: ProfileNote[]): PartitionEnvelope {
+  const fail = (): never => { throw new GatewayError("conflict", "Original profile audit envelope is invalid"); };
+  if (!raw || typeof raw !== "object") fail();
+  const envelope = raw as PartitionEnvelope;
+  if (envelope.version !== 1 || !envelope.context || envelope.context.commandId !== commandId || !["home", "ui"].includes(envelope.context.actor?.kind)
+    || !Array.isArray(envelope.writes) || Object.keys(envelope).some(key => !["version", "replayAt", "context", "writes"].includes(key))) fail();
+  const changed = originals.flatMap((before, index) => before.revisionId !== prepared[index]?.revisionId ? [{ before, after: prepared[index]! }] : []);
+  if (!changed.length || changed.length !== envelope.writes.length) fail();
+  for (const [index, pair] of changed.entries()) {
+    const write = envelope.writes[index]!;
+    const before = write.before as HomeProfileValue | null;
+    const after = write.after as HomeProfileValue | null;
+    if (write.id !== pair.before.id || pair.after.id !== pair.before.id || !before || !after || write.direction !== "widen" || !labelOnlyWrite(before, after)) fail();
+    for (const [value, record] of [[before!, pair.before], [after!, pair.after]] as const) {
+      const kinds = HOME_PROFILE_KINDS.filter(kind => record.content.tags?.includes(kindTag(kind)));
+      const expected = { kind: kinds[0], text: record.content.title, confirmed: record.content.confirmed, state: value.state, revisionId: record.revisionId,
+        ...(value.supersedes ? { supersedes: value.supersedes } : {}), ...(value.supersededBy ? { supersededBy: value.supersededBy } : {}),
+        ...(profileLabels(record.content.tags).length ? { fileLabels: profileLabels(record.content.tags) } : {}) };
+      if (kinds.length !== 1 || JSON.stringify(expected) !== JSON.stringify(value) || !["active", "retired", "superseded"].includes(value.state)
+        || (record.content.retired === true) !== (value.state === "retired")) fail();
+    }
+  }
+  changes.validateSubjectAudit(envelope.writes, envelope.context, envelope.replayAt);
+  return envelope;
+}
 
 /** What one change saved, as the tool result and the RPC answer state it. */
 export interface HomeProfileSaved {
@@ -186,7 +236,8 @@ export interface HomeProfileSaved {
 export function profileValue(item: HomeProfileItem | undefined): HomeProfileValue | null {
   if (!item) return null;
   return { kind: item.kind, text: item.text, confirmed: item.confirmed, state: item.status, revisionId: item.revisionId,
-    ...(item.supersedes ? { supersedes: item.supersedes } : {}), ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}) };
+    ...(item.supersedes ? { supersedes: item.supersedes } : {}), ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}),
+    ...(profileLabels(item.record.content.tags).length ? { fileLabels: profileLabels(item.record.content.tags) } : {}) };
 }
 
 /** The list projection of an item (`home.profileList` and the change answer). */
@@ -257,9 +308,17 @@ export class HomeProfileItems {
     return this.knowledge() !== undefined;
   }
 
-  /** Domain operations stay here; the settings engine owns their stripe and audit. */
-  async change(changes: SettingsChangePath, ops: readonly HomeProfileOp[], context: ProfileChangeContext): Promise<ProfileChangeResult> {
+  /** Domain effects stay here. Content uses the engine's stripe; partition effects
+   * use Knowledge's atomic revision fences and the engine's group publisher. */
+  async change(changes: SettingsChangePath, requests: readonly HomeProfileRequest[], context: ProfileChangeContext): Promise<ProfileChangeResult> {
     if (!this.available()) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
+    const partition = requests.find(op => op.action === "migrate" || op.action === "reorganize" || op.action === "retry");
+    if (partition && (partition.action === "migrate" || partition.action === "reorganize" || partition.action === "retry")) {
+      if (requests.length !== 1 || context.author.kind !== "home") throw new GatewayError("invalid_request", "Organization is one explicit Home operation");
+      return partition.action === "retry" ? this.retryPartition(changes, partition.commandId, context.actor.kind)
+        : this.partition(changes, { commandId: context.commandId, mode: partition.action, assignments: partition.assignments }, context);
+    }
+    const ops = requests as readonly HomeProfileOp[];
     if (ops.length === 0 || ops.length > 50) throw new GatewayError("invalid_request", "A profile change holds 1 to 50 changes");
     return changes.auditSubject(async () => {
       const applied: Array<{ saved: HomeProfileSaved; writes: HomeProfileWrite[] }> = [];
@@ -285,10 +344,73 @@ export class HomeProfileItems {
     });
   }
 
+  /** Freeze the ORIGINAL audit before effects, then publish only proven committed
+   * identities. The existing backup owns recovery; no domain replay runs on open. */
+  async partition(changes: SettingsChangePath, request: ProfilePartitionRequest, context: SubjectContext, undoOf?: ReadonlyMap<string, string>): Promise<ProfileChangeResult> {
+    if (request.commandId !== context.commandId || !["home", "ui"].includes(context.actor.kind)) throw new GatewayError("invalid_request", "Profile partition needs its original Home or maintainer command");
+    const result = await this.owner().store.partitionProfile(request, {
+      create: (originals, prepared, visibleProfile) => {
+        const read = classifyProfile(visibleProfile);
+        return { version: 1, replayAt: new Date().toISOString(), context: { commandId: context.commandId, actor: context.actor,
+        ...(context.reason !== undefined ? { reason: context.reason } : {}), ...(context.web !== undefined ? { web: context.web } : {}) },
+        writes: originals.flatMap((record, index) => {
+          const next = prepared[index]!;
+          if (record.revisionId === next.revisionId) return [];
+          const item = read.items.find(item => item.id === record.id);
+          if (!item) throw new GatewayError("conflict", "Unclassified profile kind needs an explicit eligibility decision");
+          const value = (record: ProfileNote) => profileValue({ ...item, revisionId: record.revisionId, record });
+          return [{ id: record.id, before: value(record), after: value(next), direction: "widen", ...(undoOf?.has(record.id) ? { undoOf: undoOf.get(record.id) } : {}) }];
+        }) };
+      },
+      validate: (raw, originals, prepared) => { validatePartitionEnvelope(changes, raw, request.commandId, originals, prepared); },
+    });
+    if (!result.backup) return { status: "applied", tier: "quiet", changes: [], saved: [], items: [] };
+    return this.retryPartition(changes, request.commandId, context.actor.kind);
+  }
+
+  /** An explicit retry either resumes the backed-up precommit domain intent or
+   * repairs ONLY its audit, even after a later canonical edit. */
+  async retryPartition(changes: SettingsChangePath, commandId: string, actor: SubjectContext["actor"]["kind"]): Promise<ProfileChangeResult> {
+    const recovery = await this.owner().store.profilePartitionRecovery(commandId);
+    const envelope = validatePartitionEnvelope(changes, recovery.envelope, commandId, recovery.originals, recovery.prepared);
+    if (!recovery.committed) {
+      if (envelope.context.actor.kind === "ui" && actor !== "ui") throw new GatewayError("invalid_request", "Only the maintainer resumes an uncommitted Undo");
+      await this.owner().store.partitionProfile(recovery.request, {
+        create: () => { throw new GatewayError("conflict", "The original profile backup is missing"); },
+        validate: (raw, originals, prepared) => { validatePartitionEnvelope(changes, raw, commandId, originals, prepared); },
+      });
+      return this.retryPartition(changes, commandId, actor);
+    }
+    const audit = await changes.publishSubjectAudit(envelope.writes, envelope.context, envelope.replayAt);
+    const read = await this.read();
+    return { ...audit, status: "applied", saved: [], items: read.items.filter(item => envelope.writes.some(write => write.id === item.id)).map(profileListItem) };
+  }
+
   /** Group/value fencing, restoration and projection all remain under the Home stripe. */
   async undo(changes: SettingsChangePath, entry: ChangeEntry, context: Omit<ChangeContext, "undoOf">): Promise<ProfileChangeResult> {
     if (!this.available()) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
     if (context.actor.kind !== "ui") throw new GatewayError("invalid_request", "Only the maintainer undoes a profile change");
+    const group = entry.group ? await changes.record.group(entry.group.id, entry.group.size) : [entry];
+    if (group.every(member => labelOnlyWrite(member.before, member.after))) {
+      const commandId = context.commandId ?? randomUUID();
+      // A retry after a committed domain/failed audit must not apply Undo twice.
+      try {
+        const recovery = await this.owner().store.profilePartitionRecovery(commandId);
+        const envelope = validatePartitionEnvelope(changes, recovery.envelope, commandId, recovery.originals, recovery.prepared);
+        if (!envelope.writes.some(write => write.undoOf === entry.changeId)) throw new GatewayError("conflict", "Command ID belongs to a different profile Undo");
+        return this.retryPartition(changes, commandId, "ui");
+      } catch (error) {
+        if (!(error instanceof GatewayError && error.message === "No backed-up profile operation with this command ID")) throw error;
+      }
+      const current = await this.values(group.map(member => member.qualifiers?.note ?? ""));
+      for (const member of group) if (member.status !== "applied" || JSON.stringify(current.get(member.qualifiers?.note ?? "") ?? null) !== JSON.stringify(member.after ?? null)) {
+        throw new GatewayError("conflict", "The profile item changed since; undo would overwrite a newer change");
+      }
+      return this.partition(changes, { commandId, mode: "reorganize", assignments: group.map(member => ({
+        id: member.qualifiers!.note!, expectedRevision: (member.after as HomeProfileValue).revisionId, labels: (member.before as HomeProfileValue).fileLabels ?? [],
+      })) }, { commandId, actor: context.actor, ...(context.reason ? { reason: context.reason } : {}), ...(context.web !== undefined ? { web: context.web } : {}) },
+      new Map(group.map(member => [member.qualifiers!.note!, member.changeId])));
+    }
     return changes.auditSubject(async () => {
       const members = entry.group ? await changes.record.group(entry.group.id, entry.group.size) : [entry];
       if (members.some(member => member.status !== "applied")) throw new GatewayError("conflict", "Only an applied change can be undone");
@@ -449,5 +571,5 @@ export class HomeProfileItems {
 
 /** What the Home runtime gives the tool: the change path, as Home. */
 export interface HomeProfileChangeAccess {
-  change(ops: HomeProfileOp[], input: { toolCallId: string; web: boolean; author: HomeProfileAuthor; commandId: string; reason?: string }): Promise<{ saved: HomeProfileSaved[] }>;
+  change(ops: HomeProfileRequest[], input: { toolCallId: string; web: boolean; author: HomeProfileAuthor; commandId: string; reason?: string }): Promise<ProfileChangeResult>;
 }

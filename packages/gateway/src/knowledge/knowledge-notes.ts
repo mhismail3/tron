@@ -38,11 +38,17 @@ export function storedNoteContent(content: NoteContent): NoteContent {
 }
 
 type Note = Extract<KnowledgeRecord, { kind: "note" }>;
-export interface ProfileAssignment { id: string; expectedRevision: string; file?: ProfileFile }
+export interface ProfileLabel { index: number; tag: string }
+export const profileLabels = (tags: readonly string[] = []): ProfileLabel[] => tags.flatMap((tag, index) => tag.startsWith(PROFILE_FILE_TAG) ? [{ index, tag }] : []);
+export interface ProfileAssignment { id: string; expectedRevision: string; file?: ProfileFile; labels?: ProfileLabel[] }
 export interface ProfilePartitionRequest { commandId: string; mode: "migrate" | "reorganize"; assignments: ProfileAssignment[] }
 export interface ProfilePartitionResult {
   backup?: string;
   changes: Array<{ id: string; beforeRevision: string; revisionId: string; beforeFile?: ProfileFile; file?: ProfileFile }>;
+}
+export interface ProfilePartitionAudit {
+  create(originals: Note[], prepared: Note[], visibleProfile: Note[]): unknown;
+  validate(envelope: unknown, originals: Note[], prepared: Note[]): void;
 }
 interface PartitionBackup {
   version: 1;
@@ -50,6 +56,27 @@ interface PartitionBackup {
   assignments: ProfileAssignment[];
   originals: Array<{ record: Note; history: KnowledgeRecord[] }>;
   prepared: Note[];
+  operation?: { commandId: string; mode: ProfilePartitionRequest["mode"]; envelope: unknown };
+}
+const planDigest = (mode: ProfilePartitionRequest["mode"], assignments: ProfileAssignment[], operation?: PartitionBackup["operation"]) =>
+  createHash("sha256").update(JSON.stringify({ mode, assignments, ...(operation ? { operation } : {}) })).digest("hex");
+export const profileOperationKey = (commandId: string) => createHash("sha256").update(commandId).digest("hex");
+function assignmentTags(note: Note, assignment: ProfileAssignment): string[] {
+  if (assignment.labels === undefined) return profileFile(note.content.tags) === assignment.file ? [...(note.content.tags ?? [])] : profileFileTags(note.content.tags ?? [], assignment.file);
+  const tags = (note.content.tags ?? []).filter(tag => !tag.startsWith(PROFILE_FILE_TAG));
+  for (const label of assignment.labels) {
+    if (label.index > tags.length) refuse("Invalid profile label position");
+    tags.splice(label.index, 0, label.tag);
+  }
+  return tags;
+}
+/** A recovery read is explicit and carries no domain side effect. */
+export async function readProfileOperation(directory: string, commandId: string) {
+  const saved = await readSecureJson<PartitionBackup>(join(directory, `${profileOperationKey(commandId)}.json`), BACKUP_BYTES);
+  const plan = saved.present ? saved.value : refuse("No backed-up profile operation with this command ID");
+  if (plan.version !== 1 || plan.operation?.commandId !== commandId || plan.digest !== planDigest(plan.operation.mode, plan.assignments, plan.operation)
+    || plan.originals.length !== plan.assignments.length || plan.prepared.length !== plan.assignments.length) refuse("Profile operation was invalidated or its backup changed");
+  return plan;
 }
 interface PartitionAccess {
   backupDirectory(): Promise<string>;
@@ -79,7 +106,7 @@ async function* profileBackups(root: string): AsyncGenerator<{ path: string; pla
     const plan = saved.present ? saved.value : refuse("Profile backup disappeared during cleanup");
     // An added opaque Home envelope must bring its owned privacy contract here;
     // never silently carry unknown copies through forget.
-    if (plan.version !== 1 || Object.keys(plan).some(key => !["version", "digest", "assignments", "originals", "prepared"].includes(key))) refuse("Unsupported profile backup cleanup shape");
+    if (plan.version !== 1 || Object.keys(plan).some(key => !["version", "digest", "assignments", "originals", "prepared", "operation"].includes(key))) refuse("Unsupported profile backup cleanup shape");
     for (const record of [...plan.prepared, ...plan.originals.flatMap(item => [item.record, ...item.history])]) validateKnowledgeRecord(record);
     if (plan.prepared.some(record => record.kind !== "note") || plan.originals.some(item => item.record.kind !== "note" || item.history.some(record => record.id !== item.record.id))) refuse("Invalid profile backup history ownership");
     yield { path, plan };
@@ -99,7 +126,11 @@ export async function redactProfileBackups(root: string, affected: (record: Know
     if (!removed.size) continue;
     // Keep original assignment identities: missing members make this operation
     // non-replayable. Do not mint a new intent or erase unrelated recovery data.
-    await durableAtomicWriteJson(path, { ...plan, originals: plan.originals.filter(item => !removed.has(item.record.id)), prepared: plan.prepared.filter(item => !removed.has(item.id)) });
+    // The opaque envelope may quote any member, including in free-form context.
+    // Forget invalidates the whole atomic intent: drop the ENTIRE envelope rather
+    // than attempt field-wise redaction or retain an unrelated copy of its text.
+    const { operation: _operation, ...retained } = plan;
+    await durableAtomicWriteJson(path, { ...retained, originals: plan.originals.filter(item => !removed.has(item.record.id)), prepared: plan.prepared.filter(item => !removed.has(item.id)) });
   }
 }
 const refuse = (message: string): never => { throw new GatewayError("conflict", message); };
@@ -110,18 +141,21 @@ const refuse = (message: string): never => { throw new GatewayError("conflict", 
  * every staged body instead of silently leaking precommit immutable revisions.
  * Explicit recovery retries the same assignments; opening the store never migrates.
  */
-export async function partitionProfileNotes(request: ProfilePartitionRequest, access: PartitionAccess): Promise<ProfilePartitionResult> {
+export async function partitionProfileNotes(request: ProfilePartitionRequest, access: PartitionAccess, audit?: ProfilePartitionAudit): Promise<ProfilePartitionResult> {
   if (request.mode !== "migrate" && request.mode !== "reorganize") refuse("Unknown profile partition operation");
   if (request.assignments.length < 1 || request.assignments.length > 500) refuse("Partition requires 1 to 500 explicit assignments");
-  const assignments = request.assignments.map(item => ({ id: item.id, expectedRevision: item.expectedRevision, ...(item.file !== undefined ? { file: item.file } : {}) })).sort((a, b) => a.id.localeCompare(b.id));
+  const assignments = request.assignments.map(item => ({ id: item.id, expectedRevision: item.expectedRevision, ...(item.file !== undefined ? { file: item.file } : {}), ...(item.labels !== undefined ? { labels: item.labels } : {}) })).sort((a, b) => a.id.localeCompare(b.id));
   if (new Set(assignments.map(item => item.id)).size !== assignments.length) refuse("Duplicate profile assignment");
   for (const item of assignments) {
     assertKnowledgeId(item.id, "profile note"); assertKnowledgeId(item.expectedRevision, "profile revision");
     if (item.file !== undefined && !validProfileFile(item.file)) refuse("Invalid explicit profile partition");
+    if (item.labels !== undefined && (item.file !== undefined || request.mode !== "reorganize" || !Array.isArray(item.labels) || item.labels.some((label, index) => typeof label.tag !== "string" || !label.tag.startsWith(PROFILE_FILE_TAG) || !Number.isInteger(label.index) || label.index < 0 || (index > 0 && label.index <= item.labels![index - 1]!.index)))) refuse("Invalid profile label restoration");
     if (request.mode === "migrate" && item.file === undefined) refuse("Migration requires a file for every note");
   }
-  const digest = createHash("sha256").update(JSON.stringify({ mode: request.mode, assignments })).digest("hex");
-  const backup = join(await access.backupDirectory(), `${digest}.json`);
+  const digest = planDigest(request.mode, assignments);
+  // Audited operations are addressed by the ORIGINAL command, not assignment
+  // equivalence: separate intents never collide, even for identical assignments.
+  const backup = join(await access.backupDirectory(), `${audit ? profileOperationKey(request.commandId) : digest}.json`);
   const saved = await readSecureJson<PartitionBackup>(backup, BACKUP_BYTES);
   const notes: Note[] = [];
   let activeBytes = 0;
@@ -137,11 +171,11 @@ export async function partitionProfileNotes(request: ProfilePartitionRequest, ac
   let plan: PartitionBackup;
   if (saved.present) {
     plan = saved.value;
-    if (plan.version !== 1 || plan.digest !== digest || JSON.stringify(plan.assignments) !== JSON.stringify(assignments)) refuse("Profile backup does not match this migration");
+    if (plan.version !== 1 || plan.digest !== planDigest(request.mode, assignments, plan.operation) || (audit && plan.operation?.commandId !== request.commandId) || JSON.stringify(plan.assignments) !== JSON.stringify(assignments)) refuse("Profile backup does not match this migration");
     for (const record of [...plan.prepared, ...plan.originals.flatMap(item => [item.record, ...item.history])]) validateKnowledgeRecord(record);
     if (plan.prepared.length !== assignments.length || plan.originals.length !== assignments.length || plan.prepared.some((note, index) => note.id !== assignments[index]!.id || plan.originals[index]!.record.id !== note.id)) refuse("Incomplete profile backup");
   } else {
-    if (assignments.every(item => current.has(item.id) && profileFile(current.get(item.id)!.content.tags) === item.file)) {
+    if (assignments.every(item => current.has(item.id) && JSON.stringify(current.get(item.id)!.content.tags ?? []) === JSON.stringify(assignmentTags(current.get(item.id)!, item)))) {
       if (assignments.some(item => current.get(item.id)!.revisionId !== item.expectedRevision)) refuse("Profile assignment revision is stale");
       return { changes: [] };
     }
@@ -155,7 +189,8 @@ export async function partitionProfileNotes(request: ProfilePartitionRequest, ac
     for (const item of assignments) {
       const note = current.get(item.id);
       if (!note || note.revisionId !== item.expectedRevision) refuse("Profile assignment revision is stale or unavailable");
-      const next = profileFile(note!.content.tags) === item.file ? note! : { ...note!, revisionId: randomUUID(), content: { ...note!.content, tags: profileFileTags(note!.content.tags ?? [], item.file) } };
+      const tags = assignmentTags(note!, item);
+      const next = JSON.stringify(note!.content.tags ?? []) === JSON.stringify(tags) ? note! : { ...note!, revisionId: randomUUID(), content: { ...note!.content, tags } };
       validateKnowledgeRecord(next);
       if (Buffer.byteLength(JSON.stringify(next, null, 2) + "\n") > access.recordBytes) refuse("Partitioned note exceeds its record byte bound");
       admit({ record: note, prepared: next });
@@ -165,16 +200,19 @@ export async function partitionProfileNotes(request: ProfilePartitionRequest, ac
       originals.push({ record: note!, history });
       prepared.push(next);
     }
-    plan = { version: 1, digest, assignments, originals, prepared };
+    const operation = audit ? { commandId: request.commandId, mode: request.mode, envelope: audit.create(originals.map(item => item.record), prepared, notes.filter(note => !access.excluded(note))) } : undefined;
+    plan = { version: 1, digest: planDigest(request.mode, assignments, operation), assignments, originals, prepared, ...(operation ? { operation } : {}) };
+    if (operation) audit!.validate(operation.envelope, originals.map(item => item.record), prepared);
     if (Buffer.byteLength(JSON.stringify(plan, null, 2) + "\n") > BACKUP_BYTES) refuse("Profile backup exceeds its bound; no note was changed");
     await durableAtomicWriteJson(backup, plan);
   }
+  if (audit) audit.validate(plan.operation!.envelope, plan.originals.map(item => item.record), plan.prepared);
   // Validate the ENTIRE plan against canonical heads before writing any body.
   for (const [index, next] of plan.prepared.entries()) {
     const now = current.get(next.id);
     const before = plan.originals[index]!.record;
     if (Buffer.byteLength(JSON.stringify(next, null, 2) + "\n") > access.recordBytes) refuse("Partitioned note exceeds its record byte bound");
-    const expected = next.revisionId === before.revisionId ? before : { ...before, revisionId: next.revisionId, content: { ...before.content, tags: profileFileTags(before.content.tags ?? [], assignments[index]!.file) } };
+    const expected = next.revisionId === before.revisionId ? before : { ...before, revisionId: next.revisionId, content: { ...before.content, tags: assignmentTags(before, assignments[index]!) } };
     if (before.revisionId !== assignments[index]!.expectedRevision || JSON.stringify(expected) !== JSON.stringify(next)) refuse("Backup would change more than partition labels");
     if (!now || (now.revisionId !== before.revisionId && now.revisionId !== next.revisionId)) refuse("Profile changed since the backed-up partition plan");
     if (now!.revisionId === before.revisionId && JSON.stringify(now) !== JSON.stringify(before)) refuse("Original profile revision differs from its backup");

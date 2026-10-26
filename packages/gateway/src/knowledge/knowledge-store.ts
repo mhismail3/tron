@@ -29,7 +29,7 @@ import { KnowledgeCatalog, type KnowledgeTable, type RecallRank } from "./knowle
 import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../protocol/json-budget.js";
 import type { ConnectionInstance } from "../modules/integrations/contract.js";
-import { carryNoteMarks, storedNoteContent, partitionProfileNotes, profileBackupRetirements, redactProfileBackups, type ProfilePartitionRequest, type ProfilePartitionResult } from "./knowledge-notes.js";
+import { carryNoteMarks, storedNoteContent, partitionProfileNotes, profileBackupRetirements, redactProfileBackups, readProfileOperation, type ProfilePartitionAudit, type ProfilePartitionRequest, type ProfilePartitionResult } from "./knowledge-notes.js";
 
 function isDecisionProducer(producer: SourceCurationProducer | undefined): boolean {
   return producer?.actor === "user" || producer?.actor === "agent";
@@ -1802,7 +1802,7 @@ export class KnowledgeStore {
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, { ...request.record, content: storedNoteContent(request.record.content) })); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, content: carryNoteMarks(current, request.record.content), id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
   /** One SQL commit publishes a fully backed-up partition; staged identities are recoverable. */
-  async partitionProfile(request: ProfilePartitionRequest): Promise<ProfilePartitionResult> {
+  async partitionProfile(request: ProfilePartitionRequest, audit?: ProfilePartitionAudit): Promise<ProfilePartitionResult> {
     return this.mutate("knowledge.profile.partition", request.commandId, request, async (state, paths) => {
       const read = (id: string, revision: string) => this.readRecord(paths, id, revision);
       return partitionProfileNotes(request, {
@@ -1812,8 +1812,32 @@ export class KnowledgeStore {
         excluded: note => this.recordExcluded(state, note),
         history: async function* (id) { for (const revision of state.records.get(id)!.revisionIds) yield await read(id, revision); },
         write: async (record, expectedRevision) => { await this.putRecord(state, paths, record, expectedRevision, record.revisionId); },
-      });
+      }, audit);
     }, undefined, undefined, request.assignments.map(item => item.id));
+  }
+  /** Explicit recovery proves immutable committed identities, not merely current
+   * heads: later edits cannot erase the original facts owed to Changes. No replay
+   * occurs here or during open. Forget invalidates the complete atomic envelope. */
+  async profilePartitionRecovery(commandId: string) {
+    return this.readState(async (state, paths) => {
+      const plan = await readProfileOperation(join(paths.root, "profile-backups"), commandId);
+      let committed = true;
+      for (const [index, prepared] of plan.prepared.entries()) {
+        const original = plan.originals[index]!.record;
+        const assignment = plan.assignments[index]!;
+        const head = state.records.get(prepared.id);
+        if (!head || state.suppressions.get(prepared.id)?.forgotten || assignment.id !== prepared.id || original.id !== prepared.id || assignment.expectedRevision !== original.revisionId) throw conflict("Profile recovery is unavailable");
+        for (const record of [original, prepared]) {
+          if (!head.revisionIds.includes(record.revisionId)) {
+            if (record === original) throw conflict("Original profile revision is not committed");
+            committed = false; continue;
+          }
+          if (JSON.stringify(await this.readRecord(paths, record.id, record.revisionId)) !== JSON.stringify(record)) throw conflict("Profile recovery differs from committed history");
+        }
+      }
+      return { request: { commandId, mode: plan.operation!.mode, assignments: plan.assignments }, envelope: plan.operation!.envelope,
+        originals: plan.originals.map(item => item.record), prepared: plan.prepared, committed };
+    });
   }
   private assertSourceDecisionAuthority(current: KnowledgeRecord & { kind: "source" }, next: KnowledgeRecordDraft & { kind: "source" }, producer: string | undefined): void {
     if (!isConnectorProducer(producer)) return;

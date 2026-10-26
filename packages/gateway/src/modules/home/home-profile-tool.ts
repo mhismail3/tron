@@ -5,18 +5,20 @@ import { GatewayError } from "../../errors.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
 import { validProfileFile, PROFILE_FILE_PATTERN, type ProfileFile } from "../../knowledge/knowledge-notes.js";
 import { profileIndex } from "./home-profile-hierarchy.js";
-import { HOME_PROFILE_ACTIONS, HOME_PROFILE_KINDS, PROFILE_TEXT_MAX, PROFILE_REASON_MAX, readHomeProfile, profileListItem, type HomeProfileAction, type HomeProfileKind, type HomeProfileSaved, type HomeProfileChangeAccess } from "./home-profile.js";
+import { HOME_PROFILE_ACTIONS, HOME_PROFILE_KINDS, PROFILE_TEXT_MAX, PROFILE_REASON_MAX, readHomeProfile, profileListItem, type HomeProfileAction, type HomeProfileKind, type HomeProfileSaved, type HomeProfileRequest, type HomeProfileChangeAccess } from "./home-profile.js";
 const SINGLE_LINE = /[\u0000-\u001f\u007f\u2028\u2029]/;
 
 // ---- the profile tool -----------------------------------------------------------
 
 const PROFILE_PARAMETERS = Type.Object({
-  action: Type.Union([...HOME_PROFILE_ACTIONS, "read" as const].map((action) => Type.Literal(action)), { description: "read an explicit file or the metadata index; learn, refine, supersede or retire an item." }),
+  action: Type.Union([...HOME_PROFILE_ACTIONS, "read" as const, "migrate" as const, "reorganize" as const, "retry" as const].map((action) => Type.Literal(action)), { description: "read an explicit file or the metadata index; learn, refine, supersede or retire an item." }),
   file: Type.Optional(Type.String({ pattern: PROFILE_FILE_PATTERN, description: "Explicit partition; read with no file returns the index. New items default to core, not automatic insertion." })),
   offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 10_000, description: "read: note offset within this explicit file." })),
   kind: Type.Optional(Type.Union(HOME_PROFILE_KINDS.map((kind) => Type.Literal(kind)), { description: "learn and supersede: the item's kind. refine: a new kind, when it changes." })),
   text: Type.Optional(Type.String({ minLength: 1, maxLength: PROFILE_TEXT_MAX, description: "learn, refine and supersede: one line of the item's text, as the maintainer states it." })),
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "refine, supersede and retire: the exact profile note ID returned by profile read." })),
+  assignments: Type.Optional(Type.Array(Type.Object({ id: Type.String({ minLength: 1, maxLength: 200 }), expectedRevision: Type.String({ minLength: 16, maxLength: 80 }), file: Type.String({ pattern: PROFILE_FILE_PATTERN }) }, { additionalProperties: false }), { minItems: 1, maxItems: 500, description: "Explicit exact-revision destinations. migrate must include EVERY note, including inactive members; reorganize names only the selected notes. Labels only: text, authority and history stay unchanged." })),
+  commandId: Type.Optional(Type.String({ minLength: 1, maxLength: 160, description: "retry: the ORIGINAL operation command returned with retry_required; never a new operation identity." })),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: PROFILE_REASON_MAX, description: "Why the change is made. Required for retire; recorded in the ledger." })),
 }, { additionalProperties: false });
 
@@ -25,13 +27,17 @@ export type HomeProfileToolDetails =
   | HomeProfileSaved
   | { status: "refused"; action: ProfileToolAction; reason: string }
   | { status: "unavailable"; action: ProfileToolAction }
+  | { status: "organized"; action: "migrate" | "reorganize" | "retry"; commandId: string; changeIds: string[] }
+  | { status: "retry_required"; action: ProfileToolAction; commandId: string; reason: string }
   | { status: "read"; file?: ProfileFile; items: unknown[]; unclassified: number; nextOffset?: number; index?: string };
 
-type ProfileToolAction = HomeProfileAction | "read";
+type ProfileToolAction = HomeProfileAction | "read" | "migrate" | "reorganize" | "retry";
 type ProfileRequest = {
   action: ProfileToolAction;
   file?: string;
   offset?: number;
+  assignments?: Array<{ id: string; expectedRevision: string; file: ProfileFile }>;
+  commandId?: string;
   kind?: HomeProfileKind;
   text?: string;
   id?: string;
@@ -41,6 +47,9 @@ type ProfileRequest = {
 /** Which fields each action takes. Anything else is refused, never silently ignored. */
 const ACTION_FIELDS: Record<ProfileToolAction, { required: Array<keyof ProfileRequest>; allowed: Array<keyof ProfileRequest> }> = {
   read: { required: [], allowed: ["file", "offset"] },
+  migrate: { required: ["assignments", "reason"], allowed: ["assignments", "reason"] },
+  reorganize: { required: ["assignments", "reason"], allowed: ["assignments", "reason"] },
+  retry: { required: ["commandId"], allowed: ["commandId"] },
   learn: { required: ["kind", "text"], allowed: ["kind", "text", "file"] },
   refine: { required: ["id"], allowed: ["id", "text", "kind", "reason"] },
   supersede: { required: ["id", "kind", "text"], allowed: ["id", "kind", "text", "reason"] },
@@ -57,7 +66,7 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
     // docs/settings-model.md 5.4: declares it reads no open-world content.
     annotations: { openWorldHint: false },
     label: "Profile",
-    description: "Read the structured profile index or an explicit core, home or scopes/<name> file. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence, using the existing logged undoable change path. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
+    description: "Read the structured profile index or an explicit core, home or scopes/<name> file. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit migrate/reorganize assign only labels with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
     parameters: PROFILE_PARAMETERS,
     executionMode: "sequential",
     execute: async (toolCallId, parameters, _signal, _update, context) => {
@@ -80,6 +89,21 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
       if (!changes) return answer({ status: "unavailable", action: request.action }, "Knowledge is unavailable on this Gateway, so the profile cannot change.");
       const citation = triggeringMessage(context);
       if (!citation) return refused(request.action, "no maintainer message in this chat to cite as evidence");
+      if (request.action === "migrate" || request.action === "reorganize" || request.action === "retry") {
+        const original = request.action === "retry" ? request.commandId! : commandId(citation.sessionId, toolCallId);
+        const op: HomeProfileRequest = request.action === "retry" ? { action: "retry", commandId: original } : { action: request.action, assignments: request.assignments! };
+        try {
+          const result = await changes.change([op], { toolCallId, web: webMark(), author: { kind: "home", ...citation }, commandId: original, ...(request.reason ? { reason: request.reason.trim() } : {}) });
+          return answer({ status: "organized", action: request.action, commandId: original, changeIds: result.changes.map(change => change.changeId) },
+            `Profile ${request.action} acknowledged through Changes. Original command ${original}; ${result.changes.length} label-only changes. No content or authority was inferred.`);
+        } catch (error) {
+          // Publication may have failed AFTER the domain committed. Never call it
+          // saved, mint another identity, or invite an unqualified second apply.
+          const reason = error instanceof Error ? error.message : String(error);
+          return answer({ status: "retry_required", action: request.action, commandId: original, reason },
+            `Profile ${request.action} is not acknowledged: ${reason}. Use retry with original command ${original}; it proves committed identities before repairing the audit, or resumes only the backed-up precommit intent. No success is assumed.`);
+        }
+      }
       const op = request.action === "learn" ? { action: "learn" as const, kind: request.kind!, text: request.text!, ...(request.file ? { file: request.file as ProfileFile } : {}) }
         : request.action === "refine" ? { action: "refine" as const, id: request.id!, ...(request.text ? { text: request.text } : {}), ...(request.kind ? { kind: request.kind } : {}), ...(request.reason ? { reason: request.reason } : {}) }
           : request.action === "supersede" ? { action: "supersede" as const, id: request.id!, kind: request.kind!, text: request.text!, ...(request.reason ? { reason: request.reason } : {}) }
@@ -124,7 +148,7 @@ function validateRequest(request: ProfileRequest): string | undefined {
   if (!fields) return "unknown profile action";
   if (request.file !== undefined && !validProfileFile(request.file)) return "invalid profile file";
   for (const field of fields.required) if (request[field] === undefined) return `${request.action} requires ${field}`;
-  for (const field of ["kind", "text", "id", "reason", "file", "offset"] as const) {
+  for (const field of ["kind", "text", "id", "reason", "file", "offset", "assignments", "commandId"] as const) {
     if (request[field] !== undefined && !fields.allowed.includes(field)) return `${request.action} does not take ${field}`;
   }
   if (request.action === "refine" && request.text === undefined && request.kind === undefined) return "refine requires text or kind";

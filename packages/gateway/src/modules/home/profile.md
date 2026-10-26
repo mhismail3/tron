@@ -78,7 +78,37 @@ cleanup table, removes forgotten/dependent snapshots from the shared backup, and
 retains unrelated snapshots. Original assignment identities remain, so the canceled
 atomic plan cannot replay as a different intent. Existing tombstones drive retry
 through `reconcile()` after a cleanup crash; no parallel cleanup journal is added.
-An opaque Home audit-envelope addition must supply its owned redaction contract
-atomically; unknown backup shapes refuse rather than silently retain such copies. The Home Changes owner remains responsible for
-canonical audit publication, replay identity and undo; a store-only result is not
-end-to-end curation success.
+The same backup also holds Home's immutable versioned audit envelope: original
+command ID, timestamp, actor/reason/web context and ordered before/after writes,
+including direction and any Undo links. Its digest binds that envelope to the exact
+assignments and prepared identities. Audited backups are addressed by the original
+command ID, not equivalent assignments. Knowledge treats the envelope as opaque;
+forget of any member drops the WHOLE envelope, which may quote another member in
+free-form context, while retaining unrelated recovery snapshots. The invalidated
+plan cannot publish a partial group or acquire a replacement identity. Unknown
+backup fields refuse privacy cleanup rather than silently retain extra copies.
+
+## Changes, explicit retry and Undo
+
+`profile {action:"migrate", assignments:[{id,expectedRevision,file}], reason}`
+requires every member, including inactive notes. `reorganize` uses the same explicit
+fields for just the selected notes. Neither action rewrites content or confirmation.
+Home preflights the complete Changes group before writing the backup or any body.
+Only after proving every prepared identity committed does it publish the original
+facts atomically through the existing Changes directory/index. No partially indexed
+group is undoable; no separate journal, consumer or publication controller exists.
+
+An unacknowledged tool result returns `retry_required` with its original `commandId`.
+`profile {action:"retry", commandId}` resumes only the backed-up precommit intent,
+or repairs ONLY the original audit after commit. It retains the original timestamp,
+actor, reason, web tier and ordered writes, not the retrying turn's context. Later
+edits do not prevent logging historical committed facts and are never overwritten
+by audit repair. Reading/opening never replays domain effects.
+
+The existing maintainer Changes Undo checks the whole group's current revision and
+value fences, then restores only the original partition labels and their exact
+positions in one backed-up Knowledge commit. Text, provenance, status, confirmation,
+relations and timestamps remain unchanged; old revisions remain readable. Its audit
+retains the original `undoOf` links through a crash/retry. Only the maintainer may
+resume an uncommitted Undo. Ordinary profile content Undo retains its existing path.
+A store-only result is never treated as end-to-end curation success.
