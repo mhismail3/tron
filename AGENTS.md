@@ -138,7 +138,7 @@ no queue, gate or auto-revert.
   announce their files in the module issue (or #1345) first.
 - Fresh read-only review before landing for new tooling, locks and kernel semantics, not
   clean moves (plan §8.4); the worker fixes defects. Closing evidence ≤ 1,500 characters
-  (App. D). ≤ 4 restructure workers + 1 steward, one simulator-heavy job; stop on plan §4.2.
+  (App. D). ≤ 4 restructure workers + 1 steward; coordinate up to 3 simulator-heavy jobs across workers (one/worktree); stop on plan §4.2.
 
 ## Documentation
 
