@@ -474,5 +474,15 @@ class MacPlatform:
         run([self.build_root(revision) / 'scripts/verify-mac-install.sh', '--require-bundled'], log, timeout=900,
             env=dict(os.environ, TRON_APP_PATH=str(self.installed)))
 
+    def refresh_guard(self, root, revision, log):
+        # The runner is a private snapshot and the checkout may trail the fetched
+        # revision. Install the selected revision, not either stale local copy.
+        source = git(root, 'show', f'{revision}:scripts/tron-fsevents-guard')
+        with tempfile.TemporaryDirectory(prefix='tron-guard-install-') as temporary:
+            script = Path(temporary) / 'guard.py'
+            script.write_text(source)
+            run(['/usr/bin/python3', script, 'install'], log, timeout=180,
+                env=dict(os.environ, HOME=str(self.home)))
+
     def replace_app_bytes(self, candidate, destination, log):
         run(['/usr/bin/ditto', candidate, destination], log, timeout=900)

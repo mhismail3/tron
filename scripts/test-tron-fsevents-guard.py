@@ -24,9 +24,10 @@ Failure modes:
   7. A shared or other-writable temp dir (/tmp) is scanned at all.
   8. The LaunchAgent plist does not embed this exact source with a valid
      argument order, or its program does not run.
+  9. Reinstall reloads a current agent, or replacement retains stale behavior.
 
-Not exercised here: `install`/`uninstall` against launchd (launchctl acts on the
-real user domain whatever HOME is), and lsof failing (fail-closed by code review).
+The install regression uses real launchd with a private fixture label and paths;
+it always boots out that job. lsof failing is fail-closed by code review.
 """
 import json
 import os
@@ -229,6 +230,63 @@ class FseventsGuard(unittest.TestCase):
         log = self.home / "Library" / "Logs" / "tron-fsevents-guard.jsonl"
         record = json.loads(log.read_text().splitlines()[-1])
         self.assertEqual(record["cleanup"].get("deleted", []), [], record)
+
+    def test_install_is_noop_when_current_and_refreshes_changed_source(self):
+        # A private label exercises real launchd without touching the live guard.
+        label = "com.tron.fsevents-guard.test-%d" % os.getpid()
+        script = self.base / "guard"
+        source = SCRIPT.read_text().replace('LABEL = "com.tron.fsevents-guard"',
+                                            'LABEL = "%s"' % label)
+        source = source.replace('os.path.expanduser("~")', repr(str(self.home)))
+        source = source.replace('default=default_temp_dir()', 'default=' + repr(str(self.temp)))
+        script.write_text(source)
+        env = dict(os.environ, HOME=str(self.home))
+        plist = self.home / "Library/LaunchAgents" / (label + ".plist")
+        target = "gui/%d/%s" % (os.getuid(), label)
+
+        def install():
+            return subprocess.run([PYTHON, str(script), "--temp-dir", str(self.temp), "install"],
+                                  env=env, capture_output=True, text=True, timeout=60, check=True)
+
+        try:
+            install()
+            before = plist.stat().st_mtime_ns
+            result = install()
+            self.assertIn("already current", result.stdout)
+            self.assertEqual(plist.stat().st_mtime_ns, before)
+            # Change behavior, not a source-string oracle: the same loaded job
+            # must execute the new implementation after the refresh.
+            repository = self.base / "repository"
+            (repository / "scripts").mkdir(parents=True)
+            (repository / "scripts/tron-fsevents-guard").write_text(
+                source.replace('def check(args):',
+                               'def check(args):\n    print("refreshed-guard-behavior")'))
+            for args in (["init", "-q"], ["add", "."],
+                         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                          "-c", "commit.gpgsign=false", "commit", "-qm", "guard"]):
+                subprocess.run(["/usr/bin/git", "-C", str(repository), *args], check=True,
+                               env=dict(env, GIT_CONFIG_GLOBAL="/dev/null"))
+            # The replacement boundary installs its selected Git revision, even
+            # when the runner and current checkout carry an older script.
+            driver = ("import sys; sys.path.insert(0, sys.argv[1]); "
+                      "from pathlib import Path; from tron_mac_replace_platform import MacPlatform; "
+                      "p=MacPlatform(); p.home=Path(sys.argv[2]); "
+                      "p.refresh_guard(Path(sys.argv[3]), 'HEAD', Path(sys.argv[4]))")
+            subprocess.run([PYTHON, "-c", driver, str(ROOT / "scripts"), str(self.home),
+                            str(repository), str(self.base / "refresh.log")],
+                           env=env, capture_output=True, text=True, timeout=180, check=True)
+            program = plistlib.loads(plist.read_bytes())["ProgramArguments"]
+            run = subprocess.run([*program, "--dry-run", "--sample-seconds", "0", *COLD],
+                                 env=env, capture_output=True, text=True, timeout=180, check=True)
+            self.assertIn("refreshed-guard-behavior", run.stdout)
+            subprocess.run(["/bin/launchctl", "print", target], capture_output=True, check=True)
+            # A matching plist without a loaded job still needs bootstrapping.
+            script.write_text((repository / "scripts/tron-fsevents-guard").read_text())
+            subprocess.run(["/bin/launchctl", "bootout", target], check=True)
+            install()
+            subprocess.run(["/bin/launchctl", "print", target], capture_output=True, check=True)
+        finally:
+            subprocess.run(["/bin/launchctl", "bootout", target], capture_output=True)
 
     def test_launch_agent_embeds_this_source_and_its_program_runs(self):
         plist = plistlib.loads(self.guard("install", "--print-plist", "--interval-minutes", "15").encode())

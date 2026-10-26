@@ -478,6 +478,8 @@ class MacPlatform:
     def verify_installed(self, require_bundled=False):
         command([REPO / 'scripts/verify-mac-install.sh', *(['--require-bundled'] if require_bundled else [])], 'installed-verification',
                 env=dict(os.environ, TRON_APP_PATH=str(self.installed)))
+        command(['/usr/bin/python3', REPO / 'scripts/tron-fsevents-guard', 'install'],
+                'fsevents-guard-install', timeout=180)
         loaded = command(['/bin/launchctl', 'print', f'gui/{os.getuid()}/com.tron.server'],
                          'agent-authority-verification', timeout=15).decode()
         # The canonical verifier pins the selected signed runtime. With no path

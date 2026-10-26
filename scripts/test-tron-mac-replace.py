@@ -126,6 +126,11 @@ class FixturePlatform(MacPlatform):
     def verify_installed(self, revision, log):
         self.codesign_identity(self.installed, log)
 
+    def refresh_guard(self, root, revision, log):
+        # Host LaunchAgents are outside this fixture Gateway's boundary; the
+        # guard suite covers the real refresh with its own private launchd label.
+        pass
+
     def replace_app_bytes(self, candidate, destination, log):
         if (Path(self.config['root']) / 'fail-copy').exists():
             destination.mkdir()

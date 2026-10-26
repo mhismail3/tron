@@ -416,6 +416,14 @@ def install(args):
     if args.print_plist:
         sys.stdout.write(data.decode())
         return 0
+    try:
+        with open(agent_plist(), "rb") as handle:
+            current = handle.read() == data
+    except FileNotFoundError:
+        current = False
+    if current and agent_loaded():
+        print("already current: %s; left loaded job unchanged" % LABEL)
+        return status(args)
     os.makedirs(os.path.dirname(agent_plist()), exist_ok=True)
     os.makedirs(home_path("Library", "Logs"), exist_ok=True)
     with open(agent_plist(), "wb") as handle:
@@ -438,9 +446,13 @@ def uninstall(_args):
     return 0
 
 
+def agent_loaded():
+    return subprocess.run(["/bin/launchctl", "print", "%s/%s" % (domain(), LABEL)],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
 def status(args):
-    loaded = subprocess.run(["/bin/launchctl", "print", "%s/%s" % (domain(), LABEL)],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    loaded = agent_loaded()
     print("LaunchAgent %s: %s (%s)" % (LABEL, "loaded" if loaded else "not loaded", agent_plist()))
     _, log = state_paths(args)
     try:

@@ -387,6 +387,7 @@ class Runner:
             self.platform.verify_installed(self.revision, self.log('verify'))
             result['cdhash'] = identity['cdhash']
             result['team'] = identity['team']
+        self.platform.refresh_guard(self.root, self.revision, self.log('verify'))
         self.data['result'] = result
         return f'{self.revision[:9]} on protocol {protocol}' + (f', cdhash {result["cdhash"][:12]}' if 'cdhash' in result else '')
 

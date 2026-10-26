@@ -194,8 +194,8 @@ shared or other-writable one such as `/tmp`.
   a macOS notification when it runs as the agent.
 - `install [--print-plist] [--interval-minutes 10]` loads the LaunchAgent
   `com.tron.fsevents-guard`. Installing is a maintainer action.
-- The agent embeds the script source at install time, so rerun `install` after
-  changing the script.
+- Manual `mac reinstall --verify` and Replace Mac App verification refresh the
+  embedded guard automatically; `install` leaves a current, loaded agent unchanged.
 - `uninstall` unloads the agent and removes its plist. It keeps the logs
   (`~/Library/Logs/tron-fsevents-guard.{jsonl,log}`) and the state in
   `~/Library/Application Support/tron-fsevents-guard/`.
