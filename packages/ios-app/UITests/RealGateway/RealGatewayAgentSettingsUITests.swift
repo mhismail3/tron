@@ -117,7 +117,15 @@ extension RealGatewayPairAndChatUITests {
         let add = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Add model'")).firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 15), app.debugDescription)
         add.tap()
-        let model = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
+        // Search expands provider groups and avoids matching a covered Thinking
+        // row named “For <model>” in the sheet below this picker.
+        let search = app.buttons["Search models"]
+        XCTAssertTrue(search.waitForExistence(timeout: 30), app.debugDescription)
+        search.tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15), app.debugDescription)
+        field.typeText(name)
+        let model = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS 'tron-e2e/'", name)).firstMatch
         XCTAssertTrue(model.waitForExistence(timeout: 30), app.debugDescription)
         model.tap()
         XCTAssertTrue(app.buttons["Save"].waitForExistence(timeout: 15), app.debugDescription)
