@@ -1,6 +1,6 @@
 import type { SettingsManager, FileEntry, AgentSessionRuntime, AgentSession, SessionManager } from "../pi/coding-agent.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT } from "../delegation/task-report.js";
-import type { ExtensionToolOrigin, ExtensionRunActivity, ToolExecutionState, SessionProcessActivity, ChatOrigin, ChatSemanticMetadata, CommandInfo, JsonValue } from "../../protocol/types.js";
+import type { ExtensionToolOrigin, ExtensionRunActivity, SessionProcessActivity, ChatOrigin, ChatSemanticMetadata, CommandInfo, JsonValue } from "../../protocol/types.js";
 import type { InputTrigger } from "../host/input-admission.js";
 import type { TrustService } from "../resources/trust-service.js";
 import type { ExtensionLifecycleCoordinator } from "../host/extension-lifecycle-coordinator.js";
@@ -29,7 +29,6 @@ export abstract class RunRuntime<FixedAt> {
   abstract readonly processOperationIDs: OwnedTurnRuntime["processOperationIDs"];
   abstract readonly processActivities: OwnedTurnRuntime["processActivities"];
   abstract readonly childSessionAdmission: OwnedTurnRuntime["childSessionAdmission"];
-  abstract readonly toolExecutions: Map<string, ToolExecutionState>;
   abstract updateToolExtensionActivityProjection(toolCallId: string, activity: ExtensionRunActivity): void;
   abstract readonly workerSettlement: OwnedTurnRuntime["workerSettlement"];
   abstract assertNoTrustReload(): void;

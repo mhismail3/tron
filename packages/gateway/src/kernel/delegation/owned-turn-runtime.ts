@@ -1,4 +1,4 @@
-import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, ToolExecutionState, JsonValue } from "../../protocol/types.js";
+import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, JsonValue } from "../../protocol/types.js";
 import type { FileEntry, SessionManager, AgentSession } from "../pi/coding-agent.js";
 import type { ChildSessionAdmission } from "./child-session-admission.js";
 import type { WorkerSettlement } from "./worker-settlement.js";
@@ -55,7 +55,6 @@ export interface OwnedTurnRuntime {
   readonly processOperationIDs: ReadonlyMap<string, string>;
   readonly processActivities: ReadonlyMap<string, SessionProcessActivity>;
   readonly childSessionAdmission: ChildSessionAdmission;
-  readonly toolExecutions: ReadonlyMap<string, ToolExecutionState>;
   updateToolExtensionActivityProjection(toolCallId: string, activity: ExtensionRunActivity): void;
   readonly workerSettlement: WorkerSettlement;
   readonly activityHeartbeat: unknown;

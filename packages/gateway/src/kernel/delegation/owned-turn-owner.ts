@@ -672,7 +672,7 @@ export class OwnedTurnOwner {
     this.extensionRunOwnership.clear();
   }
 
-  /** Retire current watches and fence their outstanding reads before physical SDK disposal. */
+  /** Retire current watches and fence outstanding watched reads before physical SDK disposal. */
   retireArtifactWatches(): void {
     this.clearExtensionActivityWatchers();
     this.extensionArtifactMissingSince.clear();
