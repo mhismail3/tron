@@ -4,6 +4,24 @@ import XCTest
 /// extension.respond owner as ask_user. Gateway lifecycle is proved separately
 /// by settings-approval-blocking.e2e.test.ts; these are simulator captures.
 final class TronSettingsApprovalFormUITests: XCTestCase {
+    /// Capture-only visual review. This does not replace the behavioral journey
+    /// or claim that a rendered preview proves decision delivery.
+    @MainActor
+    func testCaptureSettingsApprovalSheetInLightAndDark() {
+        for appearance in ["Light", "Dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-ask-user-fixture", "-tron-settings-approval-form", "-AppleInterfaceStyle", appearance]
+            app.launch()
+            if app.staticTexts["Settings approval"].waitForExistence(timeout: 5) {
+                let attachment = XCTAttachment(screenshot: app.screenshot())
+                attachment.name = "settings-approval-sheet-\(appearance.lowercased())"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+            app.terminate()
+        }
+    }
+
     @MainActor
     func testSettingsApprovalSheetPresentsAutomaticallyAndSubmitsDeny() {
         continueAfterFailure = false
