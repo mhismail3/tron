@@ -2086,7 +2086,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** Rebuild this slot's runtime over the same session manager, keeping the
    * session identity, its subscribers and its presentation. The factory decides
    * the profile from the record, so this is also how a profile change takes
-   * effect. */
+   * effect. Caller must hold this session's lane through reconstruction and
+   * publication; this is native I/O, not an independent admission entry point. */
   async replaceRuntime(sessionManager: SessionManager = this.sessionManager): Promise<void> {
     await this.runtime.dispose().catch(() => {});
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
