@@ -1,4 +1,5 @@
 import type { HomeTaskReportOwner } from "./task-report.js";
+import type { OwnedTurnOwner } from "./owned-turn-owner.js";
 import { homeTaskSubagentRunsSettled } from "./task-subagents.js";
 import type { TaskWorkerControl } from "./worker-contract.js";
 import { interruptTaskWorker, stopTaskWorker, steerTaskWorker, taskWorkerSteeringInput } from "./worker-control.js";
@@ -11,8 +12,7 @@ type OwnedLease<Session> = { slot: Session; release: () => void };
  * existing lane/rebuild operation, never through a second runtime or state copy. */
 type OwnedSession = {
   retainLease(): () => void;
-  bindTaskWorker(report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<void>;
-  readonly taskWorker?: HomeTaskReportOwner | undefined;
+  readonly ownedTurns: Pick<OwnedTurnOwner, "worker" | "bindWorker">;
   prompt(...input: ReturnType<typeof taskWorkerSteeringInput>): Promise<unknown>;
 };
 type InterruptWorkerTools<Session> = (slot: Session, by: string, before?: () => Promise<void>) => Promise<string[]>;
@@ -67,13 +67,13 @@ export class DelegationOperations<Session extends OwnedSession> {
   async interruptWorker(sessionId: string, control: TaskWorkerControl, by: string, text?: string): Promise<string[]> {
     const slot = await this.sessions.acquire(sessionId);
     // K5 validates the exact operation before native I/O fixes its tool targets.
-    return await interruptTaskWorker(slot.taskWorker, control,
+    return await interruptTaskWorker(slot.ownedTurns.worker, control,
       () => this.interruptTools(slot, by,
         text === undefined ? undefined : async () => { await steerTaskWorker(control, text, input => slot.prompt(...input)); }));
   }
 
   async stopWorker(sessionId: string, control: TaskWorkerControl): Promise<void> {
-    await stopTaskWorker((await this.sessions.acquire(sessionId)).taskWorker, control);
+    await stopTaskWorker((await this.sessions.acquire(sessionId)).ownedTurns.worker, control);
   }
 
   async createWorker(cwd: string, report: HomeTaskReportOwner): Promise<OwnedLease<Session>> {
@@ -85,7 +85,7 @@ export class DelegationOperations<Session extends OwnedSession> {
   async resumeWorker(sessionId: string, report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<OwnedLease<Session>> {
     const lease = await this.sessions.acquireOwnedSessionLease(sessionId);
     try {
-      await lease.slot.bindTaskWorker(report, exceptWorkToken);
+      await lease.slot.ownedTurns.bindWorker(report, exceptWorkToken);
       return lease;
     } catch (error) { lease.release(); throw error; }
   }

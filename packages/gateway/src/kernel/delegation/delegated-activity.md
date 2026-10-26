@@ -27,8 +27,9 @@ acknowledgement and the one first-registration-wins session→task attribution i
 That metadata is not a live report-owner binding. Home selects recovery entries;
 native catalog/attention batching reads/registers this owner and keeps its original
 acknowledgement lane and publication ordering. No parallel index or token map exists.
-Worker resume acquires the canonical native lease here, invokes the native lane/
-rebuild operation, and releases that same lease on failure. Registry supplies only
+Worker resume acquires the canonical native lease here, invokes the existing K5
+owned-turn owner's lane-protected bind, and releases that same lease on failure.
+SDK rebuild and physical publication remain native I/O. Registry supplies only
 its actual persisted-session acquisition; it has no resume forwarding route.
 
 Native Session/Run owns ordinary leases, prompt admission and canonical recovery/marker
@@ -51,8 +52,12 @@ index. Canonical append and work handles remain native; the same operation owner
 passed to the append after the live notice join. Native exposes its existing atomic
 activity/controller projections and the single K5 waiter owner.
 
-`OwnedTurnOwner` is the one session-local owned-terminal observer map and held-task
-continuation authority. K2 passes its actual frame, reads this owner for admission,
+`OwnedTurnOwner` holds the single live worker report-owner binding as well as the
+session-local owned-terminal observer map and held-task continuation state. Creation
+seeds its binding once; resume validates live work, chapter identity and canonical
+markers in the same native lane, replaces the binding, rebuilds the SDK runtime and
+publishes in the original order. Slot has no separate worker field or bind route.
+K2 passes its actual frame, reads this owner for admission,
 registers wake identity at the native admission boundary and reports canonical terminals
 directly. K5 keeps wake-before-own selection, own-before-task callback ordering, selected-
 branch/live-work hold decisions and exact waiting-task Stop; no native wait mirror exists.

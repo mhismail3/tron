@@ -9,7 +9,7 @@ map/construction/mutation authority, shared synchronous `liveRuntime` read and
 mutex-ordered `orderedRuntime` read. Profile modules supply domain recipes over
 those operations; no Registry-produced Home provider exists. The actual K2 frame is
 `runtime-slot.ts`; the runtime pair retains the `gateway/run` logical owner.
-Worker binding/control transfer remains separate from physical native ownership.
+Worker binding/control is K5-owned, separate from physical native ownership.
 Its control identity and shared diagnostics are K5 contracts (`worker-contract.ts`),
 not dependencies on a module's dispatcher. K5's `WorkerSettlement` owns task-end waiters
 and bounded joins; native activity/canonical publications wake that same owner. Provider
@@ -22,8 +22,11 @@ capture/steer/abort ordering. Home has no native control I/O binding.
 K5 owns worker report/budget/reminder finish-turn policy and resumed-worker
 lease/bind/failure-release orchestration. Native pipeline installation passes the
 same frame, SDK runtime object and captured report owner, without copied state or
-an early diagnostic-sink read. Native `bindTaskWorker` remains the actual lane-protected validation/rebuild/publication
-backend; Registry has no worker-resume wrapper. Home uses the actual SessionOperations
+an early diagnostic-sink read. The existing K5 `OwnedTurnOwner` holds the single live
+worker binding and validates/rebinds it in the actual native lane. Creation seeds that
+owner once; every native reader uses it directly. Native SDK rebuild and publication
+remain backend I/O, with no Slot bind route or Registry worker-resume wrapper.
+Home uses the actual SessionOperations
 for canonical worker reads, leases and mutation ordering, with no duplicate worker input.
 K5 owns cold artifact proof; Native supplies the admitted resource input, not a proof wrapper.
 K5 also owns canonical subagent settlement. Its runtime port reads the actual
@@ -50,7 +53,8 @@ actual K3 host; native frames do not select product modules or keep another list
   settlement and successor fencing on the same run authority.
 - `run-runtime.ts`: native frame contract and canonical SDK readers; settings provenance stays opaque.
   Selected-branch projections include the header; worker state and sealed task evidence remain file-wide.
-  Worker binding and live settlement controls stay with the concrete frame.
+  Native SDK reconstruction, canonical evidence and physical publication stay with the concrete frame;
+  the single K5 owned-turn authority holds worker binding and live task state.
 - `bounded-tool-cancellation.ts`: per-call abort controllers, bounded cancellation
   settlement and rejection of late results.
 - `direct-bash-process-owner.ts`: foreground shell process trees, timeout and abort

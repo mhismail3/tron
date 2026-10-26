@@ -59,7 +59,7 @@ export class RunTerminalOwner {
 
   async notifyAgentTerminal(sourceId: string, outcome: AgentTerminalOutcome): Promise<void> {
     // A task's durable result owner, never generic chat completion, decides push.
-    if (this.operations.taskWorker) return;
+    if (this.operations.ownedTurns.worker) return;
     const runTerminal = this.operations.dependencies.modules.policy("runTerminal")?.();
     if (!runTerminal) return;
     const previousEpisode = this.waitingNotificationEpisode;
@@ -102,8 +102,8 @@ export class RunTerminalOwner {
     const reason = assistant?.role === "assistant" ? assistant.stopReason : undefined;
     // A task operation whose report is sealed ended at the report's tool boundary
     // by design: that is its completion, not an unknown outcome.
-    const reportCompleted = reason === "toolUse" && this.operations.taskWorker?.reportSealed === true
-      && this.operations.taskWorker.identity.operationId === operationId;
+    const reportCompleted = reason === "toolUse" && this.operations.ownedTurns.worker?.reportSealed === true
+      && this.operations.ownedTurns.worker.identity.operationId === operationId;
     const outcome: AgentTerminalOutcome = this.operations.runAbort.abortedOperations.has(operationId) || reason === "aborted" ? "stopped"
       : reason === "error" ? "failed"
       : reason === "length" ? "limited"

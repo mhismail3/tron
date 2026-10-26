@@ -39,7 +39,7 @@ export class RunAbortOwner {
     let queuedAtStop: RuntimeQueuedMessage[] | undefined;
     // Finite task cancellation belongs to its report/controller, not the
     // ordinary Stop continuation. A sealed task can never admit another turn.
-    if (!this.operations.taskWorker && (this.operations.runQueue.queuedMessages.some((item) => item.behavior === "steer")
+    if (!this.operations.ownedTurns.worker && (this.operations.runQueue.queuedMessages.some((item) => item.behavior === "steer")
       || this.operations.runQueue.pendingQueueAdmission?.behavior === "steer")
       && this.stopSteeringContinuation === undefined) {
       queuedAtStop = await this.operations.lane.run(() => {
@@ -76,13 +76,13 @@ export class RunAbortOwner {
     // proves exact operation identity and reports any unresolved receipt after
     // cancellation instead of clearing the persistence fence.
     this.operations.assertAvailable();
-    const taskOperationId = this.operations.taskWorker?.identity.operationId;
+    const taskOperationId = this.operations.ownedTurns.worker?.identity.operationId;
     const taskOwnsForeground = taskOperationId !== undefined && this.operations.ownedTurns.liveTaskOperationId() === taskOperationId;
     const targetsTask = expectedOperationId === taskOperationId
       || (expectedOperationId === undefined && (taskOwnsForeground || !this.operations.operation))
       || (taskOwnsForeground && expectedOperationId === this.operations.operation?.id);
-    if (this.operations.taskWorker?.controlsActive && terminalErrorCode === "user-abort" && targetsTask) {
-      await this.operations.taskWorker!.stop();
+    if (this.operations.ownedTurns.worker?.controlsActive && terminalErrorCode === "user-abort" && targetsTask) {
+      await this.operations.ownedTurns.worker!.stop();
       return [];
     }
     if (expectedOperationId !== undefined && this.operations.operation?.id !== expectedOperationId
@@ -118,8 +118,8 @@ export class RunAbortOwner {
     // Retire accepted queue ownership before abort emits queue_update: those
     // entries were not consumed. Keep their exact owners on this cancellation
     // frame until their not-delivered receipts are persisted below.
-    const stoppedTaskQueue = this.operations.taskWorker ? this.operations.runQueue.queuedMessages : [];
-    if (this.operations.taskWorker) {
+    const stoppedTaskQueue = this.operations.ownedTurns.worker ? this.operations.runQueue.queuedMessages : [];
+    if (this.operations.ownedTurns.worker) {
       (this.operations.runQueue.suppressQueueEvents = true);
       try { this.operations.runtime.session.clearQueue(); }
       finally { (this.operations.runQueue.suppressQueueEvents = false); }

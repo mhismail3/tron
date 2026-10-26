@@ -619,10 +619,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     interrupted: boolean,
     creationProfile: SessionProfile = ORDINARY_SESSION_PROFILE,
     homeMaterializationAuthority?: object,
-    // Rebound only by `bindTaskWorker` when a settled task resumes in place (#929).
-    public taskWorker?: HomeTaskReportOwner,
+    taskWorker?: HomeTaskReportOwner,
   ) {
     super();
+    this.ownedTurns.worker = taskWorker;
     this.explicitProfile = { sessionId: sessionManager.getSessionId(), profile: creationProfile };
     this.canonicalAppendContext = {
       owner: this,
@@ -847,7 +847,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   async inspectTaskSettlement<T>(operationId: string, inspect: (settled: boolean) => Promise<T>): Promise<T> {
     return this.lane.run(() => {
       this.assertUsable();
-      if (this.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
+      if (this.ownedTurns.worker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
       return inspect(!this.hasActiveAgentRun && !this.isAgentAdmissionSettling && this.operation === undefined);
     });
   }
@@ -911,8 +911,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     });
     const actor = (toolCallId: string): Actor => {
       const profileActor = this.liveProfile().settingsActor;
-      const kind = profileActor === "agent" && this.taskWorker ? "worker" : profileActor;
-      return { kind, id: this.id, sessionId: this.id, toolCallId, ...(this.taskWorker ? { taskId: this.taskWorker.identity.taskId } : {}) };
+      const kind = profileActor === "agent" && this.ownedTurns.worker ? "worker" : profileActor;
+      return { kind, id: this.id, sessionId: this.id, toolCallId, ...(this.ownedTurns.worker ? { taskId: this.ownedTurns.worker.identity.taskId } : {}) };
     };
     const worker = async (taskId: string, purpose: "resolve" | "change") => {
       if (!this.liveProfile().workerSettings) {
@@ -1008,7 +1008,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** One steer in the worker's ordered steering lane (#1336), read at the boundary whose request
    * first uses the change. Never throws: the change is stored, so a refused steer is reported. */
   async announceSettingsChange(notice: SettingsNotice): Promise<SettingsSignal | undefined> {
-    const worker = this.taskWorker;
+    const worker = this.ownedTurns.worker;
     if (!worker) return undefined;
     const taskId = worker.identity.taskId;
     if (!this.liveTaskConfiguration()) return { status: "not-running", taskId, appliesFrom: "next-run" };
@@ -1100,7 +1100,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     if (JSON.stringify(previousPins) !== JSON.stringify(requestPins)) {
       await this.persistSessionSettings({ settings: explicitSettings, requestPins });
     }
-    await applyModelAdmission(session, admission, Boolean(this.taskWorker) || this.liveProfile().modelSelection?.physicalOnly === true,
+    await applyModelAdmission(session, admission, Boolean(this.ownedTurns.worker) || this.liveProfile().modelSelection?.physicalOnly === true,
       owners.model.owner.admitModelChoice);
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during model admission");
     session.settingsManager.applyOverrides(settings);
@@ -1601,7 +1601,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         cwd: () => this.cwd,
         modelRuntime, profile: () => this.liveProfile(),
         fixedSettings: () => readSessionFixedSettings(this.sessionManager.getBranch()),
-        delegatedWorker: () => Boolean(this.taskWorker),
+        delegatedWorker: () => Boolean(this.ownedTurns.worker),
         ...(profile.managedSubagents && this.dependencies.managedSubagents ? {
           requireChildExtensions: this.dependencies.managedSubagents.requireChildExtensions.bind(this.dependencies.managedSubagents),
         } : {}),
@@ -1647,11 +1647,11 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
             ...this.dependencies.modules.registrations(this.dependencies.modules.runtimeOrder, sessionContext),
             ...(modelRuntimePolicy?.extensions(sessionContext,
               managedSubagents?.requireChildExtensions.bind(managedSubagents)) ?? []),
-            ...(this.taskWorker ? [{ name: "tron-home-task-worker", factory: createHomeTaskWorkerExtension({
+            ...(this.ownedTurns.worker ? [{ name: "tron-home-task-worker", factory: createHomeTaskWorkerExtension({
               providerVersion: toolName => delegatedProviderToolVersion(this.runtime?.session.resourceLoader.getExtensions().extensions ?? [], toolName),
               refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
-                taskHash: createHash("sha256").update(this.taskWorker!.identity.taskId).digest("hex").slice(0, 16), reason }),
-              reportSealed: () => this.taskWorker!.reportSealed,
+                taskHash: createHash("sha256").update(this.ownedTurns.worker!.identity.taskId).digest("hex").slice(0, 16), reason }),
+              reportSealed: () => this.ownedTurns.worker!.reportSealed,
               ownsSubagentRun: runId => this.ownsSubagentRun(runId),
               ownsSupervisorRequest: requestId => this.ownsSupervisorRequest(requestId),
             }) }] : []),
@@ -1721,7 +1721,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         // bash schema is nevertheless the exact SDK definition registered here.
         ...(directBashProcesses ? { customTools: [
           directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
-          ...(this.taskWorker ? [this.taskWorker.checkinTool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.ownedTurns.taskTurnOperationId(this.activeOperationId) : undefined), this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.ownedTurns.taskTurnOperationId(this.activeOperationId) : undefined,
+          ...(this.ownedTurns.worker ? [this.ownedTurns.worker.checkinTool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.ownedTurns.taskTurnOperationId(this.activeOperationId) : undefined), this.ownedTurns.worker.tool(() => this.id, () => this.activeOperationId && !this.runAbort.abortedOperations.has(this.activeOperationId) ? this.ownedTurns.taskTurnOperationId(this.activeOperationId) : undefined,
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
@@ -1756,7 +1756,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const compactionSession = created.session;
       compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir, compactionAdmission.bind(undefined, this.dependencies.settingsSchema),
         profile.compaction === "disabled" ? { disabled: true } : { session: () => readSessionSettings(compactionSession.sessionManager.getBranch()) });
-      const taskWorker = this.taskWorker;
+      const taskWorker = this.ownedTurns.worker;
       requestPipeline.install(created.session, {
         applySettings: () => this.applyLiveRunSettings(created.session),
         settingsApplied: () => {
@@ -1848,7 +1848,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   async setHomeTaskModelQueues(queues: import("../settings/tool-contract.js").TaskModelQueues): Promise<void> {
     return this.lane.run(async () => {
       this.assertConfigurationIdle();
-      if (!this.taskWorker) throw new GatewayError("invalid_request", "Only an admitted Home task owns task queue launch inputs");
+      if (!this.ownedTurns.worker) throw new GatewayError("invalid_request", "Only an admitted Home task owns task queue launch inputs");
       const fixed = readSessionFixedSettings(this.sessionManager.getBranch());
       for (const role of ["worker", "subagent"] as const) {
         const key = `model.queue[role=${role}]`;
@@ -1875,7 +1875,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   private assertAutomationMayNotReplaceSession(): void {
-    if (this.taskWorker || currentInvocationContext()?.operationId?.startsWith("automation:")) {
+    if (this.ownedTurns.worker || currentInvocationContext()?.operationId?.startsWith("automation:")) {
       throw new GatewayError("conflict", "Scheduled automation turns cannot replace or navigate their target session");
     }
   }
@@ -1974,7 +1974,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   public assertSessionIdentityReplacement(): void {
     this.assertChapterWritable();
-    if (this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)) {
+    if (this.ownedTurns.worker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)) {
       throw new GatewayError("conflict", "Task worker session identity cannot be replaced");
     }
     const lineage = this.dependencies.sessionLineage();
@@ -2087,7 +2087,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
    * session identity, its subscribers and its presentation. The factory decides
    * the profile from the record, so this is also how a profile change takes
    * effect. */
-  private async replaceRuntime(sessionManager: SessionManager = this.sessionManager): Promise<void> {
+  async replaceRuntime(sessionManager: SessionManager = this.sessionManager): Promise<void> {
     await this.runtime.dispose().catch(() => {});
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
       cwd: sessionManager.getCwd(),
@@ -2106,47 +2106,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
    * the idle check, the durable commit and the rebuild: the next prompt always
    * sees the new profile. A busy slot refuses retryably and changes nothing.
    */
-  /** A settled task resumes in place (#929): this session's next task operation is owned by
-   * `report`. Refused while any run, admission, subagent or previous task operation is live,
-   * so the predecessor's operation is never shared. The runtime is rebuilt over the same
-   * session manager, keeping identity, subscribers and presentation, so the task worker's
-   * tools and producer gates belong to the new operation. */
-  async bindTaskWorker(report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<void> {
-    await this.lane.run(async () => {
-      this.assertUsable();
-      this.assertChapterWritable();
-      // Any live work in this session refuses the rebind, named.
-      const blocking = this.dependencies.workRegistry.sessionWorkKinds(this.id, exceptWorkToken);
-      const drain = this.administrativeDrainBlockers().map(fact => fact.category);
-      if (this.runtime.session.isStreaming || blocking.length || drain.length) {
-        throw new GatewayError("busy", `The worker session is busy (${[...new Set([...blocking, ...drain])].join(", ") || "streaming"}); resume it when that finishes`, true);
-      }
-      if (this.liveProfile().chapter || this.dependencies.sessionLineage().state(this.id).lineageId) {
-        throw new GatewayError("conflict", "A Home chapter cannot run a task");
-      }
-      if (this.taskWorker?.controlsActive || this.ownedTurns.waitingTask || this.activeOperationId !== undefined || this.operation !== undefined
-        || this.catalogHasActiveSubagents || this.isAgentAdmissionSettling) {
-        throw new GatewayError("conflict", "The worker session is still running; stop it before resuming");
-      }
-      const markers = this.canonicalTaskEvidence().filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
-      if (!markers.length) throw new GatewayError("conflict", "Only a Home task worker session can resume a task");
-      const work = this.dependencies.workRegistry.begin({
-        kind: "administrative-provider-package-operation",
-        sessionId: this.id,
-        hostEpoch: this.ui.hostEpoch,
-      });
-      try {
-        this.taskWorker = report;
-        await this.replaceRuntime();
-        this.revision += 1;
-        this.emit("session.resourcesChanged", {});
-        this.publishSnapshot();
-      } finally {
-        work.settle();
-      }
-    });
-  }
-
   async replaceRuntimeForProfile(commit: () => Promise<void>): Promise<void> {
     await this.lane.run(async () => {
       this.assertUsable();
@@ -5777,14 +5736,14 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   public persistTaskMarker(operationId: string): Promise<void> {
     return this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
-      JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker!.identity, sessionId: this.id })), `task:${operationId}`);
+      JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.ownedTurns.worker!.identity, sessionId: this.id })), `task:${operationId}`);
   }
 
   public noteAcceptedSteering(operationId: string): void {
-      if (this.taskWorker && operationId !== this.taskWorker.identity.operationId) {
+      if (this.ownedTurns.worker && operationId !== this.ownedTurns.worker.identity.operationId) {
         this.dependencies.homeTaskDiagnostic?.({ event: "home.task.control",
-          taskHash: createHash("sha256").update(this.taskWorker.identity.taskId).digest("hex").slice(0, 16),
-          operationHash: createHash("sha256").update(this.taskWorker.identity.operationId).digest("hex").slice(0, 16),
+          taskHash: createHash("sha256").update(this.ownedTurns.worker.identity.taskId).digest("hex").slice(0, 16),
+          operationHash: createHash("sha256").update(this.ownedTurns.worker.identity.operationId).digest("hex").slice(0, 16),
           action: "steer", disposition: "accepted" });
       }
   }
@@ -6653,7 +6612,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
 
 
-  protected assertChapterWritable(manager: SessionManager = this.sessionManager): void {
+  assertChapterWritable(manager: SessionManager = this.sessionManager): void {
     this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).assertWritable(manager);
   }
 
