@@ -35,6 +35,8 @@ export interface TierBasis {
   web: boolean;
   risk: Tier | null;
   riskEvaluation?: { status: "assessed" | "failed" | "timeout"; rationale: string };
+  /** The requester asked for the maintainer's approval below this key's approve tier. */
+  requested?: true;
 }
 
 
@@ -70,6 +72,8 @@ export interface ChangeEntry {
   /** The approval request a pending entry belongs to, and on a decision fact who decided. */
   requestId?: string;
   decidedBy?: Actor;
+  /** An approval action fact (#1985): `key` names its subject, `after` its preview. Never undoable. */
+  action?: true;
   /** Entries one change wrote together and undo reverts together: both notes of a
    * profile supersede, or every item of a Confirm all (doc 6.4). */
   group?: { id: string; size: number };
@@ -77,6 +81,18 @@ export interface ChangeEntry {
 
 const SEGMENT_ENTRIES = 500;
 interface RecordIndex { version: 1; segments: Array<{ name: string; count: number; closed?: true }> }
+
+function publication(entries: readonly ChangeEntry[]): { name: string; encoded: string; count: number } | undefined {
+  if (!entries.length) return undefined;
+  const group = entries[0]!.group;
+  if (!group?.id || group.size !== entries.length || new Set(entries.map(entry => entry.changeId)).size !== entries.length
+    || entries.some(entry => entry.group?.id !== group.id || entry.group.size !== group.size)) {
+    throw new GatewayError("invalid_request", "A settings transfer audit must contain one complete group with unique entries");
+  }
+  const encoded = entries.map(entry => `${JSON.stringify(entry)}\n`).join("");
+  if (Buffer.byteLength(encoded) > 1024 * 1024) throw new GatewayError("conflict", "The settings transfer audit exceeds its bound");
+  return { name: `once-${createHash("sha256").update(group.id).digest("hex")}`, encoded, count: entries.length };
+}
 
 export class SettingsChangeRecord {
   private readonly mutex = new AsyncMutex();
@@ -108,35 +124,42 @@ export class SettingsChangeRecord {
     });
   }
 
-  /** Startup transfers publish one immutable, identity-addressed segment. A crash
-   * between segment and index publication can be completed without duplicating the
-   * audit or consulting it as settings truth. Call before ordinary writers start. */
-  async appendOnce(entry: ChangeEntry): Promise<void> {
+  /** Preflight before domain effects; publication enforces the same group/byte bound. */
+  validateAppendOnce(entries: readonly ChangeEntry[]): void { publication(entries); }
+
+  /** One immutable group, one index visibility cut. The existing mutex also
+   * serializes ordinary writers; replay re-proves file and parent durability. */
+  async appendOnce(entries: readonly ChangeEntry[]): Promise<void> {
+    const intent = publication(entries);
+    if (!intent) return;
     await this.mutex.run(async () => {
-      const name = `once-${createHash("sha256").update(entry.changeId).digest("hex")}`;
+      const { name, encoded, count } = intent;
       const path = join(this.directory, `${name}.jsonl`);
       const index = await this.index();
-      const existing = await this.segmentLines(name);
-      if (existing.length && (existing.length !== 1 || JSON.stringify(existing[0]) !== JSON.stringify(entry))) {
-        throw new GatewayError("conflict", "The settings transfer audit conflicts with its intent");
-      }
-      if (!existing.length) {
-        const encoded = `${JSON.stringify(entry)}\n`;
-        if (Buffer.byteLength(encoded) > 1024 * 1024) throw new GatewayError("conflict", "The settings transfer audit exceeds its bound");
+      const file = await open(path, "r").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+      if (file) {
+        try {
+          if ((await file.stat()).size > 1024 * 1024 || !(await file.readFile()).equals(Buffer.from(encoded))) {
+            throw new GatewayError("conflict", "The settings transfer audit conflicts with its intent");
+          }
+          await syncDurably(file);
+        } finally { await file.close(); }
+      } else {
         await mkdir(this.directory, { recursive: true, mode: 0o700 });
         const temporary = `${path}.${randomUUID()}.tmp`;
         try {
-          const file = await open(temporary, "wx", 0o600);
-          try { await file.writeFile(encoded); await syncDurably(file); } finally { await file.close(); }
+          const created = await open(temporary, "wx", 0o600);
+          try { await created.writeFile(encoded); await syncDurably(created); } finally { await created.close(); }
           await rename(temporary, path);
-          const directory = await open(this.directory, "r");
-          try { await syncDurably(directory); } finally { await directory.close(); }
         } finally { await rm(temporary, { force: true }); }
       }
-      if (!index.segments.some(segment => segment.name === name)) {
-        index.segments.push({ name, count: 1, closed: true });
-        await durablePublishBoundedJson(join(this.directory, "index.json"), index, 16 * 1024 * 1024);
-      }
+      const directory = await open(this.directory, "r");
+      try { await syncDurably(directory); } finally { await directory.close(); }
+      const indexed = index.segments.find(segment => segment.name === name);
+      if (indexed && (indexed.count !== count || !indexed.closed)) throw new GatewayError("conflict", "The settings transfer index conflicts with its intent");
+      if (!indexed) index.segments.push({ name, count, closed: true });
+      // Even an indexed retry must re-prove the publication's durability.
+      await durablePublishBoundedJson(join(this.directory, "index.json"), index, 16 * 1024 * 1024);
     });
   }
 

@@ -1,88 +1,94 @@
 {
-  "fill-specializations": [
+  "fill-specializations" : [
     {
-      "value": {
-        "automatic-gradient": "srgb:0.95294,0.92941,0.89020,1.00000"
+      "value" : {
+        "automatic-gradient" : "srgb:0.95294,0.92941,0.89020,1.00000"
       }
     },
     {
-      "appearance": "dark",
-      "value": {
-        "automatic-gradient": "srgb:0.07059,0.12549,0.10588,1.00000"
+      "appearance" : "dark",
+      "value" : {
+        "automatic-gradient" : "srgb:0.07059,0.12549,0.10588,1.00000"
       }
     }
   ],
-  "groups": [
+  "groups" : [
     {
-      "layers": [
+      "layers" : [
         {
-          "fill-specializations": [
+          "fill-specializations" : [
             {
-              "value": {
-                "solid": "srgb:0.01961,0.58824,0.41176,1.00000"
+              "value" : {
+                "solid" : "srgb:0.02353,0.37255,0.27451,1.00000"
               }
             },
             {
-              "appearance": "tinted",
-              "value": {
-                "solid": "extended-gray:1.00000,1.00000"
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.43137,0.90588,0.71765,1.00000"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-gray:1.00000,1.00000"
               }
             }
           ],
-          "glass": true,
-          "image-name": "tron-mark.png",
-          "name": "Tron mark",
-          "position": {
-            "scale": 1,
-            "translation-in-points": [
+          "glass" : true,
+          "image-name" : "tron-mark.png",
+          "name" : "Tron mark",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
               0,
               0
             ]
           }
         }
       ],
-      "shadow-specializations": [
+      "shadow-specializations" : [
         {
-          "value": {
-            "kind": "neutral",
-            "opacity": 0.5
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.5
           }
         },
         {
-          "appearance": "light",
-          "value": {
-            "kind": "neutral",
-            "opacity": 0.2
+          "appearance" : "light",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.20000000000000001
           }
         }
       ],
-      "specular-specializations": [
+      "specular-specializations" : [
         {
-          "value": true
+          "value" : true
         },
         {
-          "appearance": "light",
-          "value": false
+          "appearance" : "light",
+          "value" : false
         }
       ],
-      "translucency-specializations": [
+      "translucency-specializations" : [
         {
-          "value": {
-            "enabled": true,
-            "value": 0.4
+          "value" : {
+            "enabled" : true,
+            "value" : 0.40000000000000002
           }
         },
         {
-          "appearance": "light",
-          "value": {
-            "enabled": true,
-            "value": 0.2
+          "appearance" : "light",
+          "value" : {
+            "enabled" : true,
+            "value" : 0.20000000000000001
           }
         }
       ]
     }
   ],
-  "supported-platforms": {
-    "squares": "shared"
+  "supported-platforms" : {
+    "squares" : "shared"
   }
 }

@@ -97,6 +97,7 @@ export class SettingsStoreAdapter {
   async options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest, resolve: (keys: readonly string[]) => Promise<Resolution>): Promise<SettingsOptionsResult> {
     const key = this.schema.KEYS.find(candidate => candidate.id === request.key);
     if (!key) throw new GatewayError("invalid_request", `Unknown setting ${request.key}`);
+    if (!key.control) throw new GatewayError("invalid_request", `${key.label} has no editor options`);
     if (!key.optionsSource) {
       if (!key.type.options) throw new GatewayError("invalid_request", `${key.label} has no options to choose from`);
       return { key: key.id, source: "static", dependsOn: [], options: key.type.options.map(option => ({
@@ -107,8 +108,7 @@ export class SettingsStoreAdapter {
     const base = { key: key.id, source: name, dependsOn: [...dependsOn] };
     switch (name) {
       case "catalog.models":
-        // A queue names physical models; a virtual model routes on its own (6.3).
-        return { ...base, ...await this.catalogModelOptions(runtime, request, key.id.startsWith("model.queue[") || target.kind === "home" || session?.home === true) };
+        return { ...base, ...await this.catalogModelOptions(runtime, request, target.kind === "home" || session?.home === true) };
       case "catalog.thinkingLevels": {
         const model = await this.followedModel(runtime, request.qualifiers, resolve);
         const supported = model ? getSupportedThinkingLevels(model) : [];
@@ -117,13 +117,6 @@ export class SettingsStoreAdapter {
         const declared = new Map(this.schema.schemaKey("model.thinking[role=chat]").type.options!.map(option => [option.value, option]));
         return { ...base, options: levels.map(level => ({ value: level, label: declared.get(level)?.label ?? level,
           ...(declared.get(level)?.detail ? { detail: declared.get(level)!.detail } : {}) })) };
-      }
-      case "catalog.contextWindow": {
-        // The bounds `settings.change` validates the value against (contextWindowValue).
-        const followed = await this.followedModel(runtime, request.qualifiers, resolve);
-        const model = followed && limitsModel(runtime, followed);
-        const limits = model && contextWindowLimits(model);
-        return { ...base, options: [], ...(limits ? { range: { min: limits.minimum, max: limits.maximum, unit: "tokens" as const } } : {}) };
       }
       case "catalog.tools": {
         if (!this.dependencies.toolCatalog) throw new GatewayError("unsupported", "This Gateway has no tool catalog");

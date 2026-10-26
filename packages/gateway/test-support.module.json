@@ -31,6 +31,8 @@
     "test-support/network-isolation.ts",
     "test-support/runtime-registry-fixture.ts",
     "test-support/scenario-lock.ts",
+    "test-support/settings-action-crash-child.ts",
+    "test-support/settings-outcome-crash-child.ts",
     "test-support/settings-dependencies.ts",
     "test-support/settings-schema.ts",
     "test-support/store-path-lock.ts",

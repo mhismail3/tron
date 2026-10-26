@@ -32,6 +32,10 @@ operations: RunOperations<unknown>,
     ownership?.signal?.throwIfAborted();
     operations.assertUsable();
     operations.assertHomePromptAdmission();
+    if (ownership?.kind === "homeWake" && (ownership.inputCancellation !== operations.runAbort.inputCancellation
+      || ownership.cancellationEpoch !== ownership.inputCancellation.epoch)) {
+      throw new GatewayError("cancelled", "Home wake stopped before admission");
+    }
     if (!ownership && operations.runAbort.stopRecoveryQueueClosed && !held && !redelivery) {
       const heldAdmission = operations.heldQueue.holdPrompt(text, images, behavior, queueDisplay, true);
       onAdmitted?.(heldAdmission);
@@ -208,7 +212,7 @@ operations: RunOperations<unknown>,
       if (ownership?.kind === "homeWake") ownership.onDelivered(homeWakeTrigger !== undefined);
       ownership?.signal?.throwIfAborted();
       sdkRun = ownership?.kind === "homeWake"
-        ? operations.startHomeWake(session, operationId, homeWakeTrigger, acceptedResolve)
+        ? operations.startHomeWake(session, operationId, homeWakeTrigger, acceptedResolve, ownership.inputCancellation, ownership.cancellationEpoch)
         : withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
         images,
         ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),

@@ -12,7 +12,7 @@ import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
 import type { ChangeEntry } from "../kernel/settings/settings-record.js";
-import { SETTINGS_OUTCOME_MESSAGE } from "./tron-settings-extension.js";
+import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/settings/tool-contract.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
@@ -98,7 +98,9 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   await trust.set(project, true);
   const runtimeEvents: Array<{ sessionId: string; topic: string; payload: unknown }> = [];
   const homeDiagnostics: HomeDiagnosticRecord[] = [];
+  let settings: ReturnType<typeof settingsDependencies> | undefined;
   const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
+    settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
     ...(options.maximumLiveRuntimes === undefined ? {} : { maximumLiveRuntimes: options.maximumLiveRuntimes }),
     broadcast: (sessionId, topic, payload) => { runtimeEvents.push({ sessionId, topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     homeDiagnostic: event => homeDiagnostics.push(event),
@@ -114,10 +116,11 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   await registry.catalog("all");
   // The fixture's clock: expiry is tested by advancing it, never by waiting.
   let clock = Date.parse("2026-10-11T12:00:00.000Z");
-  const { settingsModel, settingsChanges } = settingsDependencies({
+  settings = settingsDependencies({
     agentDir, tronHome, trust, modelRuntime, sessions: registry, home: () => homeOwnerOf(registry), registry, now: () => new Date(clock),
     toolCatalog: async target => target.kind === "home" ? homeToolCatalog(registry.runtimeEntries(), id => registry.isLineageMember(id)) : target.kind === "session" ? registry.liveToolCatalog(target.sessionId) : [],
   });
+  const { settingsModel, settingsChanges } = settings;
   const pushes: Array<{ kind: string; title?: string; message: string; sessionId: string; category?: string }> = [];
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const service = new GatewayService({ display: displayOwnerOf(registry),
@@ -130,9 +133,12 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
 
+  await settingsChanges.start();
+
   /** One run: one model step per tool call, then a closing reply. Returns the
    * tool results the closing request carried and what that run's context held. */
   async function run(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, input: string, steps: Array<{ name: string; args: ToolCall["arguments"] }>) {
+    await waitFor(() => slot.snapshot().phase === "idle" && slot.snapshot().configurationBlocker === null || undefined, "previous run settled before scripting input");
     const requests: Array<Array<Record<string, unknown>>> = [];
     faux.setResponses([
       ...steps.map(step => async (context: { messages: Array<Record<string, unknown>> }) => {
@@ -146,7 +152,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     ]);
     await slot.prompt(input);
     await waitFor(() => requests.length >= steps.length + 1 || undefined, "run requests");
-    await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "run settled");
+    await waitFor(() => slot.snapshot().phase === "idle" && slot.snapshot().configurationBlocker === null || undefined, "run settled");
     const closing = requests.at(-1)!;
     const results = closing.filter(message => message.role === "toolResult").slice(-steps.length).map(message => ({
       tool: String(message.toolName), isError: message.isError === true,
@@ -159,7 +165,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
     const first = requests[0]!;
     const turn = first.slice(first.findLastIndex(message => message.role === "assistant") + 1);
-    const outcomes = turn.filter(message => message.role === "user" && text(message).startsWith("Settings change ")).map(text);
+    const outcomes = turn.filter(message => message.role === "user" && text(message).startsWith("Settings request ")).map(text);
     return { results, outcomes };
   }
   const settle = (results: Array<{ tool: string; details?: Record<string, unknown> }>) => results.find(result => result.tool === "settings")!.details!;
@@ -195,8 +201,13 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     }
     return found;
   };
+  const homeOutcome = async (slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, requestId: string) => {
+    await waitFor(async () => (await canonicalOutcomes()).some(text => text.startsWith(`Settings request ${requestId}:`)) || undefined, "exact autonomous Home outcome appended");
+    await waitFor(() => slot.snapshot().phase === "idle" && slot.snapshot().configurationBlocker === null || undefined, "autonomous Home outcome settled");
+    return (await canonicalOutcomes()).filter(text => text.startsWith(`Settings request ${requestId}:`));
+  };
   return {
-    canonicalOutcomes, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide, approveProjectChange,
+    canonicalOutcomes, homeOutcome, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide, approveProjectChange,
     macDocument, designateHome, chat, faux, modelRuntimeFactory, modelRuntime, runtimeEvents, homeDiagnostics, advance: (ms: number) => { clock += ms; },
   };
 }
@@ -656,13 +667,16 @@ describe("settings risk gate", () => {
     expect(changes.map(entry => entry.op)).toEqual(expect.arrayContaining(["set", "unset"]));
     // Cold resume of the parent keeps its own Session values (the fork's unset is branch-local).
     await f.registry.dispose();
+    let settings: ReturnType<typeof settingsDependencies> | undefined;
     const reopened = await createTestRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+      settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
     registries.push(reopened);
     await reopened.initialize();
     await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "compaction catalog cut");
-    settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime, sessions: reopened,
+    settings = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime, sessions: reopened,
       home: () => homeOwnerOf(reopened), registry: reopened });
+    await settings.settingsChanges.start();
     const resumed = await reopened.acquire(parentId);
     expect(resumed.settingsSessionLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
     expect(resumed.snapshot().compactionPolicy?.next).toMatchObject({ enabled: false, reserveTokens: 4_096, keepRecentTokens: 12_000,
@@ -794,15 +808,18 @@ describe("settings risk gate", () => {
     expect(canonical).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.settings.v1",
       data: expect.objectContaining({ settings: expectedChat }) }));
     await f.registry.dispose();
+    let settings: ReturnType<typeof settingsDependencies> | undefined;
     const reopened = await createTestRegistry({
       agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+      settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(reopened);
     await reopened.initialize();
     await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "resumed catalog cut");
-    settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime,
+    settings = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime,
       sessions: reopened, home: () => homeOwnerOf(reopened), registry: reopened });
+    await settings.settingsChanges.start();
     const resumed = await reopened.acquire(fork.sessionId);
     expect(resumed.settingsSessionLayer().settings).toEqual(expectedChat);
     expect(resumed.settingsSessionLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true, from: "global" }) });
@@ -908,6 +925,7 @@ describe("settings risk gate", () => {
     expect(approved).toMatchObject({ status: "approved" });
     expect((await f.trust.inspect(f.other)).savedDecision).toBe(true);
     steps.push({ step: "trust approved", pending, approved });
+    await f.homeOutcome(home, pending.approval.requestId);
 
     // A second request, declined: no change; both outcomes recorded.
     await f.trust.set(f.other, null);
@@ -919,10 +937,13 @@ describe("settings risk gate", () => {
     expect(trustEntries).toEqual(expect.arrayContaining(["pending", "approved", "declined"]));
     steps.push({ step: "trust declined", statuses: trustEntries });
 
-    // Home's next turn names the declined change (Q22).
+    // Home hears the declined change autonomously; the next user turn never repeats it.
+    const declined = await f.homeOutcome(home, second.approval.requestId);
+    expect(declined).toHaveLength(1);
+    expect(declined.join("\n")).toMatch(/Trust for this project .*was declined by the maintainer/);
     const told = await f.run(home, "anything new?", []);
-    expect(told.outcomes.join("\n")).toMatch(/Trust for this project .*was declined by the maintainer/);
-    steps.push({ step: "Home told", outcomes: told.outcomes });
+    expect(told.outcomes).toEqual([]);
+    steps.push({ step: "Home told", outcomes: declined });
 
     // Quiet from a clean turn; notify after web_fetch in that turn.
     expect(f.settle((await f.run(home, "retries", [{ name: "settings", args: retries(4, 3) }])).results)).toMatchObject({ status: "applied", tier: "quiet" });
@@ -985,7 +1006,7 @@ describe("settings risk gate", () => {
     transcript.push({ case: "superseded and expired", steps: [{ statuses, outcomes: told.outcomes }] });
   }, 60_000);
 
-  it("Home's pending change expires after 24 hours, is never applied, and Home is told on its next turn", async () => {
+  it("Home's pending change expires after 24 hours, is never applied, and Home hears it once autonomously", async () => {
     const f = await fixture();
     const home = await f.designateHome();
     const asked = await f.run(home, "trust the other project", [{ name: "settings", args: { action: "change", reason: "The maintainer asked me to work there",
@@ -997,11 +1018,13 @@ describe("settings risk gate", () => {
     await expect(f.decide(pending.approval.requestId, pending.approval.digest, true)).rejects.toMatchObject({ code: "conflict" });
     expect((await f.trust.inspect(f.other)).savedDecision ?? null).toBeNull();
     expect((await f.history()).filter(entry => entry.key === "permissions.projectTrust").map(entry => entry.status)).toEqual(expect.arrayContaining(["pending", "expired"]));
-    const told = await f.run(home, "next", []);
-    expect(told.outcomes).toHaveLength(1);
-    expect(told.outcomes[0]).toMatch(/expired after 24 hours/);
+    const expired = await f.homeOutcome(home, pending.approval.requestId);
+    expect(expired).toHaveLength(1);
+    expect(expired[0]).toMatch(/expired after 24 hours/);
+    expect((await f.run(home, "next", [])).outcomes).toEqual([]);
     expect((await f.run(home, "after", [])).outcomes).toEqual([]);
-    transcript.push({ case: "Home expiry", steps: [{ outcomes: told.outcomes }] });
+    expect((await f.canonicalOutcomes()).filter(text => text.startsWith(`Settings request ${pending.approval.requestId}:`))).toEqual(expired);
+    transcript.push({ case: "Home expiry", steps: [{ outcomes: expired }] });
   }, 60_000);
 
   it("a Home task worker: quiet from a clean turn, notify after an undeclared third-party tool in its turn", async () => {
@@ -1009,7 +1032,7 @@ describe("settings risk gate", () => {
     // The worker's project carries a third-party tool that declares nothing, so it marks the run.
     await mkdir(join(f.cwd, ".pi", "extensions"), { recursive: true });
     await writeFile(join(f.cwd, ".pi", "extensions", "third-party.ts"), THIRD_PARTY_EXTENSION);
-    const { settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway, sessions: f.registry, registry: f.registry });
+    const { settingsChanges } = f.settings;
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
     const textOf = (message: { content: unknown }) => typeof message.content === "string" ? message.content
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
@@ -1068,8 +1091,7 @@ describe("settings risk gate", () => {
    */
   it("Home changes a running worker's model and thinking from its next request, with an explicit signal", async () => {
     const f = await homeTaskFixture();
-    const { settingsModel, settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway,
-      sessions: f.registry, home: () => homeOwnerOf(f.registry), registry: f.registry });
+    const { settingsModel, settingsChanges } = f.settings;
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
     const service = new GatewayService({ display: displayOwnerOf(f.registry),
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
@@ -1112,16 +1134,19 @@ describe("settings risk gate", () => {
         if (homeCall && last.toolName === homeCall.name) homeResults.set(homeCall.prompt, { isError: last.isError === true, text: textOf(last), details: last.details });
         return fauxAssistantMessage("Done.");
       }
-      if (homeCall && users.at(-1) === homeCall.prompt) return fauxAssistantMessage([fauxToolCall(homeCall.name, homeCall.args)], { stopReason: "toolUse" });
+      // A settings wake is not another copy of the preceding user instruction.
+      const turn = context.messages.slice(context.messages.findLastIndex(message => message.role === "assistant") + 1);
+      if (homeCall && turn.some(message => message.role === "user" && textOf(message) === homeCall.prompt)) return fauxAssistantMessage([fauxToolCall(homeCall.name, homeCall.args)], { stopReason: "toolUse" });
       return fauxAssistantMessage("Noted.");
     };
     f.faux.setResponses(Array.from({ length: 40 }, () => respond as never));
     const home = await f.registry.acquire(f.home.sessionId);
     const homeSays = async (prompt: string, name: string, args: Record<string, unknown>) => {
+      await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().configurationBlocker === null || undefined, "previous Home run settled before scripting input");
       homeCall = { prompt, name, args };
       await home.prompt(prompt);
       const result = await waitFor(() => homeResults.get(prompt), `Home result: ${prompt}`);
-      await waitFor(() => home.snapshot().configurationBlocker === null || undefined, `Home settled: ${prompt}`);
+      await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().configurationBlocker === null || undefined, `Home settled: ${prompt}`);
       return result;
     };
     const steps: Array<Record<string, unknown>> = [];

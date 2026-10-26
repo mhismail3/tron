@@ -1,7 +1,9 @@
 import type { TaskWorkerControl, TaskControlRefusalReason } from "../../kernel/delegation/worker-contract.js";
-import type { InputEnvelope, InputDelivery } from "../../kernel/host/input-admission.js";
+import type { InputEnvelope, InputDelivery, InputTrigger, InputMessage } from "../../kernel/host/input-admission.js";
+import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
+import { settingsOutcomeRequestIds, type SettingsOutcomeMessage } from "../../kernel/settings/tool-contract.js";
 import type { ImageContent } from "../../kernel/pi/ai.js";
-import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
+import { canonicalMessageBytes, isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
@@ -18,7 +20,7 @@ import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { HomeChapterList, HomeProfileList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryView, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../../protocol/types.js";
 import { readHomeProfile } from "./home-profile.js";
-import type { SessionEntry } from "../../kernel/pi/coding-agent.js";
+import { estimateTokens, type SessionEntry } from "../../kernel/pi/coding-agent.js";
 import { historyEntry } from "../../kernel/projection/history.js";
 import type { EpisodicMemory } from "../../episodic/episodic-memory.js";
 import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, homeMemoryToolDisplay, type HomeMemoryViewRequest } from "./home-memory-browser.js";
@@ -103,9 +105,10 @@ export interface HomeSessionPort {
   /** Retire every live Home slot after uncertain publication; next admission
    * rebuilds from the record reloaded by this owner. */
   retireHomeRuntimes(): Promise<void>;
-  /** Starts one wake activation for the Home session: admission, the trigger
-   * result, and the run. `delivered` is false when no result could be delivered. */
-  wakeHome(sessionId: string): Promise<{ delivered: boolean }>;
+  /** Capture the existing native cancellation lifetime synchronously. The
+   * returned runner lazily acquires/admit/runs that exact wake; a Stop or runtime
+   * replacement after capture must refuse it, never capture a fresh lifetime. */
+  wakeHome(sessionId: string): () => Promise<{ delivered: boolean }>;
 }
 
 /** What the session runtime reports to Home's memory. Narrow on purpose: the
@@ -145,6 +148,8 @@ export interface HomeOwnerOptions {
   taskDiagnostic?: (record: HomeTaskDiagnostic) => void;
   /** Knowledge supplies the learned profile section of Home's system prompt. */
   knowledge: () => KnowledgeService | undefined;
+  /** The settings approvals owner: Home's settled requests wake it as their own turn (#1642). */
+  settingsOutcomes?: () => Pick<SettingsChangePath, "takeOutcomes" | "onOutcome"> | undefined;
 }
 
 /** Tron Home's neutral workspace. It is never part of a Project, so project
@@ -205,6 +210,7 @@ export class HomeOwner {
    * asks for another attempt when it ends, so a refused or failed wake cannot
    * retry itself in a loop. */
   private lastWakeDelivered = false;
+  private settingsWatch: { owner: object; stop: () => void } | undefined;
 
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
@@ -261,9 +267,10 @@ export class HomeOwner {
   /** Post-listen startup only (gateway-main, after listen). Recovery
    * has no executable session lifetime to resurrect. */
   async recoverTasks(): Promise<void> {
-    const recovery = await this.tasks.recover();
-    // Recovery settled: pending results from before the restart may now wake Home. A refused recovery delivers nothing.
-    if (recovery.available) this.requestWake();
+    await this.tasks.recover();
+    // Task refusal fences only its inbox. Settings have their own durable outbox
+    // and must subscribe/reconcile even when task recovery is unavailable.
+    this.requestWake();
   }
 
   private async taskOwner(): Promise<HomeTaskDispatcher> {
@@ -536,21 +543,47 @@ export class HomeOwner {
     return (await this.tasks.recoveryStatus()).available;
   }
 
-  async admitTaskResults(sessionId: string, operationId: string, delivery: InputDelivery, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<InputEnvelope>): Promise<HomeWakeTrigger | undefined> {
+  async admitTaskResults(sessionId: string, operationId: string, delivery: InputDelivery, append: (message: InputMessage) => Promise<void>, envelope: () => Promise<InputEnvelope>): Promise<HomeWakeTrigger | InputTrigger | undefined> {
     const route = this.wakeRoute(sessionId);
-    if (!route?.enabled || !(await this.inboxAvailable())) return undefined;
-    await this.inbox.recover(route);
-    return this.inbox.admit(route, operationId, delivery, append, envelope);
+    if (!route?.enabled) return undefined;
+    let trigger: HomeWakeTrigger | undefined;
+    // Task results need the task namespace's proof; settings outcomes have their own store.
+    if (await this.inboxAvailable()) {
+      await this.inbox.recover(route);
+      trigger = await this.inbox.admit(route, operationId, delivery, append, envelope);
+    }
+    if (trigger) return trigger;
+    // Home owns settings admission for user turns and wakes alike. The SDK hook
+    // must not select an uncontrolled second batch outside this envelope.
+    const settings = this.options.settingsOutcomes?.();
+    if (!settings || !this.record || !(await settings.takeOutcomes(this.record.chapters.map(chapter => chapter.sessionId)))) return undefined;
+    const prepared = await envelope();
+    prepared.signal.throwIfAborted();
+    const message = await this.settingsOutcome(sessionId, candidate => {
+      prepared.signal.throwIfAborted();
+      return prepared.entries >= 2 && canonicalMessageBytes(candidate) <= prepared.bytes
+        && estimateTokens({ role: "custom", ...candidate, timestamp: Date.now() }) <= prepared.tokens;
+    }, prepared.signal);
+    prepared.signal.throwIfAborted();
+    if (!message) return undefined;
+    if (delivery === "user") { await append(message); return undefined; }
+    return { taskId: message.details.taskId, message };
   }
 
   /** A wake whose trigger never reached the canonical session goes back to pending. */
   async releaseWakeTrigger(taskId: string, operationId: string, eventId: string): Promise<void> {
+    // Selection did not mutate the approvals store; an unappended settings trigger remains untold.
+    if (eventId.startsWith("settings-outcome:")) return;
     await this.inbox.releaseTrigger(taskId, operationId, eventId);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
     const route = this.wakeRoute(sessionId);
     if (route && await this.inboxAvailable()) await this.inbox.settle(route, operationId);
+    if (route) {
+      try { await this.settingsOutcome(sessionId, () => false); }
+      catch { process.emitWarning("Settings outcome delivery proof deferred; the outbox remains retained", { code: "TRON_SETTINGS_OUTCOME_PROOF_DEFERRED" }); }
+    }
   }
 
   /** The Home session went idle after a user activation or a delivered wake. Only these two events can
@@ -561,7 +594,51 @@ export class HomeOwner {
     if (by === "user" || this.lastWakeDelivered) this.requestWake();
   }
 
+  /** Reconcile durable delivery proof before selecting a wake. A crash before append
+   * leaves the request untold; a crash after append is acknowledged on recovery. */
+  private async settingsOutcome(sessionId: string, accepts?: (message: SettingsOutcomeMessage) => boolean, signal?: AbortSignal) {
+    const owner = this.options.settingsOutcomes?.();
+    const record = this.record;
+    if (!owner || !record || homeSessionId(record) !== sessionId) return undefined;
+    const requesters = record.chapters.map(chapter => chapter.sessionId);
+    if (!(await owner.takeOutcomes(requesters))) return undefined;
+    const path = await this.options.runtimes.sessionFile(sessionId);
+    if (!path && !signal) throw new GatewayError("conflict", "Home settings delivery has no canonical file to prove");
+    const delivered = new Set<string>();
+    if (path) {
+      try {
+        await visitCanonicalSessionEntries({ path, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes, durable: true,
+          visit: entry => { for (const id of settingsOutcomeRequestIds([entry.raw])) delivered.add(id); } });
+      } catch (error) {
+        // Actual input admission has validated the first empty chapter (and
+        // refuses a started chapter whose canonical file is missing). Absence
+        // proves no delivery; never use it to retire IDs or permit sealing.
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT" || !signal) throw error;
+        delivered.clear();
+      }
+    }
+    signal?.throwIfAborted();
+    // Quiescent rollover proves/acknowledges this chapter before sealing it, so
+    // recovery needs only the current canonical file, not every historical log.
+    const current = this.record;
+    if (!current || current.homeId !== record.homeId || current.generation !== record.generation
+      || current.routeGeneration !== record.routeGeneration || homeSessionId(current) !== sessionId) return undefined;
+    return owner.takeOutcomes(requesters, [...delivered], accepts);
+  }
+
+  /** The settings owner nudges Home when a request it made settles; the outcome itself
+   * stays in the approvals store until a wake or turn takes it. */
+  private watchSettingsOutcomes(): void {
+    const owner = this.options.settingsOutcomes?.();
+    if (!owner || this.settingsWatch?.owner === owner) return;
+    this.settingsWatch?.stop();
+    this.settingsWatch = { owner, stop: owner.onOutcome(sessionId => {
+      if (this.wakeRoute()?.enabled && this.record?.chapters.some(chapter => chapter.sessionId === sessionId)) this.requestWake();
+    }) };
+  }
+
   private requestWake(): void {
+    this.watchSettingsOutcomes();
     this.wakeRequested = true;
     // A drain that fails must not become an unhandled rejection: the attempt is
     // reported and no further attempt starts until the next event.
@@ -589,23 +666,27 @@ export class HomeOwner {
    * notice; an undeliverable result says Home is waiting. */
   private async wakeOnce(): Promise<"busy" | "done"> {
     const record = this.record;
-    if (this.unavailable || !record || !(await this.inboxAvailable())) return "done";
+    if (this.unavailable || !record) return "done";
     const sessionId = homeSessionId(record);
-    if (!(await this.inbox.pendingTasks(record.homeId)).length) { this.lastWakeDelivered = false; return "done"; }
+    const wake = this.options.sessions.wakeHome(sessionId);
+    const tasks = await this.inboxAvailable() && (await this.inbox.pendingTasks(record.homeId)).length > 0;
+    if (!tasks && !(await this.options.settingsOutcomes?.()?.takeOutcomes(record.chapters.map(chapter => chapter.sessionId)))) {
+      this.lastWakeDelivered = false; return "done";
+    }
     // An attempt runs after recovery, so the task namespace and the session catalog are settled here.
     // A Home that never wrote its conversation has no session to run; a wake materializes a reserved successor (#1518).
     const refusal = this.reservedChapter(sessionId) === undefined && !(await this.options.runtimes.sessionPresent(sessionId)) ? "unavailable" : await this.homeRefusal(record);
     if (refusal) {
       this.lastWakeDelivered = false;
       this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: refusal });
-      await this.inbox.pushPending(record.homeId, "task");
+      if (tasks) await this.inbox.pushPending(record.homeId, "task");
       return "done";
     }
     let delivered: boolean;
     try {
       // A post-rollover wake materializes the successor as home.prompt does (#1518).
       if (this.reservedChapter(sessionId)) { await this.materializer.materialize(sessionId); await this.materializer.assertAttempt(sessionId); }
-      ({ delivered } = await this.options.sessions.wakeHome(sessionId));
+      ({ delivered } = await wake());
     } catch (error) {
       if (error instanceof GatewayError && error.code === "busy") {
         this.options.diagnostic?.({ outcome: "wake", decision: "deferred", reason: "busy" });
@@ -613,13 +694,13 @@ export class HomeOwner {
       }
       this.lastWakeDelivered = false;
       this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: "failed" });
-      await this.inbox.pushPending(record.homeId, "waiting");
+      if (tasks) await this.inbox.pushPending(record.homeId, "waiting");
       return "done";
     }
     this.lastWakeDelivered = delivered;
     if (!delivered) {
       this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: "nothing-deliverable" });
-      await this.inbox.pushPending(record.homeId, "waiting");
+      if (tasks) await this.inbox.pushPending(record.homeId, "waiting");
     } else {
       this.options.diagnostic?.({ outcome: "wake", decision: "admitted", reason: "delivered" });
     }
@@ -1052,14 +1133,14 @@ export class HomeOwner {
    * a profile change) gets the same seam and keeps its open activation; only a
    * fork — a new session id — gets a fresh one.
    *
-   * The caller has already decided the runtime is Home's. The only two sessions
-   * that can be: the one the record names and enables, and the one a designation
-   * in flight is creating (its first runtime is built before the record can name
-   * it — the same window runtime profile selection covers with its creation recipe).
+   * The caller has already decided the session is Home's. Active/materializing
+   * chapters, the current reserved successor and an in-flight designation share
+   * this owner. A reserved chapter can capture its input cancellation identity
+   * before materialization without constructing a native runtime.
    */
   requestPolicyFor(sessionId: string): HomeRequestPolicy | undefined {
     const record = this.record;
-    const designated = record !== undefined && record.enabled && record.chapters.some(chapter => chapter.sessionId === sessionId && (chapter.state === "active" || chapter.state === "materializing"));
+    const designated = record !== undefined && record.enabled && record.chapters.some(chapter => chapter.sessionId === sessionId && (chapter.state === "active" || chapter.state === "materializing" || (chapter.state === "reserved" && chapter === record.chapters.at(-1))));
     if (!designated && !this.designating) return undefined;
     let policy = this.policies.get(sessionId);
     if (!policy) {
@@ -1110,6 +1191,9 @@ export class HomeOwner {
       const metrics = await this.options.sessions.chapterMetrics(sessionId);
       if (!metrics.quiescent || (metrics.bytes < HOME_SOFT_BYTES && metrics.entries < HOME_SOFT_ENTRIES
         && metrics.bytes < HOME_HARD_BYTES && metrics.entries < HOME_HARD_ENTRIES)) return undefined;
+      // Never strand an unproved settings delivery in a sealed file. A failed
+      // canonical sync defers rollover, preserving the current chapter as owner.
+      await this.settingsOutcome(sessionId, () => false);
       const sealed = await this.recordMutex.run(async () => {
         const current = this.record;
         const active = current?.chapters.find(candidate => candidate.sessionId === sessionId);
@@ -1129,12 +1213,15 @@ export class HomeOwner {
       });
       return sealed ? metrics : undefined;
     });
-    if (rolled) this.options.diagnostic?.({
-      outcome: "chapter-rollover", chapterOrdinal: chapter.ordinal,
-      reason: rolled.bytes >= HOME_HARD_BYTES ? "hard-byte-limit"
-        : rolled.entries >= HOME_HARD_ENTRIES ? "hard-entry-limit"
-          : rolled.bytes >= HOME_SOFT_BYTES ? "soft-byte-limit" : "soft-entry-limit",
-    });
+    if (rolled) {
+      this.options.diagnostic?.({
+        outcome: "chapter-rollover", chapterOrdinal: chapter.ordinal,
+        reason: rolled.bytes >= HOME_HARD_BYTES ? "hard-byte-limit"
+          : rolled.entries >= HOME_HARD_ENTRIES ? "hard-entry-limit"
+            : rolled.bytes >= HOME_SOFT_BYTES ? "soft-byte-limit" : "soft-entry-limit",
+      });
+      this.requestWake();
+    }
   }
 
   async publishObservedMaterialization(sessionId: string, attemptId: string, expectedPath: string): Promise<boolean> {
@@ -1402,6 +1489,8 @@ export class HomeOwner {
 
   /** Release the memory store and the request seams. */
   async dispose(): Promise<void> {
+    this.settingsWatch?.stop();
+    this.settingsWatch = undefined;
     this.policies.clear();
     const memory = this.memory;
     this.memory = undefined;

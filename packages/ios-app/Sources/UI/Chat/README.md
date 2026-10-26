@@ -74,7 +74,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   blocks into the sent text; Save hands the keyboard straight to the composer input (#1597). Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937). The context ring opens Manage Session.
 - **Tools.** Calls and results join by `toolCallId` into one chip; consecutive calls with equal
-  nonempty segments form one run chip whose aggregate sheet lists bounded summary rows. Every
+  nonempty segments form one run chip whose aggregate sheet lists bounded summary rows. Resting
+  run tint follows only the latest invocation's error: canonical transcript group order, then finalized
+  `groupIndex` within the last group, never result-arrival or timing metadata. Aggregate failure count,
+  icon and elapsed labels remain cumulative; active runs keep their existing failure/amber tint. Every
   chip opens a top-anchored detail sheet presented above the rows by `ChatTranscriptSheetRoutes`,
   starting at medium per fresh presentation. Edits show one verified diff inline, otherwise a
   Changes sheet; `ToolDiffCountChip` counts belong to that diff. Codemode shows Script, Result
@@ -189,6 +192,11 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 | `opening.failed` | warning | The conversation layout did not settle and the open failed (`ChatView.swift`); settlement reasons in `details`. Chat's trace records: [Core](../../../Core/README.md#signals) |
 
 ## Verify
+
+`TronToolSummaryTintUITests` renders canonical transcript DTOs through mounted ChatView and samples
+native title ink: recovered (count retained), latest failure, no failures, cross-group continuation,
+and active failure/amber. Calls deliberately disagree with collection, result-arrival and timestamp
+ordering. Its capture-only method provides light/dark visual review, not behavioral acceptance.
 
 `TronWorkerToolRegressionTests` exercises custom worker report outcomes/Markdown/evidence,
 check-in attention/Next, friendly transcript chips, aggregate navigation and extension/MCP

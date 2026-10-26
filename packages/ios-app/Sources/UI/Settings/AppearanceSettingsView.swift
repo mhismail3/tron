@@ -3,6 +3,7 @@ import SwiftUI
 struct AppearanceSettingsView: View {
     @PresentationState private var appearance = AppearanceSettings.shared
     @PresentationState private var fonts = FontSettings.shared
+    @PresentationState private var iconChangeFailed = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -26,15 +27,29 @@ struct AppearanceSettingsView: View {
                     VStack(spacing: 0) {
                         ForEach(Array(ThemeColor.allCases.enumerated()), id: \.element.id) { index, color in
                             if index > 0 { TronSettingsDivider(accent: .tronPrimary) }
-                            Button { appearance.themeColor = color } label: {
+                            Button {
+                                Task { @MainActor in
+                                    iconChangeFailed = false
+                                    do { try await appearance.selectTheme(color) }
+                                    catch { iconChangeFailed = true }
+                                }
+                            } label: {
                                 TronSettingsRow(icon: appearance.themeColor == color ? "checkmark.circle.fill" : "circle",
                                                 title: color.label, accent: .tronPrimary)
                             }
                             .buttonStyle(.plain)
+                            .disabled(appearance.isApplyingAppIcon)
                             .accessibilityIdentifier("theme-color-\(color.rawValue)")
                             .accessibilityValue(appearance.themeColor == color ? "Selected" : "")
                         }
                     }
+                }
+
+                .tronSettingsCaption("Selecting a theme also applies its matching app icon. iOS shows an icon-change alert and controls Home Screen appearance and notification icons.")
+
+                if iconChangeFailed {
+                    TronSettingsNotice(message: "Theme applied, but the app icon could not be changed. Select the theme again to retry.")
+                        .accessibilityIdentifier("theme-icon-error")
                 }
 
                 TronSettingsGroup("Text Font", accent: .tronPurple) {

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { GatewayError } from "../../errors.js";
 import { readJson, updateJsonLocked } from "../../util/json.js";
 import type { Actor, TierBasis } from "./settings-record.js";
-import { type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier } from "./tool-contract.js";
+import { type ApprovalActionPreview, type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier } from "./tool-contract.js";
 
 /**
  * Pending settings changes (docs/settings-model.md 5.5, decision 8, Q22).
@@ -19,8 +19,8 @@ import { type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, 
 export const APPROVAL_TTL_MS = 24 * 60 * 60 * 1_000;
 /** Open requests are refused past this, so an agent cannot flood the maintainer. */
 const MAXIMUM_PENDING_APPROVALS = 100;
-/** Decided requests kept until their requester is told. */
-const MAXIMUM_UNTOLD = 400;
+/** Every accepted request reserves its outcome slot until delivery. */
+const MAXIMUM_RETAINED_APPROVALS = 400;
 
 export type ApprovalStatus = "pending" | "approved" | "declined" | "expired" | "superseded" | "failed";
 
@@ -47,12 +47,19 @@ export interface ApprovalRequest {
   actor: Actor;
   reason?: string;
   changes: PendingChange[];
+  /** An action request (#1985) has no changes: its registered subject, bounded
+   * parameters and the exact preview the maintainer approves. */
+  action?: { subject: string; params: unknown; preview: ApprovalActionPreview };
   /** What a decision binds to (no approve-then-swap). */
   digest: string;
   status: ApprovalStatus;
   decidedAt?: string;
   failure?: string;
-  /** The requester's next turn named the outcome (Q22). */
+  /** Durable before action effects: an interrupted execution is never replayed. */
+  executionStartedAt?: string;
+  /** An approved action's own account of what it did (#1985). */
+  summary?: string;
+  /** The requester heard the outcome: its next turn or Home's wake carried it. */
   told?: true;
 }
 
@@ -62,10 +69,11 @@ const EMPTY: ApprovalsDocument = { version: 1, requests: [] };
 /** The digest of a diff: the target and each change's instance, before and after. */
 export function approvalDigest(target: unknown, changes: readonly {
   key: string; qualifiers?: unknown; layer: string; op: string; before?: unknown; after?: unknown; fixedAt?: unknown;
-}[]): string {
+}[], action?: ApprovalRequest["action"]): string {
   return createHash("sha256").update(JSON.stringify({
     target,
     changes: changes.map(change => [change.key, change.qualifiers ?? {}, change.layer, change.op, change.before ?? null, change.after ?? null, change.fixedAt ?? null]),
+    ...(action ? { action: [action.subject, action.params, action.preview] } : {}),
   })).digest("hex");
 }
 
@@ -83,13 +91,16 @@ export class SettingsApprovals {
   async create(input: Omit<ApprovalRequest, "requestId" | "createdAt" | "expiresAt" | "digest" | "status">, now: Date): Promise<{ request: ApprovalRequest; superseded: ApprovalRequest[] }> {
     const request: ApprovalRequest = {
       ...input, requestId: randomUUID(), createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + APPROVAL_TTL_MS).toISOString(),
-      digest: approvalDigest(input.target, input.changes), status: "pending",
+      digest: approvalDigest(input.target, input.changes, input.action), status: "pending",
     };
     const instances = new Set(request.changes.map(change => instanceId(request.target, change)));
     const superseded: ApprovalRequest[] = [];
     await this.update(document => {
       if (document.requests.filter(candidate => candidate.status === "pending").length >= MAXIMUM_PENDING_APPROVALS) {
         throw new GatewayError("busy", "Too many settings changes are waiting for approval", true);
+      }
+      if (document.requests.length >= MAXIMUM_RETAINED_APPROVALS) {
+        throw new GatewayError("busy", "Settings approval outcomes are waiting for delivery; no new request was accepted", true);
       }
       for (const candidate of document.requests) {
         if (candidate.status !== "pending" || !candidate.changes.some(change => instances.has(instanceId(candidate.target, change)))) continue;
@@ -103,13 +114,13 @@ export class SettingsApprovals {
   }
 
   /** Every request past its 24 hours becomes expired (never applied). */
-  async expire(now: Date): Promise<ApprovalRequest[]> {
+  async expire(now: Date, requestId?: string): Promise<ApprovalRequest[]> {
     const expired: ApprovalRequest[] = [];
-    const due = (await this.read()).requests.some(request => request.status === "pending" && Date.parse(request.expiresAt) <= now.getTime());
+    const due = (await this.read()).requests.some(request => (!requestId || request.requestId === requestId) && request.status === "pending" && Date.parse(request.expiresAt) <= now.getTime());
     if (!due) return expired;
     await this.update(document => {
       for (const request of document.requests) {
-        if (request.status !== "pending" || Date.parse(request.expiresAt) > now.getTime()) continue;
+        if ((requestId && request.requestId !== requestId) || request.status !== "pending" || Date.parse(request.expiresAt) > now.getTime()) continue;
         request.status = "expired";
         request.decidedAt = now.toISOString();
         expired.push({ ...request });
@@ -126,8 +137,20 @@ export class SettingsApprovals {
     return (await this.read()).requests.find(request => request.requestId === requestId);
   }
 
+  /** Claim action execution durably before effects. Recovery may report an
+   * uncertain failure, but never invokes an action twice for the same request. */
+  async beginAction(requestId: string, now: Date): Promise<void> {
+    await this.update(document => {
+      const request = document.requests.find(candidate => candidate.requestId === requestId);
+      if (!request?.action || request.status !== "pending" || request.executionStartedAt) {
+        throw new GatewayError("conflict", "This approval action is no longer available for execution");
+      }
+      request.executionStartedAt = now.toISOString();
+    });
+  }
+
   /** Settles an open request; refused unless it is still pending. */
-  async settle(requestId: string, status: Exclude<ApprovalStatus, "pending">, now: Date, failure?: string): Promise<ApprovalRequest> {
+  async settle(requestId: string, status: Exclude<ApprovalStatus, "pending">, now: Date, failure?: string, summary?: string): Promise<ApprovalRequest> {
     let settled: ApprovalRequest | undefined;
     await this.update(document => {
       const request = document.requests.find(candidate => candidate.requestId === requestId);
@@ -136,26 +159,36 @@ export class SettingsApprovals {
       request.status = status;
       request.decidedAt = now.toISOString();
       if (failure) request.failure = failure;
-      // An approved change was the requester's own wish; nothing to tell.
-      if (status === "approved") request.told = true;
+      if (summary) request.summary = summary;
       settled = { ...request };
     });
     return settled!;
   }
 
-  /** The requester's untold outcomes, marked told (Q22). */
-  async takeOutcomes(sessionId: string): Promise<ApprovalRequest[]> {
-    const untold = (await this.read()).requests.some(request => request.actor.sessionId === sessionId && request.status !== "pending" && !request.told);
-    if (!untold) return [];
-    const taken: ApprovalRequest[] = [];
+  /** Whether these requesters have a settled outcome they have not heard. */
+  async hasUntold(requesterSessionIds: readonly string[]): Promise<boolean> {
+    return (await this.takeOutcomes(requesterSessionIds)).length > 0;
+  }
+
+  /** Canonical delivery evidence retires only these requesters' settled requests.
+   * Selecting an outcome never consumes it: a refused admission or crash before
+   * append leaves it available, and recovery acknowledges the existing chat entry. */
+  async acknowledge(requesterSessionIds: readonly string[], requestIds: readonly string[]): Promise<void> {
+    const requesters = new Set(requesterSessionIds); const ids = new Set(requestIds);
+    const owned = (request: ApprovalRequest) => request.actor.sessionId !== undefined && requesters.has(request.actor.sessionId);
+    if (!(await this.read()).requests.some(request => owned(request) && ids.has(request.requestId) && request.status !== "pending" && !request.told)) return;
     await this.update(document => {
       for (const request of document.requests) {
-        if (request.actor.sessionId !== sessionId || request.status === "pending" || request.told) continue;
-        request.told = true;
-        taken.push({ ...request });
+        if (owned(request) && ids.has(request.requestId) && request.status !== "pending") request.told = true;
       }
     });
-    return taken;
+  }
+
+  /** Original requester identities survive Home chapter rollover. The delivery
+   * owner supplies its authoritative scope and proves delivery before retiring IDs. */
+  async takeOutcomes(requesterSessionIds: readonly string[]): Promise<ApprovalRequest[]> {
+    const requesters = new Set(requesterSessionIds);
+    return (await this.read()).requests.filter(request => request.actor.sessionId !== undefined && requesters.has(request.actor.sessionId) && request.status !== "pending" && !request.told);
   }
 
   private async read(): Promise<ApprovalsDocument> {
@@ -169,10 +202,10 @@ export class SettingsApprovals {
       if (current.version !== 1 || !Array.isArray(current.requests)) throw new GatewayError("conflict", "The settings approvals store could not be read");
       const document: ApprovalsDocument = { version: 1, requests: current.requests.map(request => ({ ...request })) };
       change(document);
-      // Decided and told requests live on only in the record; untold ones are
-      // bounded, oldest first, so a requester that never runs again cannot grow it.
+      // Admission reserves the bounded outbox slot. Never evict an accepted
+      // outcome: even an older over-capacity document drains without data loss.
       const open = document.requests.filter(request => request.status === "pending");
-      const untold = document.requests.filter(request => request.status !== "pending" && !request.told).slice(-MAXIMUM_UNTOLD);
+      const untold = document.requests.filter(request => request.status !== "pending" && !request.told);
       document.requests = [...open, ...untold].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       return document;
     });

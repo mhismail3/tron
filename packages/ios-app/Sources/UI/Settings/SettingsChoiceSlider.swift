@@ -107,11 +107,11 @@ struct SettingsChoiceSelectionRow: View {
                 return ConfigurationSliderRequest(
                     session: session, anchor: anchor, sourceVerticalInset: controlSize == .small ? 8 : 0,
                     accent: theme?.accent ?? accent,
-                    editor: .choice(SettingsChoiceSliderRequest(title: title, options: options, value: value, identifier: sliderIdentifier) { next in
+                    editor: SettingsChoiceSliderRequest(title: title, options: options, value: value, identifier: sliderIdentifier) { next in
                         guard isEnabled, activity.allowsPresentationPublication,
                               options.contains(where: { $0.value == next && $0.disabledReason == nil }) else { return }
                         onChange(next)
-                    })
+                    }
                 )
             }
         }

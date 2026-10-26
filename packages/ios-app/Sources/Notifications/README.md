@@ -32,6 +32,13 @@ notification inbox.
   presentation lease suppresses its own agent-terminal alert at the Gateway. Push Notifications
   settings toggle Input needed, Finished and Waiting through `push.registration.upsert`, rolling
   back on failure. A zero badge is written at launch to clear the retired badge implementation.
+- **Icon.** iOS owns the small app icon in system notifications; there is no per-notification
+  theme color or icon override in Tron's payload. Theme selection uses bundled alternate app
+  icons through UIKit, not a notification extension or communication-avatar workaround. Apple
+  documents system-scaled notification icons, but not alternate-icon cache refresh timing;
+  neither new nor already-delivered notification parity is guaranteed. Device validation is
+  separate from simulator app-icon previews. See [Apple icon guidance](https://developer.apple.com/design/human-interface-guidelines/app-icons)
+  and [alternate-icon workflow](https://developer.apple.com/documentation/xcode/configuring-your-app-to-use-alternate-app-icons).
 - **Delivered reads.** A synchronized chat becoming visible captures a native delivered cut,
   matching admitted machine/session routes at or before that visibility. Home membership comes
   from `home.chapterList`, not dashboard names or rows; a failed ledger read never widens cleanup.

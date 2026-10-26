@@ -39,18 +39,6 @@ struct HostedForegroundSheetScenario {
         return .object(object)
     }
 
-    func settings(_ response: JSONValue) -> JSONValue {
-        guard connections > 1, ProcessInfo.processInfo.arguments.contains("-foreground-settings-change"),
-              var object = response.objectValue, let keys = object["keys"]?.arrayValue else { return response }
-        let retained = ProcessInfo.processInfo.arguments.contains("-foreground-settings-removed")
-            ? keys.filter { $0.objectValue?["key"]?.stringValue != "model.thinking[role=worker]" } : keys
-        object["keys"] = .array(retained.map { value in
-            guard var row = value.objectValue,
-                  row["key"]?.stringValue == "model.thinking[role=worker]" else { return value }
-            row["value"] = .string("high"); row["display"] = .string("High")
-            return .object(row)
-        })
-        return .object(object)
-    }
+
 }
 #endif
