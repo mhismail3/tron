@@ -294,6 +294,22 @@ describe("settings approval outcomes", () => {
       .rejects.toMatchObject({ code: "invalid_request" });
   }, 60_000);
 
+  it("settings request returns from the real tool turn and wakes Home with the maintainer's decision", async () => {
+    const f = await gateway();
+    const dry = await f.homeSays("Preview a request", "settings", { action: "request", dryRun: true, reason: "Preview only", changes: [RETRIES(5)] });
+    expect(dry).toMatchObject({ isError: false, details: { dryRun: true, status: "pending", tier: "approve" } });
+    expect(await f.approvals()).toEqual([]);
+    const asked = await f.homeSays("Ask for the retry change", "settings", { action: "request", reason: "The maintainer should approve this change", changes: [RETRIES(5)] });
+    expect(asked).toMatchObject({ isError: false, details: { status: "pending", tier: "approve" } });
+    const [pending] = await f.approvals(); expect(pending).toBeDefined();
+    expect(f.outcomes()).toHaveLength(0);
+    await f.decide(pending!.requestId, pending!.digest, false);
+    await waitFor(() => f.outcomes().length === 1 && !f.home.isBusy || undefined, "maintainer decision wakes Home without another user prompt");
+    expect(f.outcomes()[0]!.details.requests).toEqual([expect.objectContaining({ requestId: pending!.requestId, status: "declined" })]);
+    expect(f.wakes.at(-1)!.trigger).toContain("was declined by the maintainer; it was not applied");
+    transcript.push({ case: "settings request actual tool and autonomous decision", steps: [dry, asked, f.outcomes()[0]!] });
+  }, 90_000);
+
   it("a pending request expires at its 24-hour deadline with no read, and its requester hears it", async () => {
     const f = await gateway();
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },
