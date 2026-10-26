@@ -6,7 +6,7 @@ import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { boundedProfilePartition, crashProfilePartition } from "../../test-support/profile-partition-crash.js";
 import { profileFileTags, profileOperationKey, type ProfileAssignment } from "./knowledge-notes.js";
-import { legacyProfileFixture } from "../../test-support/profile-v1-fixture.js";
+import { restoreLegacyProfileFixture } from "../../test-support/profile-v1-fixture.js";
 import type { KnowledgeNoteMutationRequest, KnowledgeRecord } from "./knowledge-contract.js";
 
 const fixtures: Array<{ root: string; workspace: TronWorkspace }> = [];
@@ -20,10 +20,14 @@ async function fixture(mode: "legacy" | "v2" | "migration" = "legacy") {
   for (let index = 0; index < 21; index++) {
     const request: KnowledgeNoteMutationRequest = { commandId: `partition-create-${index}`, record: { kind: "note", scope: "personal", provenance: { actor: index % 2 ? "agent" : "user", source: "partition-fixture", evidence: index === 2 ? [{ recordId: records[0]!.id, revisionId: records[0]!.revisionId }] : [], reason: `original ${index}` }, relations: mode !== "migration" && index === 3 ? [{ type: "supersedes", recordId: records[1]!.id, revisionId: records[1]!.revisionId }] : [], content: { title: `Exact profile text ${index}.`, body: `Complete body ${index}.\nDo not truncate this history.`, role: index % 2 ? "preference" : "decision", confirmed: index % 2 === 0, ...(mode !== "migration" && index % 7 === 0 ? { retired: true } : {}), tags: ["home-profile", index % 2 ? "kind-preference" : "kind-standing-decision", "fixture-label"], ...(mode === "v2" ? { profile: { version: 2 as const, path: ["life"] } } : {}) } } };
     if (mode === "migration") {
-      // Migration admits active legacy members only. The two distinct historical
-      // revisions come from v2 creation followed by the existing exact restore,
-      // not an ordinary legacy edit or a production admission bypass.
-      records.push(await legacyProfileFixture(store, request.commandId, request.record));
+      // Preserve the original two TEXT editions, not just two placement states.
+      // The admitted v2 create/edit followed by exact historical restore needs
+      // three revisions; frozen two-revision assertions must await approval.
+      const created = (await store.createNote({ ...request, record: { ...request.record, content: { ...request.record.content, profile: { version: 2, path: ["life"] } } } })).record;
+      if (created.kind !== "note") throw new Error("Expected note");
+      const edited = (await store.updateNote({ commandId: `partition-history-${index}`, recordId: created.id, expectedRevision: created.revisionId, record: { ...created, content: { ...created.content, body: created.content.body + "\nSecond edition." } } })).record;
+      if (edited.kind !== "note") throw new Error("Expected note");
+      records.push(await restoreLegacyProfileFixture(store, request.commandId, edited, request.record.content.tags ?? []));
     } else {
       const draft = (await store.createNote(request)).record;
       if (draft.kind !== "note") throw new Error("Expected note");

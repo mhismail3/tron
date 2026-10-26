@@ -8,7 +8,13 @@ export async function legacyProfileFixture(store: KnowledgeStore, commandId: str
   const tags = record.content.tags ?? [];
   const created = (await store.createNote({ commandId, record: { ...record, content: { ...record.content,
     tags: tags.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: ["life"] } } } })).record;
+  if (created.kind !== "note") throw new Error("Expected fixture note");
+  return restoreLegacyProfileFixture(store, commandId, created, tags);
+}
+
+/** Restore placement after callers have arranged meaningful v2 text history. */
+export async function restoreLegacyProfileFixture(store: KnowledgeStore, commandId: string, current: Extract<KnowledgeRecord, { kind: "note" }>, tags: readonly string[]): Promise<Extract<KnowledgeRecord, { kind: "note" }>> {
   const labels = profileLabels(tags);
-  await store.partitionProfile({ commandId: `${commandId}-historical-fixture`, mode: "reorganize", assignments: [{ id: created.id, expectedRevision: created.revisionId, labels }] }, { restoring: true, create: () => ({ fixture: "historical-profile-restore" }), validate: envelope => { if ((envelope as { fixture?: string }).fixture !== "historical-profile-restore") throw new Error("Unexpected fixture recovery envelope"); } });
-  return await store.read(created.id) as Extract<KnowledgeRecord, { kind: "note" }>;
+  await store.partitionProfile({ commandId: `${commandId}-historical-fixture`, mode: "reorganize", assignments: [{ id: current.id, expectedRevision: current.revisionId, labels }] }, { restoring: true, create: () => ({ fixture: "historical-profile-restore" }), validate: envelope => { if ((envelope as { fixture?: string }).fixture !== "historical-profile-restore") throw new Error("Unexpected fixture recovery envelope"); } });
+  return await store.read(current.id) as Extract<KnowledgeRecord, { kind: "note" }>;
 }

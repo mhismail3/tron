@@ -70,6 +70,8 @@ one accepted recovery through the existing work owner.
   partition-restore owner. It grants no legacy-create exemption to ordinary note APIs.
   Migration fixtures select active legacy members; completed seed-operation backups
   are removed before the operation under test, retaining canonical heads and bodies.
+  A migration fixture retaining two text editions has three revisions: admitted v2
+  creation, v2 text edit, then exact historical placement restore.
 - The bounded profile child takes an explicit migration/reorganization mode. The
   v2 deep-history case exercises reorganization with a real 96 MiB process ceiling.
 - No test reaches the network or a real Tron home.
