@@ -117,7 +117,10 @@ struct HostedSettingsRendererFixture: View {
         NavigationStack {
             if ready {
                 Group {
-                    if ProcessInfo.processInfo.arguments.contains("-theme-icon-boundary") {
+                    if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-project-lifecycle-preview"),
+                       ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
+                        HostedProjectLifecyclePreview(surface: ProcessInfo.processInfo.arguments[index + 1])
+                    } else if ProcessInfo.processInfo.arguments.contains("-theme-icon-boundary") {
                         HostedThemeIconFixture()
                     } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-six-ui-surface"),
                        ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
@@ -162,7 +165,8 @@ struct HostedSettingsRendererFixture: View {
                     if !ProcessInfo.processInfo.arguments.contains("-settings-alignment-review")
                         && !ProcessInfo.processInfo.arguments.contains("-settings-controls-review")
                         && !ProcessInfo.processInfo.arguments.contains("-settings-three-layer-preview")
-                        && !ProcessInfo.processInfo.arguments.contains("-six-ui-surface") {
+                        && !ProcessInfo.processInfo.arguments.contains("-six-ui-surface")
+                        && !ProcessInfo.processInfo.arguments.contains("-project-lifecycle-preview") {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
                         Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")

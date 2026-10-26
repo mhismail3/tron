@@ -187,6 +187,15 @@ has a capture-only `TronSettingsThreeLayerPreviewTests` fixture: synthetic Swift
 implemented settings contract. Before device sign-off, change values rapidly, dismiss while saving
 and switch profile: no untouched inherited setting may become an override.
 
+## Project lifecycle visual proposal
+
+`TronProjectLifecyclePreviewUITests/testProjectLifecycleVisualProposal` captures the
+`HOSTED_TEST`-only `HostedProjectLifecyclePreview` in light/dark at Large and XXXL.
+It composes shared settings rows, groups and managed sheets with synthetic projects.
+No lifecycle command or approval is submitted; these captures are design review, not
+Gateway acceptance. The proposed Add Project chooser and per-project action sheet
+are not production routes until maintainer visual approval and real-Gateway journeys.
+
 ## Not here
 
 Coordinators and settings state: [State](../../State/README.md). Shared row, tint and sheet
