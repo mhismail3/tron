@@ -170,12 +170,24 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   only the maintainer's client decides; the push carries `settings-approval` only to a relay
   advertising it ([push relay](../../push-relay/README.md#notification-categories)). A
   `settings` tool `action: "request"` holds a change at any tier (`tierBasis.requested`)
-  and returns without waiting for the tap. Its dry run validates without creating a
-  request; `change` keeps its normal tier. Chat presents the request, not a direction to
-  open Settings. A timer expires a
+  and blocks the calling turn on the same semantic form sheet as `ask_user`. The sheet
+  shows scope, layer, reason and exact diff with Approve/Deny choices; only its scoped
+  client response admits the decision. `change` also blocks when its normal tier needs
+  approval. The original tool result returns approved/applied, declined, expired or
+  superseded explicitly, with no separate outcome wake. Stop retires the form and
+  supersedes its still-pending diff without applying it. Dry run creates no request.
+  The settings owner retains the digest fence, one-use decision and Changes/undo.
+  A turn cannot request its own between-runs SDK configuration (model, thinking,
+  tools or context window); runtime admission refuses before opening a form, including
+  dry run. Supported Run settings and Home's delegated-worker changes keep their declared
+  effect points. Form decisions are attributed to their scoped interaction; the accepted
+  `extension.respond` receipt records the client, rather than trusting client identity in
+  the form's answer payload.
+  A timer expires a
   request at its 24-hour deadline; a transient expiry failure keeps later known deadlines
-  armed without immediately retrying a persistently bad store. Every outcome (approved and
-  applied, declined, failed, superseded, expired) stays queued as `tron.settings-outcome.v1`;
+  armed without immediately retrying a persistently bad store. Blocking tool reviews consume
+  their terminal outcome directly. Other persisted approvals and registered actions retain
+  their outcome (approved and applied, declined, failed, superseded, expired) as `tron.settings-outcome.v1`;
   `details.requests[]` carry status, requester, reason, failure and display `before`/`after`.
   The approvals store is the sole outbox: at most 400 accepted requests reserve capacity
   until delivery, and further admission is `busy`, never eviction of an untold outcome.

@@ -2,19 +2,11 @@
 import SwiftUI
 import TronMobileCore
 
-/// Production chips/sheet against HostedSettingsRendererSocket's real RPC path.
+/// Production Changes decision sheet against HostedSettingsRendererSocket's RPC path.
 /// This is a frontend boundary fixture, not a real-Gateway delivery proof.
 struct HostedInlineApprovalBoundaryFixture: View {
     @State private var routes = ChatTranscriptSheetRouteOwner()
 
-    private var requestTool: ChatToolPresentation {
-        ChatToolPresentation(id: "approval-tool", title: "Settings", toolName: "settings", subtitle: "Completed",
-            request: .object(["action": .string("request")]),
-            response: .object(["status": .string("pending"), "tier": .string("approve"),
-                "requestId": .string("approve"), "changes": .array([.object(["changeId": .string("pending-approve")])])]),
-            content: "", fallbackContent: nil, error: false, startedAt: nil, completedAt: nil,
-            durationMs: nil, lastProgressAt: nil, progressSequence: nil)
-    }
     static let failure = "Action execution was interrupted. Its effects may have completed. Inspect the affected state before retrying. This original diagnostic is retained in full, including the final instruction: verify the existing worktree before creating another one."
     private var outcome: SettingsApprovalOutcomeMessage? {
         SettingsApprovalOutcomeMessage(details: .object([
@@ -32,7 +24,10 @@ struct HostedInlineApprovalBoundaryFixture: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                ToolCard(data: requestTool)
+                Button("Review pending request") {
+                    routes.present(.settingsApproval(.request(SettingsApprovalReference(requestID: "approve", changeIDs: ["pending-approve"]))))
+                }
+                .accessibilityIdentifier("fixture-review-pending-approval")
                 if let outcome { SettingsApprovalOutcomeChip(message: outcome) }
             }.padding(18)
         }

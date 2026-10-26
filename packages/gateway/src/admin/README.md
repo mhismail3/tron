@@ -33,7 +33,12 @@ Durable stores: `<tronHome>/gateway/settings/` (`changes/`, `approvals.json`,
 
 `settings-module.ts` owns the settings extension descriptor. Its request/result
 vocabulary is the [kernel settings contract](../kernel/settings/README.md); the
-session resolves its actor and settings owner at every call.
+session resolves its actor and settings owner at every call. Approve-tier tool calls
+(including explicit `request`) await the existing semantic form host instead of returning
+pending. Scope/layer/reason/diff and Approve/Deny are shown in that form; the same tool
+turn receives the terminal outcome. Dry runs do not open forms. Stop cancels only its
+own pending diff. `settings-approval-blocking.e2e.test.ts` proves the live Home continuation,
+approve/deny/expiry and Stop at the real runtime boundary.
 `settings-presentation.ts` owns the profile audit-value formatter. History need
 not load Home's profile implementation; Home calls the same formatter for its
 stale-edit answer. Profile admission, records and mutation policy stay Home-owned.

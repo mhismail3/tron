@@ -1,29 +1,5 @@
 import SwiftUI
 
-struct SettingsApprovalRequestChip: View {
-    let reference: SettingsApprovalReference
-    var onOpenDetails: (() -> Void)? = nil
-    @Environment(\.chatTranscriptSheetRoutes) private var routes
-
-    var body: some View {
-        Button { routes?.present(.settingsApproval(.request(reference))) } label: {
-            ChatCompactPillSurface(tone: .warning, material: .glass, interactive: true,
-                                   cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius) {
-                ChatCompactPillLabel(icon: "checkmark.shield", title: "Approval", detail: "Request", tone: .warning,
-                                    iconSize: ChatCompactPillLayoutPolicy.toolIconSize) { EmptyView() }
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(routes == nil)
-        .accessibilityLabel("Approval request")
-        .accessibilityHint("Review the current request before deciding")
-        .accessibilityIdentifier("settings-request-chip-\(reference.requestID)")
-        .contextMenu {
-            if let onOpenDetails { Button("Tool details", action: onOpenDetails) }
-        }
-    }
-}
-
 struct SettingsApprovalOutcomeChip: View {
     let message: SettingsApprovalOutcomeMessage
     @Environment(\.chatTranscriptSheetRoutes) private var routes

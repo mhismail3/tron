@@ -10,16 +10,6 @@ struct SettingsApprovalReference: Equatable, Hashable, Sendable {
         self.requestID = requestID; self.changeIDs = changeIDs
     }
 
-    init?(result: JSONValue?) {
-        guard let value = result?.objectValue, value["status"]?.stringValue == "pending",
-              value["tier"]?.stringValue == "approve",
-              let id = value["requestId"]?.stringValue, !id.isEmpty,
-              let changes = value["changes"]?.arrayValue else { return nil }
-        let ids = changes.compactMap { $0.objectValue?["changeId"]?.stringValue }
-        guard ids.count == changes.count, Set(ids).count == ids.count, ids.allSatisfy({ !$0.isEmpty }),
-              !ids.isEmpty || value["action"]?.objectValue != nil else { return nil }
-        requestID = id; changeIDs = ids
-    }
 }
 
 struct SettingsApprovalOutcome: Decodable, Equatable, Sendable, Identifiable {

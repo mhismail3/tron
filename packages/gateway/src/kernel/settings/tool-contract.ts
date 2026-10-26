@@ -240,10 +240,14 @@ export interface TaskWorkerSettingsView extends TaskWorkerSettingsState {
   resolvedFrom?: string;
 }
 
+/** Presentation is supplied by the existing semantic form host, never by model text. */
+export type SettingsApprovalPresenter = (review: { requestId: string; title: string; context: string; expiresAt: string }, signal: AbortSignal) => Promise<"approve" | "deny" | undefined>;
+
 /** What the session runtime gives the tool: its own target and identity, or Home's worker target. */
 export interface SettingsToolAccess {
   resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;
   change(changes: ChangeRequest[], input: { reason: string; dryRun?: boolean; request?: boolean; toolCallId: string; web: boolean; taskId?: string }): Promise<ChangeResult & { worker?: TaskWorkerSettingsView }>;
+  review(requestId: string, present: SettingsApprovalPresenter, signal?: AbortSignal): Promise<ChangeResult>;
   /** Every settled request this chat asked for and has not heard yet (decision 4e6e8f54). */
   takeOutcomes(deliveredRequestIds?: readonly string[]): Promise<SettingsOutcomeMessage | undefined>;
 }

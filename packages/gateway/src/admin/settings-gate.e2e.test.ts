@@ -138,7 +138,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   /** One run: one model step per tool call, then a closing reply. Returns the
    * tool results the closing request carried and what that run's context held. */
   async function run(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, input: string, steps: Array<{ name: string; args: ToolCall["arguments"] }>) {
-    await waitFor(() => slot.snapshot().phase === "idle" && slot.snapshot().configurationBlocker === null || undefined, "previous run settled before scripting input");
+    await waitFor(() => !slot.isBusy && slot.snapshot().phase === "idle" && slot.snapshot().configurationBlocker === null || undefined, "previous run settled before scripting input");
     const requests: Array<Array<Record<string, unknown>>> = [];
     faux.setResponses([
       ...steps.map(step => async (context: { messages: Array<Record<string, unknown>> }) => {
@@ -152,7 +152,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     ]);
     await slot.prompt(input);
     await waitFor(() => requests.length >= steps.length + 1 || undefined, "run requests");
-    await waitFor(() => slot.snapshot().phase === "idle" && slot.snapshot().configurationBlocker === null || undefined, "run settled");
+    await waitFor(() => !slot.isBusy && slot.snapshot().phase === "idle" && slot.snapshot().configurationBlocker === null || undefined, "run settled");
     const closing = requests.at(-1)!;
     const results = closing.filter(message => message.role === "toolResult").slice(-steps.length).map(message => ({
       tool: String(message.toolName), isError: message.isError === true,
@@ -168,6 +168,10 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     const outcomes = turn.filter(message => message.role === "user" && text(message).startsWith("Settings request ")).map(text);
     return { results, outcomes };
   }
+  const pendingApproval = async (slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>) => {
+    await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions[0], "blocking settings prompt");
+    return (await settingsChanges.pendingApprovals()).find(request => request.actor.sessionId === slot.id)!;
+  };
   const settle = (results: Array<{ tool: string; details?: Record<string, unknown> }>) => results.find(result => result.tool === "settings")!.details!;
   const history = async () => (await service.invoke(phone(), "settings.history", { limit: 200 }) as unknown as { entries: ChangeEntry[] }).entries;
   const approvals = async () => (await service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<Record<string, unknown> & { requestId: string; digest: string }> }).requests;
@@ -207,7 +211,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     return (await canonicalOutcomes()).filter(text => text.startsWith(`Settings request ${requestId}:`));
   };
   return {
-    canonicalOutcomes, homeOutcome, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide, approveProjectChange,
+    settingsChanges, pendingApproval, canonicalOutcomes, homeOutcome, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide, approveProjectChange,
     macDocument, designateHome, chat, faux, modelRuntimeFactory, modelRuntime, runtimeEvents, homeDiagnostics, advance: (ms: number) => { clock += ms; },
   };
 }
@@ -484,17 +488,15 @@ describe("settings risk gate", () => {
     expect((await observe()).images).toBe(0);
     expect((await observe(createdWhileBlocked)).images).toBe(0);
     expect((await observe(await f.chat())).images).toBeGreaterThan(0);
-    const pending = f.settle((await f.run(slot, "request images", [{ name: "settings", args: {
+    const imagesTurn = f.run(slot, "request images", [{ name: "settings", args: {
       action: "change", reason: "Need the attached image", changes: [{ key: "context.images.block", layer: "session", op: "set", value: false }],
-    } }])).results);
-    expect(pending.status).toBe("pending");
-    expect((await observe()).images).toBe(0);
-    const approval = (await f.approvals())[0]!;
-    if (kind === "Home") f.faux.setResponses([fauxAssistantMessage("Approval outcome received.")]);
+    } }]);
+    const approval = await f.pendingApproval(slot);
+    expect(slot.snapshot().extensionPresentation.pendingInteractions).toHaveLength(1);
     await f.service.invoke(phone(), "settings.decide", {
       commandId: commandId(), requestId: approval.requestId, digest: approval.digest, approved: true,
     });
-    if (kind === "Home") await f.homeOutcome(slot, approval.requestId);
+    expect(f.settle((await imagesTurn).results)).toMatchObject({ status: "approved" });
     expect((await observe()).images).toBeGreaterThan(0);
     // Narrowing during a model/tool loop must affect the next request in the
     // same turn, not only the next user prompt.
@@ -883,22 +885,24 @@ describe("settings risk gate", () => {
     expect(f.settle(next.results)).toMatchObject({ status: "applied", tier: "quiet" });
 
     // A notify-floor change (adding a default tool widens tools.active) after web: approve, so pending.
-    const widen = await f.run(slot, "add a tool", [
+    const widening = f.run(slot, "add a tool", [
       { name: "fetch_page", args: {} },
       { name: "settings", args: { action: "change", reason: "The page said to", changes: [{ key: "tools.active", layer: "global", op: "set", value: ["read", "bash", "edit", "write", "fetch_page"] }] } },
     ]);
-    const pending = f.settle(widen.results) as { status: string; tier: string; approval: { requestId: string } };
-    expect(pending).toMatchObject({ status: "pending", tier: "approve" });
+    const pending = await f.pendingApproval(slot);
+    expect(pending).toMatchObject({ status: "pending" });
     expect((await f.macDocument()).defaultTools).toBeUndefined();
     expect(f.pushes).toContainEqual(expect.objectContaining({ kind: "waiting", sessionId: slot.id, category: "settings-approval" }));
     const [waiting] = await f.approvals();
     // The row the iPhone shows: who asked and the exact change, as Gateway display strings.
     expect(waiting).toMatchObject({
-      requestId: pending.approval.requestId, actor: { kind: "agent", sessionId: slot.id }, requester: "A chat's agent", reason: "The page said to",
+      requestId: pending.requestId, actor: { kind: "agent", sessionId: slot.id }, requester: "A chat's agent", reason: "The page said to",
       // The Mac held nothing, so the selection is stored relative to the built-in tools.
       changes: [{ key: "tools.active", layer: "global", tier: "approve", after: ["+fetch_page"], display: { before: "Not set", after: "+fetch_page" } }],
     });
     steps.push({ step: "notify floor after web", result: pending, approvals: await f.approvals() });
+    await f.decide(pending.requestId, pending.digest, false);
+    expect(f.settle((await widening).results)).toMatchObject({ status: "declined" });
 
     const entries = await f.history();
     const byKey = entries.filter(entry => entry.actor.kind === "agent" && entry.key === "run.retry.maxRetries").reverse();
@@ -917,35 +921,34 @@ describe("settings risk gate", () => {
     const trustProject = (project: string) => ({ action: "change", reason: "The maintainer asked me to work there", changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project } }] });
 
     // Home asking to trust a project: pending; nothing applies until approved on the device.
-    const asked = await f.run(home, "trust the other project", [{ name: "settings", args: trustProject(f.other) }]);
-    const pending = f.settle(asked.results) as { status: string; approval: { requestId: string; digest: string } };
-    expect(pending).toMatchObject({ status: "pending", tier: "approve" });
+    const trustTurn = f.run(home, "trust the other project", [{ name: "settings", args: trustProject(f.other) }]);
+    const pending = await f.pendingApproval(home);
+    expect(pending).toMatchObject({ status: "pending" });
     expect((await f.trust.inspect(f.other)).savedDecision ?? null).toBeNull();
     // An approval for a different diff is refused (no approve-then-swap).
-    await expect(f.decide(pending.approval.requestId, "0".repeat(64), true)).rejects.toMatchObject({ code: "conflict" });
-    const approved = await f.decide(pending.approval.requestId, pending.approval.digest, true);
+    await expect(f.decide(pending.requestId, "0".repeat(64), true)).rejects.toMatchObject({ code: "conflict" });
+    const approved = await f.decide(pending.requestId, pending.digest, true);
     expect(approved).toMatchObject({ status: "approved" });
     expect((await f.trust.inspect(f.other)).savedDecision).toBe(true);
     steps.push({ step: "trust approved", pending, approved });
-    await f.homeOutcome(home, pending.approval.requestId);
+    expect(f.settle((await trustTurn).results)).toMatchObject({ status: "approved" });
 
     // A second request, declined: no change; both outcomes recorded.
     await f.trust.set(f.other, null);
-    const again = await f.run(home, "trust it again", [{ name: "settings", args: trustProject(f.other) }]);
-    const second = f.settle(again.results) as { approval: { requestId: string; digest: string } };
-    expect(await f.decide(second.approval.requestId, second.approval.digest, false)).toMatchObject({ status: "declined" });
+    const again = f.run(home, "trust it again", [{ name: "settings", args: trustProject(f.other) }]);
+    const second = await f.pendingApproval(home);
+    expect(await f.decide(second.requestId, second.digest, false)).toMatchObject({ status: "declined" });
     expect((await f.trust.inspect(f.other)).savedDecision ?? null).toBeNull();
     const trustEntries = (await f.history()).filter(entry => entry.key === "permissions.projectTrust").map(entry => entry.status);
     expect(trustEntries).toEqual(expect.arrayContaining(["pending", "approved", "declined"]));
     steps.push({ step: "trust declined", statuses: trustEntries });
 
-    // Home hears the declined change autonomously; the next user turn never repeats it.
-    const declined = await f.homeOutcome(home, second.approval.requestId);
-    expect(declined).toHaveLength(1);
-    expect(declined.join("\n")).toMatch(/Trust for this project .*was declined by the maintainer/);
+    // The original tool turn owns the declined outcome; no autonomous turn repeats it.
+    const declined = f.settle((await again).results);
+    expect(declined).toMatchObject({ status: "declined" });
     const told = await f.run(home, "anything new?", []);
     expect(told.outcomes).toEqual([]);
-    steps.push({ step: "Home told", outcomes: declined });
+    steps.push({ step: "Home told", outcome: declined });
 
     // Quiet from a clean turn; notify after web_search in that turn.
     expect(f.settle((await f.run(home, "retries", [{ name: "settings", args: retries(4, 3) }])).results)).toMatchObject({ status: "applied", tier: "quiet" });
@@ -979,54 +982,45 @@ describe("settings risk gate", () => {
     transcript.push({ case: "Home", steps });
   }, 90_000);
 
-  it("refuses a superseded approval, and expires a pending change after 24 hours with the requester told on its next turn", async () => {
+  it("a superseding diff resumes the blocked tool explicitly and refuses the old approval", async () => {
     const f = await fixture();
     const slot = await f.chat();
-    const widen = (tools: string[]) => ({ action: "change", reason: "Need the page tool", changes: [{ key: "tools.active", layer: "global", op: "set", value: tools }] });
-    const first = f.settle((await f.run(slot, "add a tool", [{ name: "fetch_page", args: {} }, { name: "settings", args: widen(["read", "fetch_page"]) }])).results) as { approval: { requestId: string; digest: string } };
-    const second = f.settle((await f.run(slot, "add two tools", [{ name: "fetch_page", args: {} }, { name: "settings", args: widen(["read", "fetch_page", "count_lines"]) }])).results) as { approval: { requestId: string; digest: string } };
-    // The newer diff supersedes the older: approving the older is refused.
-    await expect(f.decide(first.approval.requestId, first.approval.digest, true)).rejects.toMatchObject({ code: "conflict" });
-    expect((await f.approvals()).map(request => request.requestId)).toEqual([second.approval.requestId]);
-
-    // Nothing decides the second for 24 hours: it expires and is never applied.
+    const firstTurn = f.run(slot, "add a tool", [{ name: "fetch_page", args: {} }, { name: "settings", args: {
+      action: "change", reason: "Need the page tool", changes: [{ key: "tools.active", layer: "global", op: "set", value: ["read", "fetch_page"] }],
+    } }]);
+    const first = await f.pendingApproval(slot);
+    const replacement = await f.settingsChanges.change(first.target, [
+      { key: "tools.active", layer: "global", op: "set", value: ["read", "fetch_page", "count_lines"] },
+    ], { actor: { kind: "agent", sessionId: "replacement" }, reason: "A newer exact diff", request: true, session: slot.taskWorkerSettingsSession() });
+    expect(f.settle((await firstTurn).results)).toMatchObject({ status: "superseded" });
+    await expect(f.decide(first.requestId, first.digest, true)).rejects.toMatchObject({ code: "not_found" });
+    expect((await f.approvals()).map(request => request.requestId)).toEqual([replacement.approval!.requestId]);
     f.advance(APPROVAL_TTL_MS + 1);
     expect(await f.approvals()).toEqual([]);
-    await expect(f.decide(second.approval.requestId, second.approval.digest, true)).rejects.toMatchObject({ code: "conflict" });
+    await expect(f.decide(replacement.approval!.requestId, replacement.approval!.digest, true)).rejects.toMatchObject({ code: "conflict" });
     expect((await f.macDocument()).defaultTools).toBeUndefined();
     const statuses = (await f.history()).filter(entry => entry.key === "tools.active").map(entry => entry.status);
     expect(statuses).toEqual(expect.arrayContaining(["pending", "superseded", "expired"]));
     expect(statuses).not.toContain("applied");
-
-    // The requester's next turn names both, once.
-    const told = await f.run(slot, "next", []);
-    expect(told.outcomes).toHaveLength(1);
-    expect(told.outcomes[0]).toMatch(/superseded/);
-    expect(told.outcomes[0]).toMatch(/expired after 24 hours/);
-    expect((await f.run(slot, "after", [])).outcomes).toEqual([]);
-    expect(await f.canonicalOutcomes()).toEqual(told.outcomes);
-    transcript.push({ case: "superseded and expired", steps: [{ statuses, outcomes: told.outcomes }] });
+    expect((await f.run(slot, "next", [])).outcomes).toEqual([]);
+    transcript.push({ case: "superseded and expired", steps: [{ statuses }] });
   }, 60_000);
 
-  it("Home's pending change expires after 24 hours, is never applied, and Home hears it once autonomously", async () => {
+  it("Home's pending change expires after 24 hours and resumes its original tool turn", async () => {
     const f = await fixture();
     const home = await f.designateHome();
-    const asked = await f.run(home, "trust the other project", [{ name: "settings", args: { action: "change", reason: "The maintainer asked me to work there",
+    const asked = f.run(home, "trust the other project", [{ name: "settings", args: { action: "change", reason: "The maintainer asked me to work there",
       changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project: f.other } }] } }]);
-    const pending = f.settle(asked.results) as { status: string; approval: { requestId: string; digest: string } };
-    expect(pending).toMatchObject({ status: "pending", tier: "approve" });
+    const pending = await f.pendingApproval(home);
     f.advance(APPROVAL_TTL_MS + 1);
     expect(await f.approvals()).toEqual([]);
-    await expect(f.decide(pending.approval.requestId, pending.approval.digest, true)).rejects.toMatchObject({ code: "conflict" });
+    await expect(f.decide(pending.requestId, pending.digest, true)).rejects.toMatchObject({ code: "not_found" });
     expect((await f.trust.inspect(f.other)).savedDecision ?? null).toBeNull();
     expect((await f.history()).filter(entry => entry.key === "permissions.projectTrust").map(entry => entry.status)).toEqual(expect.arrayContaining(["pending", "expired"]));
-    const expired = await f.homeOutcome(home, pending.approval.requestId);
-    expect(expired).toHaveLength(1);
-    expect(expired[0]).toMatch(/expired after 24 hours/);
+    expect(f.settle((await asked).results)).toMatchObject({ status: "expired" });
     expect((await f.run(home, "next", [])).outcomes).toEqual([]);
-    expect((await f.run(home, "after", [])).outcomes).toEqual([]);
-    expect((await f.canonicalOutcomes()).filter(text => text.startsWith(`Settings request ${pending.approval.requestId}:`))).toEqual(expired);
-    transcript.push({ case: "Home expiry", steps: [{ outcomes: expired }] });
+    expect(await f.canonicalOutcomes()).toEqual([]);
+    transcript.push({ case: "Home expiry in original turn", steps: [{ status: "expired" }] });
   }, 60_000);
 
   it("a Home task worker: quiet from a clean turn, notify after an undeclared third-party tool in its turn", async () => {
@@ -1188,11 +1182,9 @@ describe("settings risk gate", () => {
     // The maintainer raised thinking's floor: Home's next thinking change waits, and the worker keeps "high".
     await service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },
       changes: [{ key: "permissions.floor", layer: "global", op: "set", value: "approve", qualifiers: { key: "model.thinking[role=chat]" } }] });
-    const pending = await homeSays("Lower live-worker thinking", "settings", { action: "change", taskId: "live-worker", reason: "Cheaper final step",
+    const pendingTurn = homeSays("Lower live-worker thinking", "settings", { action: "change", taskId: "live-worker", reason: "Cheaper final step",
       changes: [{ key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" }] });
-    expect(pending.text).toMatch(/^Pending the maintainer's approval .*the worker keeps its current settings/);
-    expect(pending.details).toMatchObject({ status: "pending", worker: { selected: { thinking: "high" } } });
-    expect((pending.details as { signal?: unknown }).signal).toBeUndefined();
+    await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0], "Home blocks for the live worker approval");
     expect(worker.snapshot().thinkingLevel).toBe("high");
 
     // Release the in-flight request: it ran on its start settings. The next request of the same run
@@ -1211,6 +1203,7 @@ describe("settings risk gate", () => {
     const approved = await service.invoke(phone(), "settings.decide", { commandId: commandId(), requestId: request!.requestId, digest: request!.digest, approved: true }) as unknown as Record<string, unknown>;
     expect(approved).toMatchObject({ status: "approved", signal: { status: "queued", taskId: "live-worker", appliesFrom: "next-request" } });
     expect(worker.snapshot().thinkingLevel).toBe("low");
+    expect((await pendingTurn).details).toMatchObject({ status: "approved" });
     gates[1]!.open();
     await waitFor(() => workerRequests.length >= 3 || undefined, "worker's request after approval");
     expect(workerRequests[2]).toMatchObject({ model: REASONING.id, thinking: "low" });

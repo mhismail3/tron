@@ -110,7 +110,7 @@ async function gateway() {
         calls.set(prompt, { name, args });
         await slot.prompt(prompt);
         const result = await waitFor(() => results.get(prompt), `chat result: ${prompt}`);
-        await waitFor(() => slot.snapshot().configurationBlocker === null && slot.snapshot().phase === "idle" || undefined, "chat idle");
+        await waitFor(() => !slot.isBusy && slot.snapshot().configurationBlocker === null && slot.snapshot().phase === "idle" || undefined, "chat idle");
         return result;
       },
       outcomes: () => slot.canonicalSessionEntries().flatMap(entry => entry.type === "custom_message" && entry.customType === SETTINGS_OUTCOME_MESSAGE
@@ -258,26 +258,26 @@ describe("settings approval outcomes", () => {
     } finally { stop(); }
   }, 60_000);
 
-  it("a chat hears its approved change on its next turn, applied, with readable details", async () => {
+  it("a chat hears its approved change in the blocked tool result without a second outcome", async () => {
     const f = await gateway();
     // The maintainer raised retries' floor, so the chat's change waits for his tap.
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },
       changes: [{ key: "permissions.floor", layer: "global", op: "set", value: "approve", qualifiers: { key: "run.retry.maxRetries" } }] });
     const chat = await f.chat();
-    const asked = await chat.says("Raise retries", "settings", { action: "change", reason: "Flaky provider today", changes: [RETRIES(5)] });
-    expect(asked.details).toMatchObject({ status: "pending", tier: "approve" });
+    const askedTurn = chat.says("Raise retries", "settings", { action: "change", reason: "Flaky provider today", changes: [RETRIES(5)] });
+    await waitFor(() => chat.slot.snapshot().extensionPresentation.pendingInteractions[0], "chat approval form");
     const [request] = await f.approvals();
     await expect(f.decide(request!.requestId, request!.digest, true)).resolves.toMatchObject({ status: "approved" });
+    const asked = await askedTurn;
     await chat.says("Anything new?", "settings", { action: "resolve", keys: ["run.retry.maxRetries"] });
-    const heard = chat.outcomes();
-    expect(heard).toHaveLength(1);
-    expect(heard[0]!.content).toBe(`Settings request ${request!.requestId}: Retries (run.retry.maxRetries) at the Global layer: Default (3 retries) → 5 retries was approved by the maintainer and applied.`);
-    expect(heard[0]!.details).toMatchObject({ version: 1, requests: [{ requestId: request!.requestId, status: "approved", requester: { kind: "agent" }, reason: "Flaky provider today",
-      items: [{ key: "run.retry.maxRetries", label: "Retries", layer: "global", before: "Default (3 retries)", after: "5 retries" }] }] });
-    // Heard once.
+    expect(asked.details).toMatchObject({ status: "approved", tier: "approve", changes: [
+      { key: "run.retry.maxRetries", before: null, after: 5 },
+    ] });
+    // The original tool result owns the outcome; no second turn or custom outcome is added.
+    expect(chat.outcomes()).toEqual([]);
     await chat.says("And now?", "settings", { action: "resolve", keys: ["run.retry.maxRetries"] });
-    expect(chat.outcomes()).toHaveLength(1);
-    transcript.push({ case: "approved outcome told", steps: [{ outcome: heard[0]! }] });
+    expect(chat.outcomes()).toEqual([]);
+    transcript.push({ case: "approved outcome in the original tool result", steps: [asked] });
   }, 90_000);
 
   it("a request is held for the tap whatever its tier, its dry run says so, and only the maintainer may ask nothing of himself", async () => {
@@ -294,20 +294,21 @@ describe("settings approval outcomes", () => {
       .rejects.toMatchObject({ code: "invalid_request" });
   }, 60_000);
 
-  it("settings request returns from the real tool turn and wakes Home with the maintainer's decision", async () => {
+  it("settings request blocks the real tool turn and resumes Home without an outcome wake", async () => {
     const f = await gateway();
     const dry = await f.homeSays("Preview a request", "settings", { action: "request", dryRun: true, reason: "Preview only", changes: [RETRIES(5)] });
     expect(dry).toMatchObject({ isError: false, details: { dryRun: true, status: "pending", tier: "approve" } });
     expect(await f.approvals()).toEqual([]);
-    const asked = await f.homeSays("Ask for the retry change", "settings", { action: "request", reason: "The maintainer should approve this change", changes: [RETRIES(5)] });
-    expect(asked).toMatchObject({ isError: false, details: { status: "pending", tier: "approve" } });
+    const askedTurn = f.homeSays("Ask for the retry change", "settings", { action: "request", reason: "The maintainer should approve this change", changes: [RETRIES(5)] });
+    await waitFor(() => f.home.snapshot().extensionPresentation.pendingInteractions[0], "Home approval form");
     const [pending] = await f.approvals(); expect(pending).toBeDefined();
     expect(f.outcomes()).toHaveLength(0);
     await f.decide(pending!.requestId, pending!.digest, false);
-    await waitFor(() => f.outcomes().length === 1 && !f.home.isBusy || undefined, "maintainer decision wakes Home without another user prompt");
-    expect(f.outcomes()[0]!.details.requests).toEqual([expect.objectContaining({ requestId: pending!.requestId, status: "declined" })]);
-    expect(f.wakes.at(-1)!.trigger).toContain("was declined by the maintainer; it was not applied");
-    transcript.push({ case: "settings request actual tool and autonomous decision", steps: [dry, asked, f.outcomes()[0]!] });
+    const asked = await askedTurn;
+    expect(asked).toMatchObject({ isError: false, details: { status: "declined", tier: "approve" } });
+    expect(f.outcomes()).toEqual([]);
+    expect(f.wakes).toEqual([]);
+    transcript.push({ case: "settings request actual tool and same-turn decision", steps: [dry, asked] });
   }, 90_000);
 
   it("a pending request expires at its 24-hour deadline with no read, and its requester hears it", async () => {
@@ -315,7 +316,8 @@ describe("settings approval outcomes", () => {
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },
       changes: [{ key: "permissions.floor", layer: "global", op: "set", value: "approve", qualifiers: { key: "run.retry.maxRetries" } }] });
     const chat = await f.chat();
-    await chat.says("Raise retries overnight", "settings", { action: "change", reason: "Overnight batch", changes: [RETRIES(7)] });
+    const overnight = chat.says("Raise retries overnight", "settings", { action: "change", reason: "Overnight batch", changes: [RETRIES(7)] });
+    await waitFor(() => chat.slot.snapshot().extensionPresentation.pendingInteractions[0], "overnight approval form");
     const deadline = f.scheduled.filter(timer => !timer.cancelled).at(-1)!;
     expect(deadline.ms).toBeGreaterThan(APPROVAL_TTL_MS - 60_000);
     expect(deadline.ms).toBeLessThanOrEqual(APPROVAL_TTL_MS);
@@ -325,9 +327,9 @@ describe("settings approval outcomes", () => {
     expect(await record()).not.toContain("expired");
     deadline.run();
     await waitFor(async () => (await record()).includes("expired") || undefined, "expired at the deadline");
+    expect(await overnight).toMatchObject({ details: { status: "expired" } });
     await chat.says("Anything new?", "settings", { action: "resolve", keys: ["run.retry.maxRetries"] });
-    expect(chat.outcomes().map(outcome => outcome.details.requests[0]!.status)).toEqual(["expired"]);
-    expect(chat.outcomes()[0]!.content).toMatch(/expired after 24 hours without a decision; it was not applied\.$/);
+    expect(chat.outcomes()).toEqual([]);
   }, 90_000);
 
   it("Home cannot decide its own request, and settings names keys by one id rule", async () => {
