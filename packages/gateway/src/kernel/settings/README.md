@@ -71,6 +71,8 @@ are not settings truth, and pending approvals never apply themselves.
 ## Invariants
 
 - No settings data, wire shape, persisted schema or policy is defined twice.
+- Writer grants protect core keys; agent-writable runtime keys apply at their declared effect point, not all hot-reloaded.
+  Keep other guidance in rules/skills/profile notes; track shrinking rigid settings by the [schema key count](../../../docs/settings-contract.md#keys).
 - Tool access is resolved at call time, never captured before settings start.
 
 ## Entry points

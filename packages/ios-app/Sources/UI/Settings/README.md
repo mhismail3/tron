@@ -34,7 +34,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   appears only while retained values need inspection or Revert. More Settings contains Agent
   changes and the HTTP proxy; there is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
   groups without duplicating them in More Settings.
-  Notifications and Changes sit in the toolbar. Dashboard Settings exposes only global scope.
+  Notifications and Changes sit in the toolbar; no Value & Source sheet. Dashboard Settings
+  exposes only Global: editable keys plus explicit read-only values with Reset and Project inspection.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
   chosen folder as Not trusted through `settings.change`, a folder inside a listed project too
   (the nearest saved decision governs).
@@ -75,7 +76,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
   Home Settings has one untitled Settings container (Models: workers/delegation only, Tools, More Settings).
   Session Settings has one Settings container (Compaction, Tools, Project Trust, More Settings),
-  no Models subsheet. Project-owned controls are read-only with a shared Project info pill;
+  no Models subsheet. Overridable keys only; Project-owned controls are read-only with “Set by Project settings”;
   explicit overrides have Overridden and circular Revert. `SettingsProjectGroups` shows applied
   Repository Overrides last; `ProjectSettingsSections` owns the unchanged trust editor and ignored
   repository-field notices (no Workspace row in Session Settings). Summaries omit unset values. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
