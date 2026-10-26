@@ -55,12 +55,19 @@ New Home statements are unconfirmed, default to `inferred/review`, and cite the
 triggering maintainer message. An explicit destination is accepted only as an
 explicit operation, not a classifier's suggestion. Home's instructions prohibit
 inferring sensitive health, relationship, financial or location information;
-deliberately stated sensitive notes wait unsorted for review. Corrections require
-an exact wrong-claim ID/revision relation and stay in `corrections`.
+deliberately stated sensitive notes wait unsorted for review. For `learn`, Home
+must declare `sensitive:true`: the tool requires the text verbatim in the current
+maintainer message, and the owner refuses a personal destination or correction
+capture. These notes use canonical `privacyScope:"private"`; organizing them needs
+exact review. Classification remains Home's responsibility, not a keyword detector:
+unmarked prose is not claimed to have a semantic privacy guarantee. Corrections
+require an exact wrong-claim ID/revision relation and stay in `corrections`.
 
 Home can sort its own inferred nonbinding notes and retire its own unconfirmed
-proposals with a reason. Confirmed notes, corrections, existing binding kinds and
-other changes require a maintainer decision through `home.profile.review`.
+proposals with a reason, including an unconfirmed standing/default/correction
+proposal. Sorting a confirmed/private note or a standing/default/correction kind,
+retiring another author's or confirmed note, and all content refinements require
+an exact maintainer decision through `home.profile.review`.
 Original notes remain unchanged while pending. The stored action binds exact
 before/after values and source revisions. Supersede previews show both the old
 note becoming superseded and the replacement's text, kind, confirmation, placement
@@ -70,8 +77,14 @@ the same non-reentrant mutex twice. Accepted changes retain Changes and Undo.
 
 Home's model-visible policy offers sorting at the start of a maintainer turn when
 eight notes are unsorted, at most eight per batch. “Not now” suppresses offers until
-a **new note**, not an edit or elapsed time. Conversation evidence carries that
-semantic discretion; no timer or background-completion trigger is introduced.
+a **new note**, not an edit, move or elapsed time. `profile {action:"defer",version}`
+binds the index's opaque arrival version. Knowledge's existing command receipt and
+SQL control own that decision. Creating a new readable profile record consumes
+it in that same transaction; later Forget cannot reinstate it. Old command replay
+returns only its original acknowledgement. No body, copied identity list, clock,
+counter, timer or background trigger is added. Edits, visibility changes and cold
+restart retain the decision. The canonical activation kind suppresses automatic
+offers during worker-completion wakes and refuses deferral from an old user message.
 The operation boundary independently refuses sorting batches above eight. External
 AGENTS.md, skills/prompts and Settings destinations remain drafts until safe Undo.
 

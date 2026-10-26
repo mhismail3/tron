@@ -1145,7 +1145,7 @@ export class HomeOwner {
     if (!policy) {
       policy = new HomeRequestPolicy({
         prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => this.memoryView(activation, signal),
-        prepareSystemPrompt: async (base: string) => homeSystemPrompt(base, this.options.knowledge, await this.currentChatChoice(sessionId)),
+        prepareSystemPrompt: async (base, activation) => homeSystemPrompt(base, this.options.knowledge, await this.currentChatChoice(sessionId), activation),
         ...(this.options.requestDiagnostic ? { onRecord: this.options.requestDiagnostic } : {}),
       });
       this.policies.set(sessionId, policy);

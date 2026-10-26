@@ -5,7 +5,7 @@ import type { HomeProfileIndexRead } from "./home-profile.js";
 export const PROFILE_SECTION_HEADING = "## Learned profile";
 /** Bodies/titles are never included. The final UTF-8 bound includes instructions,
  * diagnostics and continuation; oversized metadata remains explicitly pageable. */
-export function profileIndex(read: Pick<HomeProfileIndexRead, "diagnostics"> & { items: Array<Pick<HomeProfileIndexRead["items"][number], "id" | "revisionId" | "path" | "status">> }, offset = 0): string {
+export function profileIndex(read: Pick<HomeProfileIndexRead, "diagnostics" | "sorting"> & { items: Array<Pick<HomeProfileIndexRead["items"][number], "id" | "revisionId" | "path" | "status">> }, offset = 0, activation?: "user" | "wake"): string {
   const names = [...Object.keys(PROFILE_AREAS), "inferred", "prior"];
   const rows = names.map(path => {
     const items = read.items.filter(item => item.path === path || item.path.startsWith(path + "/"));
@@ -24,7 +24,8 @@ export function profileIndex(read: Pick<HomeProfileIndexRead, "diagnostics"> & {
     `Capacity: ${personal.length}/256 personal, ${unsorted}/128 unsorted, ${subareas.size}/128 subareas; ${nearLeaves} leaf groups at ≥80% of 32.${nearCapacity ? " Warning: review capacity before adding; nothing is automatically evicted." : ""}`,
     "Personal profile: seven areas, separate Unsorted holding notes, and read-only Prior organization for historical placement. This is metadata, not selected instructions. Use profile read path=<path> for exact content and provenance; Home decides relevance and worker briefs.",
     "Confirmed by you and Inferred describe evidence, not execution permission. Existing explicitly binding safety and standing instructions retain their force wherever placed; inspect and respect them before acting.",
-    `Unsorted active: ${read.items.filter(item => item.status === "active" && item.path.startsWith("inferred/")).length}. At a maintainer turn start, offer sorting once at 8 unsorted, at most 8 notes per proposal. After Not now, do not repeat until a NEW note arrives; edits/moves/time alone do not reset it. Use conversation evidence, never timers or polling.`,
+    `Sorting arrival version: ${read.sorting.version}. Use profile defer version=<version> only for his Not now on a maintainer turn; the Knowledge receipt owns suppression.`,
+    `Unsorted active: ${unsorted}. Sorting offer: ${activation !== "user" ? "on-demand only; not a maintainer turn start" : read.sorting.deferred ? "deferred until a NEW note arrives" : unsorted >= 8 ? "eligible at this maintainer turn start; offer at most 8 notes" : "below 8 Unsorted; no automatic offer"}. Edits, moves, time and restarts do not reset Not now; no timers or polling.`,
     `Profile diagnostics: ${read.diagnostics.length}; exact records remain available through Knowledge.`,
   ];
   const selected: string[] = [];

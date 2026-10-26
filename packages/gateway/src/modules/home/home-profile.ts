@@ -9,7 +9,7 @@ import type { ChangeResult } from "../../kernel/settings/tool-contract.js";
 import { GatewayError } from "../../errors.js";
 import type { KnowledgeListResponse, KnowledgeProvenance, KnowledgeRecord, KnowledgeRelation, NoteContent } from "../../knowledge/knowledge-contract.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
-import type { KnowledgeMutationResult } from "../../knowledge/knowledge-store.js";
+import type { KnowledgeMutationResult, ProfileSortingState } from "../../knowledge/knowledge-store.js";
 
 /*
  * Tron Home's learned profile (#731): the maintainer's durable preferences,
@@ -117,13 +117,14 @@ function classifyProfile(notes: ProfileNote[]): HomeProfileRead {
 }
 
 export interface HomeProfileIndexRead {
+  sorting: ProfileSortingState;
   items: Array<{ id: string; revisionId: string; path: string; kind: HomeProfileKind; text: string; confirmed: boolean; status: HomeProfileStatus; createdAt: string; updatedAt: string }>;
   unclassified: number;
   diagnostics: HomeProfileRead["diagnostics"];
 }
 /** Mechanical SQL-head discovery; only the historical reader loads old bodies. */
 export async function readHomeProfileIndex(knowledge: KnowledgeService): Promise<HomeProfileIndexRead> {
-  const rows = await knowledge.store.profileRows();
+  const { rows, sorting } = await knowledge.store.profileMetadata();
   const superseded = new Set(rows.flatMap(row => row.supersedes));
   const items: HomeProfileIndexRead["items"] = [], diagnostics: HomeProfileRead["diagnostics"] = [];
   for (const row of rows) {
@@ -135,19 +136,19 @@ export async function readHomeProfileIndex(knowledge: KnowledgeService): Promise
     if (kinds.length === 1) items.push({ id: row.id, revisionId: row.revisionId, path: row.profile?.path.join("/") ?? "prior", kind: kinds[0]!, text: row.title,
       confirmed: row.confirmed, status: row.retired ? "retired" : superseded.has(row.id) ? "superseded" : "active", createdAt: row.createdAt, updatedAt: row.updatedAt });
   }
-  return { items, diagnostics, unclassified: diagnostics.filter(item => item.issues.includes("kind")).length };
+  return { items, sorting, diagnostics, unclassified: diagnostics.filter(item => item.issues.includes("kind")).length };
 }
 
 function kindTag(kind: HomeProfileKind): string {
   return `kind-${kind}`;
 }
 
-export async function homeProfileSection(knowledge: () => KnowledgeService | undefined): Promise<{ text: string; notes: number }> {
+export async function homeProfileSection(knowledge: () => KnowledgeService | undefined, activation: "user" | "wake"): Promise<{ text: string; notes: number }> {
   const owner = knowledge();
   if (!owner) return { text: unavailableSection("Knowledge is not available on this Gateway"), notes: 0 };
   try {
     const read = await readHomeProfileIndex(owner);
-    return { text: profileIndex(read), notes: read.items.filter((item) => item.status === "active").length };
+    return { text: profileIndex(read, 0, activation), notes: read.items.filter((item) => item.status === "active").length };
   } catch (error) {
     return { text: unavailableSection(`reading Knowledge failed (${error instanceof Error ? error.message.slice(0, 200) : "unknown error"})`), notes: 0 };
   }
@@ -177,7 +178,7 @@ export type HomeProfileChangeAction = HomeProfileAction | "confirm";
 /** One requested change. `expectedRevision` is the revision the requester read: a note
  * changed since is refused with a conflict rather than overwritten. */
 export type HomeProfileOp =
-  | { action: "learn"; kind: HomeProfileKind; text: string; path?: string; corrects?: { id: string; revisionId: string } }
+  | { action: "learn"; kind: HomeProfileKind; text: string; path?: string; sensitive?: boolean; corrects?: { id: string; revisionId: string } }
   | { action: "confirm"; id: string; expectedRevision?: string }
   | { action: "refine"; id: string; text?: string; kind?: HomeProfileKind; reason?: string; expectedRevision?: string }
   | { action: "supersede"; id: string; kind: HomeProfileKind; text: string; reason?: string; expectedRevision?: string }
@@ -282,6 +283,7 @@ export const PROFILE_REASON_MAX = 2_000;
 
 /** The one validation every actor's request passes. */
 function validateProfileOp(op: HomeProfileOp, author: HomeProfileAuthor["kind"]): string | undefined {
+  if (op.action === "learn" && op.sensitive && (op.kind === "correction" || (op.path !== undefined && !op.path.startsWith("inferred/")))) return "Sensitive statements must wait unsorted for exact review; do not infer a correction or personal destination";
   if (op.action === "learn" && ((op.kind === "correction") !== (op.corrects !== undefined))) return "a correction requires an exact wrong-claim ID and revision; other kinds do not take corrects";
   if (op.action === "confirm" && author !== "maintainer") return "only the maintainer confirms an item";
   if (op.action === "refine" && op.text === undefined && op.kind === undefined) return "refine requires text or kind";
@@ -349,10 +351,13 @@ export class HomeProfileItems {
       const own = (id: string) => {
         const item = read.items.find(item => item.id === id);
         return item && !item.confirmed && item.record.provenance.actor === "agent" && item.record.provenance.source === "home"
-          && !["standing-decision", "delegation-default", "correction"].includes(item.kind);
+          && item.record.content.profile !== undefined;
       };
       const needsReview = requests.some(op => op.action === "retry" ? false : op.action === "learn" ? false
-        : op.action === "retire" ? !own(op.id) : op.action === "reorganize" ? op.assignments.some(item => !own(item.id)) : true);
+        : op.action === "retire" ? !own(op.id) : op.action === "reorganize" ? op.assignments.some(({ id }) => {
+          const item = read.items.find(candidate => candidate.id === id);
+          return !item || !homeMayOrganize(item.record);
+        }) : true);
       if (needsReview) {
         if (!context.reason?.trim()) throw new GatewayError("invalid_request", "An exact profile review requires a reason");
         const pinned = requests.map(op => "id" in op ? { ...op, expectedRevision: op.expectedRevision ?? read.items.find(item => item.id === op.id)?.revisionId } : op);
@@ -400,7 +405,7 @@ export class HomeProfileItems {
       restoring: undoOf !== undefined,
       create: (originals, prepared, visibleProfile) => {
         const read = classifyProfile(visibleProfile);
-        if (!undoOf && context.actor.kind === "home" && !(context as ProfileChangeContext).approved && originals.some(note => note.content.confirmed || note.provenance.actor !== "agent" || note.provenance.source !== "home" || note.content.tags?.some(tag => ["kind-standing-decision", "kind-delegation-default", "kind-correction"].includes(tag)))) throw new GatewayError("invalid_request", "This organization needs the maintainer tap on exact before/after; original notes remain unchanged");
+        if (!undoOf && context.actor.kind === "home" && !(context as ProfileChangeContext).approved && originals.some(note => !homeMayOrganize(note))) throw new GatewayError("invalid_request", "This organization needs the maintainer tap on exact before/after; original notes remain unchanged");
         if (!undoOf && !context.reason?.trim()) throw new GatewayError("invalid_request", "Profile organization requires a reason");
         return { version: 1, replayAt: new Date().toISOString(), context: { commandId: context.commandId, actor: context.actor,
         ...(context.reason !== undefined ? { reason: context.reason } : {}), ...(context.web !== undefined ? { web: context.web } : {}) },
@@ -524,10 +529,11 @@ export class HomeProfileItems {
 
   private async write(owner: KnowledgeService, op: HomeProfileOp, author: HomeProfileAuthor, confirmed: boolean, profile: HomeProfileRead, commandId: string): Promise<HomeProfileSaved> {
     const create = async (kind: HomeProfileKind, text: string, relations: KnowledgeRelation[], reason?: string) => {
+      const privacyScope = op.action === "learn" ? op.sensitive ? "private" : undefined : profile.items.find(item => item.id === op.id)?.record.content.privacyScope;
       const { record } = await owner.invoke({ operation: "knowledge.note.create", request: {
         commandId, ...(confirmed ? { confirmedByUser: true } : {}),
         record: { kind: "note", scope: "personal", provenance: provenance(author, reason), relations,
-          content: { title: text, role: KIND_ROLE[kind], confirmed, tags: [HOME_PROFILE_TAG, kindTag(kind)],
+          content: { title: text, role: KIND_ROLE[kind], confirmed, tags: [HOME_PROFILE_TAG, kindTag(kind)], ...(privacyScope ? { privacyScope } : {}),
             profile: op.action === "learn" ? profilePath(op.path ?? (kind === "correction" ? "corrections" : "inferred/review")) : profile.items.find(item => item.id === op.id)!.record.content.profile! } },
       } }) as KnowledgeMutationResult;
       return record;
@@ -630,6 +636,12 @@ export class HomeProfileItems {
 }
 
 /** What the Home runtime gives the tool: the change path, as Home. */
+function homeMayOrganize(note: Extract<KnowledgeRecord, { kind: "note" }>): boolean {
+  return note.content.profile !== undefined && !note.content.confirmed && note.content.privacyScope !== "private"
+    && note.provenance.actor === "agent" && note.provenance.source === "home"
+    && !note.content.tags?.some(tag => ["kind-standing-decision", "kind-delegation-default", "kind-correction"].includes(tag));
+}
 export interface HomeProfileChangeAccess {
+  deferSorting(commandId: string, version: string): Promise<{ status: "deferred"; version: string }>;
   change(ops: HomeProfileRequest[], input: { toolCallId: string; web: boolean; author: HomeProfileAuthor; commandId: string; reason?: string }): Promise<ProfileChangeResult | (ChangeResult & { saved: []; items: [] })>;
 }

@@ -219,7 +219,7 @@ export interface HomeRequestPolicyOptions {
   /** Home's full system prompt for one activation, from the SDK's base prompt
    * captured at admission. Called at most once per activation, at its first
    * `prepareRequest` step; a rejection fails that activation closed. */
-  prepareSystemPrompt: (base: string) => Promise<HomeSystemPrompt>;
+  prepareSystemPrompt: (base: string, activation: HomeActivationKind) => Promise<HomeSystemPrompt>;
   /** Where the seam reports its bounded per-activation and refusal records. */
   onRecord?: (record: HomeRequestRecord) => void;
 }
@@ -579,7 +579,7 @@ export class HomeRequestPolicy {
    * the same bytes. A failure refuses the activation, and the refusal is cached
    * with the prompt, as the memory view's is. */
   private systemPromptFor(activation: ActivationState): Promise<HomeSystemPrompt> {
-    activation.system ??= this.options.prepareSystemPrompt(activation.systemBase).catch(error => {
+    activation.system ??= this.options.prepareSystemPrompt(activation.systemBase, activation.kind).catch(error => {
       throw this.refuse("system-unavailable", error instanceof Error ? error.message : String(error), activation);
     });
     return activation.system;

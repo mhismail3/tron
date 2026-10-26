@@ -148,8 +148,14 @@ interface KnowledgeState {
   receipts: KnowledgeTable<StoredReceipt>;
   config: KnowledgeConfig;
   connectors?: Record<string, KnowledgeConnectorState>;
+  /** Current Not now decision. A new readable profile record consumes it atomically. */
+  profileSorting?: string;
 }
-type CatalogControl = Pick<KnowledgeState, "schemaVersion" | "stateRevision" | "catalogID" | "config" | "connectors">;
+type CatalogControl = Pick<KnowledgeState, "schemaVersion" | "stateRevision" | "catalogID" | "config" | "connectors" | "profileSorting">;
+export interface ProfileSortingState { version: string; deferred: boolean }
+function profileSortingVersion(rows: ReadonlyArray<{ id: string }>): string {
+  return createHash("sha256").update(rows.map(row => row.id).sort().join("\n")).digest("hex");
+}
 
 export type KnowledgeStateFailure = "unsafe" | "invalid" | "newer";
 export class KnowledgeStoreError extends Error {
@@ -725,6 +731,7 @@ export class KnowledgeStore {
       if (before!.ino !== after!.ino || before!.dev !== after!.dev) throw new KnowledgeStoreError("unsafe", "Knowledge catalog changed while opening");
       const control = catalog.control<CatalogControl>();
       if (control.catalogID !== catalogID || control.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || !Number.isSafeInteger(control.stateRevision) || control.stateRevision < 0) throw new KnowledgeStoreError("invalid", "Invalid Knowledge catalog control");
+      if (control.profileSorting !== undefined && (typeof control.profileSorting !== "string" || !/^[a-f0-9]{64}$/.test(control.profileSorting))) throw new KnowledgeStoreError("invalid", "Invalid profile sorting decision");
       control.config = validateKnowledgeConfig(withoutRetiredKnowledgeConfig(control.config));
       for (const [key, value] of Object.entries(control.connectors ?? {})) { if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) throw new KnowledgeStoreError("invalid", "Invalid connector state key"); if (value) validateConnectorState(value, value.connector); }
       return { catalog, control };
@@ -746,7 +753,7 @@ export class KnowledgeStore {
   }
   private control(state: KnowledgeState): CatalogControl {
     return { schemaVersion: state.schemaVersion, stateRevision: state.stateRevision, ...(state.catalogID ? { catalogID: state.catalogID } : {}),
-      config: state.config, ...(state.connectors ? { connectors: state.connectors } : {}) };
+      config: state.config, ...(state.connectors ? { connectors: state.connectors } : {}), ...(state.profileSorting ? { profileSorting: state.profileSorting } : {}) };
   }
   private async save(_paths: StorePaths, state: KnowledgeState): Promise<void> {
     if (!state.catalog) throw new KnowledgeStoreError("invalid", "Knowledge catalog was not initialized");
@@ -1807,8 +1814,22 @@ export class KnowledgeStore {
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, content: carryNoteMarks(current, request.record.content), id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
   /** Metadata-only after explicit hierarchy migration. The narrow legacy reader
    * derives old heads from their immutable bodies; it never writes or upgrades. */
-  async profileRows(): Promise<ProfileRecordRow[]> {
-    return this.readState((state, paths) => this.profileRowsInState(state, paths, true));
+  async profileMetadata(): Promise<{ rows: ProfileRecordRow[]; sorting: ProfileSortingState }> {
+    return this.readState(async (state, paths) => {
+      const rows = await this.profileRowsInState(state, paths, true);
+      return { rows, sorting: { version: profileSortingVersion(rows), deferred: state.profileSorting !== undefined } };
+    });
+  }
+  /** The ordinary Knowledge command receipt and SQL transaction own this decision.
+   * A replay returns its original acknowledgement, never re-suppresses newer notes. */
+  async deferProfileSorting(commandId: string, version: string): Promise<{ status: "deferred"; version: string }> {
+    if (!/^[a-f0-9]{64}$/.test(version)) throw invalid("Profile sorting needs its exact arrival version");
+    return this.mutate("knowledge.profile.defer", commandId, { version }, async (state, paths) => {
+      const visible = await this.profileRowsInState(state, paths, true);
+      if (profileSortingVersion(visible) !== version) throw conflict("New profile notes arrived or the visible snapshot changed; read the index before Not now");
+      state.profileSorting = version;
+      return { status: "deferred" as const, version };
+    });
   }
   private async profileRowsInState(state: KnowledgeState, paths: StorePaths, visibleOnly: boolean): Promise<ProfileRecordRow[]> {
     const heads = state.catalog?.rows<RecordHead>("records", "json_extract(value, '$.kind') = 'note' AND json_extract(value, '$.scope') = 'personal' AND (json_type(value, '$.profileRow') IS NULL OR json_type(value, '$.profileRow') = 'object')", [], "key", 501) ?? [];
@@ -1886,6 +1907,10 @@ export class KnowledgeStore {
     await durableAtomicWriteJson(this.recordPath(paths, id, record.revisionId), record, 0o600);
     const revisions = [...(existing?.revisionIds ?? []), record.revisionId];
     const nextHead = headFor(record, revisions, existing?.objectHashes, state.config);
+    // Consume the decision with creation, not when presentation notices a new
+    // set. Later retirement/Forget cannot reinstate an old Not now.
+    if (state.profileSorting !== undefined && existing === undefined && nextHead.profileRow
+      && this.headVisible(state, id, nextHead)) delete state.profileSorting;
     for (const identity of existing?.sourceIdentities ?? []) if (nextHead.sourceIdentities?.includes(identity) !== true) state.sourceIdentities.delete(identity);
     for (const identity of nextHead.sourceIdentities ?? []) state.sourceIdentities.set(identity, id);
     state.records.set(id, nextHead);

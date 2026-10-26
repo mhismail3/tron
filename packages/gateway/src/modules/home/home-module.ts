@@ -242,7 +242,10 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
     },
     memory: sessionId => owner.memoryToolsFor(sessionId),
     task: (sessionId, request) => owner.taskTool(sessionId, request),
-    profileChanges: session => homeProfileChanges(session, platform.settings()?.changes, platform.knowledge),
+    profileChanges: session => homeProfileChanges(session, platform.settings()?.changes, platform.knowledge, () => {
+      const evidence = owner.requestPolicyFor(session.sessionId())?.contextEvidence();
+      return evidence?.kind === "user" && evidence.activationOpen;
+    }),
     explicitlyTrustedDirectory: async path => {
       try { return (await platform.trust.inspect(path)).savedDecision === true; } catch { return false; }
     },
@@ -250,12 +253,26 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
 }
 
 /** Home's profile tool resolves the current change path and actor on each call. */
-export function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined, knowledge: () => KnowledgeService | undefined): HomeProfileChangeAccess | undefined {
+export function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined, knowledge: () => KnowledgeService | undefined, maintainerTurn: () => boolean): HomeProfileChangeAccess | undefined {
   if (!changes || !session.profile().profileChanges) return undefined;
-  return { change: (ops, input) => new HomeProfileItems(knowledge).change(changes, ops, {
-    actor: { kind: "home", id: session.sessionId(), sessionId: session.sessionId(), toolCallId: input.toolCallId },
-    author: input.author, commandId: input.commandId, web: input.web, ...(input.reason ? { reason: input.reason } : {}),
-  }) };
+  const requireMaintainerTurn = () => {
+    if (!maintainerTurn()) throw new GatewayError("invalid_request", "This profile decision requires the current maintainer turn, not a background wake or old message");
+  };
+  return {
+    deferSorting: (commandId, version) => {
+      requireMaintainerTurn();
+      const owner = knowledge();
+      if (!owner) throw new GatewayError("unsupported", "Knowledge is unavailable");
+      return owner.store.deferProfileSorting(commandId, version);
+    },
+    change: (ops, input) => {
+      if (ops.some(op => op.action === "learn" && op.sensitive)) requireMaintainerTurn();
+      return new HomeProfileItems(knowledge).change(changes, ops, {
+        actor: { kind: "home", id: session.sessionId(), sessionId: session.sessionId(), toolCallId: input.toolCallId },
+        author: input.author, commandId: input.commandId, web: input.web, ...(input.reason ? { reason: input.reason } : {}),
+      });
+    },
+  };
 }
 
 /** What Home's two modules read per runtime: the composition's inputs, the
