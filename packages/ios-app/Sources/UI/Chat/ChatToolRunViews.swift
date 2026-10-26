@@ -153,7 +153,8 @@ struct ToolCard: View {
             progressSequence: timing?.progressSequence,
             outputTruncated: timing?.outputTruncated ?? outputTruncated,
             display: timing?.display,
-            extensionOrigin: timing?.extensionOrigin
+            extensionOrigin: timing?.extensionOrigin,
+            toolSegmentId: timing?.toolSegmentId
         )
     }
 

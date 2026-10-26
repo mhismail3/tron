@@ -163,7 +163,7 @@ export interface ChangeOutcome {
 export interface ChangeResult {
   dryRun?: true;
   status: ChangeStatus;
-  /** The request's tier: the highest of its changes (doc 5.4). */
+  /** Highest change tier; a refused dry run has no admitted plan and reports quiet. */
   tier: Tier;
   changes: ChangeOutcome[];
   /** A pending request: what the maintainer decides and the exact diff it binds to. */

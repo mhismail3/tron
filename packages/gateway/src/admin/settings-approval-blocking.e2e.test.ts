@@ -37,12 +37,12 @@ async function settledWorker(f: Awaited<ReturnType<typeof fixture>>) {
 
 async function pendingApproval(options: Parameters<typeof fixture>[5] = {}, changes: ChangeRequest[] = [
   { key: "run.retry.maxRetries", layer: "session", op: "set", value: 3 },
-], worker = false) {
+], worker = false, reason = "Retry a transient failure") {
   const f = await fixture(false, false, undefined, false, undefined, options);
   await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
   const taskId = worker ? await settledWorker(f) : undefined;
   f.faux.setResponses([
-    fauxAssistantMessage([fauxToolCall("settings", { action: "request", reason: "Retry a transient failure", changes, ...(taskId ? { taskId } : {}) }, { id: "settings-request" })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxToolCall("settings", { action: "request", reason, changes, ...(taskId ? { taskId } : {}) }, { id: "settings-request" })], { stopReason: "toolUse" }),
     fauxAssistantMessage("Finished"),
   ]);
   const home = await f.registry.acquire(f.home.sessionId);
@@ -157,6 +157,53 @@ describe("blocking settings approval", () => {
       await waitFor(() => !f.home.isBusy, "full diff denial settles");
       await saveCase("complete-diff", { interaction: f.interaction });
     } finally { await f.home.abort("agent"); await f.prompting; }
+  });
+
+  it("control characters are disclosed as escapes without swallowing the digest-bound diff", async () => {
+    const instructions = "prefix\u009dnot-hidden\u009cafter\u007f\u0085\u2028\u2029";
+    const f = await pendingApproval({}, [
+      { key: "context.compaction.instructions", layer: "session", op: "set", value: instructions },
+    ], true, "Reason\u009dnot-hidden\u007ftail");
+    try {
+      const context = f.interaction.form!.questions[0]!.context!;
+      expect(context).toContain("\\u009dnot-hidden\\u007ftail");
+      expect(context).toContain("\\u009dnot-hidden\\u009cafter\\u007f\\u0085\\u2028\\u2029");
+      expect(context).toContain("context.compaction.instructions");
+      expect(context).toContain("Approve applies only this diff. Deny changes nothing.");
+      f.answer("deny");
+      await f.prompting;
+      await waitFor(() => !f.home.isBusy, "escaped diff denial settles");
+      await saveCase("control-character-diff", { interaction: f.interaction });
+    } finally { await f.home.abort("agent"); await f.prompting; }
+  });
+
+  it("a mixed valid/refused dry run fails the whole bundle just like its real request", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const changes = [
+      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 3 },
+      { key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" },
+    ];
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "request", dryRun: true, reason: "Mixed preview", changes }, { id: "mixed-dry" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Noted"),
+      fauxAssistantMessage([fauxToolCall("settings", { action: "request", reason: "Mixed request", changes }, { id: "mixed-live" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Noted"),
+    ]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    try {
+      await home.prompt("Preview mixed request");
+      const dry = await waitFor(() => home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "mixed-dry"), "mixed preview result");
+      expect(dry).toMatchObject({ isError: false, details: { dryRun: true, status: "failed", tier: "quiet" } });
+      await waitFor(() => !home.isBusy, "mixed preview settles");
+      await home.prompt("Make mixed request");
+      const real = await waitFor(() => home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "mixed-live"), "mixed request refusal");
+      expect(real).toMatchObject({ isError: true });
+      expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+      expect(await f.settings.settingsChanges.pendingApprovals()).toEqual([]);
+      expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries).toEqual([]);
+      await saveCase("mixed-dry-run", { dry, real });
+    } finally { await home.abort("agent"); }
   });
 
   it("an oversized exact diff is refused explicitly without leaving an unreviewable pending request", async () => {
