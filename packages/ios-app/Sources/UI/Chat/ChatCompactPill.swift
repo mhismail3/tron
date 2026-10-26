@@ -176,7 +176,9 @@ struct ChatCompactPillSurface<Content: View>: View {
             style: .continuous
         )
         let surfaceAccent = accentOverride ?? tone.surfaceColor
-        let isGlass = material == .glass
+        // Sheet-opening pills always use the shared interactive glass treatment;
+        // flat material remains available only to informational, non-tappable pills.
+        let isGlass = interactive || material == .glass
         // One structure at every material: a value change from flat to glass
         // must not remount the pill (a remount showed the flat frame before the
         // measured glass one). The unused half of each pair is inert — a clear

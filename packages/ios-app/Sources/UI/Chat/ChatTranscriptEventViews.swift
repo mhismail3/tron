@@ -42,8 +42,8 @@ extension View {
 
 /// One visual language for transcript events that are not conversation turns.
 /// Detail-bearing events are buttons with Liquid Glass; informational events
-/// remain noninteractive and flat. Provider errors keep their flat rounded
-/// surface and the same centered alignment as other transcript event pills.
+/// remain noninteractive and flat. Provider errors share interactive glass
+/// while retaining their semantic red tint and centered alignment.
 struct ChatNotificationView: View {
     let presentation: ChatNotificationPresentation
     @Environment(AppModel.self) private var model
@@ -54,10 +54,6 @@ struct ChatNotificationView: View {
     private var showsDetailAction: Bool {
         presentation.hasDetailSheet
             || (presentation.expandsOnTruncation && titleMeasurement?.isTruncated == true)
-    }
-
-    private var resolvedMaterial: ChatNotificationMaterial {
-        presentation.errorRun != nil ? .flat : (showsDetailAction ? .glass : presentation.material)
     }
 
     var body: some View {
@@ -125,7 +121,7 @@ struct ChatNotificationView: View {
     private var pill: some View {
         ChatCompactPillSurface(
             tone: presentation.tone,
-            material: resolvedMaterial,
+            material: presentation.material,
             interactive: showsDetailAction,
             cornerRadiusOverride: presentation.errorRun == nil ? nil : ChatToolChipShapePolicy.cornerRadius
         ) {
@@ -136,12 +132,15 @@ struct ChatNotificationView: View {
                 tone: presentation.tone,
                 showsProgress: presentation.showsProgress,
                 titleWeight: presentation.errorRun == nil ? .semibold : .bold,
-                detailStyle: presentation.hasDetailSheet ? .summary : .status
+                detailStyle: presentation.hasDetailSheet ? .summary : .status,
+                // Strong error ink stays readable over the brighter red glass;
+                // the surface keeps the existing semantic error tint.
+                foregroundOverride: presentation.errorRun == nil ? nil : presentation.tone.secondaryColor
             ) {
                 if let run = presentation.errorRun, run.occurrences.count > 1 {
                     Text("×\(run.occurrences.count)")
                         .font(TronTypography.secondaryCodeDescription)
-                        .foregroundStyle(presentation.tone.primaryColor)
+                        .foregroundStyle(presentation.tone.secondaryColor)
                 }
             }
         }

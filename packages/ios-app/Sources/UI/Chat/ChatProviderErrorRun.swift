@@ -74,7 +74,7 @@ struct ChatProviderErrorRun: Hashable, Sendable {
         ChatNotificationPresentation(
             id: "notification-provider-error-\(occurrences[0].id)", semanticID: occurrences[0].semanticID,
             icon: "exclamationmark.triangle.fill", title: title, detail: nil, body: nil,
-            tone: .error, material: .flat, errorRun: self
+            tone: .error, material: .glass, errorRun: self
         )
     }
 }

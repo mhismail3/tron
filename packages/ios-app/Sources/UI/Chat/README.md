@@ -102,6 +102,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   identity stays stable as a live tail joins and settles; cold/history uses the same assembler.
   Gateway `errorInfo` owns friendly classification; there is no provider mapping in Swift.
   One centered compact error pill shows the uniform message or Provider errors and a ×N count.
+  `ChatCompactPillSurface` enforces interactive Liquid Glass, with semantic red tint and stronger
+  error ink; only non-tappable informational pills may retain a flat surface.
   The existing transcript notification route keeps its sheet live above lazy rows.
   `ChatDetailSheet`, shared with nested tool details, owns navigation/Done, medium/large detents,
   top chrome and insets. Themed standard sections, glass groups and rows show totals, distinct

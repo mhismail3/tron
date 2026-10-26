@@ -26,6 +26,7 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
 
 - Keep SwiftUI and the current look/behavior; UIKit replacements are only for measured transcript,
   composer or long-list hotspots: previewed, lock-gated, pixel-identical slices deleting the SwiftUI version.
+- Every tappable pill or chip that opens a sheet must use tinted Liquid Glass through its shared style.
 - Components are presentation only: they take values and emit intents, own no Gateway reads,
   receipts or canonical state. Native sheet sources are preference inputs, not views inside controls;
   `TronNativeSheetCanvas` mounts retained ordinary SwiftUI sheets at the containing surface root.

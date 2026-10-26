@@ -56,8 +56,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   13-point symbol (or a pulse at that nominal size with 20% footprint compensation), then a
   five-point gap. Only a pill with real detail is an interactive Liquid Glass button; no-detail
   pills use a flat tinted fill with identical type and geometry. Tones are `Sendable` semantic
-  values resolved to colors only at the view boundary. Provider-error runs retain the flat
-  semantic-error treatment and centered alignment.
+  values resolved to colors only at the view boundary. Every tappable pill/chip opening a sheet
+  uses tinted Liquid Glass through its shared surface. Provider-error runs retain centered
+  alignment and semantic red glass with contrast-safe error ink; no flat error override.
 - **Role palette.** User input emerald, commands indigo, tools emerald, attributed extension
   context violet, informational notifications primary-themed, unknown context slate, warnings amber,
   failures red. Producer and category stay in text so color is never the only signal.
