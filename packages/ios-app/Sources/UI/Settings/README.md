@@ -189,12 +189,16 @@ and switch profile: no untouched inherited setting may become an override.
 
 ## Project lifecycle visual proposal
 
-`TronProjectLifecyclePreviewUITests/testProjectLifecycleVisualProposal` captures the
-`HOSTED_TEST`-only `HostedProjectLifecyclePreview` in light/dark at Large and XXXL.
-It composes shared settings rows, groups and managed sheets with synthetic projects.
-No lifecycle command or approval is submitted; these captures are design review, not
-Gateway acceptance. The proposed Add Project chooser and per-project action sheet
-are not production routes until maintainer visual approval and real-Gateway journeys.
+`TronProjectLifecyclePreviewUITests` captures the `HOSTED_TEST`-only
+`HostedProjectLifecyclePreview` in light/dark at Large and XXXL. Project and action
+lists use `TronListGroup`/`TronListRow`, without chevrons; form fields keep the shared
+settings controls. Every drill-in uses a managed sub-sheet, never a navigation push.
+Archive, Untrust, Trust and Rename review reuse the actual `SettingsApprovalSheet`
+with socket-served synthetic actions; fixture decisions refuse without effects.
+The route journey opens and dismisses nested detail, rename, approval, Add/Create
+and folder sheets. No lifecycle command is submitted: captures and route checks are
+not Gateway acceptance. Production integration still awaits visual approval and
+real-Gateway journeys.
 
 ## Not here
 
