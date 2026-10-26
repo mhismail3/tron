@@ -116,7 +116,10 @@ extension RealGatewayPairAndChatUITests {
     private func addQueueModel(_ app: XCUIApplication, named name: String) {
         let add = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Add model'")).firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 15), app.debugDescription)
-        add.tap()
+        // The glass row also projects as a Button in AX; its trailing Choose
+        // button owns navigation, not the non-interactive title area.
+        let choose = add.buttons.matching(NSPredicate(format: "label == 'Add model'")).firstMatch
+        choose.tap()
         // Search expands provider groups and avoids matching a covered Thinking
         // row named “For <model>” in the sheet below this picker.
         let search = app.buttons["Search models"]
