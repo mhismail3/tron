@@ -259,17 +259,17 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "key": .string("context.compaction.enabled"), "group": .string("context"),
                 "value": .bool(true), "display": .string("On"), "layer": .string("global"),
                 "applied": .bool(false), "badges": .array([]),
-                // As the Gateway serves it: a chat can set its own compaction.
+                // Canonical scope and recovery metadata remain, without an app editor.
                 "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")])]),
                 "presentation": .object(["label": .string("Automatic compaction"), "help": .string("Automatic compaction policy."),
-                    "order": .number(10), "importance": .string("essential"), "control": .string("toggle"),
+                    "order": .number(10), "importance": .string("essential"),
                     "sessionOverridable": .bool(true), "projectSettable": .bool(true), "editable": .bool(true)]),
             ]), HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model",
                 try JSONValue.encode(snapshot.model), snapshot.model?.id == "alternative" ? "Alternative Model" : "Fixture Model", "catalog", order: 5, essential: true, layer: "session"),
                 HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true,
                     qualifiers: ["model": "\(snapshot.model?.provider ?? "fixture")/\(snapshot.model?.id ?? "model")"]),
                 HostedSettingsReviewSchema.key("model.queue[role=background]", "workers", "Background models",
-                    .array([.string("fixture/memory-a"), .string("fixture/memory-b")]), "2 models", "list", order: 44, essential: true)
+                    .array([.string("fixture/memory-a"), .string("fixture/memory-b")]), "2 models", order: 44, essential: true)
             ] + HostedSettingsReviewSchema.additionalKeys.filter {
                 !["model.thinking[role=chat]", "context.compaction.enabled", "permissions.budget.task"].contains($0.objectValue?["key"]?.stringValue ?? "")
             }), "sections": .array(HostedSettingsReviewSchema.sections)])

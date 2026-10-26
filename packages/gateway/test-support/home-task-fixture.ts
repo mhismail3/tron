@@ -90,6 +90,9 @@ export interface FixtureOptions {
   /** Run Home memory on the real background-queue summarizer instead of a fixed summary. */
   queueSummarizer?: boolean;
   knowledge?: () => KnowledgeService | undefined;
+  settingsNow?: Parameters<typeof settingsDependencies>[0]["now"];
+  settingsSchedule?: Parameters<typeof settingsDependencies>[0]["schedule"];
+  homeDiagnostic?: import("../src/modules/home/home-diagnostic.js").HomeDiagnostic;
 }
 
 export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false, models?: Record<string, unknown>, options: FixtureOptions = {}) {
@@ -124,10 +127,10 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   // before returning the fixture, including when the test refuses before opening Home;
   // otherwise models-store.json.lock can outlive disposal of this fixture (#1673).
   await gateway.refresh({ allowNetwork: false });
-  const settings: Record<string, unknown> = { sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id };
-  if (contextWindow) settings.compaction = { enabled: false, reserveTokens: 1024, keepRecentTokens: 0 };
+  const sdkSettings: Record<string, unknown> = { sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id };
+  if (contextWindow) sdkSettings.compaction = { enabled: false, reserveTokens: 1024, keepRecentTokens: 0 };
   if (codemode) {
-    settings.defaultTools = ["+codemode"];
+    sdkSettings.defaultTools = ["+codemode"];
     const extensionDir = join(cwd, ".pi", "extensions");
     await mkdir(extensionDir, { recursive: true });
     await writeFile(join(extensionDir, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-coding-agent"))}; export default createCodemodeExtension({ mode: "on" });`);
@@ -144,9 +147,9 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
           writeFileSync(${JSON.stringify(join(cwd, "wait-effect.json"))}, JSON.stringify(input));
           return {content:[{type:'text',text:'wait finished'}]}; }});
     }`);
-    settings.packages = [`npm:pi-subagents@${UNMANAGED_PROVIDER_VERSION}`];
+    sdkSettings.packages = [`npm:pi-subagents@${UNMANAGED_PROVIDER_VERSION}`];
   }
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify(settings));
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify(sdkSettings));
   const trust = new TrustService(agentDir);
   await trust.set(cwd, true);
   const signals: Array<Record<string, unknown>> = [];
@@ -168,7 +171,10 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   await pushStore.initialize();
   // No relay: admission validates and records nothing is sent off the Mac.
   const pushAdmission = new NotificationService(pushStore, { available: false, relayOrigin: "https://push.invalid" } as unknown as PushRelayClient);
-  const createRegistry = async () => await createTestRegistry({ knowledge, agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
+  let settings: ReturnType<typeof settingsDependencies> | undefined;
+  const createRegistry = async () => await createTestRegistry({ knowledge, agentDir, tronHome, trust, machineId: "machine-task-test",
+    settings: () => settings ? { model: settings.settingsModel, changes: settings.settingsChanges } : undefined,
+    homeDiagnostic: record => { signals.push({ ...record }); options.homeDiagnostic?.(record); }, idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
     // Production admits the same artifact root (gateway-main.ts): run status artifacts are read only under it.
     ...(managed ? { delegatedArtifactRoot: delegatedArtifactRoot(tronHome) } : {}),
     gatewayModelRuntime: gateway,
@@ -201,6 +207,10 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     ...(options.providerUsage ? { providerUsage: options.providerUsage } : {}),
   });
   const registry = await createRegistry();
+  settings = settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, sessions: registry, registry,
+    home: () => homeOwnerOf(registry), knowledge,
+    ...(options.settingsNow ? { now: options.settingsNow } : {}), ...(options.settingsSchedule ? { schedule: options.settingsSchedule } : {}) });
+  await settings.settingsChanges.start();
   const owned = { registry, root };
   fixtures.push(owned);
   await bringUpToReadiness(registry);
@@ -208,21 +218,21 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   const home = await homeOwnerOf(registry).designate({ model: { provider: model.provider, id: model.id } }, () => model);
   // Readiness only: task recovery runs after listen, as in gateway-main.
   const restartToReadiness = async () => {
-    // Production installs the settings owners on every start (gateway-main); a restarted
-    // fixture keeps them when the test installed them, so the model queues still resolve.
-    const hadSettings = (owned.registry as unknown as { settingsOwners?: unknown }).settingsOwners !== undefined;
+    // Root reconstructs the actual settings owners for the successor Registry;
+    // Home and native Run receive the same instances, never Registry readback.
     await owned.registry.dispose();
     await owned.registry.administrativeWorkRegistry.waitUntilSettled();
+    settings = undefined;
     owned.registry = await createRegistry();
-    if (hadSettings) {
-      const restarted = owned.registry;
-      settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, registry: restarted, home: () => homeOwnerOf(restarted),
-        knowledge });
-    }
+    const restarted = owned.registry;
+    settings = settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, sessions: restarted, registry: restarted,
+      home: () => homeOwnerOf(restarted), knowledge,
+      ...(options.settingsNow ? { now: options.settingsNow } : {}), ...(options.settingsSchedule ? { schedule: options.settingsSchedule } : {}) });
+    await settings.settingsChanges.start();
     await bringUpToReadiness(owned.registry);
     return owned.registry;
   };
-  return { root, registry, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, queueDiagnostics, agentDir, trust, restartToReadiness,
+  return { root, registry, get settings() { return settings!; }, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, queueDiagnostics, agentDir, trust, restartToReadiness,
     restart: async () => {
       const cold = await restartToReadiness();
       await homeOwnerOf(cold).recoverTasks();

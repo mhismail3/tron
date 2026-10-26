@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
-import { settingsDependencies, setModelQueue } from "../../test-support/settings-dependencies.js";
+import { setModelQueue } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -23,7 +23,7 @@ afterAll(async () => {
 async function setup() {
   const f = await fixture();
   const dependencies = { registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway };
-  const { settingsModel, settingsChanges } = settingsDependencies({ ...dependencies, sessions: f.registry, home: () => homeOwnerOf(f.registry) });
+  const { settingsModel, settingsChanges } = f.settings;
   const service = new GatewayService({ display: displayOwnerOf(f.registry),
     config: { machineId: "settings-machine", machineGroupID: "settings-group", machineName: "Test Mac", agentDir: f.agentDir, tronHome: f.tronHome },
     modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry,
@@ -127,14 +127,14 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(observed).toEqual({ effective: 1, requests: 2 });
   });
 
-  it("serves the shared editor's scope grants, inactive override and exact Project path from real resolution", async () => {
+  it("serves read-only recovery scope, inactive override and exact Project path from real resolution", async () => {
     const f = await setup();
     const slot = await f.create();
     await f.retryChange(slot, "set", 0);
     await f.project({ retry: { maxRetries: 2 } });
     const read = async () => f.service.invoke(f.client, "settings.resolve", {
       target: { kind: "session", sessionId: slot.id }, keys: ["run.retry.maxRetries"],
-      renderer: { version: 1, controls: ["number"] },
+      renderer: { version: 1, controls: [] },
     }) as Promise<{ keys: Array<{ value: unknown; overridden: boolean; projectSetting?: { file: string; path: string }; presentation: { sessionOverridable: boolean; projectSettable: boolean; editable: boolean } }> }>;
     const masked = (await read()).keys[0]!;
     expect(masked).toMatchObject({ value: 2, overridden: true,
@@ -145,13 +145,13 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(active).toMatchObject({ value: 0, overridden: true });
     expect(active.projectSetting).toBeUndefined();
     await f.retryChange(slot, "unset");
-    expect((await read()).keys[0]).toMatchObject({ value: 1, overridden: false });
+    expect((await read()).keys).toEqual([]);
   });
 
-  it("serves target-specific editor capability, Global reset presence and no stopped-runtime setting row", async () => {
+  it("serves target-specific recovery capability, Global reset presence and no stopped-runtime setting row", async () => {
     const f = await setup();
     const read = (target: Record<string, string>) => f.service.invoke(f.client, "settings.resolve", {
-      target, keys: ["run.retry.maxRetries", "setup.sessionDir"], renderer: { version: 1, controls: ["number", "text"] },
+      target, keys: ["run.retry.maxRetries", "setup.sessionDir"], renderer: { version: 1, controls: ["text"] },
     }) as Promise<{ keys: Array<{ key: string; overridden: boolean; presentation: { editable: boolean } }> }>;
     const global = await read({ kind: "global" });
     expect(global.keys).toHaveLength(1);

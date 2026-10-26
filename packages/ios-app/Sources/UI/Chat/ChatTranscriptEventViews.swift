@@ -42,8 +42,8 @@ extension View {
 
 /// One visual language for transcript events that are not conversation turns.
 /// Detail-bearing events are buttons with Liquid Glass; informational events
-/// remain noninteractive and flat. Error notices use a rounded rectangle so
-/// multiline diagnostics do not read like an oversized capsule.
+/// remain noninteractive and flat. Provider errors keep their flat rounded
+/// surface and the same centered alignment as other transcript event pills.
 struct ChatNotificationView: View {
     let presentation: ChatNotificationPresentation
     @Environment(AppModel.self) private var model
@@ -80,7 +80,7 @@ struct ChatNotificationView: View {
                 action: detailAction
             )
             .allowsHitTesting(showsDetailAction)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: presentation.errorRun == nil ? .center : .leading)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
             .accessibilityIdentifier(presentation.errorRun.map { "chat-error-run-\($0.occurrences[0].id)" } ?? "")
             .contentTransition(.interpolate)
             // A runtime notification that stops showing progress is the one
@@ -162,13 +162,21 @@ struct ChatNotificationDetailSheet: View {
     let detailID: UUID
     @Environment(\.dismiss) private var dismiss
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if let run = presentation.errorRun {
+            ChatDetailSheet(title: run.sheetTitle, accent: presentation.tone.surfaceColor) {
+                ChatProviderErrorDetails(run: run).id(detailID)
+            }
+            .tronSettingsVisualTheme(accent: presentation.tone.surfaceColor)
+        } else {
+            ordinaryDetail
+        }
+    }
+
+    private var ordinaryDetail: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if let run = presentation.errorRun {
-                        ChatProviderErrorDetails(run: run).id(detailID)
-                    }
                     if let detail = presentation.detail {
                         Text(detail)
                             .font(TronTypography.bodySM)
@@ -193,7 +201,7 @@ struct ChatNotificationDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: presentation.errorRun?.sheetTitle ?? presentation.title, accent: presentation.tone.surfaceColor)
+                    TronSheetTitle(title: presentation.title, accent: presentation.tone.surfaceColor)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {

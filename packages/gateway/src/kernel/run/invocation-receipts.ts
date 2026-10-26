@@ -1,4 +1,5 @@
 import type { SessionEntry } from "../pi/coding-agent.js";
+import { SETTINGS_OUTCOME_MESSAGE } from "../settings/tool-contract.js";
 import type { ChatOrigin, InvocationLifecycle, JsonValue, ResourceInvocation } from "../../protocol/types.js";
 import { GatewayError } from "../../errors.js";
 import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "../../sessions/resource-invocation.js";
@@ -245,7 +246,7 @@ export function invocationReceipts(entries: readonly SessionEntry[], sessionId?:
       const target = entriesById.get(receipt.canonicalEntryId);
       // A Home wake binds the result message that triggered it, never a user message.
       const valid = receipt.source === "homeWake"
-        ? target?.type === "custom_message" && target.customType === HOME_TASK_RESULT_MESSAGE
+        ? target?.type === "custom_message" && (target.customType === HOME_TASK_RESULT_MESSAGE || target.customType === SETTINGS_OUTCOME_MESSAGE)
         : target?.type === "message" && target.message.role === "user";
       if (!valid) throw new Error("invocation receipt target is not the canonical message its source binds");
       if (receipt.parentEntryId !== undefined && entry.parentId !== receipt.parentEntryId) {

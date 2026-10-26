@@ -30,7 +30,23 @@ result and worker-state interfaces. `settings-types.ts` owns value validation, f
 ordered queue summaries, Pi-compatible tool-selection composition and neutral resolver inputs
 (store snapshots, outside marks, floor overrides, Git state and option/format sources). `settings-record.ts` owns append-only audit
 segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
-approvals, their admission bounds, settlement, expiry and untold outcomes.
+approvals (settings changes and registered approval actions), their admission bounds,
+settlement, expiry and untold outcomes; composition calls `settings-change.ts`'s `start()`
+to arm one timer for the earliest pending deadline and `onOutcome` nudges Home when an
+outcome settles. Known later deadlines are armed before expiry I/O, so a transient failure
+cannot disarm them and a persistently bad store is not retried immediately.
+Constructing an inspection-only owner starts no background work.
+Expiry shares each target's decision stripe. `dispose()` cancels/fences arming and joins
+accepted expiry work before composition releases the stores. Outcome selection does not
+consume requests; canonical custom-entry request IDs acknowledge delivery within an
+explicit requester-ID scope. Home supplies its chapter ledger and fitting-prefix predicate;
+ordinary runtimes supply their singleton identity. Admission reserves at most 400 outcome
+slots (pending and settled together), refusing new requests rather than evicting old ones. Approval
+actions claim execution durably before effects. The first awaited `start()` recovers
+pre-existing claims as uncertain failures without replay; concurrent/repeated start
+and dispose join that recovery through the existing arm-work owner.
+Ordinary selection, expiry and arming exclude execution claims, so delivery does not
+join this owner's live action effects.
 `scope-resolution.ts` owns binding admission from declared Session/Project permissions,
 canonical targets, the public/storage scope mapping and the canonical sorted-qualifier
 instance identity used by resolution badges and outside-change observation.
@@ -46,7 +62,7 @@ validation; admin owns the migration transaction, backups and publication.
 ## Contract
 
 `SettingsToolAccess` resolves and changes the current session settings and drains
-its pending outcomes. Admin loads stores, supplies runtime option/format sources
+its pending outcomes as one typed `SettingsOutcomeMessage` (`tool-contract.ts`). Admin loads stores, supplies runtime option/format sources
 and applies concrete store bindings; the kernel owns read/change policy and
 transaction order. The session runtime
 supplies its own identity and appliers. Audit records
@@ -65,6 +81,8 @@ are not settings truth, and pending approvals never apply themselves.
 ## Signals
 
 Callers own persistence failure diagnostics; these stores propagate write failures.
+`TRON_SETTINGS_EXPIRY_FAILED` means a background expiry attempt failed; retained requests
+are revisited at the next known deadline or foreground admission, not in a tight retry loop.
 
 ## Verify
 

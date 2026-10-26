@@ -4,7 +4,7 @@ import { createQueueSummarizer } from "../src/episodic/episodic-compactor.js";
 import { ModelQueueOwner } from "../src/providers/model-queue.js";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
-import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
+import { SettingsChangePath, type ExpiryScheduler } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
@@ -30,6 +30,8 @@ export function settingsDependencies(input: {
   registry?: { setSettings(model: SettingsModel, changes: SettingsChangePath): void };
   /** The change path's clock; a fixture advances it to test expiry. */
   now?: () => Date;
+  /** The pending-approval deadline scheduler; a fixture fires it after advancing the clock. */
+  schedule?: ExpiryScheduler;
   /** Option catalog for `catalog.tools` keys, wired as gateway-main wires it. */
   toolCatalog?: ConstructorParameters<typeof SettingsStoreAdapter>[0]["toolCatalog"];
 }): { settingsModel: SettingsModel<SettingsStoreAdapter>; settingsChanges: SettingsChangePath } {
@@ -44,7 +46,7 @@ export function settingsDependencies(input: {
         async (inspection) => { await input.sessions?.commitProjectReload(inspection.cwd); });
     },
     ...(input.knowledge ? { undoSubject: (entry, context) => new HomeProfileItems(() => input.knowledge?.()).undo(settingsChanges, entry, context) } : {}),
-  }, input.now);
+  }, input.now, input.schedule);
   input.registry?.setSettings(settingsModel, settingsChanges);
   return { settingsModel, settingsChanges };
 }

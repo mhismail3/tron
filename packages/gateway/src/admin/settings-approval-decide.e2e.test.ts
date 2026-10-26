@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type AssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
-import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { disposeFixtures, fixture as homeTaskFixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
@@ -38,8 +38,7 @@ const textOf = (message: { content: unknown }) => typeof message.content === "st
 
 async function gateway() {
   const f = await homeTaskFixture();
-  const { settingsModel, settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway,
-    sessions: f.registry, home: () => homeOwnerOf(f.registry), registry: f.registry });
+  const { settingsModel, settingsChanges } = f.settings;
   await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
   const service = new GatewayService({ display: displayOwnerOf(f.registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },

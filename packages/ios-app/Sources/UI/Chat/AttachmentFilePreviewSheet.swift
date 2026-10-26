@@ -224,11 +224,14 @@ struct AttachmentFilePreviewSheet: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var phase: Phase = .loading
     @PresentationState private var loadGeneration = 0
     @PresentationState private var loadedSourceID: String?
     @PresentationState private var swiftApp: SwiftAppLaunch?
+
+    private var resolvedAccent: Color { TronSheetTint.resolve(nil, theme: settingsTheme) }
 
     private enum Phase {
         case loading
@@ -265,9 +268,9 @@ struct AttachmentFilePreviewSheet: View {
     private var content: some View {
         switch phase {
         case .loading:
-            TronSheetLoadingState(label: "Preparing file preview…", accent: .tronBlue)
+            TronSheetLoadingState(label: "Preparing file preview…", accent: resolvedAccent)
         case .unavailable(let message):
-            TronInfoCard(icon: "doc.text.magnifyingglass", text: fallbackText ?? message, accent: .tronBlue)
+            TronInfoCard(icon: "doc.text.magnifyingglass", text: fallbackText ?? message, accent: resolvedAccent)
                 .padding(TronSpacing.xlarge)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         case .prepared(let preview):
@@ -326,7 +329,7 @@ struct AttachmentFilePreviewSheet: View {
             TronInfoCard(
                 icon: "text.badge.ellipsis",
                 text: "Preview shows the first \(AttachmentFilePreviewPolicy.maximumTextBytes.formatted()) bytes.",
-                accent: .tronBlue
+                accent: resolvedAccent
             )
         }
     }

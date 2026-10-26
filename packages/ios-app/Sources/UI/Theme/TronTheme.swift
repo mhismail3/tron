@@ -1,6 +1,22 @@
 import SwiftUI
 import UIKit
 
+extension ThemeColor {
+    var ink: Color { Color(lightHex: lightHex, darkHex: darkHex) }
+
+    /// Burgundy glass uses a deeper wine pigment independent of foreground ink.
+    var surfaceTint: Color {
+        self == .burgundy ? Color(lightHex: lightHex, darkHex: "#5B1735") : ink
+    }
+}
+
+extension Color {
+    /// Reading the observable owner registers the consuming SwiftUI body without
+    /// recreating the chat, navigation stack or composer when identity changes.
+    @MainActor static var tronPrimary: Color { AppearanceSettings.shared.themeColor.ink }
+    @MainActor static var tronPrimarySurface: Color { AppearanceSettings.shared.themeColor.surfaceTint }
+}
+
 // MARK: - Preserved Tron palette
 
 extension Color {

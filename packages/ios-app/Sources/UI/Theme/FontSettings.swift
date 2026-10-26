@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum FontCategory: String, CaseIterable, Sendable {
     case sans, serif, mono
@@ -167,6 +168,26 @@ enum AppearanceMode: String, CaseIterable, Identifiable, Sendable {
 @Observable
 final class AppearanceSettings {
     static let shared = AppearanceSettings()
+    private(set) var isApplyingAppIcon = false
+
+    /// Only an explicit selection changes the system icon. Restores and color-mode
+    /// changes stay silent; iOS owns icon appearance variants and its change alert.
+    func selectTheme(_ theme: ThemeColor) async throws {
+        guard !isApplyingAppIcon else { return }
+        themeColor = theme
+        let application = UIApplication.shared
+        guard application.supportsAlternateIcons else { throw AppIconError.unsupported }
+        let icons = Bundle.main.object(forInfoDictionaryKey: "CFBundleIcons") as? [String: Any]
+        let primary = icons?["CFBundlePrimaryIcon"] as? [String: Any]
+        let name: String? = primary?["CFBundleIconName"] as? String == theme.appIconName ? nil : theme.appIconName
+        guard application.alternateIconName != name else { return }
+        isApplyingAppIcon = true
+        defer { isApplyingAppIcon = false }
+        try await application.setAlternateIconName(name)
+    }
+
+    private enum AppIconError: Error { case unsupported }
+
     var themeColor: ThemeColor {
         didSet { UserDefaults.standard.set(themeColor.rawValue, forKey: "themeColor") }
     }

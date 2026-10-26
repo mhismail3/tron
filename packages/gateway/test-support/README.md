@@ -12,7 +12,11 @@ fixtures. Its manifest is `../test-support.module.json` (it also owns fixtures u
 `wait-for.ts`, `network-isolation.ts`, `fixture-process-owner.mjs`,
 `runtime-registry-fixture.ts`, `gateway-lock-harness.ts`, `gateway-registry.ts`, `scenario-lock.ts`,
 `tron-store-*.ts`, the Tron-home environment guard and preflight, and the Home task
-and crash fixtures.
+and crash fixtures. `settings-action-crash-child.ts` runs the real approval engine
+against a file-backed action, exposing the effect/before-settlement cut so its parent
+can kill and reopen it to prove interrupted actions are not replayed. Its lifecycle
+mode holds a real pending-read return to prove concurrent start and disposal join
+one accepted recovery through the existing work owner.
 
 ## Contract
 
@@ -49,6 +53,13 @@ and crash fixtures.
 - Home task fixtures await an offline model refresh after provider registration,
   before returning either the Gateway-wide or a session runtime. Early refusal tests
   can otherwise delete their root while registration still holds its catalog lock.
+- The task fixture Root constructs one actual settings model/change owner per Registry,
+  supplies it directly to Home and native installation, and starts expiry explicitly.
+  `f.settings` reads the current Root-created actual owners, not Registry readback;
+  cold restart constructs and exposes the successor. Registry disposal joins expiry before stores.
+- `settings-outcome-crash-child.ts` owns the SDK session only after the parent Registry
+  is disposed. Its before/after canonical-append cuts use process loss, not graceful
+  disposal, to test native outcome recovery; the parent stops and joins that child.
 - MCP fixtures join the direct-tool registration boundary before scripting a call
   (runtime creation does not mean HTTP discovery finished). Git cleanup proof is
   `ENOENT` plus the branch decision, never an arbitrary filesystem error.

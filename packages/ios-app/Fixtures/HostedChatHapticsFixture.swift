@@ -60,6 +60,8 @@ struct HostedChatHapticsFixture: View {
         }
         .environment(model)
         .tronPresentation()
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-error-style-preview")
+            ? (ProcessInfo.processInfo.arguments.contains("-error-preview-dark") ? .dark : .light) : nil)
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: model.enteredBackground()
