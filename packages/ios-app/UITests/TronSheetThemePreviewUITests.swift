@@ -125,11 +125,12 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         close(app); close(app)
         for _ in 0..<3 {
             XCTAssertFalse(app.staticTexts["Advanced"].exists)
-            XCTAssertFalse(app.staticTexts["Thinking budgets"].exists)
-            XCTAssertFalse(app.staticTexts["Offered models"].exists)
+            XCTAssertTrue(app.staticTexts["Thinking budgets"].exists, "Model controls share the consolidated Agent Behavior sheet")
+            XCTAssertTrue(app.staticTexts["Offered models"].exists, "Model controls share the consolidated Agent Behavior sheet")
             XCTAssertFalse(app.staticTexts["Mac Terminal key"].exists)
             app.swipeUp()
         }
+        for _ in 0..<7 where !app.staticTexts["Retries"].isHittable { app.swipeUp() }
         XCTAssertTrue(app.staticTexts["Retries"].isHittable)
         close(app)
         open(app, "settings-link-Agent Behavior")

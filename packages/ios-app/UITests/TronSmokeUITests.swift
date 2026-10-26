@@ -2940,10 +2940,15 @@ final class TronSmokeUITests: XCTestCase {
     /// Opens one section's sheet from Settings.
     @MainActor
     private func openRendererSection(_ app: XCUIApplication, _ id: String, link: String? = nil) {
-        let row = ["model", "workers", "context", "approvals", "run"].contains(id)
-            ? "settings-link-Agent Behavior" : "settings-section-\(link ?? id)-open"
+        let consolidated = ["model", "workers", "context", "approvals", "run"].contains(id)
+        let row = consolidated ? "settings-link-Agent Behavior" : "settings-section-\(link ?? id)-open"
         tapScrolling(app.buttons[row], in: app)
-        XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(id)-detail"].waitForExistence(timeout: 5), app.debugDescription)
+        let detail = app.descendants(matching: .any)["settings-section-\(id)-detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5), app.debugDescription)
+        if consolidated {
+            let firstRow = detail.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-' AND NOT identifier ENDSWITH '-reset'")).firstMatch
+            reveal(firstRow, in: app)
+        }
     }
 
     /// Dismisses the frontmost sheet by its own Done; covered sheets' Done
