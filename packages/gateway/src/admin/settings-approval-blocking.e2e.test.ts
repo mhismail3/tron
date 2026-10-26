@@ -177,6 +177,21 @@ describe("blocking settings approval", () => {
     } finally { await f.home.abort("agent"); await f.prompting; }
   });
 
+  it("bidi and zero-width format controls are visible escapes in the exact diff", async () => {
+    const value = "visible\u061c\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\ufeffend";
+    const f = await pendingApproval({}, [
+      { key: "context.compaction.instructions", layer: "session", op: "set", value },
+    ], true);
+    try {
+      const context = f.interaction.form!.questions[0]!.context!;
+      expect(context).toContain("visible\\u061c\\u200b\\u200c\\u200d\\u200e\\u200f\\u202a\\u202b\\u202c\\u202d\\u202e\\u2066\\u2067\\u2068\\u2069\\ufeffend");
+      f.answer("deny");
+      await f.prompting;
+      await waitFor(() => !f.home.isBusy, "format control diff denial settles");
+      await saveCase("format-control-diff", { interaction: f.interaction });
+    } finally { await f.home.abort("agent"); await f.prompting; }
+  });
+
   it("a mixed valid/refused dry run fails the whole bundle just like its real request", async () => {
     const f = await fixture();
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
@@ -244,6 +259,7 @@ describe("blocking settings approval", () => {
       const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
       expect(history.some(entry => entry.status === "approved")).toBe(false);
       expect(history.some(entry => entry.status === "superseded")).toBe(true);
+      expect(history.find(entry => entry.status === "superseded")?.failure).toContain("decision could not be admitted");
       await saveCase("removed-worker", { result, history });
     } finally { await f.home.abort("agent"); await f.prompting; }
   });

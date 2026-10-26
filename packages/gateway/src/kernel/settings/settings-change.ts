@@ -508,13 +508,15 @@ export class SettingsChangePath {
 
   /** Stop or host retirement invalidates only this requester's pending diff.
    * Superseded is the existing terminal state for a diff that can no longer be decided. */
-  async cancelApproval(requestId: string, requesterSessionId: string): Promise<void> {
+  async cancelApproval(requestId: string, requesterSessionId: string, cause: "turn-ended" | "decision-failed"): Promise<void> {
     const found = await this.approvals.get(requestId);
     if (!found || found.actor.sessionId !== requesterSessionId) throw new GatewayError("conflict", "This approval belongs to another requester");
     await this.mutexFor(found.target).run(async () => {
       const request = await this.approvals.get(requestId);
       if (!request || request.status !== "pending") return;
-      const failure = "Approval cancelled because its requesting turn stopped or closed; nothing changed";
+      const failure = cause === "decision-failed"
+        ? "Approval cancelled because its decision could not be admitted; nothing changed"
+        : "Approval cancelled because its requesting turn stopped or closed; nothing changed";
       const settled = await this.approvals.settle(requestId, "superseded", this.now(), failure);
       await this.record.append(request.changes.map(change => ({
         ...this.pendingEntry(request, change, { actor: request.actor }), changeId: randomUUID(), at: this.now().toISOString(),
