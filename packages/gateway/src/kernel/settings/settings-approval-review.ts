@@ -98,8 +98,11 @@ function reviewText(schema: SettingsSchema, request: ApprovalRequest): string {
   lines.push(`Expires: ${request.expiresAt}`, "Approve applies only this diff. Deny changes nothing.");
   // Escape rather than strip author-supplied controls: host sanitization must
   // never consume a terminal-control payload and silently hide the bound diff.
-  const text = lines.join("\n").replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g,
-    character => "\\u" + character.charCodeAt(0).toString(16).padStart(4, "0"));
+  const text = lines.join("\n").replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu,
+    // Keep structural LF only. Astral characters emit both JSON surrogate
+    // escapes, retaining the exact value instead of dropping a low surrogate.
+    character => character === "\n" ? character : character.split("").map(unit =>
+      "\\u" + unit.charCodeAt(0).toString(16).padStart(4, "0")).join(""));
   if (Buffer.byteLength(text, "utf8") > 32 * 1_024) {
     throw new GatewayError("invalid_request", "Settings approval diff is too large to review (maximum 32 KiB); request fewer or smaller changes");
   }
