@@ -103,19 +103,7 @@ describe("gateway/automations owned-run lock", () => {
 
     gateway.script([
       async () => {
-        // Keep the first turn live until the real socket observes its operation:
-        // otherwise rebaseline coalescing can erase this shape before delivery.
-        const slot = await gateway.registry.acquire(sessionId);
-        const releaseWrites = phone.holdWrites();
-        try {
-          slot.publishSnapshot();
-          slot.publishSnapshot();
-          slot.publishSnapshot();
-        } finally { releaseWrites(); }
-        await waitFor(() => phone.events.some(event => event.topic === "session.rebaseline"
-          && event.sessionId === sessionId
-          && (event.payload as { snapshot?: { operation?: { lifecycle?: string } } }).snapshot?.operation?.lifecycle !== undefined),
-        "the first automation-chat operation rebaseline");
+        await gateway.observeLiveOperation(phone, sessionId);
         return fauxAssistantMessage("Ready for scheduled checks.");
       },
       () => fauxAssistantMessage([fauxToolCall("read", { path: "notes.txt" }, { id: "lock-automation-read" })], { stopReason: "toolUse" }),

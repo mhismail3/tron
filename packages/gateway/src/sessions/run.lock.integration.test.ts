@@ -98,11 +98,14 @@ describe("gateway/run kernel locks", () => {
   it("prompt/stream: one prompt streams thinking, text and a tool round trip", async () => {
     const session = await openSession("run-prompt-stream");
     session.gateway.script([
-      () => fauxAssistantMessage([
-        fauxThinking("Reading the lock notes."),
-        { type: "text", text: "Reading notes." },
-        fauxToolCall("read", { path: "notes.txt" }, { id: "lock-read" }),
-      ], { stopReason: "toolUse" }),
+      async () => {
+        await session.gateway.observeLiveOperation(session.client, session.sessionId);
+        return fauxAssistantMessage([
+          fauxThinking("Reading the lock notes."),
+          { type: "text", text: "Reading notes." },
+          fauxToolCall("read", { path: "notes.txt" }, { id: "lock-read" }),
+        ], { stopReason: "toolUse" });
+      },
       () => fauxAssistantMessage("The notes say: lock notes."),
     ]);
     const admitted = await session.prompt("read the notes");
@@ -119,7 +122,7 @@ describe("gateway/run kernel locks", () => {
     const session = await openSession("run-steer");
     const held = gate();
     session.gateway.script([
-      async () => { held.reach(); await held.opened; return fauxAssistantMessage([fauxToolCall("read", { path: "notes.txt" }, { id: "lock-steer-read" })], { stopReason: "toolUse" }); },
+      async () => { await session.gateway.observeLiveOperation(session.client, session.sessionId); held.reach(); await held.opened; return fauxAssistantMessage([fauxToolCall("read", { path: "notes.txt" }, { id: "lock-steer-read" })], { stopReason: "toolUse" }); },
       () => fauxAssistantMessage("Steered work acknowledged."),
       () => fauxAssistantMessage("Follow-up work acknowledged."),
     ]);
@@ -145,6 +148,7 @@ describe("gateway/run kernel locks", () => {
     const held = gate();
     session.gateway.script([
       async (_context, options) => {
+        await session.gateway.observeLiveOperation(session.client, session.sessionId);
         held.reach();
         await new Promise<void>((resolve) => {
           const signal = options?.signal;
@@ -172,7 +176,10 @@ describe("gateway/run kernel locks", () => {
     const session = await openSession("run-compaction");
     const long = "lock context ".repeat(80);
     session.gateway.script([
-      () => fauxAssistantMessage(`First answer. ${long}`),
+      async () => {
+        await session.gateway.observeLiveOperation(session.client, session.sessionId);
+        return fauxAssistantMessage(`First answer. ${long}`);
+      },
       () => fauxAssistantMessage(`Second answer. ${long}`),
       // A manual compaction asks for the summary of the cut history, then for the
       // prefix of the split turn the recent tail keeps.
@@ -208,7 +215,10 @@ describe("gateway/run kernel locks", () => {
       }
     ` }] });
     session.gateway.script([
-      () => fauxAssistantMessage([fauxToolCall("lock_select", {}, { id: "lock-select" })], { stopReason: "toolUse" }),
+      async () => {
+        await session.gateway.observeLiveOperation(session.client, session.sessionId);
+        return fauxAssistantMessage([fauxToolCall("lock_select", {}, { id: "lock-select" })], { stopReason: "toolUse" });
+      },
       () => fauxAssistantMessage("Keeping the lock path."),
     ]);
     const running = session.prompt("ask me which path");

@@ -145,6 +145,8 @@ export interface LockGateway {
   commandId(): string;
   /** Wait until the session's run, queue and maintenance have settled. */
   settled(sessionId: string): Promise<void>;
+  /** Observe this live operation through the real socket before releasing its provider. */
+  observeLiveOperation(client: LockClient, sessionId: string): Promise<void>;
   canonical(sessionId: string): Promise<TraceValue[]>;
   /** A normalized JSON file under the Gateway's roots, or `null` if absent. */
   file(path: string): Promise<TraceValue>;
@@ -425,6 +427,23 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       // operation and not busy" after an admitted request is a settled run, never
       // a run that has not started yet.
       await waitFor(() => !slot.isBusy && !slot.snapshot().operation, `session ${sessionId} to settle`);
+    },
+    async observeLiveOperation(client, sessionId) {
+      const slot = await registry.acquire(sessionId);
+      const operationId = slot.snapshot().operation?.id;
+      if (!operationId) throw new Error("The provider must still own a live operation");
+      const start = client.events.length;
+      const releaseWrites = client.holdWrites();
+      try {
+        slot.publishSnapshot();
+        slot.publishSnapshot();
+        slot.publishSnapshot();
+      } finally { releaseWrites(); }
+      await waitFor(() => client.events.slice(start).some(event => {
+        const snapshot = (event.payload as { snapshot?: { operation?: { id?: string; lifecycle?: string } } }).snapshot;
+        return event.topic === "session.rebaseline" && event.sessionId === sessionId
+          && snapshot?.operation?.id === operationId && snapshot.operation.lifecycle !== undefined;
+      }), `session ${sessionId}'s live operation rebaseline`);
     },
     async canonical(sessionId) {
       const slot = await registry.acquire(sessionId);

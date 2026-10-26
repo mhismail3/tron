@@ -24,7 +24,7 @@ contract](docs/settings-contract.md), [Pi SDK maintenance](docs/pi-sdk-maintenan
 [observability](docs/observability.md), [scenario locks](docs/scenario-locks.md).
 Each heading below keeps its inbound anchor and links to the current owner.
 
-## Protocol v7 chat semantics
+## Chat semantics
 
 Invocation receipts, terminal settlement, Stop and transcript order:
 [gateway/run](src/sessions/README.md#contract). Protocol version steps:

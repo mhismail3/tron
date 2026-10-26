@@ -1173,7 +1173,9 @@
         "write",
         "lock_select",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -1186,7 +1188,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
       "messages": [
         {
           "role": "user",
@@ -1202,7 +1204,9 @@
         "write",
         "lock_select",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -1215,44 +1219,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
-      "messages": [
-        {
-          "role": "user",
-          "text": "finish the quiet run"
-        },
-        {
-          "role": "assistant",
-          "text": "Finished the quiet run."
-        },
-        {
-          "role": "user",
-          "text": "ask me while I am away"
-        }
-      ]
-    },
-    {
-      "tools": [
-        "read",
-        "bash",
-        "edit",
-        "write",
-        "lock_select",
-        "jev",
-        "settings",
-        "ask_user",
-        "display",
-        "swift_app",
-        "computer",
-        "notify"
-      ],
-      "promptSections": [
-        "tools",
-        "rules",
-        "docs",
-        "cwd"
-      ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
       "messages": [
         {
           "role": "user",
@@ -1265,18 +1232,6 @@
         {
           "role": "user",
           "text": "ask me while I am away"
-        },
-        {
-          "role": "assistant",
-          "text": "",
-          "toolCalls": [
-            "lock_select"
-          ]
-        },
-        {
-          "role": "toolResult",
-          "text": "chosen: Keep",
-          "toolName": "lock_select"
         }
       ]
     },
@@ -1288,7 +1243,9 @@
         "write",
         "lock_select",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -1301,7 +1258,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
       "messages": [
         {
           "role": "user",
@@ -1326,14 +1283,6 @@
           "role": "toolResult",
           "text": "chosen: Keep",
           "toolName": "lock_select"
-        },
-        {
-          "role": "assistant",
-          "text": "Keeping the hidden path."
-        },
-        {
-          "role": "user",
-          "text": "ask me while I am watching"
         }
       ]
     },
@@ -1345,7 +1294,9 @@
         "write",
         "lock_select",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -1358,7 +1309,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
       "messages": [
         {
           "role": "user",
@@ -1391,6 +1342,65 @@
         {
           "role": "user",
           "text": "ask me while I am watching"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
+      "messages": [
+        {
+          "role": "user",
+          "text": "finish the quiet run"
+        },
+        {
+          "role": "assistant",
+          "text": "Finished the quiet run."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am away"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_select"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "chosen: Keep",
+          "toolName": "lock_select"
+        },
+        {
+          "role": "assistant",
+          "text": "Keeping the hidden path."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am watching"
         },
         {
           "role": "assistant",
@@ -1414,7 +1424,9 @@
         "write",
         "lock_select",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -1427,7 +1439,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
       "messages": [
         {
           "role": "user",
@@ -1491,7 +1503,9 @@
         "write",
         "lock_select",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -1504,7 +1518,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
       "messages": [
         {
           "role": "user",
@@ -1576,7 +1590,9 @@
         "write",
         "lock_select",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -1591,7 +1607,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:e25ea82e53765128b29e61821c94f05cec53ef08f7a6a8f2d8a65aca3a1588cc",
+      "promptHash": "sha256:75aef444bfdd901f1239f48d40e7cf8c9795bbd3e3f4f5d5282bb0ea1c7f824c",
       "messages": [
         {
           "role": "user",
@@ -1607,7 +1623,9 @@
         "write",
         "lock_select",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -1622,7 +1640,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:e25ea82e53765128b29e61821c94f05cec53ef08f7a6a8f2d8a65aca3a1588cc",
+      "promptHash": "sha256:75aef444bfdd901f1239f48d40e7cf8c9795bbd3e3f4f5d5282bb0ea1c7f824c",
       "messages": [
         {
           "role": "user",

@@ -106,7 +106,8 @@
                 "session_read",
                 "knowledge",
                 "read_file",
-                "settings"
+                "settings",
+                "projects"
               ]
             }
           },
@@ -178,7 +179,8 @@
                 "session_read",
                 "knowledge",
                 "read_file",
-                "settings"
+                "settings",
+                "projects"
               ]
             }
           },
@@ -265,7 +267,8 @@
                 "session_read",
                 "knowledge",
                 "read_file",
-                "settings"
+                "settings",
+                "projects"
               ]
             }
           },
@@ -338,8 +341,8 @@
             "cwd": "<cwd>\n<tmp>/tron/gateway/home/workspace\n</cwd>",
             "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: <pkg:@earendil-works/pi-coding-agent>/README.md\n- Additional docs: <pkg:@earendil-works/pi-coding-agent>/docs\n- Examples: <pkg:@earendil-works/pi-coding-agent>/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
             "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
-            "rules": "<rules>\n- Use ask_user only when the user's answer is required to continue; do not use it for ordinary conversational questions.\n- Provide two to four concrete options per question and keep the form to four questions or fewer.\n- Put any command, URL, path, ID or other text the user may need to copy in a normal assistant message before asking (or in the question's context as a fenced code block), not only in the question sentence.\n- Proactively use display for screenshots, UI/design previews, comparisons, charts, diagrams, or image results when seeing them helps the user understand or judge the result; do not wait to be asked. Prefer presentation.surface=inline for bounded image previews. Skip decorative or redundant images.\n- Use actual result artifacts where available, crop to the useful area without hiding relevant context, and label mockups or simulator captures honestly. A still image is not proof of animation, interaction, or device validation.\n- Use display for document, media, or webpage content when it materially improves the response.\n- Always provide concise alt text and never include secrets or credential-bearing URLs.\n- Live browser and native window views default to floating and expand into a sheet. Other content defaults to a sheet; use inline for bounded transcript content and floating for content worth keeping visible while chatting.\n- Write generated HTML or media to a session file or an internal workspace files/ document before calling display; do not pass inline bytes or base64.\n- For live browser viewing, use source.kind=browser_live with the opaque viewId and generation returned by agent_browser get cdp-url. Never invent a handle, supply a browser endpoint, or launch a browser from a historical display.\n- For a Mac window use source.kind=native_live with the exact viewId/generation from native_capture view. Capture runs only while viewed; an ended reference cannot restart or select another window.\n- Use settings to read or change model, context, tools, permissions and run settings; never edit settings.json, .pi/ or trust files directly.\n- Give every change a reason written for the maintainer. A pending change is not applied until the maintainer approves it.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
-            "tools": "<tools>\n- ask_user: Ask the user for a bounded set of choices when a decision is required.\n- display: Proactively display useful visual results in Tron chat; prefer inline image previews when they help the user understand or judge the result.\n- settings: Change settings with the settings tool, never by editing settings files.\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>"
+            "rules": "<rules>\n- Use ask_user only when the user's answer is required to continue; do not use it for ordinary conversational questions.\n- Provide two to four concrete options per question and keep the form to four questions or fewer.\n- Put any command, URL, path, ID or other text the user may need to copy in a normal assistant message before asking (or in the question's context as a fenced code block), not only in the question sentence.\n- Proactively use display for screenshots, UI/design previews, comparisons, charts, diagrams, or image results when seeing them helps the user understand or judge the result; do not wait to be asked. Prefer presentation.surface=inline for bounded image previews. Skip decorative or redundant images.\n- Use actual result artifacts where available, crop to the useful area without hiding relevant context, and label mockups or simulator captures honestly. A still image is not proof of animation, interaction, or device validation.\n- Use display for document, media, or webpage content when it materially improves the response.\n- Always provide concise alt text and never include secrets or credential-bearing URLs.\n- Live browser and native window views default to floating and expand into a sheet. Other content defaults to a sheet; use inline for bounded transcript content and floating for content worth keeping visible while chatting.\n- Write generated HTML or media to a session file or an internal workspace files/ document before calling display; do not pass inline bytes or base64.\n- For live browser viewing, use source.kind=browser_live with the opaque viewId and generation returned by agent_browser get cdp-url. Never invent a handle, supply a browser endpoint, or launch a browser from a historical display.\n- For a Mac window use source.kind=native_live with the exact viewId/generation from native_capture view. Capture runs only while viewed; an ended reference cannot restart or select another window.\n- Use settings to read or change model, context, tools, permissions and run settings; never edit settings.json, .pi/ or trust files directly.\n- Give every change a reason written for the maintainer. A pending change is not applied until the maintainer approves it.\n- When a change needs the maintainer's approval, use settings request; the chat shows it to him. Never ask him to open Settings.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+            "tools": "<tools>\n- ask_user: Ask the user for a bounded set of choices when a decision is required.\n- display: Proactively display useful visual results in Tron chat; prefer inline image previews when they help the user understand or judge the result.\n- settings: Change settings with the settings tool, never by editing settings files.\n- projects: Use projects for project creation and maintainer-approved lifecycle changes; never write trust files.\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>"
           },
           "timestamp": "<timestamp>",
           "toolsAdded": [
@@ -808,7 +811,7 @@
               }
             },
             {
-              "description": "Change the learned profile of the maintainer: learn a durable preference, standing decision, delegation default or fact; refine an item's text or kind; supersede an item with a replacement; or retire an item with a reason. Every change is saved unconfirmed (inferred) until the maintainer confirms it, is shown in Changes where he can undo it, and applies from the next activation. Learn only what the maintainer stated durably.",
+              "description": "Read the structured profile index or an explicit core, home or scopes/<name> file. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit migrate/reorganize assign only labels with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
               "name": "profile",
               "parameters": {
                 "additionalProperties": false,
@@ -830,9 +833,63 @@
                       {
                         "const": "retire",
                         "type": "string"
+                      },
+                      {
+                        "const": "read",
+                        "type": "string"
+                      },
+                      {
+                        "const": "migrate",
+                        "type": "string"
+                      },
+                      {
+                        "const": "reorganize",
+                        "type": "string"
+                      },
+                      {
+                        "const": "retry",
+                        "type": "string"
                       }
                     ],
-                    "description": "learn a new item; refine an item's text or kind; supersede an item with a replacement; retire an item."
+                    "description": "read an explicit file or the metadata index; learn, refine, supersede or retire an item."
+                  },
+                  "assignments": {
+                    "description": "Explicit exact-revision destinations. migrate must include EVERY note, including inactive members; reorganize names only the selected notes. Labels only: text, authority and history stay unchanged.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "expectedRevision": {
+                          "maxLength": 80,
+                          "minLength": 16,
+                          "type": "string"
+                        },
+                        "file": {
+                          "pattern": "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$",
+                          "type": "string"
+                        },
+                        "id": "<id>"
+                      },
+                      "required": [
+                        "id",
+                        "expectedRevision",
+                        "file"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 500,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "commandId": {
+                    "description": "retry: the ORIGINAL operation command returned with retry_required; never a new operation identity.",
+                    "maxLength": 160,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "file": {
+                    "description": "Explicit partition; read with no file returns the index. New items default to core, not automatic insertion.",
+                    "pattern": "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$",
+                    "type": "string"
                   },
                   "id": "<id>",
                   "kind": {
@@ -855,6 +912,12 @@
                       }
                     ],
                     "description": "learn and supersede: the item's kind. refine: a new kind, when it changes."
+                  },
+                  "offset": {
+                    "description": "read: note offset within this explicit file.",
+                    "maximum": 10000,
+                    "minimum": 0,
+                    "type": "integer"
                   },
                   "reason": {
                     "description": "Why the change is made. Required for retire; recorded in the ledger.",
@@ -1241,21 +1304,22 @@
               }
             },
             {
-              "description": "Read (resolve) or change Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve waits for his tap (pending). Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
+              "description": "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve awaits his tap (pending). Request always creates a pending approval and returns immediately; chat shows the maintainer the request. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
               "name": "settings",
               "parameters": {
                 "additionalProperties": false,
                 "properties": {
                   "action": {
-                    "description": "resolve: read values and where each comes from. change: set or unset keys.",
+                    "description": "resolve: read values and where each comes from. change: set or unset keys at their normal tier. request: always ask the maintainer to approve, without waiting.",
                     "enum": [
                       "resolve",
-                      "change"
+                      "change",
+                      "request"
                     ],
                     "type": "string"
                   },
                   "changes": {
-                    "description": "change (required): the changes, applied together.",
+                    "description": "change/request (required): the changes, applied together.",
                     "items": {
                       "additionalProperties": false,
                       "properties": {
@@ -1316,7 +1380,7 @@
                     "type": "array"
                   },
                   "dryRun": {
-                    "description": "change: validate and return the tier without applying.",
+                    "description": "change/request: validate and return the tier without applying or creating a request.",
                     "type": "boolean"
                   },
                   "keys": {
@@ -1330,7 +1394,7 @@
                     "type": "array"
                   },
                   "reason": {
-                    "description": "change (required): why, for the maintainer.",
+                    "description": "change/request (required): why, for the maintainer.",
                     "maxLength": 2000,
                     "minLength": 1,
                     "type": "string"
@@ -1344,6 +1408,49 @@
                 },
                 "required": [
                   "action"
+                ],
+                "type": "object"
+              }
+            },
+            {
+              "description": "Manage direct-child projects in ~/Workspace. create exclusively creates a folder and git repository on main, then requests trust. trust, rename, archive and untrust request the maintainer's tap (24h expiry); never self-approve. Optional github creates a private repository and origin only after approval, without pushing. Existing paths, symlinks and worker/worktree/claim ownership are refused. Archive retains files in ~/Workspace/.archive. Failures may retain partial untrusted work: inspect before retrying.",
+              "name": "projects",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "create",
+                      "trust",
+                      "rename",
+                      "archive",
+                      "untrust"
+                    ],
+                    "type": "string"
+                  },
+                  "github": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "newName": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "reason": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action",
+                  "name",
+                  "reason"
                 ],
                 "type": "object"
               }

@@ -80,7 +80,8 @@ describe("gateway/session-catalog project-root lock", () => {
     const phone = await gateway.connect("phone");
     let systemPrompt = "";
     gateway.script([
-      (context) => {
+      async (context) => {
+        await gateway.observeLiveOperation(phone, sessionId);
         systemPrompt = getCurrentSystemPrompt(context.messages) ?? "";
         return fauxAssistantMessage([fauxToolCall("project_probe", {}, { id: "lock-project-probe" })], { stopReason: "toolUse" });
       },

@@ -1,8 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { disposeFixtures, fixture, TASK_VIRTUAL_MODEL_ID } from "../../../test-support/home-task-fixture.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 
 const evidence: unknown[] = [];
 afterEach(async () => { vi.restoreAllMocks(); await disposeFixtures(); });
@@ -14,15 +16,35 @@ afterAll(async () => {
 type Tools = { availableTools: { name: string }[] };
 
 it("refuses virtual explicit choices for a Home creation-profile runtime without settings services", async () => {
-  const f = await fixture();
-  const slot = await f.registry.create(f.cwd, "home");
-  expect(homeOwnerOf(f.registry).profileFor(slot.id, slot.cwd)).toBe("unnamed");
-  const before = slot.snapshot().model;
-  await expect(slot.setModel(f.model.provider, TASK_VIRTUAL_MODEL_ID)).rejects.toMatchObject({
-    code: "invalid_request", message: "Tron Home requires a fixed physical model; virtual models are not supported",
+  const base = await fixture();
+  // The shared task fixture composes Settings. This boundary explicitly omits
+  // that service in a separate real Registry and separate canonical store.
+  const registry = await createTestRegistry({
+    agentDir: base.agentDir, tronHome: join(base.root, "settings-free"), trust: base.trust,
+    machineId: "settings-free-profile", idleRuntimeMs: Infinity, gatewayModelRuntime: base.gateway,
+    broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    modelRuntimeFactory: async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: join(base.agentDir, "models.json"), refreshOnCreate: false });
+      runtime.registerNativeProvider(base.faux.provider);
+      await runtime.refresh({ allowNetwork: false });
+      return runtime;
+    },
   });
-  expect(slot.snapshot().model).toEqual(before);
-  evidence.push({ case: "creation-profile-model-constraint", before, after: slot.snapshot().model });
+  const f = { ...base, registry };
+  try {
+    await registry.initialize();
+    const slot = await f.registry.create(f.cwd, "home");
+    expect(homeOwnerOf(f.registry).profileFor(slot.id, slot.cwd)).toBe("unnamed");
+    const before = slot.snapshot().model;
+    await expect(slot.setModel(f.model.provider, TASK_VIRTUAL_MODEL_ID)).rejects.toMatchObject({
+      code: "invalid_request", message: "Tron Home requires a fixed physical model; virtual models are not supported",
+    });
+    expect(slot.snapshot().model).toEqual(before);
+    evidence.push({ case: "creation-profile-model-constraint", before, after: slot.snapshot().model });
+  } finally {
+    await registry.dispose();
+    await registry.administrativeWorkRegistry.waitUntilSettled();
+  }
 });
 
 

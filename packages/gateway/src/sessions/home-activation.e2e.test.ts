@@ -1285,12 +1285,12 @@ describe("Tron Home activations end to end", () => {
       await awaitsWithin(entered, "latched runtime profile before services");
       const owner = homeOwnerOf(f.registry) as unknown as {
         writeLocked: (record: HomeRecord) => Promise<void>;
-        options: { sessions: { replaceRuntimeForProfile: (id: string, commit: () => Promise<void>) => Promise<void> } };
+        options: { runtimes: { replaceRuntimeForProfile: (id: string, commit: () => Promise<void>) => Promise<void> } };
       };
       let transitionReached!: () => void;
       const changing = new Promise<void>(resolve => { transitionReached = resolve; });
-      const originalPort = owner.options.sessions.replaceRuntimeForProfile;
-      vi.spyOn(owner.options.sessions, "replaceRuntimeForProfile").mockImplementation((...args) => {
+      const originalPort = owner.options.runtimes.replaceRuntimeForProfile.bind(owner.options.runtimes);
+      vi.spyOn(owner.options.runtimes, "replaceRuntimeForProfile").mockImplementation((...args) => {
         const result = originalPort(...args); transitionReached(); return result;
       });
       // The unfixed disable bypasses Registry entirely for an unpublished

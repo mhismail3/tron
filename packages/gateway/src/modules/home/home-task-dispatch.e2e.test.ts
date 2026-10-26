@@ -360,9 +360,10 @@ describe("Home task bounded backlogs", () => {
       f.faux.setResponses([fauxAssistantMessage("Initial conversation")]);
       await first.prompt("First"); await waitFor(() => first.snapshot().configurationBlocker === null, "first chapter activation");
       const port = (owner as any).options.sessions;
+      const runtimes = (owner as any).options.runtimes;
       if (kind === "replacement") {
-        const present = port.sessionPresent.bind(port);
-        const missing = vi.spyOn(port, "sessionPresent").mockImplementation((id: string) => id === sessionId ? Promise.resolve(false) : present(id));
+        const present = runtimes.sessionPresent.bind(runtimes);
+        const missing = vi.spyOn(runtimes, "sessionPresent").mockImplementation((id: string) => id === sessionId ? Promise.resolve(false) : present(id));
         sessionId = (await owner.designate({ model: { provider: model.provider, id: model.id } })).sessionId;
         missing.mockRestore();
       } else {
@@ -2088,6 +2089,8 @@ describe("Home task production dispatch", () => {
 
   it("keeps ordinary chat capabilities and completion unchanged without delegate or report", async () => {
     const f = await fixture();
+    await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    const signalsBefore = [...f.signals];
     const ordinary = await f.registry.create(f.cwd);
     const requests: unknown[] = [];
     f.faux.setResponses([(context) => { requests.push(context); return fauxAssistantMessage("Ordinary reply"); }]);
@@ -2097,9 +2100,9 @@ describe("Home task production dispatch", () => {
     expect(requests).toHaveLength(1);
     expect(tools).not.toMatch(/"name":"(?:report|delegate)"/);
     expect(ordinary.canonicalSessionEntries().some((entry: any) => entry.customType?.startsWith("tron-home-task"))).toBe(false);
-    expect(f.signals).toEqual([]);
+    expect(f.signals).toEqual(signalsBefore);
     await waitFor(() => f.notifications.some(record => record.sessionId === ordinary.id), "ordinary terminal notification");
-    evidence.push({ case: "ordinary-negative-control", taskTools: false, taskSignals: 0, ordinaryNotification: true });
+    evidence.push({ case: "ordinary-negative-control", taskTools: false, taskSignals: f.signals.length - signalsBefore.length, ordinaryNotification: true });
   }, 20_000);
 
   // Live and exited-unreaped children are real processes. The fixture parent reaps its own child before it exits.

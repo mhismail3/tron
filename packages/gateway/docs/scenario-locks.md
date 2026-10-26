@@ -93,12 +93,14 @@ After open/sync it publishes an idle snapshot from the real runtime and requires
 ordinary event before admitting work. Its failed run holds the phone's real socket
 write through terminal retirement so the idle snapshot deterministically supersedes
 queued busy state as a rebaseline; both null-blocker wire paths are observed.
-The cold-load and automation locks keep their first provider step live while holding
-socket writes and publishing three snapshots of that actual runtime: the first write
-is held, and the second queued snapshot supersedes the first queued one. They release
-writes in `finally` and await the connection's live-operation rebaseline before the
-provider answers. This pins the operation shape through real outbound coalescing,
-without pruning it from normalization or relying on a fast turn's timing. The
+The prompt/stream, steer, abort, compaction, extension-UI, queue-control, project-root,
+cold-load and automation locks observe their live operation through
+`gateway.observeLiveOperation` before releasing the first provider response. The
+helper holds socket writes and publishes three snapshots of that actual runtime:
+the first write is held, and the second queued snapshot supersedes the first
+queued one. It releases writes in `finally` and waits for that exact operation id
+on a fresh rebaseline. This pins the operation shape through real outbound
+coalescing, without pruning it from normalization or relying on a fast turn's timing. The
 automation lock wires the production store, scheduler, executor and service (harness option
 `automations`) and records every command receipt's contents. The Home lock
 keeps Home's and the worker's provider requests as two ordered streams (they
@@ -197,7 +199,7 @@ These are follow-ups, not exemptions.
   `packages/protocol-fixtures` connection values);
 - the accepted hello frame's structure;
 - the refusal of a client one version too new (close 4006, `protocol_mismatch`);
-- for each of 21 methods, the structure of its request and of its response or
+- for each of 22 methods, the structure of its request and of its response or
   error.
 
 A renamed, removed, added or retyped field fails it; a wire change belongs to

@@ -255,13 +255,13 @@ async function homeStatus(f: Fixture): Promise<HomeStatus> {
 }
 
 const HOME_EXTENSIONS = [
-  "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify", "tron-settings",
+  "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify", "tron-projects", "tron-settings", "tron-web-research",
 ];
 /** The curated Home profile's executable tool set: the allowlist, sorted the way
  * the assertions read it. */
 const HOME_TOOLS = [
   "ask_user", "date", "delegate", "display", "knowledge", "memory_search", "notify",
-  "profile", "read_file", "session_read", "session_search", "settings", "task", "web_fetch", "web_search", "zoom",
+  "profile", "projects", "read_file", "session_read", "session_search", "settings", "task", "web_search", "zoom",
 ];
 
 describe("Tron Home designation", () => {

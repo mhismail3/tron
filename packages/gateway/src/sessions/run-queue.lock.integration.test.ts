@@ -72,7 +72,7 @@ describe("gateway/run queue lock", () => {
     let thirdReached!: () => void;
     const third = new Promise<void>((resolve) => { thirdReached = resolve; });
     gateway.script([
-      async () => { first.reach(); await first.opened; return fauxAssistantMessage("Held run settled."); },
+      async () => { await gateway.observeLiveOperation(phone, sessionId); first.reach(); await first.opened; return fauxAssistantMessage("Held run settled."); },
       () => fauxAssistantMessage("Third follow-up answered."),
       () => fauxAssistantMessage("First follow-up answered."),
       async () => { second.reach(); await second.opened; return fauxAssistantMessage("Second held run settled."); },

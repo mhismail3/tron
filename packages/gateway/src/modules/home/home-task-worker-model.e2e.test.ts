@@ -29,7 +29,7 @@ const queueOwners = (f: Awaited<ReturnType<typeof fixture>>) =>
   ({ registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway });
 
 function installSettings(f: Awaited<ReturnType<typeof fixture>>) {
-  return f.settings.settingsModel;
+  return f.settings.settingsModel.owner;
 }
 
 function textOf(message: { content: unknown }): string {
@@ -136,7 +136,9 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const { observed, homeContexts, refusals } = await delegateThroughHome(f, { taskId: "typed-not-prose", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "typed-not-prose");
     expect(refusals).toEqual([]);
-    expect(homeContexts.some(context => context.includes(mirrored))).toBe(true);
+    expect((await homeOwnerOf(f.registry).profileList()).items).toContainEqual(expect.objectContaining({ text: mirrored, status: "active" }));
+    expect(homeContexts.some(context => context.includes("## Learned profile"))).toBe(true);
+    expect(homeContexts.some(context => context.includes(mirrored))).toBe(false);
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
     briefEvidence.push({ scenario: "typed-queue-not-learned-prose", observed });
   });

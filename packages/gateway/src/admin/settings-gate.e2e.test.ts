@@ -947,14 +947,14 @@ describe("settings risk gate", () => {
     expect(told.outcomes).toEqual([]);
     steps.push({ step: "Home told", outcomes: declined });
 
-    // Quiet from a clean turn; notify after web_fetch in that turn.
+    // Quiet from a clean turn; notify after web_search in that turn.
     expect(f.settle((await f.run(home, "retries", [{ name: "settings", args: retries(4, 3) }])).results)).toMatchObject({ status: "applied", tier: "quiet" });
     const webTurn = await f.run(home, "read this page then raise retries", [
-      { name: "web_fetch", args: { url: "https://example.org/page" } },
+      { name: "web_search", args: { op: "read", url: "https://example.org/page" } },
       { name: "settings", args: retries(5, 4) },
     ]);
     expect(f.settle(webTurn.results)).toMatchObject({ status: "applied", tier: "notify" });
-    steps.push({ step: "Home quiet then notify after web_fetch", result: f.settle(webTurn.results) });
+    steps.push({ step: "Home quiet then notify after web_search", result: f.settle(webTurn.results) });
 
     // Only the maintainer's tap lowers a floor: Home's request is refused.
     const lowerFloor = { key: "permissions.floor", layer: "global", op: "set", value: "notify", qualifiers: { key: "permissions.projectTrust", direction: "widen" } };

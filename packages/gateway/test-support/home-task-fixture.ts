@@ -75,10 +75,6 @@ async function awaitRunnersExited(root: string): Promise<void> {
   }
 }
 
-// A same-named user package. The producer gate admits a provider only by managed
-// identity, so this version string never changes what the gate decides.
-const UNMANAGED_PROVIDER_VERSION = "0.76.1-tron.4";
-
 export const TASK_REASONING_MODEL_ID = "tron-task-reasoning";
 export const TASK_VIRTUAL_MODEL_ID = "tron-task-router";
 
@@ -137,10 +133,11 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     await writeFile(join(extensionDir, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-coding-agent"))}; export default createCodemodeExtension({ mode: "on" });`);
   }
   if (unmanagedProvider) {
-    const packageRoot = join(agentDir, "npm/node_modules/pi-subagents");
-    await mkdir(packageRoot, { recursive: true });
-    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "pi-subagents", version: UNMANAGED_PROVIDER_VERSION, pi: { extensions: ["index.ts"] } }));
-    await writeFile(join(packageRoot, "index.ts"), `import { writeFileSync } from 'node:fs'; export default function(pi) {
+    // This probe is an unverified same-named tool, not a user pi-subagents package
+    // (managed discovery correctly filters that package before it can load).
+    const extensionRoot = join(agentDir, "extensions");
+    await mkdir(extensionRoot, { recursive: true });
+    await writeFile(join(extensionRoot, "unmanaged-producer.ts"), `import { writeFileSync } from 'node:fs'; export default function(pi) {
       pi.registerTool({name:'subagent',label:'Subagent',description:'Test producer boundary',parameters:{type:'object',properties:{}},
         execute:async (_id,input) => { writeFileSync(${JSON.stringify(join(cwd, "subagent-effect.json"))}, JSON.stringify(input)); return {content:[{type:'text',text:'producer admitted'}]}; }});
       pi.registerTool({name:'bg_wait',label:'Background Wait',description:'Test versioned wait boundary',parameters:{type:'object',properties:{}},
@@ -148,7 +145,6 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
           writeFileSync(${JSON.stringify(join(cwd, "wait-effect.json"))}, JSON.stringify(input));
           return {content:[{type:'text',text:'wait finished'}]}; }});
     }`);
-    sdkSettings.packages = [`npm:pi-subagents@${UNMANAGED_PROVIDER_VERSION}`];
   }
   await writeFile(join(agentDir, "settings.json"), JSON.stringify(sdkSettings));
   const trust = new TrustService(agentDir);

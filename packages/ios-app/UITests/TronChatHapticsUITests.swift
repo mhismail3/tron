@@ -37,7 +37,7 @@ final class TronChatHapticsUITests: XCTestCase {
         XCTAssertTrue(cancel.waitForExistence(timeout: 20), app.debugDescription)
         cancel.tap()
         XCTAssertTrue(cancel.waitForNonExistence(timeout: 10), app.debugDescription)
-        let answered = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ask User")).firstMatch
+        let answered = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Ask user")).firstMatch
         XCTAssertTrue(answered.waitForExistence(timeout: 10), app.debugDescription)
         answered.tap()
         XCTAssertTrue(app.staticTexts["Cancelled — no answers submitted"].waitForExistence(timeout: 10), app.debugDescription)
@@ -112,7 +112,7 @@ final class TronChatHapticsUITests: XCTestCase {
         cancel.tap()
         XCTAssertTrue(cancel.waitForNonExistence(timeout: 10), app.debugDescription)
         assertHaptics(app, "none", "the restored question and its dismissal play nothing")
-        let tool = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ask User")).firstMatch
+        let tool = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Ask user")).firstMatch
         var expected: [String] = []
         for _ in 0..<2 {
             XCTAssertTrue(tool.waitForExistence(timeout: 10), app.debugDescription)
