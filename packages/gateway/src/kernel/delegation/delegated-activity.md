@@ -70,7 +70,10 @@ maps. `subagent-artifact-status.ts` owns bounded opened-file/directory/header pr
 `subagent-activity.ts` folds lifecycle, canonical facts/receipts and publications over those
 same maps. No native subagent artifact parser, run-control method, second index or callback adapter
 exists. Native branch/disposal boundaries call this owner's reset/retirement operations;
-late reads keep the original generation, disposed-frame and canonical identity fences.
+watched refresh checks generation and disposed-frame identity after its read. Admission
+retains bounded path/header/inode proofs; ambient discovery uses attribution and receipt-claim
+checks. Native alone writes SDK invocation rows; K5 reads their evidence through a readonly
+map and writes its activity projection through the actual Native resource operation.
 The bounded Gateway discovery scheduler offers each frame's actual K5 owner directly.
 Native process rows, exact process-to-child projection bindings, canonical append and
 physical SDK/work/publication resources retain their original identities and lifetimes.

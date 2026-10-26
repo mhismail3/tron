@@ -1,9 +1,4 @@
 import type { ExtensionArtifactDiscoveryOutcome } from "../../sessions/extension-artifact-discovery.js";
-function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefined, observedAt: string): string {
-  if (!["completed", "failed", "stopped", "rejected"].includes(state) || producerEndedAt === undefined) return observedAt;
-  const ended = Date.parse(producerEndedAt);
-  return Number.isFinite(ended) && ended <= Date.parse(observedAt) ? producerEndedAt : observedAt;
-}
 import { resolve } from "node:path";
 import type { ExtensionRunActivity, ExtensionRunChild } from "../../protocol/types.js";
 import { safeJson } from "../projection/projection.js";
@@ -13,6 +8,11 @@ import type { OwnedTurnOwner } from "./owned-turn-owner.js";
 import { detachedWorkflowChildKeys, isEmbeddedLifecycleArtifact, preserveEmbeddedLifecycleMarker, OversizedExtensionArtifactError, ForeignExtensionArtifactSessionError, extensionArtifactReadFailureReason } from "./subagent-artifact-status.js";
 import { type CanonicalExtensionRunFact, extensionActivityWatchRequired, upsertExtensionActivity, trimExtensionActivities, canonicalExtensionRunFacts, appendExtensionActivityReceipt, publishExtensionActivity } from "./subagent-activity.js";
 
+function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefined, observedAt: string): string {
+  if (!["completed", "failed", "stopped", "rejected"].includes(state) || producerEndedAt === undefined) return observedAt;
+  const ended = Date.parse(producerEndedAt);
+  return Number.isFinite(ended) && ended <= Date.parse(observedAt) ? producerEndedAt : observedAt;
+}
 
 export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
   asyncDir: string,
@@ -426,8 +426,7 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
     turns.extensionActivities.delete(toolCallId);
     turns.extensionActivities.set(toolCallId, activity);
     upsertExtensionActivity(turns, activity);
-    const tool = turns.operations.toolExecutions.get(toolCallId);
-    if (tool) turns.operations.toolExecutions.set(toolCallId, { ...tool, extensionActivity: activity });
+    turns.operations.updateToolExtensionActivityProjection(toolCallId, activity);
     publishExtensionActivity(turns, activity);
     if (activity.status === "running") {
       const tracked = turns.extensionActivityWatchers.get(toolCallId);

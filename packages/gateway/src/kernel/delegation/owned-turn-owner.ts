@@ -1,7 +1,5 @@
 import type { ExtensionArtifactDiscoveryOutcome } from "../../sessions/extension-artifact-discovery.js";
 import { GatewayError } from "../../errors.js";
-
-
 import { HOME_TASK_MARKER, type HomeTaskReportOwner } from "./task-report.js";
 import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "./owned-operation-terminal.js";
 import type { TaskWorkerControl } from "./worker-contract.js";
@@ -21,15 +19,11 @@ import { SubagentArtifactStatus, WORKFLOW_CHILD_ARTIFACT_DIRECTORIES } from "./s
 import { refreshSubagentActivityFromArtifact, refreshExtensionActivityFromArtifact } from "./subagent-artifact-reconcile.js";
 import { liveActivitySubagentRuns, extensionActivityOwnsLiveWork, upsertExtensionActivity, canonicalExtensionRunFacts, publishExtensionActivity } from "./subagent-activity.js";
 
-
-
-
 const EXTENSION_ARTIFACT_MISSING_GRACE_MS = 30_000;
 
 export class OwnedTurnOwner {
-
-  /** Bounded, disposable extension-owned run projections retain completed work
-   * for Manage Session while the owning tool carries the live copy. */
+  /** K5 owns run/lifecycle admission. Native invocation rows are SDK progress
+   * projections; this bounded view also retains completed work for Manage Session. */
   readonly extensionActivities = new Map<string, ExtensionRunActivity>();
 
   /** Monotonic lifecycle projection ordering and terminal latches are runtime
@@ -678,7 +672,7 @@ export class OwnedTurnOwner {
     this.extensionRunOwnership.clear();
   }
 
-  /** Fence late artifact reads and detach the exact watches before physical SDK disposal. */
+  /** Retire current watches and fence their outstanding reads before physical SDK disposal. */
   retireArtifactWatches(): void {
     this.clearExtensionActivityWatchers();
     this.extensionArtifactMissingSince.clear();

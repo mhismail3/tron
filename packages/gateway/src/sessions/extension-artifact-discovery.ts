@@ -1,6 +1,13 @@
 import { opendir, open, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+/** How one offer of a `status.json` to its owner ended, for the caller deciding
+ * whether these exact bytes may be recorded as dealt with. `accepted` means a
+ * lifecycle was projected; `rejected` means no later offer of the same bytes can
+ * decide differently (shape, run identity, directory, timestamps or a terminal
+ * latch outranks them); `transient` means current state could not decide — a
+ * losing read, unavailable receipt claim, I/O error or attribution comparison a
+ * later pass may resolve — so the same artifact must be offered again. */
 export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "transient";
 import {
   MAX_EXTENSION_ARTIFACT_BYTES,

@@ -3638,6 +3638,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     };
   }
 
+  /** The actual SDK invocation record is native projection state, not run authority. */
+  updateToolExtensionActivityProjection(toolCallId: string, activity: ExtensionRunActivity): void {
+    const tool = this.toolExecutions.get(toolCallId);
+    if (tool) this.toolExecutions.set(toolCallId, { ...tool, extensionActivity: activity });
+  }
+
   private processForViewer(processId: string): SessionProcessActivity | undefined {
     return this.processActivities.get(processId)
       ?? processHistoryDetail(this.runtime.session.sessionManager, processId);

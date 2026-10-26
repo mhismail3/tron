@@ -55,7 +55,8 @@ export interface OwnedTurnRuntime {
   readonly processOperationIDs: ReadonlyMap<string, string>;
   readonly processActivities: ReadonlyMap<string, SessionProcessActivity>;
   readonly childSessionAdmission: ChildSessionAdmission;
-  readonly toolExecutions: Map<string, ToolExecutionState>;
+  readonly toolExecutions: ReadonlyMap<string, ToolExecutionState>;
+  updateToolExtensionActivityProjection(toolCallId: string, activity: ExtensionRunActivity): void;
   readonly workerSettlement: WorkerSettlement;
   readonly activityHeartbeat: unknown;
   revision: number;
