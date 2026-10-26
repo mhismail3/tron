@@ -233,3 +233,25 @@ Cleanup intentions and tombstones commit before deletion; `reconcile()` retries 
 pending cleanup. Historical revisions do not expire. Missing, malformed or newer
 state, unsafe ancestors and corrupt files stay visible failures. Object reads verify
 hash and size; media type belongs to the reference.
+
+Explicit profile partitions use `knowledge-notes.ts`: complete ID/revision/file
+assignments, full original histories and immutable prepared identities in an
+owner-only ≤ 64 MiB backup before any body mutation, then one SQL head commit.
+Recovery validates exact originals/history and adopts those same identities;
+rescanned identical destinations create no revisions. Invalid, stale, incomplete,
+excluded or over-bound plans refuse without truncation or inferred classification.
+Forget also redacts forgotten/dependent members from profile backups, retaining
+unrelated recovery snapshots. It invalidates the original atomic plan and queues
+its uncommitted prepared files through the same revision-cleanup table. Existing
+tombstones make backup redaction retryable by `reconcile()` after a crash; no new
+cleanup journal is introduced. The same backup may hold Home's opaque original
+audit envelope, bound into its digest and addressed by original command ID rather
+than assignment equivalence. Forget of ANY member drops that entire envelope
+(including free-form context), invalidating the whole atomic intent, while keeping
+unrelated recovery snapshots. Unknown backup fields refuse cleanup. Explicit
+`profilePartitionRecovery()` proves exact historical committed identities without
+replaying effects, even after later edits; opening never runs domain recovery.
+Malformed stored partition labels remain diagnostic/unassigned until an explicit
+reorganization replaces just those owner labels; valid records remain discoverable.
+This is storage recovery, not canonical Changes/undo publication; the
+[Home profile owner](../modules/home/profile.md) owns that audit boundary.
