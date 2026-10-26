@@ -1850,7 +1850,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:2db6e0728bbbf8c9c05bc1fe70f884085f30dc9dbe1a42ec1c38a6cae8b5fe46",
+        "promptHash": "sha256:77ef87f921572e9507341a14c02cbc0af66c07de15f921472d793c025550d5ab",
         "messages": [
           {
             "role": "user",
@@ -1887,7 +1887,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:2db6e0728bbbf8c9c05bc1fe70f884085f30dc9dbe1a42ec1c38a6cae8b5fe46",
+        "promptHash": "sha256:77ef87f921572e9507341a14c02cbc0af66c07de15f921472d793c025550d5ab",
         "messages": [
           {
             "role": "user",
@@ -1936,7 +1936,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:2db6e0728bbbf8c9c05bc1fe70f884085f30dc9dbe1a42ec1c38a6cae8b5fe46",
+        "promptHash": "sha256:77ef87f921572e9507341a14c02cbc0af66c07de15f921472d793c025550d5ab",
         "messages": [
           {
             "role": "user",
@@ -2021,7 +2021,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:2db6e0728bbbf8c9c05bc1fe70f884085f30dc9dbe1a42ec1c38a6cae8b5fe46"
+      "promptHash": "sha256:77ef87f921572e9507341a14c02cbc0af66c07de15f921472d793c025550d5ab"
     },
     {
       "caller": "home-delegated",
@@ -2029,7 +2029,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:2db6e0728bbbf8c9c05bc1fe70f884085f30dc9dbe1a42ec1c38a6cae8b5fe46"
+      "promptHash": "sha256:77ef87f921572e9507341a14c02cbc0af66c07de15f921472d793c025550d5ab"
     },
     {
       "caller": "home-wake",
@@ -2037,7 +2037,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:2db6e0728bbbf8c9c05bc1fe70f884085f30dc9dbe1a42ec1c38a6cae8b5fe46"
+      "promptHash": "sha256:77ef87f921572e9507341a14c02cbc0af66c07de15f921472d793c025550d5ab"
     }
   ],
   "requestOptions": [
@@ -2205,7 +2205,7 @@
       },
       {
         "name": "profile",
-        "schema": "sha256:bc4989eb3801ed2d212a9866ac1a06ea3c9d6437206a7c9cf580d6a130bf2fa8"
+        "schema": "sha256:601192f1cdbe75dc72139275d619403c68e1402e5b9e8128594a4f7e1dcf80c6"
       },
       {
         "name": "web_search",
@@ -3408,7 +3408,7 @@
               }
             },
             {
-              "description": "Read the structured profile index or an explicit core, home or scopes/<name> file. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit migrate/reorganize assign only labels with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
+              "description": "Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit migrate/reorganize assign only placement with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
               "name": "profile",
               "parameters": {
                 "additionalProperties": false,
@@ -3451,7 +3451,7 @@
                     "description": "read an explicit file or the metadata index; learn, refine, supersede or retire an item."
                   },
                   "assignments": {
-                    "description": "Explicit exact-revision destinations. migrate must include EVERY note, including inactive members; reorganize names only the selected notes. Labels only: text, authority and history stay unchanged.",
+                    "description": "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and history stay unchanged.",
                     "items": {
                       "additionalProperties": false,
                       "properties": {
@@ -3460,16 +3460,17 @@
                           "minLength": 16,
                           "type": "string"
                         },
-                        "file": {
-                          "pattern": "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$",
+                        "id": "<id>",
+                        "path": {
+                          "maxLength": 131,
+                          "minLength": 1,
                           "type": "string"
-                        },
-                        "id": "<id>"
+                        }
                       },
                       "required": [
                         "id",
                         "expectedRevision",
-                        "file"
+                        "path"
                       ],
                       "type": "object"
                     },
@@ -3483,12 +3484,34 @@
                     "minLength": 1,
                     "type": "string"
                   },
-                  "file": {
-                    "description": "Explicit partition; read with no file returns the index. New items default to core, not automatic insertion.",
-                    "pattern": "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$",
+                  "corrects": {
+                    "additionalProperties": false,
+                    "description": "correction: exact wrong claim. Home never invents a claim or confirmation.",
+                    "properties": {
+                      "id": "<id>",
+                      "revisionId": {
+                        "maxLength": 80,
+                        "minLength": 16,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "revisionId"
+                    ],
+                    "type": "object"
+                  },
+                  "cursor": {
+                    "description": "Opaque query-bound continuation returned by a record page. Restart if the snapshot changes.",
+                    "maxLength": 512,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "id": "<id>",
+                  "includeInactive": {
+                    "description": "Explicitly include retired and superseded content; omitted reads active notes only.",
+                    "type": "boolean"
+                  },
                   "kind": {
                     "anyOf": [
                       {
@@ -3506,15 +3529,25 @@
                       {
                         "const": "fact",
                         "type": "string"
+                      },
+                      {
+                        "const": "correction",
+                        "type": "string"
                       }
                     ],
                     "description": "learn and supersede: the item's kind. refine: a new kind, when it changes."
                   },
                   "offset": {
-                    "description": "read: note offset within this explicit file.",
+                    "description": "Metadata-index offset; record pages use cursor.",
                     "maximum": 10000,
                     "minimum": 0,
                     "type": "integer"
+                  },
+                  "path": {
+                    "description": "Explicit personal path or inferred holding bucket; read prior for historical organization. No path reads the metadata index. New notes default to inferred/review.",
+                    "maxLength": 131,
+                    "minLength": 1,
+                    "type": "string"
                   },
                   "reason": {
                     "description": "Why the change is made. Required for retire; recorded in the ledger.",

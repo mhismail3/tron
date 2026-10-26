@@ -5,7 +5,7 @@
   "files": [
     {
       "path": "gateway/settings/changes/000000.jsonl",
-      "content": "<5853 bytes>"
+      "content": "<5897 bytes>"
     },
     {
       "path": "gateway/settings/changes/index.json",
@@ -34,12 +34,18 @@
       "content": {
         "content": {
           "confirmed": false,
+          "profile": {
+            "path": [
+              "inferred",
+              "review"
+            ],
+            "version": 2
+          },
           "retired": true,
           "role": "fact",
           "tags": [
             "home-profile",
-            "kind-fact",
-            "home-file-core"
+            "kind-fact"
           ],
           "title": "Works from an iPhone"
         },
@@ -64,11 +70,17 @@
       "content": {
         "content": {
           "confirmed": false,
+          "profile": {
+            "path": [
+              "inferred",
+              "review"
+            ],
+            "version": 2
+          },
           "role": "decision",
           "tags": [
             "home-profile",
-            "kind-standing-decision",
-            "home-file-core"
+            "kind-standing-decision"
           ],
           "title": "Lands with plain Git"
         },
@@ -100,11 +112,17 @@
       "content": {
         "content": {
           "confirmed": false,
+          "profile": {
+            "path": [
+              "inferred",
+              "review"
+            ],
+            "version": 2
+          },
           "role": "fact",
           "tags": [
             "home-profile",
-            "kind-fact",
-            "home-file-core"
+            "kind-fact"
           ],
           "title": "Works from an iPhone"
         },
@@ -136,11 +154,17 @@
       "content": {
         "content": {
           "confirmed": false,
+          "profile": {
+            "path": [
+              "inferred",
+              "review"
+            ],
+            "version": 2
+          },
           "role": "preference",
           "tags": [
             "home-profile",
-            "kind-preference",
-            "home-file-core"
+            "kind-preference"
           ],
           "title": "Prefers concise answers"
         },
@@ -172,11 +196,17 @@
       "content": {
         "content": {
           "confirmed": true,
+          "profile": {
+            "path": [
+              "inferred",
+              "review"
+            ],
+            "version": 2
+          },
           "role": "decision",
           "tags": [
             "home-profile",
-            "kind-standing-decision",
-            "home-file-core"
+            "kind-standing-decision"
           ],
           "title": "Lands with plain Git after tests"
         },
@@ -206,11 +236,17 @@
       "content": {
         "content": {
           "confirmed": true,
+          "profile": {
+            "path": [
+              "inferred",
+              "review"
+            ],
+            "version": 2
+          },
           "role": "preference",
           "tags": [
             "home-profile",
-            "kind-preference",
-            "home-file-core"
+            "kind-preference"
           ],
           "title": "Prefers concise answers"
         },
@@ -242,18 +278,18 @@
     "items": [
       {
         "confirmed": true,
-        "file": "core",
         "id": "<id>",
         "kind": "preference",
+        "path": "inferred/review",
         "revisionId": "<id>",
         "status": "active",
         "text": "Prefers concise answers"
       },
       {
         "confirmed": false,
-        "file": "core",
         "id": "<id>",
         "kind": "standing-decision",
+        "path": "inferred/review",
         "revisionId": "<id>",
         "status": "superseded",
         "supersededBy": "<id>",
@@ -261,9 +297,9 @@
       },
       {
         "confirmed": true,
-        "file": "core",
         "id": "<id>",
         "kind": "standing-decision",
+        "path": "inferred/review",
         "revisionId": "<id>",
         "status": "active",
         "supersedes": "<id>",
@@ -271,9 +307,9 @@
       },
       {
         "confirmed": false,
-        "file": "core",
         "id": "<id>",
         "kind": "fact",
+        "path": "inferred/review",
         "revisionId": "<id>",
         "status": "retired",
         "text": "Works from an iPhone"

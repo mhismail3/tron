@@ -24,7 +24,8 @@ describe("Tron Home learned profile", () => {
     expect(note!.scope).toBe("personal");
     expect(note!.content.title).toBe("I prefer short replies.");
     expect(note!.content.confirmed).toBe(false);
-    expect(note!.content.tags).toEqual(["home-profile", "kind-preference", "home-file-core"]);
+    expect(note!.content.tags).toEqual(["home-profile", "kind-preference"]);
+    expect(note!.content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
     expect(note!.provenance).toEqual({
       actor: "agent",
       source: "home",
@@ -79,7 +80,8 @@ describe("Tron Home learned profile", () => {
     expect(refined.revisionId).not.toBe(originalRevision);
     expect(refined.content.title).toBe("Use metric units everywhere.");
     expect(refined.content.confirmed).toBe(false);
-    expect(refined.content.tags).toEqual(["home-profile", "kind-preference", "home-file-core"]);
+    expect(refined.content.tags).toEqual(["home-profile", "kind-preference"]);
+    expect(refined.content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
     expect((await noteAt(f, original!.id, originalRevision)).content.title).toBe("Use metric units.");
     const afterRefine = await homeActivation(f, "after refine", [say("ok")]);
     const refinedSection = profileSection(afterRefine.first.systemPrompt);
@@ -182,7 +184,8 @@ describe("Tron Home learned profile", () => {
     const next = await homeActivation(f, "after confirm", [say("ok")]);
     expect(next.first.systemPrompt).not.toContain(item!.id);
     expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: item!.id, kind: "delegation-default", confirmed: true, status: "active" })]);
-    expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default", "home-file-core"]);
+    expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default"]);
+    expect((await noteAt(f, item!.id)).content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
 
     // A native correction, from the same typed model, keeps the item too, now corrected.
     const confirmed = await noteAt(f, item!.id);
@@ -198,7 +201,8 @@ describe("Tron Home learned profile", () => {
     const corrected = await homeActivation(f, "after correction", [say("ok")]);
     expect(corrected.first.systemPrompt).not.toContain("Delegate reviews to a cheaper model, by default.");
     expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: item!.id, text: "Delegate reviews to a cheaper model, by default.", confirmed: true, status: "active" })]);
-    expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default", "home-file-core"]);
+    expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default"]);
+    expect((await noteAt(f, item!.id)).content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
     recordCase("native-confirm-keeps-profile", { readMarkedConfirmed: true, correctionKeepsProfile: true });
   }, 120_000);
 
@@ -325,7 +329,8 @@ describe("Tron Home learned profile", () => {
     const noteB = await noteAt(f, b.id);
     expect(noteB.id).toBe(b.id);
     expect(noteB.content).toMatchObject({ title: "The office is in Lisbon, where I work.", confirmed: true });
-    expect(noteB.content.tags).toEqual(["home-profile", "kind-preference", "home-file-core"]);
+    expect(noteB.content.tags).toEqual(["home-profile", "kind-preference"]);
+    expect(noteB.content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
 
     // c. supersede a: one group of two entries; the old item is superseded, the new one active and confirmed.
     const a2 = await itemText(f, "I prefer short replies.");

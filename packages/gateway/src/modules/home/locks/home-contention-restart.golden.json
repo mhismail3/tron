@@ -811,7 +811,7 @@
               }
             },
             {
-              "description": "Read the structured profile index or an explicit core, home or scopes/<name> file. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit migrate/reorganize assign only labels with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
+              "description": "Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit migrate/reorganize assign only placement with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
               "name": "profile",
               "parameters": {
                 "additionalProperties": false,
@@ -854,7 +854,7 @@
                     "description": "read an explicit file or the metadata index; learn, refine, supersede or retire an item."
                   },
                   "assignments": {
-                    "description": "Explicit exact-revision destinations. migrate must include EVERY note, including inactive members; reorganize names only the selected notes. Labels only: text, authority and history stay unchanged.",
+                    "description": "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and history stay unchanged.",
                     "items": {
                       "additionalProperties": false,
                       "properties": {
@@ -863,16 +863,17 @@
                           "minLength": 16,
                           "type": "string"
                         },
-                        "file": {
-                          "pattern": "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$",
+                        "id": "<id>",
+                        "path": {
+                          "maxLength": 131,
+                          "minLength": 1,
                           "type": "string"
-                        },
-                        "id": "<id>"
+                        }
                       },
                       "required": [
                         "id",
                         "expectedRevision",
-                        "file"
+                        "path"
                       ],
                       "type": "object"
                     },
@@ -886,12 +887,34 @@
                     "minLength": 1,
                     "type": "string"
                   },
-                  "file": {
-                    "description": "Explicit partition; read with no file returns the index. New items default to core, not automatic insertion.",
-                    "pattern": "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$",
+                  "corrects": {
+                    "additionalProperties": false,
+                    "description": "correction: exact wrong claim. Home never invents a claim or confirmation.",
+                    "properties": {
+                      "id": "<id>",
+                      "revisionId": {
+                        "maxLength": 80,
+                        "minLength": 16,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "revisionId"
+                    ],
+                    "type": "object"
+                  },
+                  "cursor": {
+                    "description": "Opaque query-bound continuation returned by a record page. Restart if the snapshot changes.",
+                    "maxLength": 512,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "id": "<id>",
+                  "includeInactive": {
+                    "description": "Explicitly include retired and superseded content; omitted reads active notes only.",
+                    "type": "boolean"
+                  },
                   "kind": {
                     "anyOf": [
                       {
@@ -909,15 +932,25 @@
                       {
                         "const": "fact",
                         "type": "string"
+                      },
+                      {
+                        "const": "correction",
+                        "type": "string"
                       }
                     ],
                     "description": "learn and supersede: the item's kind. refine: a new kind, when it changes."
                   },
                   "offset": {
-                    "description": "read: note offset within this explicit file.",
+                    "description": "Metadata-index offset; record pages use cursor.",
                     "maximum": 10000,
                     "minimum": 0,
                     "type": "integer"
+                  },
+                  "path": {
+                    "description": "Explicit personal path or inferred holding bucket; read prior for historical organization. No path reads the metadata index. New notes default to inferred/review.",
+                    "maxLength": 131,
+                    "minLength": 1,
+                    "type": "string"
                   },
                   "reason": {
                     "description": "Why the change is made. Required for retire; recorded in the ledger.",
