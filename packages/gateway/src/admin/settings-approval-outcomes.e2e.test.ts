@@ -189,6 +189,24 @@ describe("settings approval outcomes", () => {
     }
   }, 60_000);
 
+  it("concurrent activation and disposal join the same accepted settings recovery read", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-settings-lifecycle-"));
+    const program = fileURLToPath(new URL("../../test-support/settings-action-crash-child.ts", import.meta.url));
+    const preload = fileURLToPath(new URL("../../test-support/home-ledger-crash-preload.mjs", import.meta.url));
+    const child = spawn(process.execPath, ["--experimental-transform-types", "--import", pathToFileURL(preload).href, program, root, "lifecycle"], { stdio: ["ignore", "pipe", "pipe"] });
+    let output = ""; child.stdout.on("data", chunk => { output += String(chunk); }); child.stderr.on("data", chunk => { output += String(chunk); });
+    try {
+      const [code] = await once(child, "exit"); expect(code, output).toBe(0);
+      const result = JSON.parse(output.split("RESULT:")[1]!.split("\n")[0]!) as { beforeRelease: string[]; settled: string[]; reads: number };
+      expect(result.beforeRelease).toEqual([]);
+      expect(result.settled.sort()).toEqual(["disposed", "first", "second"]); expect(result.reads).toBe(1);
+      transcript.push({ case: "activation-disposal-owned-read", steps: [result] });
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) { const exited = once(child, "exit"); child.kill("SIGKILL"); await exited; }
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("disposal cancels and fences a queued expiry callback before its stores are released", async () => {
     const f = await gateway();
     const held = await f.settingsChanges.change({ kind: "global" }, [RETRIES(5) as never],
