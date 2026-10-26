@@ -2,7 +2,7 @@
 # Mac Terminal's iOS journey (README "Mac Terminal"): starts a real OpenSSH
 # sshd as this user on this Mac's Tailscale address, with its own host key and
 # an empty authorized_keys, compiles this checkout's Gateway for the real shell
-# host (`machine/mac-terminal-host.ts`, #1075) with a short Tron home of its
+# host (`modules/mac-terminal/mac-terminal-host.ts`, #1075) with a short Tron home of its
 # own, then runs TronMacTerminalUITests against it through
 # the owned test simulator (`scripts/tron-ios-test run`, which takes the
 # host-wide heavy slot itself). The synthetic Gateway in the hosted fixture
@@ -83,7 +83,7 @@ json.dump({
     "hosts": [dns_name, address], "port": int(port), "username": user,
     "hostKeys": [key("ssh_host_ed25519_key.pub")], "otherHostKey": key("other_host_key.pub"),
     "authorizedKeys": f"{work}/authorized_keys",
-    "hostCommand": [node, f"{work}/gateway/machine/mac-terminal-host.js", "connect", "--home", host_home],
+    "hostCommand": [node, f"{work}/gateway/modules/mac-terminal/mac-terminal-host.js", "connect", "--home", host_home],
 }, open(f"{work}/fixture.json", "w"))
 PY
 

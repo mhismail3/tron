@@ -13,7 +13,7 @@ import { TrustService } from "./kernel/resources/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
-import { macTerminalHostCommand } from "./machine/mac-terminal-host.js";
+import { macTerminalHostCommand } from "./modules/mac-terminal/mac-terminal-host.js";
 import { terminalIdleLimitMs } from "./kernel/settings/settings-schema.js";
 import { createGatewaySettingsSchema } from "./main/settings-schema.js";
 import { SettingsStoreAdapter } from "./admin/settings-model.js";

@@ -338,7 +338,7 @@ describe("Mac Terminal", () => {
         "--outDir", build, "--declaration", "false", "--sourceMap", "false", "--declarationMap", "false"]);
       await writeFile(join(build, "package.json"), JSON.stringify({ type: "module" }));
       await symlink(join(HERE, "../../node_modules"), join(build, "node_modules"));
-      const hostCommand = [process.execPath, join(build, "machine", "mac-terminal-host.js"), "connect", "--home", tronHome];
+      const hostCommand = [process.execPath, join(build, "modules", "mac-terminal", "mac-terminal-host.js"), "connect", "--home", tronHome];
 
       const { service, pair } = await gateway(join(root, "host-tron"), sshDirectory, hostDirectory, port, hostCommand);
       const phone = await pair("Fixture iPhone");
