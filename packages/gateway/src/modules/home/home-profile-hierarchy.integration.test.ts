@@ -99,8 +99,8 @@ it("new profile content is discoverable but never automatically inserted into Ho
   expect(notes[0]!.content.confirmed).toBe(false);
   const next = await homeActivation(f, "Plan unrelated work.", [say("ready")]);
   expect(next.first.systemPrompt).not.toContain("the fixture service is named Cedar");
-  expect(next.first.systemPrompt).toContain("core");
-  const read = await homeActivation(f, "Read Core.", [profileCall({ action: "read", file: "core" }, "hierarchy-read"), say("read")]);
+  expect(next.first.systemPrompt).toContain("Unsorted (inferred): 1 active / 1 total");
+  const read = await homeActivation(f, "Read Unsorted.", [profileCall({ action: "read", path: "inferred" }, "hierarchy-read"), say("read")]);
   expect(JSON.stringify(read.last.messages)).toContain("Context only: the fixture service is named Cedar.");
   expect((await profileNotes(f))[0]!.revisionId).toBe(notes[0]!.revisionId);
 });
