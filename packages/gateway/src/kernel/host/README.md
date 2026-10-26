@@ -34,7 +34,10 @@ actual metadata at invocation, never admission. Product name reservations and so
 classification remain outside K3; `extensionAdmission` supplies that actual policy
 at the loader cut. The module also owns whether the interaction capability is required.
 `semantic-ui-broker.ts`, `semantic-form.ts` and `extension-adapter-contract.ts` own
-semantic interactions and the versioned form capability. `presentation/` owns the
+semantic interactions and the versioned form capability. Optional `presentation: "approval"`
+is admitted only for one single-select approve/deny question with no Other or Cancel;
+it projects direct toolbar answers without changing the form continuation or local-dismiss rules.
+`presentation/` owns the
 remote Pi host, component generations, bounded terminal capture and the single
 presentation epoch. `extension-lifecycle-coordinator.ts` derives quiescence from
 that epoch; the runtime replaces its activity source when rotating the host.

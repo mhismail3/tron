@@ -171,8 +171,11 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   advertising it ([push relay](../../push-relay/README.md#notification-categories)). A
   `settings` tool `action: "request"` holds a change at any tier (`tierBasis.requested`)
   and blocks the calling turn on the same semantic form sheet as `ask_user`. The sheet
-  shows scope, layer, reason and exact diff with Approve/Deny choices; only its scoped
-  client response admits the decision. `change` also blocks when its normal tier needs
+  shows scope, layer, reason and exact diff. Its approval presentation uses labeled
+  toolbar actions: Deny/X on the left in destructive color, Approve/checkmark on the
+  right in success color; neither is duplicated in the body. Swipe dismissal only
+  closes the local sheet: the pending tool can reopen it and the turn keeps waiting
+  without approving or denying. Only an explicit client decision admits the change. `change` also blocks when its normal tier needs
   approval. The original tool result returns approved/applied, declined, expired or
   superseded explicitly, with no separate outcome wake. Stop retires the form and
   supersedes its still-pending diff without applying it. Dry run creates no request.

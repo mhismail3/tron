@@ -611,6 +611,8 @@ export interface ExtensionFormQuestion {
 }
 
 export interface ExtensionFormDescriptor {
+  /** One canonical approve/deny question answered directly from the sheet toolbar. */
+  presentation?: "approval";
   version: 1;
   title: string;
   questions: ExtensionFormQuestion[];

@@ -79,7 +79,16 @@ struct ExtensionFormSheet: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if form?.allowCancel == true {
+                if form?.presentation == .approval {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(role: .destructive) { submitApproval("deny") } label: {
+                            TronToolbarTextLabel("Deny", systemImage: "xmark")
+                                .tronToolbarAction(role: .destructive)
+                        }
+                        .tint(Color.tronError)
+                        .disabled(submitting || expired)
+                    }
+                } else if form?.allowCancel == true {
                     ToolbarItem(placement: .topBarLeading) {
                         Button(role: .destructive, action: cancel) {
                             Image(systemName: "xmark")
@@ -98,7 +107,14 @@ struct ExtensionFormSheet: View {
                 // stays pending and the persisted draft is restored on reopen.
                 // Cancel is the only control that resolves the request unanswered.
                 ToolbarItem(placement: .topBarTrailing) {
-                    if form != nil {
+                    if form?.presentation == .approval {
+                        Button { submitApproval("approve") } label: {
+                            TronToolbarTextLabel("Approve", systemImage: "checkmark", isWorking: submitting)
+                                .tronToolbarAction(accent: .tronSuccess)
+                        }
+                        .tint(Color.tronSuccess)
+                        .disabled(submitting || expired)
+                    } else if form != nil {
                         Button(action: submit) {
                             if submitting {
                                 TronPulseLoadingIndicator(accent: .tronAmber, size: 14)
@@ -228,7 +244,7 @@ struct ExtensionFormSheet: View {
             // Eager stack: self-sizing selectable Markdown in a lazy stack
             // re-estimates heights mid-scroll and makes the page jump.
             VStack(alignment: .leading, spacing: 16) {
-                questionStatus(question, index: index, form: form)
+                if form.presentation != .approval { questionStatus(question, index: index, form: form) }
 
                 // Agent-authored text may carry URLs, commands and IDs the user
                 // must act on: shared Markdown with native selection and Copy.
@@ -255,11 +271,13 @@ struct ExtensionFormSheet: View {
                     selectableText: true
                 )
 
+                if form.presentation != .approval {
                 VStack(spacing: 10) {
                     ForEach(question.options) { option in
                         optionRow(option, question: question)
                     }
                     if question.allowOther { otherRow(question) }
+                }
                 }
                 // Reveal target: the content end, so the Other card keeps the
                 // page's bottom margin between itself and the keyboard.
@@ -558,7 +576,18 @@ struct ExtensionFormSheet: View {
 
     private func submit() {
         guard canSubmit, let form else { return }
-        let answer = draft.answer(for: form)
+        submitAnswer(draft.answer(for: form), form: form)
+    }
+
+    private func submitApproval(_ optionID: String) {
+        guard !submitting, !expired, let form, form.presentation == .approval,
+              let question = form.questions.first else { return }
+        submitAnswer(ExtensionFormAnswer(version: 1, answers: [
+            ExtensionFormQuestionAnswer(questionId: question.id, optionIds: [optionID], other: nil)
+        ]), form: form)
+    }
+
+    private func submitAnswer(_ answer: ExtensionFormAnswer, form: ExtensionFormDescriptor) {
         guard ExtensionInteractionResponsePolicy.formError(answer, descriptor: form) == nil,
               let data = try? JSONEncoder.gateway.encode(answer),
               let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: data) else { return }

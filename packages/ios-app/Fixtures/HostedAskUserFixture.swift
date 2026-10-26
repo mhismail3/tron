@@ -211,7 +211,7 @@ private struct HostedAskUserFixture {
                 options: [ExtensionFormOption(id: "approve", label: "Approve", description: nil),
                           ExtensionFormOption(id: "deny", label: "Deny", description: nil)],
                 multiSelect: false, allowOther: false
-            )], allowCancel: false
+            )], allowCancel: false, presentation: .approval
         ) : form
         self.form = presentedForm
         let interaction = ExtensionInteraction(

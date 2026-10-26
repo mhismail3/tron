@@ -89,7 +89,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   status, paged reports and receipts; unknown shapes stay generic. Check-ins lead with the step/summary,
   then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Worker reports render their invocation’s outcome, Markdown summary and acceptance evidence through shared Home sections; opaque receipts stay in Technical details. Report/check-in sheets use `tronPrimary`. `ToolDetailPresentation` owns one name/icon catalog for transcript, nested calls, sheets and resource tools; unknown extension/MCP names are humanized without changing invocation identity. Task reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
 - **Settings approvals.** The settings tool blocks on the same semantic form sheet as
-  ask_user, showing scope, layer, reason and diff with Approve/Deny choices. The original
+  ask_user, showing scope, layer, reason and diff. The explicit approval form mode
+  uses standard text/icon toolbar actions (Deny/X left, destructive; Approve/checkmark
+  right, success), with no body choices or separate Submit. Swipe dismissal is local
+  only; the pending tool reopens the same request, and silence never decides it. The original
   tool result receives the decision; no completed-pending request chip is rendered.
   Gateway-attributed `tron.settings-outcome.v1` contexts open the read-only outcome sheet; unknown
   versions/shapes retain the ordinary context viewer. `ChatTranscriptSheetRoutes` owns these sheets

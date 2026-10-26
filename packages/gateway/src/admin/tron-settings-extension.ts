@@ -149,7 +149,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
           result = { ...await owner.review(result.approval!.requestId, async (review, reviewSignal) => {
             if (!requestForm) throw new Error("Settings approval requires an interactive Tron form host");
             const answer = await requestForm({ signal: reviewSignal, form: {
-              version: 1, title: review.title, allowCancel: false,
+              version: 1, title: review.title, allowCancel: false, presentation: "approval",
               questions: [{ id: review.requestId, question: "Approve these settings changes?", context: review.context,
                 options: [{ id: "approve", label: "Approve" }, { id: "deny", label: "Deny" }],
                 multiSelect: false, allowOther: false }],
