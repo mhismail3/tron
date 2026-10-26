@@ -169,7 +169,10 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   `before`/`after` (the decision's whole fence: no client fence); a newer request supersedes;
   only the maintainer's client decides; the push carries `settings-approval` only to a relay
   advertising it ([push relay](../../push-relay/README.md#notification-categories)). A
-  context `request` holds a change at any tier (`tierBasis.requested`). A timer expires a
+  `settings` tool `action: "request"` holds a change at any tier (`tierBasis.requested`)
+  and returns without waiting for the tap. Its dry run validates without creating a
+  request; `change` keeps its normal tier. Chat presents the request, not a direction to
+  open Settings. A timer expires a
   request at its 24-hour deadline; a transient expiry failure keeps later known deadlines
   armed without immediately retrying a persistently bad store. Every outcome (approved and
   applied, declined, failed, superseded, expired) stays queued as `tron.settings-outcome.v1`;
