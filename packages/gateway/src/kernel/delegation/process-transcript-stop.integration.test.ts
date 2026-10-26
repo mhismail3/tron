@@ -9,8 +9,13 @@ import { ProcessTranscriptLeaseStore } from "../../transport/process-transcript-
 
 const servers: ChildModelServer[] = [];
 afterEach(async () => {
-  for (const server of servers.splice(0)) await server.close();
-  await disposeFixtures();
+  try {
+    // Keep the model endpoint alive for its actual Registry/work/runner owner's
+    // disposal join. All teardown retains the existing 10-second hook deadline.
+    await disposeFixtures();
+  } finally {
+    for (const server of servers.splice(0)) await server.close();
+  }
 });
 
 /** Real Registry/Pi, managed producer, child process, canonical child admission
