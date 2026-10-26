@@ -167,7 +167,8 @@ private struct HostedAskUserFixture {
     init() {
         let receipt = HostedAskUserFixtureReceipt()
         self.receipt = receipt
-        let allowCancel = !ProcessInfo.processInfo.arguments.contains("-tron-ask-user-no-cancel")
+        let settingsApproval = ProcessInfo.processInfo.arguments.contains("-tron-settings-approval-form")
+        let allowCancel = !settingsApproval && !ProcessInfo.processInfo.arguments.contains("-tron-ask-user-no-cancel")
         let styled = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-styled")
         // Agent-authored URL, inline code and a fenced command (#941).
         let copyable = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-copyable")
@@ -201,14 +202,24 @@ private struct HostedAskUserFixture {
             ] : []),
             allowCancel: allowCancel
         )
-        self.form = form
+        let presentedForm = settingsApproval ? ExtensionFormDescriptor(
+            version: 1, title: "Settings approval",
+            questions: [ExtensionFormQuestion(
+                id: "settings-approval", question: "Approve these settings changes?",
+                context: "Scope: Home\nReason: Retry a transient failure\n\nMaximum retries (run.retry.maxRetries)\nLayer: Session\nNot set → 3 retries\n\nApprove applies only this diff. Deny changes nothing.",
+                options: [ExtensionFormOption(id: "approve", label: "Approve", description: nil),
+                          ExtensionFormOption(id: "deny", label: "Deny", description: nil)],
+                multiSelect: false, allowOther: false
+            )], allowCancel: false
+        ) : form
+        self.form = presentedForm
         let interaction = ExtensionInteraction(
             id: "ask-user-interaction",
             hostEpoch: "hosted-ask-user-epoch",
             presentationRevision: 1,
             method: .form,
-            title: form.title,
-            form: form,
+            title: presentedForm.title,
+            form: presentedForm,
             owner: ExtensionOwner(id: "tron-ask-user", title: "Ask User", source: AskUserToolPresentation.tronSource),
             invocationId: "hosted-ask-user-invocation",
             operationId: "hosted-ask-user-operation"

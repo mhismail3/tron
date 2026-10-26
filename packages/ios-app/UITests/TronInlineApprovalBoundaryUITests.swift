@@ -13,9 +13,9 @@ final class TronInlineApprovalBoundaryUITests: XCTestCase {
     }
 
     @MainActor
-    func testRequestChipDismissalDecisionAndHistoricalReceipt() {
+    func testChangesRequestDismissalDecisionAndHistoricalReceipt() {
         let app = launch(); defer { app.terminate() }
-        let chip = app.buttons["settings-request-chip-approve"]
+        let chip = app.buttons["fixture-review-pending-approval"]
         XCTAssertTrue(chip.waitForExistence(timeout: 15), app.debugDescription)
         chip.tap()
         let approve = app.buttons["settings-approval-approve-approve"]

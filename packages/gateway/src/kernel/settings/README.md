@@ -23,6 +23,14 @@ module-policy availability or capture an eligibility snapshot.
 Home supplies learned-profile operations and typed result projection; `auditSubject`
 keeps their validation, restoration, grouped audit and awaited observer/projection
 under the same Home stripe, without moving Knowledge DTOs into the kernel.
+`settings-approval-review.ts` connects an accepted settings tool request to the host's
+existing form continuation through `SettingsApprovalPresenter`. The settings engine
+remains the decision/expiry authority; a scoped client answer admits the digest-bound
+decision. Stop/host retirement supersedes the pending diff, never masquerading as a
+maintainer decline. The direct terminal result consumes its outbox slot, so it does
+not also schedule an outcome turn. Persisted approvals and registered actions still
+use the outbox; no existing live request is decided by constructing a review.
+
 `tool-contract.ts`: layer/tier/qualifier and model-reference/queue role/key vocabulary,
 retired scope-name mapping
 shared by session readers and store migration, and tool request, resolution,

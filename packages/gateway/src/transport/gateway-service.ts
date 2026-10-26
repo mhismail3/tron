@@ -2178,9 +2178,14 @@ export class GatewayService {
         return this.mutation(client, method, params, async (workToken) => {
           rejectUnknownFields(params, ["commandId", "requestId", "digest", "approved"], method);
           const requestId = string(params.requestId, "requestId", { max: 100 });
-          const pending = (await this.dependencies.settingsChanges.approvals.get(requestId))?.target;
-          const session = pending?.kind === "session" && params.approved === true ? (await this.slot({ sessionId: pending.sessionId })).taskWorkerSettingsSession() : undefined;
-          const homeChapter = pending?.kind === "home" && params.approved === true ? await this.settingsHomeChapter(workToken) : undefined;
+          const request = await this.dependencies.settingsChanges.approvals.get(requestId);
+          const pending = request?.target;
+          const running = request?.actor.sessionId && request.actor.toolCallId && !request.action && params.approved === true
+            ? (await this.slot({ sessionId: request.actor.sessionId })).settingsApprovalContext(requestId) : undefined;
+          const session = pending?.kind === "session" && params.approved === true
+            ? pending.sessionId === request?.actor.sessionId && running?.session ? running.session
+              : (await this.slot({ sessionId: pending.sessionId })).taskWorkerSettingsSession() : undefined;
+          const homeChapter = pending?.kind === "home" && params.approved === true ? running?.homeChapter ?? await this.settingsHomeChapter(workToken) : undefined;
           return safeJson(await this.dependencies.settingsChanges.decide(requestId, {
             ...(homeChapter ? { homeChapter } : {}),
             digest: string(params.digest, "digest", { max: 64 }),

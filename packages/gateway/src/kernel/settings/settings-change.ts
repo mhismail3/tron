@@ -14,6 +14,8 @@ import { canonicalSettingsTarget, scopeAdmitted, storeForScope } from "./scope-r
 import { SettingsModel, declaredKey, deepEqual, setPath, unsetPath, qualifiedWrite, type SessionSettingsSource, type SettingsReadOwner } from "./settings-model.js";
 
 export interface SessionAppliers {
+  /** Runtime-owned admission, checked before holding a diff and by dry run too. */
+  admit?(key: KeyDeclaration, layer: LayerId): void;
   setModel(ref: ModelRefValue, fixedAt?: FixedSetting): Promise<number>;
   setThinking(level: string, fixedAt?: FixedSetting): Promise<number>;
   setContextWindow(model: ModelRefValue, value: number | null, fixedAt?: FixedSetting): Promise<number>;
@@ -187,7 +189,7 @@ export class SettingsChangePath {
   private observer: SettingsObserver | undefined;
   private readonly actions = new Map<string, ApprovalActionHandler>();
   /** Requesters to nudge when an outcome they have not heard settles (Home's wake). */
-  private readonly outcomeListeners = new Set<(sessionId: string) => void>();
+  private readonly outcomeListeners = new Set<(sessionId: string, requestId: string) => void>();
   private expiry: ReturnType<ExpiryScheduler> | undefined;
   private disposed = false;
   private started = false;
@@ -228,7 +230,7 @@ export class SettingsChangePath {
 
   /** Nudged with the requester's session when one of its outcomes settles. The
    * outcome itself stays in the approvals store until the requester hears it. */
-  onOutcome(listener: (sessionId: string) => void): () => void {
+  onOutcome(listener: (sessionId: string, requestId: string) => void): () => void {
     this.outcomeListeners.add(listener);
     return () => { this.outcomeListeners.delete(listener); };
   }
@@ -236,7 +238,7 @@ export class SettingsChangePath {
   private settledOutcome(request: ApprovalRequest): void {
     this.observer?.approvals({ kind: "resolved", request });
     if (request.status !== "pending" && !request.told && request.actor.sessionId) {
-      for (const listener of this.outcomeListeners) listener(request.actor.sessionId);
+      for (const listener of this.outcomeListeners) listener(request.actor.sessionId, request.requestId);
     }
     void this.armExpiry().catch(() => undefined);
   }
@@ -501,6 +503,24 @@ export class SettingsChangePath {
         // The permanent record may name a key this Gateway no longer declares.
         // It stays in Everything/key history, but has no current section.
         && (!input.section || this.model.schema.auditSubject(entry.key)?.group === input.section),
+    });
+  }
+
+  /** Stop or host retirement invalidates only this requester's pending diff.
+   * Superseded is the existing terminal state for a diff that can no longer be decided. */
+  async cancelApproval(requestId: string, requesterSessionId: string): Promise<void> {
+    const found = await this.approvals.get(requestId);
+    if (!found || found.actor.sessionId !== requesterSessionId) throw new GatewayError("conflict", "This approval belongs to another requester");
+    await this.mutexFor(found.target).run(async () => {
+      const request = await this.approvals.get(requestId);
+      if (!request || request.status !== "pending") return;
+      const failure = "Approval cancelled because its requesting turn stopped or closed; nothing changed";
+      const settled = await this.approvals.settle(requestId, "superseded", this.now(), failure);
+      await this.record.append(request.changes.map(change => ({
+        ...this.pendingEntry(request, change, { actor: request.actor }), changeId: randomUUID(), at: this.now().toISOString(),
+        status: "superseded" as const, refersTo: change.changeId, failure,
+      })));
+      this.settledOutcome(settled);
     });
   }
 
@@ -1018,6 +1038,7 @@ export class SettingsChangePath {
     const { floor, source } = floorFor(key, direction, stores.floors);
     const web = context.web === true;
     const basis: TierBasis = { direction, floor, floorSource: source, web, risk: null };
+    context.session?.appliers.admit?.(key, request.layer);
     return {
       request, key, binding, qualifiers, before, after,
       tier: raiseTier(floor, web ? 1 : 0), basis,

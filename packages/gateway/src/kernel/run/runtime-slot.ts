@@ -57,7 +57,8 @@ import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTas
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
 import type { SessionSettingsSource, SettingsModel } from "../settings/settings-model.js";
-import { SETTINGS_OUTCOME_MESSAGE, settingsOutcomeRequestIds, type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting } from "../settings/tool-contract.js";
+import { reviewSettingsApproval } from "../settings/settings-approval-review.js";
+import { SETTINGS_OUTCOME_MESSAGE, settingsOutcomeRequestIds, type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import { visitCanonicalSessionEntries } from "../session/canonical-reader.js";
 import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
 import type { Actor } from "../settings/settings-record.js";
@@ -147,7 +148,7 @@ import { skillTitle } from "../../sessions/skill-title.js";
 import { boundedUtf8Prefix } from "../../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, subagentDetail, type SubagentCatalog, type SubagentDetail } from "../delegation/subagent-catalog.js";
 import type { SessionStore } from "../settings/settings-types.js";
-import { hasCompactionApplier, type SettingsSchema } from "../settings/settings-schema.js";
+import { hasCompactionApplier, type SettingsSchema, type KeyDeclaration } from "../settings/settings-schema.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
@@ -737,20 +738,38 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   /** The `settings` tool's view of this chat (settings-model.md 5.1). It runs inside the run that
    * holds the lane, so lane setters refuse rather than wait; Home's `taskId` targets that worker (#1336). */
-  private settingsToolAccess(): SettingsToolAccess | undefined {
-    const owners = this.dependencies.settings();
-    if (!owners) return undefined;
-    const target = { kind: "session" as const, sessionId: this.id };
+  private settingsToolSource() {
     const busy = (): never => { throw new GatewayError("busy", "This chat's own Session-scope settings change between runs, not during one"); };
-    const source = () => ({
+    return {
       ...this.settingsSource(),
       appliers: {
         setModel: busy, setThinking: busy, setContextWindow: busy, setTools: busy,
+        admit: (key: KeyDeclaration, layer: LayerId) => {
+          if (layer === "session" && key.layers.session?.store === "session") {
+            throw new GatewayError("busy", `${key.id} changes only between runs; this turn cannot request its own SDK configuration change`);
+          }
+        },
         // This tool already owns the running lane. It records the override;
         // request admission applies it, never a mutation of the active request.
         setSetting: (key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting) => this.persistChatRunSetting(key, value, allowFixedDirection, fixedAt),
       },
-    });
+    };
+  }
+
+  /** Changes can decide the same diff while its tool is waiting. The live host
+   * form is the authority for borrowing the already-owned running lane. */
+  settingsApprovalContext(requestId: string): Pick<ChangeContext, "session" | "homeChapter"> | undefined {
+    if (!this.ui.interactions().some(interaction => interaction.method === "form" && interaction.form.questions[0]?.id === requestId)) return undefined;
+    const session = this.settingsToolSource();
+    return { session, ...(this.usesHomeSettings ? { homeChapter: { ...this.settingsSource(), sessionId: this.id,
+      mutate: operation => operation({ appliers: session.appliers }) } } : {}) };
+  }
+
+  private settingsToolAccess(): SettingsToolAccess | undefined {
+    const owners = this.dependencies.settings();
+    if (!owners) return undefined;
+    const target = { kind: "session" as const, sessionId: this.id };
+    const source = () => this.settingsToolSource();
     const actor = (toolCallId: string): Actor => {
       const profileActor = this.liveProfile().settingsActor;
       const kind = profileActor === "agent" && this.ownedTurns.worker ? "worker" : profileActor;
@@ -791,6 +810,17 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         });
         return { ...result, worker: { ...task, ...slot.taskWorkerSettingsState() } };
       },
+      review: (requestId, present, signal) => reviewSettingsApproval({ path: owners.changes, schema: owners.model.schema,
+        requestId, requesterSessionId: this.id, present, ...(signal ? { signal } : {}),
+        context: async request => {
+          if (request.target.kind === "session" && request.target.sessionId !== this.id) {
+            const { slot } = await worker(request.actor.taskId!, "change");
+            return { session: slot.taskWorkerSettingsSession() };
+          }
+          return { session: source(), ...(this.usesHomeSettings ? { homeChapter: { ...this.settingsSource(), sessionId: this.id,
+            mutate: operation => operation({ appliers: source().appliers }) } } : {}) };
+        },
+      }),
       takeOutcomes: async delivered => {
         // Home admits settings messages through its bounded, cancellable input
         // envelope for both user turns and wakes; the native hook is ordinary-only.

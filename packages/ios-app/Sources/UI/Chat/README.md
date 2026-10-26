@@ -88,10 +88,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   owns display, memory-bounded photo previews and honest load-failure fallback. Technical details hold JSON. `TaskToolDetailPresentation` shows catalog rows/counts,
   status, paged reports and receipts; unknown shapes stay generic. Check-ins lead with the step/summary,
   then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Worker reports render their invocation’s outcome, Markdown summary and acceptance evidence through shared Home sections; opaque receipts stay in Technical details. Report/check-in sheets use `tronPrimary`. `ToolDetailPresentation` owns one name/icon catalog for transcript, nested calls, sheets and resource tools; unknown extension/MCP names are humanized without changing invocation identity. Task reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
-- **Approval chips.** `SettingsApprovalReference` projects only a completed canonical pending
-  tool result's request/change IDs, not prose or an approval cache. `SettingsApprovalChips` reuse
-  compact-pill chrome; request segments keep their original call order and technical details.
-  Gateway-attributed `tron.settings-outcome.v1` contexts open the same read-only sheet; unknown
+- **Settings approvals.** The settings tool blocks on the same semantic form sheet as
+  ask_user, showing scope, layer, reason and diff with Approve/Deny choices. The original
+  tool result receives the decision; no completed-pending request chip is rendered.
+  Gateway-attributed `tron.settings-outcome.v1` contexts open the read-only outcome sheet; unknown
   versions/shapes retain the ordinary context viewer. `ChatTranscriptSheetRoutes` owns these sheets
   above lazy rows, including push review, so scrolling cannot dismiss them. Positive status uses
   the compact-pill owner's contrast-safe success palette; failures keep the shared error palette.
@@ -215,10 +215,10 @@ ordering. Its capture-only method provides light/dark visual review, not behavio
 check-in attention/Next, friendly transcript chips, aggregate navigation and extension/MCP
 humanization. `TronWorkerToolPreviewTests` captures light/dark native review surfaces only.
 
-`TronInlineApprovalsPreviewTests` captures synthetic request/outcome canvases in light/dark:
-settings, one-use grants, registered actions, interrupted effects and mixed batches. Pending
-canvases use title Approve and top-right red X/green check without a footer bar. These static
-captures are design review only; they do not prove decisions, dismissal, delivery or durability.
+`TronSettingsApprovalFormUITests` exercises automatic hosted presentation and a scoped Deny
+submission through the shared ask_user form sheet, retaining light/dark simulator captures.
+The Gateway's `settings-approval-blocking.e2e.test.ts` owns decision, expiry and Stop proof;
+hosted captures are not evidence of real-Gateway delivery.
 
 `TronSixSmallUIRegressionTests` exercises scoped row ordering, primary toast ink, model ID/type
 metrics and retained search/selection, workspace path/status separation at standard/narrow/accessibility

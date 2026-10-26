@@ -1,4 +1,5 @@
 import { settingsOutcomeRequestIds, type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
+import { TRON_FORM_CAPABILITY, type FormCapableUI } from "../kernel/host/extension-adapter-contract.js";
 import { StringEnum, Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory, ToolInfo } from "../kernel/pi/coding-agent.js";
 
@@ -63,7 +64,7 @@ const CHANGE = Type.Object({
  * tool found, #961). Per-action requirements are checked by `admitSettingsCall`.
  */
 const PARAMETERS = Type.Object({
-  action: StringEnum(["resolve", "change", "request"] as const, { description: "resolve: read values and where each comes from. change: set or unset keys at their normal tier. request: always ask the maintainer to approve, without waiting." }),
+  action: StringEnum(["resolve", "change", "request"] as const, { description: "resolve: read values and where each comes from. change: set or unset keys at their normal tier. request: ask the maintainer to approve and wait for his decision." }),
   keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200, description: "resolve: the key ids to read; omit for every key." })),
   taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 160,
     description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." })),
@@ -117,7 +118,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
     pi.registerTool({
       name: "settings",
       label: "Settings",
-      description: "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve awaits his tap (pending). Request always creates a pending approval and returns immediately; chat shows the maintainer the request. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
+      description: "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve awaits his tap (pending). Request opens a blocking approval sheet and returns his decision; Stop cancels the pending request. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
       promptSnippet: "Change settings with the settings tool, never by editing settings files.",
       promptGuidelines: [
         "Use settings to read or change model, context, tools, permissions and run settings; never edit settings.json, .pi/ or trust files directly.",
@@ -127,7 +128,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
       parameters: PARAMETERS,
       annotations: { openWorldHint: false },
       executionMode: "sequential",
-      execute: async (toolCallId, raw): Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }> => {
+      execute: async (toolCallId, raw, signal, _onUpdate, context): Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }> => {
         const input = admitSettingsCall(raw);
         const owner = access();
         if (!owner) throw new Error("Settings are not available in this chat");
@@ -139,12 +140,27 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
           }));
           return { content: [{ type: "text", text: JSON.stringify({ ...(resolution.worker ? { worker: resolution.worker } : {}), layers: resolution.layers, keys: summary }) }], details: resolution };
         }
-        const result = await owner.change(input.changes, {
+        let result = await owner.change(input.changes, {
           reason: input.reason, ...(input.dryRun ? { dryRun: true } : {}), ...(input.action === "request" ? { request: true } : {}), toolCallId, web: marked, ...(input.taskId ? { taskId: input.taskId } : {}),
         });
-        const text = result.status === "pending" && !result.dryRun
-          ? `Pending the maintainer's approval (request ${result.approval!.requestId}, expires ${result.approval!.expiresAt}). Nothing changed yet${result.worker ? "; the worker keeps its current settings and is told only if it is approved" : ""}. You hear the outcome when he decides or it expires.`
-          : result.dryRun ? `Dry run: tier ${result.tier}.` : `Applied at tier ${result.tier}.${signalText(result)}`;
+        if (result.status === "pending" && !result.dryRun) {
+          const requestForm = context?.hasUI ? (context.ui as typeof context.ui & FormCapableUI)[TRON_FORM_CAPABILITY] : undefined;
+          const worker = result.worker;
+          result = { ...await owner.review(result.approval!.requestId, async (review, reviewSignal) => {
+            if (!requestForm) throw new Error("Settings approval requires an interactive Tron form host");
+            const answer = await requestForm({ signal: reviewSignal, form: {
+              version: 1, title: review.title, allowCancel: false,
+              questions: [{ id: review.requestId, question: "Approve these settings changes?", context: review.context,
+                options: [{ id: "approve", label: "Approve" }, { id: "deny", label: "Deny" }],
+                multiSelect: false, allowOther: false }],
+            } });
+            const choice = answer?.answers[0]?.optionIds[0];
+            return choice === "approve" || choice === "deny" ? choice : undefined;
+          }, signal), ...(worker ? { worker } : {}) };
+        }
+        const text = result.dryRun ? `Dry run: tier ${result.tier}.`
+          : result.status === "approved" || result.status === "applied" ? `Applied at tier ${result.tier}.${signalText(result)}`
+          : `Settings approval ${result.status}; nothing changed.`;
         return { content: [{ type: "text", text: `${text}\n${JSON.stringify(result)}` }], details: result };
       },
     });

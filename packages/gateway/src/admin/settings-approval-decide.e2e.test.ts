@@ -85,14 +85,16 @@ describe("settings approval decisions", () => {
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },
       changes: [{ key: "permissions.floor", layer: "global", op: "set", value: "approve", qualifiers: { key: "model.thinking[role=chat]" } }] });
     const REASONING = { provider: f.model.provider, id: TASK_REASONING_MODEL_ID };
-    const pending = await homeSays("Switch settled-worker to reasoning", "settings", { action: "change", taskId: "settled-worker", reason: "Harder step on resume",
+    const pendingTurn = homeSays("Switch settled-worker to reasoning", "settings", { action: "change", taskId: "settled-worker", reason: "Harder step on resume",
       changes: [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: REASONING }, { key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" }] });
-    expect(pending.details).toMatchObject({ status: "pending", tier: "approve" });
+    await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0], "Home blocks for the worker approval");
 
     // Approved from the Global Changes sheet: the iPhone never opened the worker, so it sends no fence.
     const [request] = (await f.service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<{ requestId: string; digest: string }> }).requests;
     const approved = await f.service.invoke(phone(), "settings.decide", { commandId: commandId(), requestId: request!.requestId, digest: request!.digest, approved: true }) as unknown as Record<string, unknown>;
     expect(approved).toMatchObject({ status: "approved", changes: expect.arrayContaining([expect.objectContaining({ key: "model.thinking[role=chat]", status: "approved", after: "low" })]) });
+    const pending = await pendingTurn;
+    expect(pending.details).toMatchObject({ status: "approved", tier: "approve" });
     const worker = await f.registry.acquire(workerSessionId);
     expect(worker.snapshot()).toMatchObject({ model: REASONING, thinkingLevel: "low" });
     expect((await f.settingsChanges.history({ key: "model.thinking[role=chat]" })).entries.map(entry => entry.status)).not.toContain("failed");
