@@ -3,7 +3,8 @@
 ## Purpose
 
 Gateway-owned project lifecycle for Home and ordinary chats, using the existing
-settings approval/action authority and the canonical Project trust store.
+settings approval/action authority and the canonical Project trust store. Delegated
+workers share the ordinary tool surface, but cannot approve their own requests.
 
 ## Owns
 
@@ -42,7 +43,7 @@ Home can delegate immediately after successful trust. Decline/expiry grant nothi
 An interrupted/failed action is never replayed; inspect retained paths and Changes.
 A crash after a local creation intent may leave an unresolved audit row; it does
 not imply success and is never replayed. If both runtime reload and compensation
-fail, the existing native fence remains fail-closed. Repair the failing resources
+fail, any existing native fence remains fail-closed. Repair the failing resources
 before retrying a trust transition; lifecycle never clears an uncertain fence.
 Repeating create refuses its existing path; repeating an approval refuses its settled
 request. To retry a failed creation's trust phase, explicitly request `trust`.
@@ -55,7 +56,9 @@ request. To retry a failed creation's trust phase, explicitly request `trust`.
   reserved and explicitly untrusted before moving, so a partial move fails closed.
 - Active/pending Home tasks, busy project sessions, linked worktrees and retained local
   or remote claim branches refuse at submission and decision/effects. Moving also refuses
-  idle live sessions. The claim owner must release/clean its branch; lifecycle never does.
+  idle live sessions. Claims are inspected only in the work tool's canonical branch
+  namespace; more than 200 refs refuses bounded inspection. The claim owner must
+  release/clean its branch; lifecycle never does.
 - Filesystem checks and reservations exclude Gateway races and existing symlink escapes;
   they are not a sandbox against another process with the same Mac user's authority
   maliciously renaming directories between OS calls. Errors retain paths for inspection.

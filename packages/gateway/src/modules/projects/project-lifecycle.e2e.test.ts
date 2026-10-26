@@ -249,7 +249,9 @@ describe("Gateway project lifecycle", () => {
     await f.git("signature-config", ["update-ref", "refs/heads/feat/42-worker", commit]);
     await f.git("signature-config", ["config", "--local", "log.showSignature", "true"]);
     await f.git("signature-config", ["config", "--local", "gpg.program", executable]);
-    expect((await f.request({ action: "trust", name: "signature-config" })).isError).toBe(true);
+    const refused = await f.request({ action: "trust", name: "signature-config" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/retains a work claim branch/i);
     await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect((await f.trust.inspect(f.path("signature-config"))).effectiveDecision).toBe(false);
   });
@@ -265,6 +267,30 @@ describe("Gateway project lifecycle", () => {
     expect((await f.request({ action: "trust", name: "partial-remote", github: true })).isError).toBe(true);
     await f.decide((await f.request({ action: "trust", name: "partial-remote" })).details);
     expect((await f.trust.inspect(f.path("partial-remote"))).effectiveDecision).toBe(true);
+  });
+
+  it("a busy refusal before reload never reports a nonexistent acquired fence or runs move effects", async () => {
+    const f = await fixture();
+    await f.decide(await f.create("busy-reload"));
+    const project = await f.registry.create(f.path("busy-reload"));
+    let entered = false;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([async () => { entered = true; await held; return fauxAssistantMessage("Released"); }]);
+    const prompt = project.prompt("Hold the real runtime");
+    let effects = 0;
+    try {
+      await waitFor(() => entered || undefined, "busy reload runtime entered");
+      const destination = f.path("busy-destination");
+      await mkdir(destination);
+      const error = await f.trust.relocate(project.cwd, destination, true, async () => { effects++; },
+        inspection => f.registry.reloadProject(inspection.projectDir, false, false),
+        inspection => f.registry.commitProjectReload(inspection.projectDir)).catch(error => error as Error);
+      expect(error).toMatchObject({ code: "internal", details: { failure: "Stop active sessions before changing project trust", rollbackFailure: "Stop active sessions before changing project trust" } });
+      expect(effects).toBe(0);
+      expect((await f.registry.create(project.cwd)).cwd).toBe(project.cwd);
+      expect((error as Error).message).not.toMatch(/remains fenced/);
+    } finally { release(); await prompt; }
   });
 
   it("retains a fail-closed native fence when both application and rollback fail, without replaying filesystem effects", async () => {

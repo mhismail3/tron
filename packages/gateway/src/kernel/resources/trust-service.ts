@@ -155,7 +155,7 @@ export class TrustService {
         // unrelated fence when the initial admission refused before effects.
         try { await apply(previous); await commit(previous); }
         catch (rollbackFailure) {
-          throw new GatewayError("internal", "Project relocation could not restore its prior runtime; project remains fenced until its resources are repaired", false, {
+          throw new GatewayError("internal", "Project relocation could not establish or restore its runtime transition; inspect the recorded failures and release active work or repair resources before retrying", false, {
             failure: failure instanceof Error ? failure.message : String(failure),
             rollbackFailure: rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure),
           });
