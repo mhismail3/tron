@@ -90,7 +90,7 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   --all`); stop what you start (and simulators booted outside the tooling); remove your
   temp files, fixtures and worktrees on success and failure, never leaving them to a
   sweep. Prefer commands that exit; isolate `HOME`/`TMPDIR` for third-party suites. One
-  simulator job per worktree; tooling owns lanes (never hand-erase). Never `git stash`.
+  simulator job/worktree; no enforced host-wide cap. Tooling owns lanes (never hand-erase). Never `git stash`.
 - No broad kills (`pkill node`, `simctl shutdown all`). Stop only what you started; ask
   when unsure; never touch another session's process, lane or lease, nor Stable or its
   children. Reproduce load in-process; if slow, check swap and report foreign hogs.
@@ -116,8 +116,8 @@ no queue, gate or auto-revert.
   One writer per issue; claims (`scripts/tron work start`) and overlap advice are not
   locks. Never edit another worker's tree, delete its branch or take over unknown or live
   work; preserve unpublished or parked checkpoints. `release`/`handoff` keep local work;
-  `cleanup`/`recover` keep exact-head safeguards. Sync the primary checkout only by
-  `git merge --ff-only origin/main` when clean and strictly behind; never reset/rebase it.
+  `cleanup`/`recover` keep exact-head safeguards. After each issue lands on origin/main, sync primary main
+  with `git merge --ff-only origin/main` only if tracked-clean and strictly behind; keep untracked files, never reset/rebase.
 - Issue writes use `scripts/tron work`; reads may use `gh`. A nonzero GraphQL exit is
   uncertain: inspect remote state, never replay. Repository protection is maintainer-only.
 - Answer questions in chat; file concrete work (bodies hold remaining scope; PRs optional);
