@@ -102,7 +102,22 @@ describe("gateway/automations owned-run lock", () => {
     });
 
     gateway.script([
-      () => fauxAssistantMessage("Ready for scheduled checks."),
+      async () => {
+        // Keep the first turn live until the real socket observes its operation:
+        // otherwise rebaseline coalescing can erase this shape before delivery.
+        const slot = await gateway.registry.acquire(sessionId);
+        const releaseWrites = phone.holdWrites();
+        try {
+          slot.publishSnapshot();
+          slot.publishSnapshot();
+          slot.publishSnapshot();
+        } finally { releaseWrites(); }
+        await waitFor(() => phone.events.some(event => event.topic === "session.rebaseline"
+          && event.sessionId === sessionId
+          && (event.payload as { snapshot?: { operation?: { lifecycle?: string } } }).snapshot?.operation?.lifecycle !== undefined),
+        "the first automation-chat operation rebaseline");
+        return fauxAssistantMessage("Ready for scheduled checks.");
+      },
       () => fauxAssistantMessage([fauxToolCall("read", { path: "notes.txt" }, { id: "lock-automation-read" })], { stopReason: "toolUse" }),
       () => fauxAssistantMessage("The scheduled check found: lock notes."),
       () => fauxAssistantMessage([fauxToolCall("read", { path: "notes.txt" }, { id: "lock-workspace-read" })], { stopReason: "toolUse" }),

@@ -92,7 +92,13 @@ HTTP fetcher replaced, and records each relay request's envelope and every recei
 After open/sync it publishes an idle snapshot from the real runtime and requires the
 ordinary event before admitting work. Its failed run holds the phone's real socket
 write through terminal retirement so the idle snapshot deterministically supersedes
-queued busy state as a rebaseline; both null-blocker wire paths are observed. The
+queued busy state as a rebaseline; both null-blocker wire paths are observed.
+The cold-load and automation locks keep their first provider step live while holding
+socket writes and publishing three snapshots of that actual runtime: the first write
+is held, and the second queued snapshot supersedes the first queued one. They release
+writes in `finally` and await the connection's live-operation rebaseline before the
+provider answers. This pins the operation shape through real outbound coalescing,
+without pruning it from normalization or relying on a fast turn's timing. The
 automation lock wires the production store, scheduler, executor and service (harness option
 `automations`) and records every command receipt's contents. The Home lock
 keeps Home's and the worker's provider requests as two ordered streams (they

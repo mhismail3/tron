@@ -75,7 +75,22 @@ describe("session lifecycle kernel locks", () => {
     gateways.push(gateway);
     const phone = await gateway.connect("phone");
     gateway.script([
-      () => fauxAssistantMessage("First answer before eviction."),
+      async () => {
+        // Hold the provider at the real wire boundary so coalescing cannot
+        // remove the operation's shape before this scenario observes it.
+        const slot = await gateway.registry.acquire(first.sessionId);
+        const releaseWrites = phone.holdWrites();
+        try {
+          slot.publishSnapshot();
+          slot.publishSnapshot();
+          slot.publishSnapshot();
+        } finally { releaseWrites(); }
+        await waitFor(() => phone.events.some(event => event.topic === "session.rebaseline"
+          && event.sessionId === first.sessionId
+          && (event.payload as { snapshot?: { operation?: { lifecycle?: string } } }).snapshot?.operation?.lifecycle !== undefined),
+        "the first pre-eviction operation rebaseline");
+        return fauxAssistantMessage("First answer before eviction.");
+      },
       () => fauxAssistantMessage("Second session answer."),
       () => fauxAssistantMessage("Answer after the cold load."),
     ]);

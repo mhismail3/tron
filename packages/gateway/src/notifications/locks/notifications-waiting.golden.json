@@ -423,7 +423,9 @@
         "write",
         "lock_background",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -436,7 +438,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
       "messages": [
         {
           "role": "user",
@@ -452,7 +454,9 @@
         "write",
         "lock_background",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -465,7 +469,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
       "messages": [
         {
           "role": "user",
@@ -493,7 +497,9 @@
         "write",
         "lock_background",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -506,7 +512,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
       "messages": [
         {
           "role": "user",
@@ -542,7 +548,9 @@
         "write",
         "lock_background",
         "jev",
+        "web_search",
         "settings",
+        "projects",
         "ask_user",
         "display",
         "swift_app",
@@ -555,7 +563,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:6bf7f6bbbb089851a3dff7b5d6ce9789709d6c7c2081a0f7dd920d2c2ef96c36",
+      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
       "messages": [
         {
           "role": "user",
