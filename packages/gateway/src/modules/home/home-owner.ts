@@ -105,9 +105,10 @@ export interface HomeSessionPort {
   /** Retire every live Home slot after uncertain publication; next admission
    * rebuilds from the record reloaded by this owner. */
   retireHomeRuntimes(): Promise<void>;
-  /** Starts one wake activation for the Home session: admission, the trigger
-   * result, and the run. `delivered` is false when no result could be delivered. */
-  wakeHome(sessionId: string): Promise<{ delivered: boolean }>;
+  /** Capture the existing native cancellation lifetime synchronously. The
+   * returned runner lazily acquires/admit/runs that exact wake; a Stop or runtime
+   * replacement after capture must refuse it, never capture a fresh lifetime. */
+  wakeHome(sessionId: string): () => Promise<{ delivered: boolean }>;
 }
 
 /** What the session runtime reports to Home's memory. Narrow on purpose: the
@@ -667,6 +668,7 @@ export class HomeOwner {
     const record = this.record;
     if (this.unavailable || !record) return "done";
     const sessionId = homeSessionId(record);
+    const wake = this.options.sessions.wakeHome(sessionId);
     const tasks = await this.inboxAvailable() && (await this.inbox.pendingTasks(record.homeId)).length > 0;
     if (!tasks && !(await this.options.settingsOutcomes?.()?.takeOutcomes(record.chapters.map(chapter => chapter.sessionId)))) {
       this.lastWakeDelivered = false; return "done";
@@ -684,7 +686,7 @@ export class HomeOwner {
     try {
       // A post-rollover wake materializes the successor as home.prompt does (#1518).
       if (this.reservedChapter(sessionId)) { await this.materializer.materialize(sessionId); await this.materializer.assertAttempt(sessionId); }
-      ({ delivered } = await this.options.sessions.wakeHome(sessionId));
+      ({ delivered } = await wake());
     } catch (error) {
       if (error instanceof GatewayError && error.code === "busy") {
         this.options.diagnostic?.({ outcome: "wake", decision: "deferred", reason: "busy" });

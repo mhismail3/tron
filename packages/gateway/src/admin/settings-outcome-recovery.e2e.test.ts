@@ -26,10 +26,10 @@ async function prompt(slot: RuntimeSlot, text: string) {
   await slot.prompt(text);
   await waitFor(() => slot.snapshot().phase === "idle" && slot.snapshot().configurationBlocker === null || undefined, "real Home activation settles");
 }
-async function gateway() {
+async function gateway(contextWindow?: number) {
   let clock = Date.now();
   const timers: Array<{ run(): void; ms: number; cancelled: boolean }> = [];
-  const f = await fixture(false, false, undefined, false, undefined, {
+  const f = await fixture(false, false, contextWindow, false, undefined, {
     settingsNow: () => new Date(clock),
     settingsSchedule: (run, ms) => { const timer = { run, ms, cancelled: false }; timers.push(timer); return { cancel: () => { timer.cancelled = true; } }; },
   });
@@ -114,6 +114,28 @@ describe("settings outcome recovery at the real Registry/Pi/store boundary", () 
     evidence.push({ case: "bounded-outbox", retained: ids.length, providerReceived: ids.length });
   }, 60_000);
 
+  it("drains fitting Home batches through the actual native context budget and successful provider replies", async () => {
+    const f = await gateway(8000); const owner = homeOwnerOf(f.registry); await owner.pauseMemory();
+    const ids: string[] = [];
+    for (let index = 0; index < 160; index++) {
+      const held = await f.request(`bounded Home batch ${index}`);
+      ids.push(held.approval!.requestId); await f.decide(held, false); f.advance(1);
+    }
+    expect(outcomes(f.home)).toHaveLength(0); await owner.resumeMemory();
+    await waitFor(async () => (await f.approvals.takeOutcomes([f.home.id])).length === 0 || undefined, "all fitting batches reach durable delivery");
+    await waitFor(() => !f.home.isBusy || undefined, "all fitting batch replies settle");
+    const messages = outcomes(f.home); expect(messages.length).toBeGreaterThan(1);
+    expect(messages.flatMap(message => (message.details as { requests: Array<{ requestId: string }> }).requests.map(request => request.requestId))).toEqual(ids);
+    const entries = f.home.canonicalSessionEntries();
+    for (const [index, message] of messages.entries()) {
+      expect(f.providerInputs.filter(body => body === String(message.content))).toHaveLength(1);
+      const start = entries.indexOf(message); const end = index + 1 < messages.length ? entries.indexOf(messages[index + 1]!) : entries.length;
+      expect(entries.slice(start + 1, end).some(entry => entry.type === "message" && entry.message.role === "assistant"
+        && textOf(entry.message).includes("Outcome receipt confirmed."))).toBe(true);
+    }
+    evidence.push({ case: "native-fitting-batches", requests: ids.length, batches: messages.length });
+  }, 60_000);
+
   it("reconciles settings outcomes on cold start even when task recovery is refused", async () => {
     const f = await gateway(); const held = await f.request("cold independent settings");
     const calls = f.faux.state.callCount;
@@ -148,6 +170,33 @@ describe("settings outcome recovery at the real Registry/Pi/store boundary", () 
     await waitFor(async () => (await f.approvals.takeOutcomes([f.home.id])).length === 0 || undefined, "independent wake durable acknowledgement");
     expect(await owner.status()).toMatchObject({ taskRecovery: { available: false, reason: "unsafe-state" } });
     evidence.push({ case: "task-refused-independent-settings", requestId: held.approval!.requestId });
+  });
+
+  it("retains the outcome when the actual native request overflows context, then delivers on a usable input", async () => {
+    const f = await gateway(8000); const owner = homeOwnerOf(f.registry); const held = await f.request("native refusal");
+    const calls = f.faux.state.callCount;
+    const heldResponse: FauxResponseFactory = (_context, options) => new Promise(resolve => {
+      options?.signal?.addEventListener("abort", () => resolve(fauxAssistantMessage("Stopped owned activation.")), { once: true });
+    });
+    f.faux.setResponses([heldResponse]); const turn = f.home.prompt("Hold while the result settles");
+    await waitFor(() => f.faux.state.callCount > calls || undefined, "owned native provider holds the user activation"); await f.decide(held);
+    await waitFor(() => f.signals.some(signal => signal.outcome === "wake" && signal.decision === "deferred" && signal.reason === "busy") || undefined,
+      "settled result observes the busy activation");
+    await f.home.abort("agent"); await turn.catch(() => {});
+    await waitFor(() => !f.home.isBusy || undefined, "Stop leaves native input ownership quiescent");
+    expect(await owner.status()).toMatchObject({ phase: "ready", memory: { configured: true, paused: false } });
+    const before = f.faux.state.callCount; f.faux.setResponses(Array.from({ length: 80 }, () => f.respond as never));
+    await f.home.prompt("x".repeat(100000)).catch(() => {});
+    await waitFor(() => !f.home.isBusy || undefined, "overflow refusal releases actual native ownership");
+    evidence.push({ case: "native-overflow-observed", signals: f.signals, callsBefore: before, callsAfter: f.faux.state.callCount });
+    expect(f.signals.some(signal => signal.event === "refused" && signal.reason === "context-overflow")).toBe(true);
+    expect(f.faux.state.callCount).toBe(before); expect(outcomes(f.home)).toHaveLength(0);
+    expect((await f.approvals.takeOutcomes([f.home.id])).map(request => request.requestId)).toEqual([held.approval!.requestId]);
+    await prompt(f.home, "A usable input can hear the retained outcome");
+    await waitFor(async () => (await f.approvals.takeOutcomes([f.home.id])).length === 0 || undefined, "usable input proves delivery");
+    expect(outcomes(f.home)).toHaveLength(1);
+    expect(f.providerInputs.filter(body => body === String(outcomes(f.home)[0]!.content))).toHaveLength(1);
+    evidence.push({ case: "native-context-refusal", requestId: held.approval!.requestId });
   });
 
   it("Stop cancels an already selecting settings wake instead of reviving Home", async () => {
