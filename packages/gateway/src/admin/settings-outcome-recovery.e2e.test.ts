@@ -7,7 +7,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { fixture, disposeFixtures } from "../../test-support/home-task-fixture.js";
 import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { SettingsApprovals, APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
 import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/settings/tool-contract.js";
 import type { RuntimeSlot } from "../kernel/run/runtime-slot.js";
@@ -212,16 +212,17 @@ describe("settings outcome recovery at the real Registry/Pi/store boundary", () 
     });
     const actor = { kind: "home" as const, id: f.home.id, sessionId: f.home.id };
     const active = await changes.requestAction("fixture.live-effect", {}, { actor, reason: "Hold the owned effect while unrelated delivery proceeds" });
-    const applying = f.decide(active);
+    const applying = f.decide(active); let restarting: Promise<void> | undefined;
     try {
       await waitFor(async () => (await f.approvals.get(active.approval!.requestId))?.executionStartedAt || undefined, "actual execution claim precedes the held effect");
+      restarting = changes.start(); await awaitsWithin(restarting, "repeated start does not recover this owner's live effect");
       const settled = await changes.requestAction("fixture.other-target", {}, { actor, reason: "Prove unrelated terminal delivery remains independent" }); await f.decide(settled, false);
       await waitFor(() => f.received.some(body => body.includes(settled.approval!.requestId)) || undefined, "independent outcome reaches Home while the other effect remains live");
       expect(await f.approvals.get(active.approval!.requestId)).toMatchObject({ status: "pending", executionStartedAt: expect.any(String) });
       expect(outcomes(f.home)).toHaveLength(1);
       expect(f.providerInputs.filter(body => body === String(outcomes(f.home)[0]!.content))).toHaveLength(1);
       evidence.push({ case: "live-effect-independent-outcome", live: active.approval!.requestId, delivered: settled.approval!.requestId });
-    } finally { release(); await applying; }
+    } finally { release(); await applying; await restarting; }
   });
 
   it("Stop cancels an already selecting settings wake instead of reviving Home", async () => {

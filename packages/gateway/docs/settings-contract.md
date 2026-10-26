@@ -190,8 +190,9 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   operation that is not a stored value shares the store, digest, expiry, decision, record
   (`action: true`, key = subject, never undoable) and outcomes; `plan` binds an exact preview,
   re-checked at decide (a moved state supersedes). A durable execution claim precedes
-  `apply`; an interrupted execution is reported failed with possibly completed effects,
-  never replayed. Action failures instruct inspection before retry rather than promising
+  `apply`; the first awaited owner start recovers pre-existing execution claims as failed
+  with possibly completed effects, never replayed. Normal delivery/expiry does not join or
+  recover this owner's live effects. Action failures instruct inspection before retry rather than promising
   that no effects occurred. Expiry and decision admission share the target stripe.
 - **One key id rule:** resolve, dry run and change take the declared id
   (`model.thinking[role=chat]`); a plain id with fixed instances is refused naming them, and a
