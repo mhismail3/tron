@@ -215,7 +215,6 @@ struct SessionContextSheet: View {
                         // controls. Settings (the gear) owns every scope's settings.
                         Group {
                             SessionContextUsageCard(snapshot: snapshot, action: compactButton(snapshot))
-                                .settingsApprovals(.session(sessionID))
                             ManageModelConfigurationCard(sessionID: sessionID)
                             sessionSection(snapshot)
                             settingsSection(snapshot)

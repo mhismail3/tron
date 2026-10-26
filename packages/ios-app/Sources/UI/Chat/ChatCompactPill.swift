@@ -14,6 +14,7 @@ extension ChatNotificationTone {
         case .purple: ChatCompactPillPalette.purplePrimary
         case .subagent: ChatCompactPillPalette.subagentPrimary
         case .warning: ChatCompactPillPalette.warningPrimary
+        case .success: ChatCompactPillPalette.successPrimary
         case .error: .tronError
         case .neutral: ChatCompactPillPalette.neutralPrimary
         }
@@ -28,6 +29,7 @@ extension ChatNotificationTone {
         case .purple: ChatCompactPillPalette.purpleSecondary
         case .subagent: ChatCompactPillPalette.subagentSecondary
         case .warning: ChatCompactPillPalette.warningSecondary
+        case .success: ChatCompactPillPalette.successSecondary
         case .error: ChatCompactPillPalette.errorSecondary
         case .neutral: ChatCompactPillPalette.neutralSecondary
         }
@@ -42,6 +44,7 @@ extension ChatNotificationTone {
         case .purple: .tronPurple
         case .subagent: .tronSubagent
         case .warning: .tronAmber
+        case .success: .tronSuccess
         case .error: .tronError
         case .neutral: .tronSlate
         }
@@ -56,6 +59,7 @@ private enum ChatCompactPillPalette {
     static let purplePrimary = Color(lightHex: "#6D28D9", darkHex: "#C4B5FD")
     static let subagentPrimary = Color(lightHex: "#006657", darkHex: "#5DE0CE")
     static let warningPrimary = Color(lightHex: "#92400E", darkHex: "#FBBF24")
+    static let successPrimary = Color(lightHex: "#166534", darkHex: "#86EFAC")
     static let neutralPrimary = Color(lightHex: "#475569", darkHex: "#CBD5E1")
 
     static let commandSecondary = Color(lightHex: "#3730A3", darkHex: "#E0E7FF")
@@ -63,6 +67,7 @@ private enum ChatCompactPillPalette {
     static let purpleSecondary = Color(lightHex: "#5B21B6", darkHex: "#DDD6FE")
     static let subagentSecondary = Color(lightHex: "#00594D", darkHex: "#A0EFE3")
     static let warningSecondary = Color(lightHex: "#78350F", darkHex: "#FDE68A")
+    static let successSecondary = Color(lightHex: "#14532D", darkHex: "#BBF7D0")
     static let errorSecondary = Color(lightHex: "#991B1B", darkHex: "#FCA5A5")
     static let neutralSecondary = Color(lightHex: "#334155", darkHex: "#E2E8F0")
 }

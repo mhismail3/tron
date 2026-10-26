@@ -175,6 +175,19 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Setup cards.** New Session cards are one `TronSetupCardLabel` with
   `TronTypography.settingsRowSubtext`.
 
+## Approval presentation
+
+Chat request/outcome chips, settings push review and Changes use `SettingsApprovalSheet`
+(`UI/Settings/SettingsApprovalsSection.swift`) and the existing receipt-backed
+`SettingsTrustCoordinator`. `SettingsApprovalPresentationModels` reads canonical structured
+facts, never prose. The transcript route owner retains approval sheets above lazy rows;
+Manage Home/Session do not duplicate them. Pending uses the Approve title and top-right red
+X/green check, no Done/bottom bar; native dismissal never submits. Current Gateway values/action
+previews and digest bind a deliberate tap. Terminal receipts/outcomes are read-only, with full
+wrapping uncertainty text; missing or incomplete proof stays unavailable, not applied/failed.
+Global Changes remains the audit/Undo surface; owner actions have no generic Undo. Positive
+compact status extends the shared pill palette's semantic success role, not per-chip colors.
+
 ## Shared lists and readers
 
 - Manage Home/Session list sheets share `Components/TronList.swift`. Fixed sets (Profile,

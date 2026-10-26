@@ -291,7 +291,6 @@ struct ChatView: View {
             guard activity.allowsPresentationPublication else { return }
             admitPendingFloatingDisplay()
         }
-        .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in openManageForStagedSettingsDecision() }
         .modifier(ChatLiveHapticsModifier(facts: liveHapticFacts) { selectedAuthoritativeSnapshot?.transcript ?? [] })
     }
 
@@ -317,14 +316,6 @@ struct ChatView: View {
         let pending: [ExtensionInteraction] = selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
         guard pending.contains(where: { ExtensionInteractionScope($0) == scope }) else { return }
         sessionPresentation.requestInteractionPresentation(interaction)
-    }
-
-    /// A settings-approval push action opens this chat's Manage sheet; the approvals
-    /// section consumes the staging, so this only opens the sheet and never decides.
-    private func openManageForStagedSettingsDecision() {
-        guard model.freshStagedSettingsDecision()?.sessionID == sessionID,
-              homeSheet == nil, !sessionPresentation.showContext else { return }
-        if !presentManageHome() { sessionPresentation.showContext = true }
     }
 
     private var completedDisplayPresentations: [DisplayProjection] {

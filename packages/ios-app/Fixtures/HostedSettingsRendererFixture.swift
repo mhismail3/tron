@@ -140,6 +140,8 @@ struct HostedSettingsRendererFixture: View {
                         providerReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
                         PushNotificationsSettingsView()
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-inline-approval-boundary") {
+                        HostedInlineApprovalBoundaryFixture()
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
                         SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
@@ -376,6 +378,17 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     }
 
     private func historyPage(_ params: [String: JSONValue]) -> JSONValue {
+        if ProcessInfo.processInfo.arguments.contains("-settings-inline-approval-boundary") {
+            return .object(["entries": .array(decided.keys.sorted().map { id in
+                .object(["changeId": .string("settled-\(id)"), "requestId": .string(id), "refersTo": .string("pending-\(id)"),
+                    "at": .string(ISO8601DateFormatter().string(from: Date())), "actor": .object(["kind": .string("agent")]),
+                    "target": .object(["kind": .string("global")]), "layer": .string("global"), "key": .string("run.retry.maxRetries"),
+                    "op": .string("set"), "tier": .string("approve"), "status": .string(decided[id] == true ? "approved" : "declined"),
+                    "before": .number(4), "after": .number(6), "presentation": .object([
+                        "label": .string("Request \(id)"), "actor": .string("Fixture agent"), "layer": .string("Global"),
+                        "display": .object(["before": .string("4 retries"), "after": .string("6 retries")])])])
+            }), "nextCursor": .null])
+        }
         guard params["key"] != nil || params["cursor"]?.stringValue == "fixture-next" else {
             return .object(["entries": .array([]), "nextCursor": .string("fixture-next")])
         }

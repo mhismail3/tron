@@ -927,6 +927,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     /// A nested `ask_user` call (for example from codemode) is still running inside this
     /// call, so its pending question opens from this row (#929).
     let hostsRunningNestedAskUser: Bool
+    let approvalRequest: SettingsApprovalReference?
     let display: DisplayProjection?
     let requestedDisplaySurface: DisplaySurface?
     let extensionOrigin: ExtensionToolOrigin?
@@ -956,6 +957,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         hostsRunningNestedAskUser = nested.contains {
             $0.objectValue?["toolName"]?.stringValue == "ask_user" && $0.objectValue?["status"]?.stringValue == "running"
         }
+        approvalRequest = tool.error || tool.isRunning ? nil : SettingsApprovalReference(result: tool.details ?? tool.response)
         display = tool.display
         requestedDisplaySurface = tool.display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? DisplayPresentationPolicy.invocationSurface(toolName: tool.toolName, request: tool.request)
@@ -1278,6 +1280,7 @@ enum ChatNotificationTone: Hashable, Sendable {
     case purple
     case subagent
     case warning
+    case success
     case error
     case neutral
 }

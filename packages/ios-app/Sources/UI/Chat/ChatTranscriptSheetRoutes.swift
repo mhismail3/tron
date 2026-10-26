@@ -39,6 +39,7 @@ enum ChatTranscriptSheetRoute: Equatable, Identifiable {
     case thinkingTrace(ChatThinkingTraceSheetRoute)
     case prompt(HomeTextReading)
     case notificationDetail(ChatNotificationDetailSheetRoute)
+    case settingsApproval(SettingsApprovalSelection)
 
     var id: String {
         switch self {
@@ -46,6 +47,7 @@ enum ChatTranscriptSheetRoute: Equatable, Identifiable {
         case .thinkingTrace(let route): "chat.thinking-trace.\(route.identity)"
         case .prompt(let reading): "chat.prompt.\(reading.id)"
         case .notificationDetail(let route): "chat.transcript-event-detail.\(route.eventID)"
+        case .settingsApproval(let selection): "chat.settings-approval.\(selection.id)"
         }
     }
 
@@ -105,6 +107,7 @@ struct ChatTranscriptSheetHost: ViewModifier {
     @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.tronPresentationActivity) private var activity
     @State private var toolRun: ToolRunResolvedState?
     @State private var displayHandoff = ToolDisplayHandoff()
 
@@ -124,7 +127,7 @@ struct ChatTranscriptSheetHost: ViewModifier {
                 // A new presentation supersedes any intent the previous one left
                 // behind. A dismissal is not a cancellation: the sheet completes
                 // its own handoff as it goes away.
-                guard let route else { return }
+                guard let route else { presentStagedApproval(); return }
                 displayHandoff.cancel()
                 // The opened run's own resolution stays the fallback while the
                 // sheet dismisses and its handoff completes.
@@ -137,12 +140,32 @@ struct ChatTranscriptSheetHost: ViewModifier {
                    || previous.sessionID != current.sessionID {
                     displayHandoff.cancel()
                 }
+                if let previous, let current, previous.sessionID != current.sessionID,
+                   let route = routes.route, case .settingsApproval = route { routes.dismiss() }
                 refreshToolRun()
+                presentStagedApproval()
             }
-            .onChange(of: model.selectedGatewayProfileID()) { _, _ in displayHandoff.cancel() }
+            .onChange(of: model.selectedGatewayProfileID()) { _, _ in
+                displayHandoff.cancel()
+                if let route = routes.route, case .settingsApproval = route { routes.dismiss() }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { displayHandoff.cancel() }
+                else { presentStagedApproval() }
             }
+            .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in presentStagedApproval() }
+            .onChange(of: activity.allowsPresentationPublication) { _, active in if active { presentStagedApproval() } }
+    }
+
+    /// Push carries a requester session, not an approval digest. Review the
+    /// owner's current candidates; never turn the push's action into a decision.
+    private func presentStagedApproval() {
+        guard routes.route == nil, activity.allowsPresentationPublication,
+              let sessionID = installationTag?.sessionID,
+              let staged = model.freshStagedSettingsDecision(),
+              staged.sessionID == sessionID || sessionID == model.homeStatus.status?.sessionId else { return }
+        model.consumeStagedSettingsDecision(staged.id)
+        routes.present(.settingsApproval(.session(staged.sessionID)))
     }
 
     @ViewBuilder
@@ -162,6 +185,8 @@ struct ChatTranscriptSheetHost: ViewModifier {
             )
         case .prompt(let reading):
             HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: .tronPrimary)
+        case .settingsApproval(let selection):
+            SettingsApprovalSheet(selection: selection)
         case .notificationDetail(let value):
             LiveNotificationDetailSheet(
                 eventID: value.eventID,

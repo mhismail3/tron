@@ -10,7 +10,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
   `SettingsChoiceSlider`, `SettingsAutosave`.
-- Audit and approvals: `SettingsChangesView`, `SettingsChangeRow`, `SettingsApprovalsSection`.
+- Audit and approvals: `SettingsChangesView`, `SettingsChangeRow`, `SettingsApprovalSheet`
+  and `SettingsApprovalRequestSummary` (in `SettingsApprovalsSection.swift`).
 - Agent configuration: `ConfigurationSlider(Surface)`,
   `CustomModelsSettingsView` with `CustomModelDraftTransformation`, `DefaultToolsSettingsSection`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
@@ -82,10 +83,16 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Project/Session/Global, pins approvals above history and keeps last-look per Mac. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
   entries never show their definition.
-- **Approvals.** `SettingsApprovalsSection` re-reads `settings.approvals` on its revision and
-  decides with `settings.decide` bound to the request digest, showing only Gateway text. It is
-  mounted in both Manage Home and Manage Session. The `settings-approval` push stages a decision for
-  two minutes; one matching request still needs an explicit confirmation tap.
+- **Approvals.** Chat request/outcome chips, push review and Changes reuse `SettingsApprovalSheet`.
+  It re-reads `settings.approvals` and displays the Gateway's exact values or registered action
+  preview. Only its red X/green check submits `settings.decide` with that displayed digest through
+  `SettingsTrustCoordinator`'s receipt owner; pending has no Done or bottom action bar, and swipe
+  dismissal leaves it pending. A two-minute push intent opens current requester candidates, never
+  auto-decides. Manage Home/Session have no duplicate waiting sections. Proven receipts and canonical
+  outcomes are read-only; missing pending state is not a terminal result. Historical request chips
+  resolve a bounded history cut by request ID and every original change ID; incomplete cuts remain
+  unavailable. Failure text retains uncertainty and is selectable/wrapping. Global Changes keeps
+  fenced Undo for applied/approved values, never registered actions.
 - **Providers.** Configured above Available. Connect/Configure opens one sheet showing every
   advertised method; the visible sheet owns the operation's prompts, and an answered choice
   restarts with `replaceOperationId` (`ProviderAuthSelectionTrail`). Usage rows reserve a skeleton

@@ -85,6 +85,13 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   owns display, memory-bounded photo previews and honest load-failure fallback. Technical details hold JSON. `TaskToolDetailPresentation` shows catalog rows/counts,
   status, paged reports and receipts; unknown shapes stay generic. Check-ins lead with the step/summary,
   then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Worker reports render their invocation’s outcome, Markdown summary and acceptance evidence through shared Home sections; opaque receipts stay in Technical details. Report/check-in sheets use `tronPrimary`. `ToolDetailPresentation` owns one name/icon catalog for transcript, nested calls, sheets and resource tools; unknown extension/MCP names are humanized without changing invocation identity. Task reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
+- **Approval chips.** `SettingsApprovalReference` projects only a completed canonical pending
+  tool result's request/change IDs, not prose or an approval cache. `SettingsApprovalChips` reuse
+  compact-pill chrome; request segments keep their original call order and technical details.
+  Gateway-attributed `tron.settings-outcome.v1` contexts open the same read-only sheet; unknown
+  versions/shapes retain the ordinary context viewer. `ChatTranscriptSheetRoutes` owns these sheets
+  above lazy rows, including push review, so scrolling cannot dismiss them. Positive status uses
+  the compact-pill owner's contrast-safe success palette; failures keep the shared error palette.
 - **Thinking and context.** Thinking shows at most four measured lines, opening the full trace on
   tap. Compaction, branch, configuration and extension status share one notification-pill language;
   command pills never show arguments. `custom_message` is right-aligned context; worker results
@@ -118,7 +125,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   capability-gated stop (`process-transcript-abort.v1`).
 - **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing), then the
   shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Effort and
-  Context Window); the existing settings renderer owns reads, writes, pending approvals and Revert.
+  Context Window); the existing settings renderer owns reads, writes and Revert; the shared approval
+  sheet owns request review.
   Tool selection uses its `SettingsToolsEditor` with the shared `AvailableToolsList`. Session
   container: Workspace (`workspace-inspector.v1`), Instructions, Resources (tags Global, Project or
   External; Commands and Subagents preview a body whose View All opens the shared reader), Session

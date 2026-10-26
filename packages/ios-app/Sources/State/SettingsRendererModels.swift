@@ -180,13 +180,15 @@ struct SettingsChangeResult: Decodable, Equatable, Sendable {
     }
 
     /// The request's tier: the highest of its changes. An applied change's result may omit it.
+    let status: String?
     let tier: String?
     let changes: [Outcome]
 
-    private enum CodingKeys: String, CodingKey { case tier, changes }
+    private enum CodingKeys: String, CodingKey { case status, tier, changes }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
         tier = try container.decodeIfPresent(String.self, forKey: .tier)
         changes = try container.decodeIfPresent([Outcome].self, forKey: .changes) ?? []
     }

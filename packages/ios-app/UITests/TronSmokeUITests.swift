@@ -2530,21 +2530,28 @@ final class TronSmokeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-scope", "-settings-changes-approvals"]
         app.launch(); defer { app.terminate() }
-        let approve = app.buttons["Approve"].firstMatch
+        let request = app.buttons["settings-changes-pending-approve"]
         XCTAssertTrue(app.navigationBars.staticTexts["Changes"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["This session"].exists)
-        XCTAssertTrue(approve.waitForExistence(timeout: 5), app.debugDescription)
-        tapScrolling(approve, in: app)
-        XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
+        XCTAssertTrue(request.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(request, in: app)
+        XCTAssertTrue(app.buttons["settings-approval-approve-approve"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.alerts.count, 0)
-        app.buttons["confirmation-cancel"].tap()
+        XCTAssertFalse(app.buttons["Done"].exists)
+        app.navigationBars.staticTexts["Approve"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+        XCTAssertTrue(request.waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["fixture.settings-changes-decisions"].label, "decisions:0 approved:0")
-        tapScrolling(approve, in: app)
-        app.buttons["Approve change"].tap()
+        tapScrolling(request, in: app)
+        app.buttons["settings-approval-approve-approve"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Applied"].waitForExistence(timeout: 5))
+        closeTopSheet(app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:1 approved:1", timeout: 5))
-        let decline = app.buttons["Decline"].firstMatch
-        tapScrolling(decline, in: app)
-        app.buttons["Decline change"].tap()
+        tapScrolling(app.buttons["settings-changes-pending-decline"], in: app)
+        XCTAssertTrue(app.buttons["settings-approval-decline-decline"].waitForExistence(timeout: 5))
+        app.buttons["settings-approval-decline-decline"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Declined"].waitForExistence(timeout: 5))
+        closeTopSheet(app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:2 approved:1", timeout: 5))
         drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
@@ -3295,16 +3302,14 @@ final class TronSmokeUITests: XCTestCase {
             app.launch()
             XCTAssertTrue(app.staticTexts["fixture.settings-renderer-applied"].waitForExistence(timeout: 10), app.debugDescription)
             if surface.hasPrefix("confirmation") {
-                tapScrolling(app.buttons["Approve"].firstMatch, in: app)
-                XCTAssertTrue(app.buttons["Approve change"].waitForExistence(timeout: 5), app.debugDescription)
+                tapScrolling(app.buttons["settings-changes-pending-approve"], in: app)
+                XCTAssertTrue(app.buttons["settings-approval-approve-approve"].waitForExistence(timeout: 5), app.debugDescription)
                 keepScreenshot(named: "1261-\(surface)")
-                let cancel = app.buttons["confirmation-cancel"]
-                if cancel.exists {
-                    cancel.tap()
-                    app.buttons["Decline"].firstMatch.tap()
-                    XCTAssertTrue(app.buttons["Decline change"].waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1261-decline-\(surface)")
-                }
+                app.navigationBars.staticTexts["Approve"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                    .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+                tapScrolling(app.buttons["settings-changes-pending-decline"], in: app)
+                XCTAssertTrue(app.buttons["settings-approval-decline-decline"].waitForExistence(timeout: 5))
+                keepScreenshot(named: "1261-decline-\(surface)")
             } else if surface == "placement" {
                 tapScrolling(app.buttons["settings-link-Extensions"], in: app)
                 XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 5), app.debugDescription)
