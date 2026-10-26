@@ -8,8 +8,8 @@ extension RealGatewayPairAndChatUITests {
     func testAgentSettingsQueuesSaveReopenAndResetInLightAndDark() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
-        let store = agent.deletingLastPathComponent().appendingPathComponent("gateway/settings/gateway.json")
+        let tronHome = try XCTUnwrap(ProcessInfo.processInfo.environment["TRON_E2E_TRON_HOME"])
+        let store = URL(fileURLWithPath: tronHome).appendingPathComponent("gateway/settings/gateway.json")
         func saved(_ role: String) -> [String]? {
             let document = (try? JSONSerialization.jsonObject(with: Data(contentsOf: store))) as? [String: Any]
             return (document?["modelQueues"] as? [String: Any])?[role] as? [String]
@@ -36,7 +36,11 @@ extension RealGatewayPairAndChatUITests {
             expandAgentSheet(app, title: "Agent Settings")
             keepScreenshot(app, name: "2010-agent-settings-top-\(appearance)")
             for (role, label) in [("worker", "Worker models"), ("subagent", "Subagent models"), ("background", "Background models")] {
-                let row = app.descendants(matching: .any)["settings-row-model.queue_role_\(role)_"]
+                // Real resolutions include the fixed role qualifier in the row identity;
+                // synthetic fixtures may omit that suffix. Address the owning row, not its reset child.
+                let row = app.descendants(matching: .any).matching(NSPredicate(
+                    format: "identifier BEGINSWITH %@ AND NOT identifier ENDSWITH '-reset'",
+                    "settings-row-model.queue_role_\(role)_")).firstMatch
                 revealBelowNavigationBar(app, row)
                 let edit = row.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label != 'Reset'", label)).firstMatch
                 XCTAssertTrue(edit.waitForExistence(timeout: 15), "Queue has no editor: \(row.debugDescription)")
@@ -65,7 +69,7 @@ extension RealGatewayPairAndChatUITests {
                 app.buttons["Save"].tap()
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == [] }, "Empty is an explicit queue choice, not Reset")
                 revealBelowNavigationBar(app, row)
-                let reset = app.buttons["settings-row-model.queue_role_\(role)_-reset"]
+                let reset = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
                 XCTAssertTrue(reset.waitForExistence(timeout: 15), app.debugDescription)
                 reset.tap()
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == nil }, "Reset must remove, not copy, the inherited value")
