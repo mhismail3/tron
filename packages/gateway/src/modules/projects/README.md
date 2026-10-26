@@ -40,6 +40,10 @@ queue, exact preview/digest, 24-hour expiry, UI-only decision, execution claim a
 requester outcomes are authoritative; there is no second queue or outcome store.
 Home can delegate immediately after successful trust. Decline/expiry grant nothing.
 An interrupted/failed action is never replayed; inspect retained paths and Changes.
+A crash after a local creation intent may leave an unresolved audit row; it does
+not imply success and is never replayed. If both runtime reload and compensation
+fail, the existing native fence remains fail-closed. Repair the failing resources
+before retrying a trust transition; lifecycle never clears an uncertain fence.
 Repeating create refuses its existing path; repeating an approval refuses its settled
 request. To retry a failed creation's trust phase, explicitly request `trust`.
 

@@ -139,6 +139,8 @@ describe("Gateway project lifecycle", () => {
     const f = await fixture();
     await f.decide(await f.create("original"));
     await writeFile(f.path("original/data"), "keep this");
+    await mkdir(f.path("occupied"));
+    expect((await f.request({ action: "rename", name: "original", newName: "occupied" })).isError).toBe(true);
     const rename = await f.request({ action: "rename", name: "original", newName: "renamed" });
     expect(rename.isError, rename.text).toBe(false);
     expect(await readFile(f.path("original/data"), "utf8")).toBe("keep this");
@@ -175,6 +177,7 @@ describe("Gateway project lifecycle", () => {
     try {
       await expect(f.decide(pending.details)).rejects.toThrow(/superseded|session|busy/i);
       await expect(direct()).rejects.toThrow(/session|busy|worker/i);
+      await expect(projectsOwnerOf(f.registry)!.request({ action: "untrust", name: "busy", reason: "Active worker boundary" }, { kind: "home", id: f.home.sessionId }, `untrust-busy-${++command}`)).rejects.toThrow(/session|busy|worker/i);
     } finally { release(); await worker.completion; }
     await f.git("busy", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "fixture"]);
     await f.git("busy", ["worktree", "add", "-b", "worker", join(f.root, "worker-tree")]);
@@ -203,7 +206,7 @@ describe("Gateway project lifecycle", () => {
     }, inspection => f.registry.reloadProject(inspection.projectDir, false, false), inspection => f.registry.commitProjectReload(inspection.projectDir));
     try {
       await waitFor(() => entered || undefined, "relocation fence acquired");
-      await expect(f.registry.create(f.path("nested"))).rejects.toThrow(/trust|reconfigured|busy/i);
+      await expect(f.registry.create(f.path("nested"))).rejects.toMatchObject({ code: "busy" });
       expect((await f.trust.inspect(destination)).effectiveDecision).toBe(false);
     } finally { release(); }
     await expect(relocating).rejects.toThrow(/fixture interrupted/);
@@ -222,7 +225,7 @@ describe("Gateway project lifecycle", () => {
     await mkdir(join(f.root, "outside"));
     await symlink(join(f.root, "outside"), f.path("replaced"));
     await expect(f.decide(pending)).rejects.toThrow(/superseded|symlink/i);
-    expect((await f.trust.inspect(join(f.root, "outside"))).effectiveDecision).not.toBe(true);
+    expect((await f.trust.inspect(join(f.root, "outside"))).savedDecision).toBe(null);
     const claimed = await f.create("claimed");
     await f.decide(claimed);
     await f.git("claimed", ["checkout", "-b", "feat/42-worker"]);
@@ -231,6 +234,39 @@ describe("Gateway project lifecycle", () => {
     await rename(f.workspace, join(f.root, "relocated-workspace"));
     await symlink(join(f.root, "relocated-workspace"), f.workspace);
     expect((await f.request({ action: "create", name: "escaped" })).isError).toBe(true);
+  });
+
+  it("partial GitHub failure retains an untrusted project and refuses to silently recreate an existing remote", async () => {
+    const f = await fixture(true);
+    const executable = join(f.root, "gh-fixture");
+    await writeFile(executable, `${await readFile(executable, "utf8")}\nexit 7\n`);
+    const pending = await f.create("partial-remote", true);
+    await expect(f.decide(pending)).rejects.toThrow(/GitHub.*inspect/i);
+    expect(await f.git("partial-remote", ["remote", "get-url", "origin"])).toBe("https://github.invalid/fixture/partial-remote.git");
+    expect((await f.trust.inspect(f.path("partial-remote"))).effectiveDecision).toBe(false);
+    expect((await f.request({ action: "trust", name: "partial-remote", github: true })).isError).toBe(true);
+    await f.decide((await f.request({ action: "trust", name: "partial-remote" })).details);
+    expect((await f.trust.inspect(f.path("partial-remote"))).effectiveDecision).toBe(true);
+  });
+
+  it("retains a fail-closed native fence when both application and rollback fail, without replaying filesystem effects", async () => {
+    const f = await fixture();
+    await f.decide(await f.create("failed-reload"));
+    const destination = f.path("reserved-failure");
+    await mkdir(destination);
+    let effects = 0;
+    await expect(f.trust.relocate(f.path("failed-reload"), destination, true, async () => { effects++; }, async inspection => {
+      await f.registry.reloadProject(inspection.projectDir, false, false);
+      throw new Error("Persistent fixture applier failure after native fence");
+    }, inspection => f.registry.commitProjectReload(inspection.projectDir))).rejects.toMatchObject({ code: "internal", details: {
+      failure: expect.stringMatching(/Persistent fixture applier failure/), rollbackFailure: expect.stringMatching(/Persistent fixture applier failure/),
+    } });
+    expect(effects).toBe(0);
+    await expect(f.registry.create(f.path("failed-reload"))).rejects.toMatchObject({ code: "busy" });
+    // This exact fixture owns the deliberately faulted native fence. Release it
+    // only after the bad applier is removed; production must repair its resource.
+    await f.registry.commitProjectReload(f.path("failed-reload"));
+    expect((await f.registry.create(f.path("failed-reload"))).cwd).toBe(f.path("failed-reload"));
   });
 
   it("optional private GitHub creation crosses only the approved spawned fixture boundary and sets origin without a push", async () => {

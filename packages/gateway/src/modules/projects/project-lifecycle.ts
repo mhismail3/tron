@@ -117,7 +117,9 @@ export class ProjectLifecycle {
     if (await realpath(this.workspace) !== this.workspace) throw new GatewayError("invalid_request", "Workspace must be a canonical directory, not a symlink");
   }
   private async directory(path: string): Promise<string> {
-    const info = await lstat(path);
+    const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+      throw new GatewayError(error.code === "ENOENT" ? "not_found" : "invalid_request", error.code === "ENOENT" ? "Project directory does not exist" : "Project directory cannot be inspected");
+    });
     if (!info.isDirectory() || info.isSymbolicLink()) throw new GatewayError("invalid_request", "Project paths must be real directories, not symlinks");
     return `${info.dev}:${info.ino}`;
   }
@@ -151,9 +153,11 @@ export class ProjectLifecycle {
     if (root !== path) throw new GatewayError("invalid_request", "Lifecycle requires a standalone project repository");
     const worktrees = await this.git(path, ["worktree", "list", "--porcelain"]);
     if (worktrees.split("\n").filter(line => line.startsWith("worktree ")).length !== 1) throw new GatewayError("busy", "Project has linked worktrees; release their owners before changing its lifecycle");
-    // Claims are commit trailers, not branch-name guesses. A retained claim is
-    // deliberately conservative: only its work owner may release it.
+    // Only the work tool's canonical claim-branch namespace owns claims.
+    // Verify its trailer too; historical markers merged into main are not owners.
+    // Retained claim branches are conservative: only their work owner cleans them.
     const refs = (await this.git(path, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"])).split("\n");
+    if (refs.length > 200) throw new GatewayError("busy", "Too many project refs to inspect safely; review its work ownership first");
     for (const ref of refs.filter(ref => /^refs\/(?:heads|remotes\/[^/]+)\/[a-z0-9._-]+\/\d+-/.test(ref))) {
       const claim = await this.git(path, ["log", ref, "-1", "--grep=^Work-Claim-Session:", "--format=%(trailers:key=Work-Claim-Session,valueonly)"]);
       if (claim) throw new GatewayError("busy", "Project retains a work claim branch; its owner must release and clean it before lifecycle changes");
@@ -166,7 +170,7 @@ export class ProjectLifecycle {
       if (action.operation === "archive") {
         const archive = join(this.workspace, ".archive");
         try { await this.directory(archive); if (await realpath(archive) !== archive) throw new Error("symlink"); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new GatewayError("invalid_request", "Archive must be a real directory"); }
+        catch (error) { if (!(error instanceof GatewayError && error.code === "not_found")) throw new GatewayError("invalid_request", "Archive must be a real directory"); }
       }
       await this.absent(destination);
     }
@@ -216,6 +220,7 @@ export class ProjectLifecycle {
         if (await realpath(archive) !== archive) throw new GatewayError("invalid_request", "Archive path changed");
       }
       // Reserve exclusively instead of rename's normal overwrite behavior.
+      // Trust's exact-path deny shadows ancestor authority before the move.
       await mkdir(destination, { mode: 0o700 });
       reservation = await this.directory(destination);
       await this.trust().relocate(path, destination, action.operation === "rename" && trust.effectiveDecision === true, async () => {

@@ -79,7 +79,11 @@ export class TrustService {
     const cwd = await this.canonicalDirectory(path);
     const projectDir = knownProjectDir ?? await this.projectDirectory(cwd);
     const requiresDecision = hasTrustRequiringProjectResources(cwd, projectDir);
-    const savedDecision = this.store.get(projectDir);
+    // A lifecycle reservation is explicitly denied before it is a Git root.
+    // Honor that exact deny even beneath a trusted repository. A subdirectory
+    // may never grant authority to its root; this exception only narrows it.
+    const exact = this.store.getEntry(cwd);
+    const savedDecision = exact?.path === cwd && exact.decision === false ? false : this.store.get(projectDir);
     const settings = SettingsManager.create(projectDir, this.agentDir, { projectTrusted: false });
     const defaultDecision = settings.getDefaultProjectTrust();
     const effectiveDecision = savedDecision ?? (defaultDecision === "always" ? true : defaultDecision === "never" ? false : null);
@@ -149,8 +153,13 @@ export class TrustService {
       catch (failure) {
         // Same rollback/reload contract as setAndApply: do not publish an
         // unrelated fence when the initial admission refused before effects.
-        await apply(previous);
-        await commit(previous);
+        try { await apply(previous); await commit(previous); }
+        catch (rollbackFailure) {
+          throw new GatewayError("internal", "Project relocation could not restore its prior runtime; project remains fenced until its resources are repaired", false, {
+            failure: failure instanceof Error ? failure.message : String(failure),
+            rollbackFailure: rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure),
+          });
+        }
         throw failure;
       }
       try {

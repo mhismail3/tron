@@ -14,6 +14,8 @@ bounds, exit rules and retirement live in `util/git-inspection.ts`.
 including inherited decisions, standalone directories, worktree propagation and
 compensating runtime application/commit rollback. `reserveUntrustedDirectory` pins
 an exact new directory before it has a Git root, never an enclosing repository.
+An exact false decision on a requested directory narrows inherited/root authority;
+a subdirectory's positive decision still never grants authority to its Git root.
 Approved `relocate` holds that same mutex/fence, shadows destination trust before
 filesystem effects and leaves both names explicitly false on a partial move. It
 never replays filesystem effects or automatically moves user data backwards.
