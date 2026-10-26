@@ -188,6 +188,24 @@ class FseventsGuard(unittest.TestCase):
         self.assertTrue(stale.exists())
         self.assertFalse((self.home / "Library" / "Logs" / "tron-fsevents-guard.jsonl").exists())
 
+    def test_default_temp_dir_is_this_users_private_darwin_temp_dir(self):
+        # Without --temp-dir the guard resolves the per-user Darwin temp dir the
+        # way the maintainer runs `install`; a dry run removes nothing.
+        expected = subprocess.run(["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"], stdout=subprocess.PIPE,
+                                  text=True, check=True).stdout.strip()
+        env = {"HOME": str(self.home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+        result = subprocess.run([PYTHON, str(SCRIPT), "install", "--print-plist"], env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        program = plistlib.loads(result.stdout.encode())["ProgramArguments"]
+        self.assertEqual(os.path.realpath(program[4]), os.path.realpath(expected))
+        result = subprocess.run([PYTHON, str(SCRIPT), "check", "--dry-run", "--sample-seconds", "0.2", *COLD],
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = self.home / "Library" / "Logs" / "tron-fsevents-guard.jsonl"
+        record = json.loads(log.read_text().splitlines()[-1])
+        self.assertEqual(record["cleanup"].get("deleted", []), [], record)
+
     def test_launch_agent_embeds_this_source_and_its_program_runs(self):
         plist = plistlib.loads(self.guard("install", "--print-plist", "--interval-minutes", "15").encode())
         program = plist["ProgramArguments"]

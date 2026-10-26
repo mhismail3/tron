@@ -48,11 +48,9 @@ def home_path(*parts):
 
 
 def default_temp_dir():
-    """This user's private Darwin temp dir; never a shared fallback such as /tmp."""
-    try:
-        return os.confstr("CS_DARWIN_USER_TEMP_DIR") or ""
-    except (ValueError, OSError):
-        return ""
+    """This user's private Darwin temp dir; never a shared fallback such as /tmp.
+    (macOS Python lacks os.confstr("CS_DARWIN_USER_TEMP_DIR"); getconf has it.)"""
+    return run(["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"], timeout=10)[1].strip()
 
 
 def private_temp_dir(path):
