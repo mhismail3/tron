@@ -333,6 +333,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "settings.history": result = HostedSettingsChangesReview.page(params) ?? historyPage(params)
         case "settings.approvals": result = .object(["requests": .array(approvalRequests())])
         case "settings.decide":
+            if ProcessInfo.processInfo.arguments.contains("-project-lifecycle-preview") {
+                throw GatewayFailure(code: "invalid_request", message: "Design previews cannot record a decision.", retryable: false, details: nil)
+            }
             guard let id = params["requestId"]?.stringValue, params["digest"]?.stringValue == "digest-\(id)",
                   params["commandId"]?.stringValue != nil, let approved = params["approved"]?.boolValue else {
                 throw GatewayFailure(code: "invalid_request", message: "Exact decision receipt required", retryable: false, details: nil)
@@ -368,6 +371,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var modelName: String { model == "pro" ? "Fixture Pro" : "Fixture Lite" }
 
     private func approvalRequests() -> [JSONValue] {
+        if ProcessInfo.processInfo.arguments.contains("-project-lifecycle-preview") {
+            return HostedProjectApprovalPreview.requests
+        }
         guard ProcessInfo.processInfo.arguments.contains("-settings-changes-approvals") else { return [] }
         return ["approve", "decline"].filter { decided[$0] == nil }.map { id in
             .object(["requestId": .string(id), "digest": .string("digest-\(id)"),
