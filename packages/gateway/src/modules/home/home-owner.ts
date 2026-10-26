@@ -1133,14 +1133,14 @@ export class HomeOwner {
    * a profile change) gets the same seam and keeps its open activation; only a
    * fork — a new session id — gets a fresh one.
    *
-   * The caller has already decided the runtime is Home's. The only two sessions
-   * that can be: the one the record names and enables, and the one a designation
-   * in flight is creating (its first runtime is built before the record can name
-   * it — the same window runtime profile selection covers with its creation recipe).
+   * The caller has already decided the session is Home's. Active/materializing
+   * chapters, the current reserved successor and an in-flight designation share
+   * this owner. A reserved chapter can capture its input cancellation identity
+   * before materialization without constructing a native runtime.
    */
   requestPolicyFor(sessionId: string): HomeRequestPolicy | undefined {
     const record = this.record;
-    const designated = record !== undefined && record.enabled && record.chapters.some(chapter => chapter.sessionId === sessionId && (chapter.state === "active" || chapter.state === "materializing"));
+    const designated = record !== undefined && record.enabled && record.chapters.some(chapter => chapter.sessionId === sessionId && (chapter.state === "active" || chapter.state === "materializing" || (chapter.state === "reserved" && chapter === record.chapters.at(-1))));
     if (!designated && !this.designating) return undefined;
     let policy = this.policies.get(sessionId);
     if (!policy) {

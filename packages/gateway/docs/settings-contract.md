@@ -180,8 +180,9 @@ undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over a
   canonical read acknowledge delivery; refusal or a pre-append crash retains the request.
   Home owns selection for both user inputs and autonomous wakes, using the existing
   token/byte/entry envelope and activation cancellation signal to choose a fitting ordered
-  prefix. Each wake captures the existing native cancellation lifetime synchronously
-  before asynchronous selection; Stop invalidates that attempt, not a future new nudge.
+  prefix. Each wake captures its existing request-policy cancellation cell and epoch
+  synchronously before selection. The same policy survives native runtime retirement;
+  Stop invalidates that attempt, not a future new nudge or a reserved successor.
   Task recovery refusal does not disable the independent settings subscription.
   Home's chapter ledger supplies original requester identities after rollover; the current
   chapter proves and acknowledges its delivered IDs before sealing, without rewriting old
