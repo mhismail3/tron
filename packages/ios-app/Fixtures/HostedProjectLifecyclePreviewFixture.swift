@@ -2,8 +2,8 @@
 import SwiftUI
 import TronMobileCore
 
-/// #2023 visual proposal only. Synthetic projects; no lifecycle commands or decisions.
-/// List anatomy comes from TronList, and every drill-in is a managed sub-sheet.
+/// Synthetic driver of the production-owned presentation. No lifecycle commands
+/// or decisions: only the real native owner may supply those effects.
 @MainActor
 struct HostedProjectLifecyclePreview: View {
     let surface: String
@@ -38,8 +38,8 @@ struct HostedProjectLifecyclePreview: View {
     }
 }
 
-/// Each presented page owns its own child sheets; a covered list never presents
-/// an approval on behalf of the project sheet above it.
+/// Fixtures alone supply sample paths, draft values and simulated effects. Each
+/// presented page owns its own child sheets, including the canonical review.
 @MainActor
 private struct HostedProjectLifecycleContent: View {
     let surface: String
@@ -48,200 +48,51 @@ private struct HostedProjectLifecycleContent: View {
     @PresentationState private var choosingFolder = false
     @PresentationState private var approval: HostedProjectApprovalPreview?
 
-    private struct Project: Identifiable {
-        let name: String
-        let trusted: Bool
-        var id: String { name }
-    }
-    private enum ManageAction: String, Identifiable {
-        case rename, archive, untrust
-        var id: String { rawValue }
-    }
-    private enum AddAction: String, CaseIterable, Identifiable {
-        case create, existing
-        var id: String { rawValue }
-    }
+    private let example = ProjectLifecycleProject(name: "Example", path: "~/Workspace/Example", trusted: true)
+    private let fieldNotes = ProjectLifecycleProject(name: "field-notes", path: "~/Workspace/field-notes", trusted: false)
 
     var body: some View {
         content
             .tronManagedSheet(item: $approval, identity: { "preview.project-lifecycle.\($0.rawValue)" }) { action in
-                approvalSheet(action)
+                SettingsApprovalSheet(selection: .request(SettingsApprovalReference(requestID: action.id, changeIDs: [])))
             }
             .tronManagedSheet(isPresented: $choosingFolder, identity: "preview.project-lifecycle.existing") {
-                // This shared browser owns its own sheet-local NavigationStack.
                 WorkspaceBrowser { _ in choosingFolder = false }
             }
     }
 
     @ViewBuilder private var content: some View {
         switch surface {
-        case "add": addProject
-        case "create": createProject
-        case "untrusted": project(trusted: false, busy: false)
-        case "trusted": project(trusted: true, busy: false)
-        case "busy": project(trusted: true, busy: true)
-        case "rename": renameProject
-        default: projects
-        }
-    }
-
-    private var projects: some View {
-        page("Trusted Projects") {
-            TronSettingsGroup(nil) {
-                SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global",
-                    presentation: .keys([TrustedProjectsSettingsView.policyKey]), detailedKeys: true)
+        case "add":
+            ProjectLifecycleAddPage(identifierPrefix: "project-preview") {
+                HostedProjectLifecycleContent(surface: "create")
+            } chooseExisting: { choosingFolder = true }
+        case "create":
+            ProjectLifecycleCreatePage(workspace: "~/Workspace", name: $name, github: $github,
+                identifierPrefix: "project-preview", footer: "Design preview only — no project is created and no command is sent.") {
+                approval = .trust
             }
-            TronListGroup(sections: [TronListSection(title: "Projects", rows: [
-                Project(name: "Example", trusted: true), Project(name: "field-notes", trusted: false),
-            ])], identifier: "project-preview-list-rows") { item in
-                sheetRow(TronListRowContent(title: item.name,
-                    status: TronListStatus(text: item.trusted ? "Trusted" : "Not trusted", tone: item.trusted ? .tronPrimary : .tronSlate),
-                    subtext: "~/Workspace/\(item.name)", monoSubtext: true)) {
-                    HostedProjectLifecycleContent(surface: item.trusted ? "trusted" : "untrusted")
-                }
+        case "trusted", "untrusted", "busy":
+            let item = surface == "untrusted" ? fieldNotes : ProjectLifecycleProject(name: example.name, path: example.path,
+                trusted: true, archiveUnavailableReason: surface == "busy"
+                    ? "An active task is using this project. Wait for it to finish or stop it before archiving." : nil)
+            ProjectLifecycleDetailPage(project: item, github: $github, identifierPrefix: "project-preview",
+                identifier: "project-preview-\(surface)") {
+                HostedProjectLifecycleContent(surface: "rename")
+            } requestTrust: { approval = .trust }
+              requestArchive: { approval = .archive }
+              requestUntrust: { approval = .untrust }
+        case "rename":
+            ProjectLifecycleRenamePage(project: example, workspace: "~/Workspace", name: $name, identifierPrefix: "project-preview") {
+                approval = .rename
             }
-            TronListGroup([AddAction.create], identifier: "project-preview-add-row") { _ in
-                sheetRow(row("Add Project", icon: "plus")) { HostedProjectLifecycleContent(surface: "add") }
-            }
-            TronSettingsCaption("Trust allows a project's extensions and hooks to load. Lifecycle changes always wait for your approval.")
-        }
-    }
-
-    private var addProject: some View {
-        page("Add Project") {
-            TronListGroup(AddAction.allCases, hasLeading: true, identifier: "project-preview-add-choices") { item in
-                switch item {
-                case .create:
-                    sheetRow(row("Create Project", icon: "folder.badge.plus", subtitle: "New Git repository on your Mac")) {
-                        HostedProjectLifecycleContent(surface: "create")
-                    }
-                case .existing:
-                    TronListButton(row("Choose Existing Folder", icon: "folder", subtitle: "Inspect a folder without changing its trust"),
-                        identifier: "project-preview-existing") { choosingFolder = true }
-                }
-            }
-            TronSettingsCaption("New projects start untrusted. Nothing is pushed to GitHub.")
-        }
-    }
-
-    private var createProject: some View {
-        page("Create Project") {
-            TronSettingsGroup("Name") {
-                nameField
-                TronSettingsDivider()
-                TronSettingsRow(icon: "folder", title: "Location", subtitle: "~/Workspace/\(name)", subtitleLineLimit: nil)
-            }
-            TronSettingsCaption("Use 1–64 letters, numbers, hyphens or underscores. Start with a letter or number.")
-            githubOption
-            action("Create Project", icon: "plus", subtitle: "Create locally, then review trust approval", approval: .trust)
-            TronSettingsCaption("The Gateway creates an untrusted Git repository on main. Trust and optional private GitHub creation need a separate approval tap. Denying leaves the local project untrusted.")
-            TronSettingsCaption("Design preview only — no project is created and no command is sent.")
-        }
-    }
-
-    private func project(trusted: Bool, busy: Bool) -> some View {
-        page(trusted ? "Example" : "field-notes") {
-            TronSettingsGroup(nil) {
-                TronSettingsRow(icon: trusted ? "checkmark.shield" : "shield.slash", title: trusted ? "Trusted" : "Not trusted",
-                    subtitle: "~/Workspace/\(trusted ? "Example" : "field-notes")", subtitleLineLimit: nil)
-            }
-            if !trusted {
-                githubOption
-                action("Request Trust", icon: "checkmark.shield", subtitle: "Review before extensions and hooks can load", approval: .trust)
-            }
-            TronListGroup(sections: [TronListSection(title: "Manage Project", rows: trusted
-                ? [ManageAction.rename, .archive, .untrust] : [ManageAction.rename, .archive])],
-                hasLeading: true, identifier: "project-preview-manage-rows") { item in
-                switch item {
-                case .rename:
-                    sheetRow(row("Rename Project", icon: "pencil", subtitle: "Move the folder; GitHub is not renamed")) {
-                        HostedProjectLifecycleContent(surface: "rename")
-                    }
-                case .archive:
-                    TronListButton(row("Archive Project", icon: "archivebox", subtitle: "Move to ~/Workspace/.archive; keep all files"),
-                        identifier: "project-preview-archive") { approval = .archive }
-                        .disabled(busy)
-                case .untrust:
-                    TronListButton(row("Untrust Project", icon: "shield.slash", subtitle: "Keep the folder; stop loading extensions and hooks"),
-                        identifier: "project-preview-untrust") { approval = .untrust }
-                }
-            }
-            if busy {
-                TronSettingsGroup(nil) {
-                    TronSettingsRow(icon: "exclamationmark.triangle", title: "Archive unavailable",
-                        subtitle: "An active task is using this project. Wait for it to finish or stop it before archiving.",
-                        subtitleLineLimit: nil, accent: .tronWarning)
-                }
-            }
-            TronSettingsCaption("Every trust, rename, archive or untrust request opens the existing approval review. No action is approved automatically.")
-            TronSettingsCaption("Archives are recoverable on your Mac at ~/Workspace/.archive/<name>-<id>. Project sessions must be closed before moving; start new sessions at the new location.")
-        }
-    }
-
-    private var renameProject: some View {
-        page("Rename Project") {
-            TronSettingsGroup(nil) {
-                TronSettingsRow(icon: "folder", title: "Current location", subtitle: "~/Workspace/Example", subtitleLineLimit: nil)
-                TronSettingsDivider()
-                nameField
-                TronSettingsDivider()
-                TronSettingsRow(icon: "folder", title: "New location", subtitle: "~/Workspace/\(name)", subtitleLineLimit: nil)
-            }
-            action("Request Rename", icon: "pencil", subtitle: "Review the exact move before approving", approval: .rename)
-            TronSettingsCaption("The folder moves only after approval. Trust is preserved after a successful move. GitHub repositories and historical session paths are not renamed.")
-        }
-    }
-
-    private var nameField: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Project name").font(TronTypography.settingsRowSubtext)
-            TextField("Project name", text: $name)
-                .font(TronTypography.body)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityIdentifier("project-preview-name")
-        }.padding(14)
-    }
-
-    private var githubOption: some View {
-        TronSettingsGroup(nil) {
-            TronSettingsRow(icon: "arrow.triangle.branch", title: "Private GitHub Repository",
-                subtitle: "Create a private repository and origin after approval. Uses the Mac's GitHub sign-in; never pushes.", subtitleLineLimit: nil) {
-                Toggle("Private GitHub Repository", isOn: $github).labelsHidden()
+        default:
+            ProjectLifecycleProjectsPage(projects: [example, fieldNotes], identifierPrefix: "project-preview") { item in
+                HostedProjectLifecycleContent(surface: item.trusted ? "trusted" : "untrusted")
+            } addDestination: {
+                HostedProjectLifecycleContent(surface: "add")
             }
         }
-    }
-
-    private func action(_ title: String, icon: String, subtitle: String, approval action: HostedProjectApprovalPreview) -> some View {
-        Button { approval = action } label: {
-            TronSettingsRow(icon: icon, title: title, subtitle: subtitle, subtitleLineLimit: nil, titleColor: .tronPrimary)
-        }.buttonStyle(.plain).tronGlassSurface(accent: .tronPrimarySurface, interactive: true)
-    }
-
-    private func row(_ title: String, icon: String, subtitle: String? = nil) -> TronListRowContent {
-        TronListRowContent(leading: .icon(icon, .tronPrimary), title: title, subtext: subtitle)
-    }
-
-    private func sheetRow<Destination: View>(_ content: TronListRowContent,
-                                            @ViewBuilder destination: @escaping () -> Destination) -> some View {
-        TronProgressiveSheetLink(accessibilityLabel: content.title, detents: .fixed([.medium, .large]), destination: destination) {
-            TronListRow(content)
-        }
-    }
-
-    private func approvalSheet(_ action: HostedProjectApprovalPreview) -> some View {
-        // Reuse the actual canonical review, not an extra confirmation or a push destination.
-        SettingsApprovalSheet(selection: .request(SettingsApprovalReference(requestID: action.id, changeIDs: [])))
-    }
-
-    private func page<Content: View>(_ title: String, @ViewBuilder content: @escaping () -> Content) -> some View {
-        ScrollView {
-            TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) { content() }
-                .padding(20)
-        }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle(title)
-        .accessibilityIdentifier("project-preview-\(surface)")
     }
 }
 

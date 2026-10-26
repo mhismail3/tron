@@ -179,18 +179,23 @@ has a capture-only `TronSettingsThreeLayerPreviewTests` fixture: synthetic Swift
 implemented settings contract. Before device sign-off, change values rapidly, dismiss while saving
 and switch profile: no untouched inherited setting may become an override.
 
-## Project lifecycle visual proposal
+## Project lifecycle presentation
 
-`TronProjectLifecyclePreviewUITests` captures the `HOSTED_TEST`-only
-`HostedProjectLifecyclePreview` in light/dark at Large and XXXL. Project and action
-lists use `TronListGroup`/`TronListRow`, without chevrons; form fields keep the shared
-settings controls. Every drill-in uses a managed sub-sheet, never a navigation push.
-Archive, Untrust, Trust and Rename review reuse the actual `SettingsApprovalSheet`
-with socket-served synthetic actions; fixture decisions refuse without effects.
-The route journey opens and dismisses nested detail, rename, approval, Add/Create
-and folder sheets. No lifecycle command is submitted: captures and route checks are
-not Gateway acceptance. Production integration still awaits visual approval and
-real-Gateway journeys.
+`ProjectLifecyclePages.swift` owns the project list, Add/Create, details and Rename
+presentation. Lists use `TronListGroup`/`TronListRow` without chevrons; fields keep
+shared settings controls. Drill-ins use managed sub-sheets, never push routes.
+Callers supply project paths, effective trust, archive refusal reasons, form bindings,
+destinations and effect closures. The views do not infer eligibility or submit RPCs.
+The live Trusted Projects entrypoint is not connected to these pages until a native
+lifecycle read/request API exists; no fake endpoint or agent-tool fallback is used.
+
+`TronProjectLifecyclePreviewUITests` exercises these production-owned views through
+`HOSTED_TEST`'s `HostedProjectLifecyclePreview` in light/dark at Large and XXXL.
+Sample paths, drafts, busy reasons and the preview-only disclaimer stay in the fixture.
+Archive, Untrust, Trust and Rename review reuse `SettingsApprovalSheet` with synthetic
+socket-served requests; fixture decisions refuse without effects. The route journey
+opens and dismisses detail, rename, approval, Add/Create and folder sub-sheets.
+Captures and route checks are not real-Gateway lifecycle acceptance.
 
 ## Not here
 
