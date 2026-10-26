@@ -34,7 +34,7 @@ export abstract class RunRuntime<FixedAt> {
   abstract noteAcceptedSteering(id: string): void;
   abstract applyLiveRunSettings(session: AgentSession): Promise<ReturnType<SettingsManager["getSettings"]> | undefined>;
   abstract extensionCommandOrigin(name: string): ChatOrigin;
-  abstract startHomeWake(session: AgentSession, id: string, trigger: InputTrigger | undefined, accepted: (value: boolean) => void, cancellationEpoch: number): Promise<void>;
+  abstract startHomeWake(session: AgentSession, id: string, trigger: InputTrigger | undefined, accepted: (value: boolean) => void, inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number): Promise<void>;
   abstract maybePerformExtensionShutdown(): void;
   abstract enqueueMarkerOwnership(id: string): Promise<void>;
   abstract readonly lifecycle: ExtensionLifecycleCoordinator;

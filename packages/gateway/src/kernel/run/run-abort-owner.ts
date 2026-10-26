@@ -3,6 +3,7 @@ import type { RunOperations } from "./run-operations.js";
 import { GatewayError } from "../../errors.js";
 import type { InvocationLifecycle, SessionOperationState } from "../../protocol/types.js";
 import type { RuntimeQueuedMessage } from "./queue-input.js";
+import type { RequestPolicy } from "../host/request-policy.js";
 
 const FOREGROUND_ABORT_SETTLEMENT_GRACE_MS = 5_000;
 
@@ -15,10 +16,20 @@ export class RunAbortOwner {
   stopSteeringContinuation: { operationId?: string; queuedSteerCount: number } | undefined;
   /** Set before SDK cancellation can synchronously settle. */
   readonly abortedOperations = new Set<string>();
-  /** Revokes asynchronous preparation before an SDK abort controller exists. */
-  cancellationEpoch = 0;
+  private readonly ordinaryInputCancellation: RequestPolicy["inputCancellation"] = { epoch: 0 };
 
   constructor(private readonly operations: RunOperations<unknown>) {}
+
+  /** Policy installation follows native construction; read the actual lifetime at use. */
+  get inputCancellation(): RequestPolicy["inputCancellation"] {
+    const policy = this.operations.homeRequestPolicy;
+    return policy ? policy.inputCancellation : this.ordinaryInputCancellation;
+  }
+
+  /** Stop and retirement revoke preparation before an SDK controller exists. */
+  cancelPreparations(): void {
+    this.inputCancellation.epoch += 1;
+  }
 
   async abort(
     kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash" = "agent",
@@ -79,7 +90,7 @@ export class RunAbortOwner {
       throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
     }
 
-    this.cancellationEpoch += 1;
+    this.cancelPreparations();
     // `kind` is presentation metadata, not cancellation authority. A stale
     // retry/compaction/bash projection must never route Stop around another
     // foreground controller or the independently owned built-in bash process.

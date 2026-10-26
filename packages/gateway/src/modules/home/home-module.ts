@@ -99,11 +99,15 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
       sessions: {
         wakeHome: sessionId => {
           const captured = sessions.liveRuntime(sessionId);
-          const cancellationEpoch = captured?.runAbort.cancellationEpoch ?? 0;
+          const inputCancellation = owner!.requestPolicyFor(sessionId)?.inputCancellation;
+          const cancellationEpoch = inputCancellation ? inputCancellation.epoch : 0;
           return async () => {
+            if (!inputCancellation) throw new GatewayError("cancelled", "Home wake request lifetime is unavailable");
             const slot = await sessions.acquire(sessionId);
-            if (captured && captured !== slot) throw new GatewayError("cancelled", "Home wake runtime changed before admission");
-            return slot.admitHomeWake(cancellationEpoch);
+            if ((captured && captured !== slot) || slot.runAbort.inputCancellation !== inputCancellation) {
+              throw new GatewayError("cancelled", "Home wake runtime changed before admission");
+            }
+            return slot.admitHomeWake(inputCancellation, cancellationEpoch);
           };
         },
         createHomeSession: async (cwd) => (await sessions.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
