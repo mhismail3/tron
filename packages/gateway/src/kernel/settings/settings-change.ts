@@ -396,10 +396,42 @@ export class SettingsChangePath {
     });
   }
 
-  private subjectEntry(write: SubjectWrite, context: SubjectContext, status: ChangeStatus, failure?: string): ChangeEntry {
+  /** Home freezes these original inputs in its existing backup before domain effects. */
+  validateSubjectAudit(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): void {
+    this.record.validateAppendOnce(this.subjectPublication(writes, context, replayAt));
+  }
+
+  /** Publishes only facts for proven committed effects; it never replays the domain. */
+  async publishSubjectAudit(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): Promise<ChangeResult> {
+    if (this.disposed) throw new GatewayError("conflict", "Settings approvals are disposed");
+    const entries = this.subjectPublication(writes, context, replayAt);
+    return this.mutexFor({ kind: "home" }).run(async () => {
+      await this.record.appendOnce(entries);
+      const changes: ChangeOutcome[] = entries.map(entry => ({ changeId: entry.changeId, key: entry.key, qualifiers: entry.qualifiers!,
+        layer: "session", status: "applied", tier: entry.tier, before: entry.before ?? null, after: entry.after ?? null }));
+      const tier = maxTier(...entries.map(entry => entry.tier));
+      if (entries.length) await this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
+      return { status: "applied", tier, changes };
+    });
+  }
+
+  private subjectPublication(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): ChangeEntry[] {
+    if (!context.commandId?.trim() || !Number.isFinite(Date.parse(replayAt)) || new Set(writes.map(write => write.id)).size !== writes.length
+      || writes.some(write => !write.id || !["widen", "narrow"].includes(write.direction))) {
+      throw new GatewayError("invalid_request", "Home audit requires its original command, timestamp and unique ordered writes");
+    }
+    const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+    const group = { id: `home-profile:${digest(context.commandId)}`, size: writes.length };
+    return writes.map(write => ({ ...this.subjectEntry(write, context, "applied", undefined,
+      { at: replayAt, changeId: `home-profile-entry:${digest([context.commandId, write.id])}` }), group,
+      ...(write.undoOf ? { undoOf: write.undoOf } : {}) }));
+  }
+
+  private subjectEntry(write: SubjectWrite, context: SubjectContext, status: ChangeStatus, failure?: string,
+    identity = { changeId: randomUUID(), at: this.now().toISOString() }): ChangeEntry {
     const web = context.web === true;
     return {
-      changeId: randomUUID(), at: this.now().toISOString(), commandId: context.commandId, actor: context.actor, target: { kind: "home" },
+      ...identity, commandId: context.commandId, actor: context.actor, target: { kind: "home" },
       layer: "session", key: HOME_PROFILE_SUBJECT.id, qualifiers: { note: write.id }, op: "set",
       ...(write.before === null ? {} : { before: write.before }), ...(write.after === null ? {} : { after: write.after }),
       ...(context.reason ? { reason: context.reason } : {}),

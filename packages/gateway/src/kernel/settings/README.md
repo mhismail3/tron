@@ -78,6 +78,21 @@ are not settings truth, and pending approvals never apply themselves.
 `SettingsToolAccess`, `ChangeRequest`, `ChangeResult`, `Resolution`,
 `SettingsModel`, `SettingsChangePath`, `SettingsChangeRecord`, `SettingsApprovals`.
 
+## Committed Home audit publication
+
+Home calls `validateSubjectAudit(writes, context, replayAt)` before domain effects,
+then freezes those original ordered `SubjectWrite[]`, `SubjectContext` and timestamp
+in its existing backup. After proving the domain committed, it calls
+`publishSubjectAudit(writes, context, replayAt)` for initial publication or audit-only
+recovery. Do not nest it inside `auditSubject` or replay domain effects. Command ID
+is the sole operation identity; duplicate write IDs and changed replay inputs refuse.
+The existing Changes mutex publishes one identity-addressed, closed group through
+one index cut, bounded to 1 MiB. Retry proves the same file, directory and index
+are durable, including an already indexed group. Normal Home undo reads the whole
+group. Home owns its opaque envelope, validation and forget/privacy handling;
+Knowledge remains the sole snapshot/backup/cleanup owner. This API creates no
+backup, migration journal or domain recovery engine.
+
 ## Signals
 
 Callers own persistence failure diagnostics; these stores propagate write failures.
@@ -89,7 +104,8 @@ are revisited at the next known deadline or foreground admission, not in a tight
 ```bash
 scripts/tron test gateway src/admin/settings-approvals.lock.integration.test.ts \
   src/admin/admin.store.lock.integration.test.ts \
-  src/admin/settings-change.integration.test.ts src/admin/settings-migration.e2e.test.ts
+  src/admin/settings-change.integration.test.ts src/admin/settings-migration.e2e.test.ts \
+  src/admin/settings-subject-audit.e2e.test.ts
 ```
 
 The real settings and run locks cover consumers of this contract.
