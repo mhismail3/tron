@@ -122,7 +122,7 @@ describe("Home task subagents: the subagent model queue", () => {
     const resolution = await settings.settingsModel.resolve({ kind: "session", sessionId: run.sessionId }, {
       cwd: f.cwd, home: false, session: worker.settingsSessionLayer(), modelRuntime: worker.modelRuntime,
     }, ["model.queue[role=subagent]"]);
-    expect(resolution.keys[0]).toMatchObject({ value: ["queue-child/limited", "queue-child/fallback"], origin: "launch", layer: "session" });
+    expect(resolution.keys[0]).toMatchObject({ value: ["queue-child/limited", "queue-child/fallback"], layer: "session", fixedAt: { from: "delegate", via: "home-profile" } });
     expect(f.queueDiagnostics).toContainEqual({ event: "model-queue.projection", role: "subagent",
       scope: "task-launch", sessionId: run.sessionId, status: "published", models: ["queue-child/limited", "queue-child/fallback"] });
     // A generic import must not transfer Home task identity into a different
