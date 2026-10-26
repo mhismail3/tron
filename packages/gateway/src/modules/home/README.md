@@ -150,7 +150,7 @@ changes keep its store, cursors and spend.
 - **Settings tool:** Home changes settings through the one change path as `home`; fetched
   content raises the tier one step. With `taskId` it reads or changes a worker's session.
 - **Learned profile:** personal Knowledge notes labelled `home-profile` plus one `kind-<kind>`
-  (`preference`, `standing-decision`, `delegation-default`, `fact`). The `profile` tool's
+  (`preference`, `standing-decision`, `delegation-default`, `fact`, `correction`). The `profile` tool's
   inferred content writes and maintainer `home.profileChange` (confirmed, `expectedRevision`)
   share `HomeProfileItems`, which owns operation validation, rollback, undo fencing and
   typed result projection. Content changes use `SettingsChangePath.auditSubject`, retaining
