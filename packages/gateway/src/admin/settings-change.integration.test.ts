@@ -432,7 +432,8 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
     setTrust: async (project, decision) => {
       return trust.setAndApply(project, decision,
         async inspection => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
-        async inspection => { await registry.commitProjectReload(inspection.projectDir); });
+        async inspection => { await registry.commitProjectReload(inspection.projectDir); },
+        async inspection => { await registry.abortProjectReload(inspection.projectDir); });
     },
   });
   registry.setSettings(settingsModel, settingsChanges);

@@ -6213,6 +6213,18 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     });
   }
 
+  async abortTrustReload(): Promise<void> {
+    // Registry's acquired project fence is still held. Close direct frame
+    // admission before the ordinary native retirement lane can run.
+    this.shuttingDown = true;
+    await this.lane.run(async () => {
+      this.trustReloadWork?.settle();
+      this.trustReloadWork = undefined;
+      this.projectTrustReloadOverride = undefined;
+      this.trustReloadPending = false;
+    });
+  }
+
   commitReload(): void {
     this.trustReloadPending = false;
     this.revision += 1;

@@ -272,7 +272,8 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(tronHome), {
     setTrust: async (project, decision) => trust.setAndApply(project, decision,
       async (inspection) => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
-      async (inspection) => { await registry.commitProjectReload(inspection.projectDir); }),
+      async (inspection) => { await registry.commitProjectReload(inspection.projectDir); },
+      async (inspection) => { await registry.abortProjectReload(inspection.projectDir); }),
   });
   registry.setSettings(settingsModel, settingsChanges);
 

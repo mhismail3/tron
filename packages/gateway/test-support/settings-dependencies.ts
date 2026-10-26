@@ -22,7 +22,7 @@ export function settingsDependencies(input: {
   tronHome: string;
   trust: TrustService;
   modelRuntime: ModelRuntime;
-  sessions?: { reloadProject(cwd: string, trusted: boolean, force: boolean): Promise<unknown>; commitProjectReload(cwd: string): Promise<unknown> | unknown };
+  sessions?: { reloadProject(cwd: string, trusted: boolean, force: boolean): Promise<unknown>; commitProjectReload(cwd: string): Promise<unknown> | unknown; abortProjectReload(cwd: string): Promise<unknown> | unknown };
   home?: () => HomeOwner | undefined;
   /** The learned profile's Knowledge owner, for Home's `profile` tool (doc 6.4). */
   knowledge?: () => KnowledgeService | undefined;
@@ -43,7 +43,8 @@ export function settingsDependencies(input: {
     setTrust: async (project, decision) => {
       return input.trust.setAndApply(project, decision,
         async (inspection) => { await input.sessions?.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false); },
-        async (inspection) => { await input.sessions?.commitProjectReload(inspection.cwd); });
+        async (inspection) => { await input.sessions?.commitProjectReload(inspection.cwd); },
+        async (inspection) => { await input.sessions?.abortProjectReload(inspection.cwd); });
     },
     ...(input.knowledge ? { undoSubject: (entry, context) => new HomeProfileItems(() => input.knowledge?.()).undo(settingsChanges, entry, context) } : {}),
   }, input.now, input.schedule);

@@ -12,13 +12,17 @@ bounds, exit rules and retirement live in `util/git-inspection.ts`.
 
 `trust-service.ts` owns the one Pi ProjectTrustStore and serialized trust changes,
 including inherited decisions, standalone directories, worktree propagation and
-compensating runtime application/commit rollback. `reserveUntrustedDirectory` pins
+compensating runtime application/commit rollback and mandatory native retirement
+of any acquired transition still pending at exit. `reserveUntrustedDirectory` pins
 an exact new directory before it has a Git root, never an enclosing repository.
 An exact false decision on a requested directory narrows inherited/root authority;
 a subdirectory's positive decision still never grants authority to its Git root.
 Approved `relocate` holds that same mutex/fence, shadows destination trust before
-filesystem effects and leaves both names explicitly false on a partial move. It
-never replays filesystem effects or automatically moves user data backwards.
+filesystem effects. A refused move restores the original runtime/trust only when
+the exact source directory remains; an absent/replaced source and partial destination
+stay explicitly false. Failed compensation retires uncertain frames and releases
+project admission instead of publishing success or stranding a reservation. It never
+replays filesystem effects or automatically moves user data backwards.
 Admin supplies binding I/O;
 the canonical resource owner supplies the trust decision used by sessions.
 

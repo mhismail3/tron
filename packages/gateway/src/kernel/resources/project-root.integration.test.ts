@@ -209,7 +209,8 @@ export default function (pi) {
     const rootServer = Number(await readFile(join(root, "root2.pid"), "utf8"));
     await trust.setAndApply(nested, false,
       (inspection) => registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),
-      (inspection) => registry.commitProjectReload(inspection.projectDir));
+      (inspection) => registry.commitProjectReload(inspection.projectDir),
+      (inspection) => registry.abortProjectReload(inspection.projectDir));
     expect((await trust.inspect(repo)).savedDecision).toBe(false);
     expect(maxRetries(slot)).toBe(builtInMaxRetries);
     expect(mcpTools(slot)).toEqual([]);

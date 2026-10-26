@@ -9,6 +9,7 @@ export function projectRuntimePort(owners: () => {
   runtimeEntries(): ReadonlyArray<readonly [string, RuntimeEntry]>;
   reloadProject(path: string, trusted: boolean, publish: boolean): Promise<void>;
   commitProjectReload(path: string): Promise<void>;
+  abortProjectReload(path: string): Promise<void>;
 }, tasks: (cursor?: string) => Promise<TaskPage>): ProjectRuntimePort {
   return {
     assertIdle: async (path, moving) => {
@@ -25,5 +26,6 @@ export function projectRuntimePort(owners: () => {
     },
     reload: (path, trusted) => owners().reloadProject(path, trusted, false),
     release: path => owners().commitProjectReload(path),
+    abort: path => owners().abortProjectReload(path),
   };
 }

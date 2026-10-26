@@ -838,6 +838,7 @@ settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new Sett
     decision,
     async (inspection) => sessions.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),
     async (inspection) => sessions.commitProjectReload(inspection.projectDir),
+    async (inspection) => sessions.abortProjectReload(inspection.projectDir),
   ),
   undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
 });

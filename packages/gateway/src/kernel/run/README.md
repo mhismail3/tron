@@ -38,6 +38,11 @@ The frame composes one K5 `OwnedTurnOwner`: its sole observer map and held-task
 continuation state replace native held-turn ownership. Admission and disposal address
 that owner directly; canonical terminal classification/receipt and SDK abort I/O stay
 native. The Slot has no task-cancellation forwarding route.
+Failed project-trust compensation is cancellation, not a successful resource
+publication. Registry's acquired project fence closes the affected native frames,
+then its existing retirement authority disposes them and releases project admission.
+An abort before acquisition is a no-op and never interrupts unrelated active work.
+
 Ordinary extension registration reads the composition-configured order on the
 actual K3 host; native frames do not select product modules or keep another list.
 

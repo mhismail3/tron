@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import {
   hasTrustRequiringProjectResources,
@@ -143,32 +143,44 @@ export class TrustService {
     path: string, destination: string, preserveTrust: boolean, move: () => Promise<void>,
     apply: (inspection: TrustInspection) => Promise<void>,
     commit: (inspection: TrustInspection) => Promise<void>,
+    abort: (inspection: TrustInspection) => Promise<void>,
   ): Promise<void> {
     await this.mutationMutex.run(async () => {
       const previous = await this.inspectUnlocked(path);
+      const sourceIdentity = await lstat(previous.cwd);
       const target = await this.canonicalDirectory(destination);
       this.store.set(target, false);
       const proposed = { ...previous, savedDecision: false, effectiveDecision: false };
-      try { await apply(proposed); }
-      catch (failure) {
-        // Same rollback/reload contract as setAndApply: do not publish an
-        // unrelated fence when the initial admission refused before effects.
-        try { await apply(previous); await commit(previous); }
-        catch (rollbackFailure) {
-          throw new GatewayError("internal", "Project relocation could not establish or restore its runtime transition; inspect the recorded failures and release active work or repair resources before retrying", false, {
-            failure: failure instanceof Error ? failure.message : String(failure),
-            rollbackFailure: rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure),
-          });
+      await this.withRuntimeRetirement(async () => {
+        const restore = async (failure: unknown): Promise<never> => {
+          try { await apply(previous); await commit(previous); }
+          catch (rollbackFailure) {
+            throw new GatewayError("internal", "Project relocation could not establish or restore its runtime transition", false, {
+              failure: failure instanceof Error ? failure.message : String(failure),
+              rollbackFailure: rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure),
+            });
+          }
+          throw failure;
+        };
+        try { await apply(proposed); }
+        catch (failure) { return restore(failure); }
+        try { await move(); }
+        catch (failure) {
+          const current = await lstat(previous.cwd).catch(() => undefined);
+          const sourceRetained = current?.isDirectory() && current.dev === sourceIdentity.dev && current.ino === sourceIdentity.ino;
+          if (sourceRetained) return restore(failure);
+          // An absent/replaced source is an uncertain partial effect, never a
+          // grant. Preserve the retained destination, without reversing the move.
+          this.store.set(previous.projectDir, false);
+          await commit(proposed);
+          throw failure;
         }
-        throw failure;
-      }
-      try {
+        // The native project fence excludes admission until both keys publish.
+        // Revocation belongs to a completed move, not a pre-effect refusal.
         this.store.set(previous.projectDir, false);
-        await move();
         this.store.set(target, preserveTrust && previous.effectiveDecision === true);
-      } finally {
         await commit(proposed);
-      }
+      }, () => abort(previous));
     });
   }
 
@@ -185,7 +197,8 @@ export class TrustService {
     path: string,
     decision: boolean | null,
     apply: (inspection: TrustInspection) => Promise<void>,
-    commit: (inspection: TrustInspection) => Promise<void> = async () => {},
+    commit: (inspection: TrustInspection) => Promise<void>,
+    abort: (inspection: TrustInspection) => Promise<void>,
   ): Promise<TrustInspection> {
     return this.mutationMutex.run(async () => {
       const previous = await this.inspectUnlocked(path);
@@ -205,31 +218,43 @@ export class TrustService {
             : previous.defaultDecision === "never" ? false : null
         ),
       };
-      try {
-        await apply(proposed);
-        this.store.set(previous.projectDir, decision);
-        const current = await this.inspectUnlocked(previous.cwd, previous.projectDir);
-        await commit(current);
-        return current;
-      } catch (failure) {
+      return this.withRuntimeRetirement(async () => {
         try {
-          this.store.set(previous.projectDir, previousLocalDecision);
-          const restored = await this.inspectUnlocked(previous.cwd, previous.projectDir);
-          await apply(restored);
-          await commit(restored);
-        } catch (rollbackFailure) {
-          throw new GatewayError(
-            "internal",
-            "Project trust failed and the previous runtime state could not be fully restored",
-            false,
-            {
-              failure: failure instanceof Error ? failure.message : "Unknown trust mutation failure",
-              rollbackFailure: rollbackFailure instanceof Error ? rollbackFailure.message : "Unknown trust rollback failure",
-            },
-          );
+          await apply(proposed);
+          this.store.set(previous.projectDir, decision);
+          const current = await this.inspectUnlocked(previous.cwd, previous.projectDir);
+          await commit(current);
+          return current;
+        } catch (failure) {
+          try {
+            this.store.set(previous.projectDir, previousLocalDecision);
+            const restored = await this.inspectUnlocked(previous.cwd, previous.projectDir);
+            await apply(restored);
+            await commit(restored);
+          } catch (rollbackFailure) {
+            throw new GatewayError("internal", "Project trust failed and the previous runtime state could not be fully restored", false, {
+              failure: failure instanceof Error ? failure.message : String(failure),
+              rollbackFailure: rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure),
+            });
+          }
+          throw failure;
         }
-        throw failure;
+      }, () => abort(previous));
+    });
+  }
+
+  /** Successful commit releases the native reservation. Anything still pending
+   * must retire uncertain frames, never publish them as a successful rollback. */
+  private async withRuntimeRetirement<T>(operation: () => Promise<T>, abort: () => Promise<void>): Promise<T> {
+    return operation().then(async value => { await abort(); return value; }, async failure => {
+      try { await abort(); }
+      catch (abortFailure) {
+        throw new GatewayError("internal", "Project trust transition and native retirement failed", false, {
+          failure: failure instanceof Error ? failure.message : String(failure),
+          abortFailure: abortFailure instanceof Error ? abortFailure.message : String(abortFailure),
+        });
       }
+      throw failure;
     });
   }
 }
