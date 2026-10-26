@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redact } from "../util/credential-redaction.js";
-import { classifyPeer, readTailscaleStatus, runBoundedCommand, type TailscalePeer, type BoundedCommand, type BoundedCommandResult } from "../transport/tailscale-peer.js";
+import { classifyPeer, readTailscaleStatus, runBoundedCommand, type TailscalePeer, type BoundedCommand, type BoundedCommandResult } from "../platform/tailscale-status.js";
 import { resolveTronHome } from "../tron-home.js";
 
 /**

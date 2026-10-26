@@ -65,6 +65,10 @@ streams and rotation: [observability](../../docs/observability.md); records: Sig
 - Every log record is redacted by the writer; a token or user path never reaches a
   file or an export.
 
+Tailscale silence lookup owns its address filter, in-flight read and reuse/deadline
+bounds in `tailscale-peer.ts`. Shared OS status/command facts and classification
+come from [platform](../platform/README.md), also used by diagnostics and Mac Terminal.
+
 ## Entry points
 
 - Add an RPC: a `case` in `GatewayService.invoke`, its protocol types in

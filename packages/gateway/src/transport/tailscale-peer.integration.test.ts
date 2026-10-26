@@ -2,7 +2,8 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readTailscaleStatus, runBoundedCommand, TailscalePeerPaths } from "./tailscale-peer.js";
+import { TailscalePeerPaths } from "./tailscale-peer.js";
+import { readTailscaleStatus, runBoundedCommand } from "../platform/tailscale-status.js";
 
 const temporaryDirectories: string[] = [];
 

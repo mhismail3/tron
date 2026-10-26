@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { syncDurably } from "../util/durable-json.js";
-import { readTailscaleStatus, runBoundedCommand, type BoundedCommand } from "../transport/tailscale-peer.js";
+import { readTailscaleStatus, runBoundedCommand, type BoundedCommand } from "../platform/tailscale-status.js";
 
 /**
  * Mac Terminal (README "Mac Terminal"): the iPhone opens a login shell on this
