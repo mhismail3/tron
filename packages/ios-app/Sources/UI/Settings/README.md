@@ -33,10 +33,12 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
   Models contains direct model/thinking, all three ordered model queues and the task budget.
   Queue drafts add available physical models through the shared picker, reorder/remove locally,
-  and write only on Save; an empty list is distinct from Reset/Revert to inheritance.
+  and write only on Save; an empty list is distinct from Reset/Revert to inheritance. A list
+  draft is keyed to its canonical input value so reopening after an accepted Save seeds the new
+  list, while local draft changes keep stable row identity.
   Other routine settings have no editor exposure; explicit values retain read-only Reset/Revert and Project inspection. Compaction
-  appears only while retained values need inspection or Revert. More Settings contains Agent
-  changes and the HTTP proxy; there is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
+  appears only while retained values need inspection or Revert. Scoped More Settings contains
+  Agent changes and the HTTP proxy; Global embeds those groups directly. There is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
   groups without duplicating them in More Settings.
   Notifications and Changes sit in the toolbar. Dashboard Settings exposes only global scope.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the
