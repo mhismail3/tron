@@ -70,8 +70,9 @@ const ACTION_FIELDS: Record<ProfileToolAction, { required: Array<keyof ProfileRe
 };
 
 /**
- * The `profile` tool. It writes nothing itself: each call is one change through the
- * settings change path, which applies it with `HomeProfileItems` and records it.
+ * Content and placement use the existing Changes owner. Not now is a Knowledge
+ * control decision with that owner's ordinary command receipt, not a note edit.
+ * The tool owns no parallel note, decision or receipt store.
  */
 export function homeProfileTool(access: () => HomeProfileChangeAccess | undefined, webMark: () => boolean, knowledge: () => KnowledgeService | undefined): ToolDefinition<TSchema, HomeProfileToolDetails> {
   return {
