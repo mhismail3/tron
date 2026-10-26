@@ -14,7 +14,9 @@ fixtures. Its manifest is `../test-support.module.json` (it also owns fixtures u
 `tron-store-*.ts`, the Tron-home environment guard and preflight, and the Home task
 and crash fixtures. `settings-action-crash-child.ts` runs the real approval engine
 against a file-backed action, exposing the effect/before-settlement cut so its parent
-can kill and reopen it to prove interrupted actions are not replayed.
+can kill and reopen it to prove interrupted actions are not replayed. Its lifecycle
+mode holds a real pending-read return to prove concurrent start and disposal join
+one accepted recovery through the existing work owner.
 
 ## Contract
 

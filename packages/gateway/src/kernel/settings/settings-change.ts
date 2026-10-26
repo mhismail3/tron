@@ -213,12 +213,11 @@ export class SettingsChangePath {
    * Merely opening settings for inspection must never expire or rewrite stores. */
   async start(): Promise<void> {
     if (this.disposed) throw new GatewayError("conflict", "Settings approvals are disposed");
-    if (this.started) return;
-    // Only activation can classify a pre-existing execution claim as interrupted.
-    // Foreground readers must never join/recover this owner's live effects.
-    await this.expireDue({ interruptedActions: true });
+    if (this.started) return this.armWork;
     this.started = true;
-    await this.armExpiry();
+    // The existing joined arm owner also owns the one activation recovery.
+    // Concurrent start/dispose must not escape an accepted recovery read.
+    await this.armExpiry(true);
   }
 
   registerAction(subject: string, handler: ApprovalActionHandler): void {
@@ -244,9 +243,11 @@ export class SettingsChangePath {
 
   /** One timer for the earliest pending deadline; serialize reads so an older
    * asynchronous arm cannot replace a newer deadline or survive disposal. */
-  private armExpiry(): Promise<void> {
+  private armExpiry(recoverInterruptedActions?: true): Promise<void> {
     this.armWork = this.armWork.catch(() => undefined).then(async () => {
       if (this.disposed || !this.started) return;
+      if (recoverInterruptedActions) await this.expireDue({ interruptedActions: true });
+      if (this.disposed) return;
       const pending = await this.approvals.pending();
       if (this.disposed) return;
       this.scheduleExpiry(pending.filter(request => !request.executionStartedAt).map(request => Date.parse(request.expiresAt)));

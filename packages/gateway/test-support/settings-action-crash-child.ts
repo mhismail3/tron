@@ -2,13 +2,14 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { TrustService } from "../src/kernel/resources/trust-service.js";
+import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import { settingsDependencies } from "./settings-dependencies.js";
 
 // A real owner in a separate process. The parent kills only this child at the
 // external-effect/before-settlement cut; the action's preview deliberately stays
 // unchanged so re-planning alone cannot prevent replay.
 const [root, mode] = process.argv.slice(2);
-if (!root || (mode !== "apply" && mode !== "recover")) throw new Error("root and apply|recover required");
+if (!root || (mode !== "apply" && mode !== "recover" && mode !== "lifecycle")) throw new Error("root and apply|recover|lifecycle required");
 const agentDir = join(root, "agent");
 await mkdir(agentDir, { recursive: true });
 const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
@@ -25,6 +26,19 @@ settingsChanges.registerAction("fixture.append", {
     return { summary: "Appended the effect" };
   },
 });
+if (mode === "lifecycle") {
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+  let entered!: () => void; const selected = new Promise<void>(resolve => { entered = resolve; });
+  let reads = 0; const pending = SettingsApprovals.prototype.pending;
+  SettingsApprovals.prototype.pending = async function () { reads++; const actual = await pending.call(this); entered(); await gate; return actual; };
+  const settled: string[] = [];
+  const first = settingsChanges.start().then(() => { settled.push("first"); }); await selected;
+  const second = settingsChanges.start().then(() => { settled.push("second"); });
+  const disposed = settingsChanges.dispose().then(() => { settled.push("disposed"); });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const beforeRelease = [...settled]; release(); await Promise.all([first, second, disposed]);
+  process.stdout.write(`RESULT:${JSON.stringify({ beforeRelease, settled, reads })}\n`);
+} else {
 await settingsChanges.start();
 const requestPath = join(root, "request.json");
 const request = mode === "apply"
@@ -38,3 +52,4 @@ try {
 const outcome = await settingsChanges.takeOutcomes([actor.sessionId]);
 process.stdout.write(`RESULT:${JSON.stringify({ decision, outcome, effects: await readFile(join(root, "effects.txt"), "utf8") })}\n`);
 await settingsChanges.dispose();
+}
