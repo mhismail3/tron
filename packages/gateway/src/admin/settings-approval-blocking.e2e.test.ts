@@ -6,6 +6,11 @@ import { fixture, disposeFixtures } from "../../test-support/home-task-fixture.j
 import { waitFor } from "../../test-support/wait-for.js";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import type { ExtensionInteraction } from "../protocol/types.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { UploadStore } from "../machine/upload-store.js";
+import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
+import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 // A real Home runtime on a faux model. The durable approval must also publish
 // an in-turn client interaction; a settings invalidation alone is not a prompt.
@@ -88,6 +93,88 @@ describe("blocking settings approval", () => {
       const result = home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult");
       expect(result).toMatchObject({ isError: true, content: [expect.objectContaining({ text: expect.stringContaining("between runs") })] });
     } finally { await home.abort("agent"); }
+  });
+
+  it("dry run refuses the same own-turn SDK change without creating a form, approval or write", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const before = home.snapshot().thinkingLevel;
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "request", dryRun: true, reason: "Preview less thinking", changes: [
+        { key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" },
+      ] })], { stopReason: "toolUse" }), fauxAssistantMessage("Noted"),
+    ]);
+    await home.prompt("Preview own thinking change");
+    try {
+      const result = await waitFor(() => home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult"), "dry-run result");
+      expect(result).toMatchObject({ isError: false, details: { dryRun: true, changes: [
+        expect.objectContaining({ status: "failed", error: { code: "busy", message: expect.stringContaining("between runs") } }),
+      ] } });
+      expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+      expect(await f.settings.settingsChanges.pendingApprovals()).toEqual([]);
+      expect((await f.settings.settingsChanges.history({ key: "model.thinking" })).entries).toEqual([]);
+      expect(home.snapshot().thinkingLevel).toBe(before);
+      await saveCase("dry-run-admission", { before, after: home.snapshot().thinkingLevel, result });
+    } finally { await home.abort("agent"); }
+  });
+
+  it("Changes approves a live Home form through settings.decide once and retires the same interaction", async () => {
+    const f = await pendingApproval();
+    const service = new GatewayService({
+      display: displayOwnerOf(f.registry),
+      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
+      modelRuntime: f.gateway, trust: f.trust, settingsModel: f.settings.settingsModel, settingsChanges: f.settings.settingsChanges,
+      sessions: f.registry, home: homeOwnerOf(f.registry), receipts: new CommandReceiptStore(f.tronHome),
+      uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES), notifications: { enqueue: async () => "queued" },
+      broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
+    } as unknown as GatewayServiceDependencies);
+    const phone = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true,
+      isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
+    const decision = { commandId: "live-form-changes-approval", requestId: f.request.requestId, digest: f.request.digest, approved: true };
+    try {
+      expect(f.home.isBusy).toBe(true);
+      expect(f.interaction.form).toMatchObject({ presentation: "approval" });
+      const approved = await service.invoke(phone, "settings.decide", decision);
+      await f.prompting;
+      await waitFor(() => !f.home.isBusy, "Changes decision releases the requesting turn");
+      expect(approved).toMatchObject({ status: "approved" });
+      expect(await service.invoke(phone, "settings.decide", decision)).toEqual(approved);
+      const snapshot = f.home.snapshot();
+      expect(snapshot.extensionPresentation.pendingInteractions).toEqual([]);
+      expect(snapshot.transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "settings-request"))
+        .toMatchObject({ isError: false, details: { status: "approved" } });
+      const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
+      expect(history.filter(entry => entry.status === "approved")).toHaveLength(1);
+      expect(history.find(entry => entry.status === "approved")).toMatchObject({ after: 3 });
+      const resolution = await service.invoke(phone, "settings.resolve", { target: { kind: "home" }, keys: ["run.retry.maxRetries"] });
+      expect(resolution).toMatchObject({ keys: [expect.objectContaining({ value: 3 })] });
+      expect(() => f.answer("approve")).toThrow();
+      await saveCase("changes-live-form", { approved, history, resolution });
+    } finally { await f.home.abort("agent"); await f.prompting; }
+  });
+
+  it("an unanswered form stays pending without applying and its later answer applies the same diff", async () => {
+    const f = await pendingApproval();
+    try {
+      // Local dismissal sends no answer. Authoritative rereads must retain the
+      // request and continuation, with no approved write, until the later tap.
+      const pending = await f.settings.settingsChanges.pendingApprovals();
+      const before = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
+      expect(pending).toEqual([expect.objectContaining({ requestId: f.request.requestId, status: "pending" })]);
+      expect(before.some(entry => entry.status === "approved" || entry.status === "declined")).toBe(false);
+      expect(f.home.isBusy).toBe(true);
+      expect(f.home.snapshot().extensionPresentation.pendingInteractions).toEqual([f.interaction]);
+      f.answer("approve");
+      await f.prompting;
+      await waitFor(() => !f.home.isBusy, "later approval settles");
+      const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
+      expect(history.filter(entry => entry.status === "approved")).toEqual([
+        expect.objectContaining({ after: 3 }),
+      ]);
+      expect(f.home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+      await saveCase("unanswered-later-approve", { pending, before, history });
+    } finally { await f.home.abort("agent"); await f.prompting; }
   });
 
   for (const choice of ["approve", "deny"] as const) {
