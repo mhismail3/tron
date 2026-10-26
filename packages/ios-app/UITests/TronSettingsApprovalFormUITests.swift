@@ -38,14 +38,30 @@ final class TronSettingsApprovalFormUITests: XCTestCase {
         let title = window.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: window.frame.midX, dy: approve.frame.midY))
         title.press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
-        XCTAssertTrue(app.buttons["Reopen Ask User"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["settings-approval-pending-tool"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Mutation count: 0"].exists, "Dismissal must not send a decision")
         XCTAssertTrue(app.staticTexts["No mutation"].exists)
-        app.buttons["Reopen Ask User"].tap()
+        app.buttons["settings-approval-pending-tool"].tap()
         XCTAssertTrue(approve.waitForExistence(timeout: 5), app.debugDescription)
         approve.tap()
         XCTAssertTrue(app.staticTexts["extension.respond cancelled=false selected=approve other="].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Mutation count: 1"].exists)
+        app.terminate()
+    }
+
+    @MainActor
+    func testApprovalContextDisplaysLiteralLinkAndImageTargets() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-ask-user-fixture", "-tron-settings-approval-form", "-tron-settings-approval-literal"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Settings approval"].waitForExistence(timeout: 5), app.debugDescription)
+        let context = app.textViews.matching(NSPredicate(format: "value CONTAINS %@", "Scope: Home")).firstMatch
+        XCTAssertTrue(context.exists)
+        XCTAssertTrue((context.value as? String)?.contains("[label](https://example.test/full-target) ![image](https://example.test/raw.png)") == true,
+                      "Approval values must not be interpreted as Markdown")
+        app.buttons["Deny"].tap()
+        XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 5), app.debugDescription)
         app.terminate()
     }
 

@@ -1,11 +1,12 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { fixture, disposeFixtures } from "../../test-support/home-task-fixture.js";
+import { fixture, disposeFixtures, reportCall } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import type { ExtensionInteraction } from "../protocol/types.js";
+import type { ChangeRequest } from "../kernel/settings/tool-contract.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
@@ -16,13 +17,32 @@ import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry
 // an in-turn client interaction; a settings invalidation alone is not a prompt.
 afterEach(disposeFixtures);
 
-async function pendingApproval(options: Parameters<typeof fixture>[5] = {}) {
+async function settledWorker(f: Awaited<ReturnType<typeof fixture>>) {
+  const home = await f.registry.acquire(f.home.sessionId);
+  const respond = (context: TranscriptContext) => {
+    if (context.messages.some(message => message.role === "user" && JSON.stringify(message.content).includes("This is a finite Home task"))) {
+      return fauxAssistantMessage([reportCall("diff-worker")], { stopReason: "toolUse" });
+    }
+    const last = context.messages.at(-1);
+    return last?.role === "user" && JSON.stringify(last.content).includes("Create diff worker")
+      ? fauxAssistantMessage([fauxToolCall("delegate", { taskId: "diff-worker", title: "Review diff worker", intent: "Report at once", target: f.cwd })], { stopReason: "toolUse" })
+      : fauxAssistantMessage("Noted");
+  };
+  f.faux.setResponses(Array.from({ length: 20 }, () => respond as never));
+  await home.prompt("Create diff worker");
+  await waitFor(async () => (await homeOwnerOf(f.registry).taskResult("diff-worker").catch(() => undefined) as { wake?: { state?: string } } | undefined)?.wake?.state === "acknowledged" || undefined, "diff worker result acknowledged");
+  await waitFor(() => !home.isBusy, "Home settled after diff worker");
+  return "diff-worker";
+}
+
+async function pendingApproval(options: Parameters<typeof fixture>[5] = {}, changes: ChangeRequest[] = [
+  { key: "run.retry.maxRetries", layer: "session", op: "set", value: 3 },
+], worker = false) {
   const f = await fixture(false, false, undefined, false, undefined, options);
   await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+  const taskId = worker ? await settledWorker(f) : undefined;
   f.faux.setResponses([
-    fauxAssistantMessage([fauxToolCall("settings", { action: "request", reason: "Retry a transient failure", changes: [
-      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 3 },
-    ] }, { id: "settings-request" })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxToolCall("settings", { action: "request", reason: "Retry a transient failure", changes, ...(taskId ? { taskId } : {}) }, { id: "settings-request" })], { stopReason: "toolUse" }),
     fauxAssistantMessage("Finished"),
   ]);
   const home = await f.registry.acquire(f.home.sessionId);
@@ -111,12 +131,55 @@ describe("blocking settings approval", () => {
       expect(result).toMatchObject({ isError: false, details: { dryRun: true, changes: [
         expect.objectContaining({ status: "failed", error: { code: "busy", message: expect.stringContaining("between runs") } }),
       ] } });
+      expect(result).toMatchObject({ details: { status: "failed", tier: "quiet" } });
       expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
       expect(await f.settings.settingsChanges.pendingApprovals()).toEqual([]);
       expect((await f.settings.settingsChanges.history({ key: "model.thinking" })).entries).toEqual([]);
       expect(home.snapshot().thinkingLevel).toBe(before);
       await saveCase("dry-run-admission", { before, after: home.snapshot().thinkingLevel, result });
     } finally { await home.abort("agent"); }
+  });
+
+  it("the form contains complete long text and tool selections rather than display summaries", async () => {
+    const instructions = "Keep every detail " + "x".repeat(120) + " [label](https://example.test/full-target) ![image](https://example.test/raw.png)";
+    const tools = ["read", "write", "edit", "bash", "settings"];
+    const f = await pendingApproval({}, [
+      { key: "context.compaction.instructions", layer: "session", op: "set", value: instructions },
+      { key: "tools.active", layer: "session", op: "set", value: tools },
+    ], true);
+    try {
+      const context = f.interaction.form!.questions[0]!.context!;
+      expect(context).toContain(JSON.stringify(instructions, null, 2));
+      expect(context).toContain(JSON.stringify(tools, null, 2));
+      expect(context).not.toContain("…");
+      f.answer("deny");
+      await f.prompting;
+      await waitFor(() => !f.home.isBusy, "full diff denial settles");
+      await saveCase("complete-diff", { interaction: f.interaction });
+    } finally { await f.home.abort("agent"); await f.prompting; }
+  });
+
+  it("an oversized exact diff is refused explicitly without leaving an unreviewable pending request", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const taskId = await settledWorker(f);
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "request", taskId, reason: "Review capacity", changes: [
+        { key: "sources.skills", layer: "global", op: "set", value: Array.from({ length: 250 }, (_, index) => "/review-only/skill-" + index + "-" + "x".repeat(180)) },
+      ] }, { id: "oversized-request" })], { stopReason: "toolUse" }), fauxAssistantMessage("Noted"),
+    ]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const prompting = home.prompt("Request a bounded exact diff");
+    try {
+      await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0]
+        || home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "oversized-request"), "oversized diff refusal or form");
+      const result = home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "oversized-request");
+      expect(result).toMatchObject({ isError: true, content: [expect.objectContaining({ text: expect.stringContaining("diff is too large to review") })] });
+      expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+      expect(await f.settings.settingsChanges.pendingApprovals()).toEqual([]);
+      expect((await f.settings.settingsChanges.history({ key: "sources.skills" })).entries.some(entry => entry.status === "approved")).toBe(false);
+      await saveCase("oversized-diff", { result });
+    } finally { await home.abort("agent"); await prompting; }
   });
 
   it("Changes approves a live Home form through settings.decide once and retires the same interaction", async () => {

@@ -92,7 +92,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   ask_user, showing scope, layer, reason and diff. The explicit approval form mode
   uses standard text/icon toolbar actions (Deny/X left, destructive; Approve/checkmark
   right, success), with no body choices or separate Submit. Swipe dismissal is local
-  only; the pending tool reopens the same request, and silence never decides it. The original
+  only; the pending settings tool reopens the same request through the exact operation/owner
+  matcher, and silence never decides it. Approval context preserves full JSON values and
+  literal URLs/markup through the shared native selectable text owner. The original
   tool result receives the decision; no completed-pending request chip is rendered.
   Gateway-attributed `tron.settings-outcome.v1` contexts open the read-only outcome sheet; unknown
   versions/shapes retain the ordinary context viewer. `ChatTranscriptSheetRoutes` owns these sheets
