@@ -243,7 +243,10 @@ need approval, lowers apply live.
 
 `ModelQueueOwner` (`src/providers/model-queue.ts`) skips unregistered, virtual or
 uncredentialed models, models with a usage-limit error in the last 15 minutes or ≥ 95% usage,
-and moves on after a usage-limit error; captured queues are read-only. Worker thinking is
+and moves on after a usage-limit error; captured queues are read-only. Global and Home expose
+all three ordered queue editors, including an empty inherited queue. Add uses the physical-model
+catalog and account availability; Save uses the canonical change/approval path, while Reset/Revert
+removes only the owned override. Empty lists retain the role-specific meanings above. Worker thinking is
 `{ "sameAs": "home" }` by default. **Learned-profile changes** (`home.profileChange`, the
 `profile` tool) use Home `HomeProfileItems.change` through the kernel
 `SettingsChangePath.auditSubject` stripe/audit coordinator: one quiet `home.profile.item` entry per

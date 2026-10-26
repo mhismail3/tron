@@ -341,6 +341,51 @@ describe("settings.resolve", () => {
 describe("settings renderer contract", () => {
   const transcript: Array<{ case: string; response: unknown }> = [];
 
+  it("offers canonical queue editors at Global and Home, preserving ordered saves, empty overrides and inheritance", async () => {
+    const f = await fixture();
+    const evidence: unknown[] = [];
+    for (const role of ["worker", "subagent", "background"] as const) {
+      const key = `model.queue[role=${role}]`;
+      const resolve = async (target: { kind: "global" | "home" }) => await f.service.invoke(subscribed(), "settings.resolve", {
+        target, keys: [key], renderer: { version: 1, controls: [...CONTROLS] },
+      }) as unknown as PresentedResolution;
+      for (const kind of ["global", "home"] as const) {
+        const initial = await resolve({ kind });
+        expect(initial.keys.find(candidate => candidate.key === key), `${kind} ${role} editor`).toMatchObject({
+          presentation: { control: "list", editable: true, valueKind: "stringList", optionsSource: { name: "catalog.models" } },
+        });
+      }
+      const options = await f.service.invoke(subscribed(), "settings.options", { target: { kind: "global" }, key, query: f.model.provider }) as unknown as {
+        options: Array<{ value: { provider: string; id: string }; disabledReason?: string }>;
+      };
+      const available = options.options.filter(option => option.value.provider === f.model.provider && !option.disabledReason);
+      expect(available).toHaveLength(2);
+      expect(options.options.some(option => option.value.provider === "tron" && option.value.id === "subagent")).toBe(false);
+      const values = available.map(option => `${option.value.provider}/${option.value.id}`);
+      const change = async (kind: "global" | "home", op: "set" | "unset", value?: string[]) => {
+        const result = await f.service.invoke(subscribed(), "settings.change", { commandId: `queue-editor-${role}-${kind}-${op}-${evidence.length}`,
+          target: { kind }, changes: [{ key, layer: kind === "home" ? "session" : "global", op, ...(value ? { value } : {}) }],
+        });
+        evidence.push(result);
+      };
+      await change("global", "set", values);
+      expect(row(await resolve({ kind: "home" }), key).value).toEqual(values);
+      await change("home", "set", [...values].reverse());
+      expect(row(await resolve({ kind: "home" }), key).value).toEqual([...values].reverse());
+      expect(row(await resolve({ kind: "global" }), key).value).toEqual(values);
+      await change("home", "set", [values[1]!]);
+      expect(row(await resolve({ kind: "home" }), key).value).toEqual([values[1]!]);
+      await change("home", "set", []);
+      expect(row(await resolve({ kind: "home" }), key)).toMatchObject({ value: [], overridden: true });
+      await change("home", "unset");
+      expect(row(await resolve({ kind: "home" }), key).value).toEqual(values);
+      const file = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"));
+      expect(file.modelQueue?.[role]).toBeUndefined();
+      evidence.push(await resolve({ kind: "home" }));
+    }
+    transcript.push({ case: "queue editor ordered save and inheritance", response: evidence });
+  });
+
   it("summarizes queues and tools without losing ordered values or full change-history detail", async () => {
     const f = await fixture();
     const target = { kind: "global" } as const;

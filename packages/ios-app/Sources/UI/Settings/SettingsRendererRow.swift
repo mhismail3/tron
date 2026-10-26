@@ -252,7 +252,7 @@ struct SettingsRendererRow: View {
                 let values = setting.value?.arrayValue ?? []
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     SettingsListEditor(title: title, help: presentation?.help ?? "", entry: presentation?.entry,
-                                       values: values.compactMap(\.stringValue), onChange: onChange)
+                                       values: values.compactMap(\.stringValue), entryPicker: modelEntryPicker, onChange: onChange)
                 }
             } else {
                 readOnlyRow
@@ -291,6 +291,17 @@ struct SettingsRendererRow: View {
             }
         case .readOnly:
             readOnlyRow
+        }
+    }
+
+    /// Model queues add physical models from the same availability-aware picker as chat.
+    private var modelEntryPicker: ((@escaping (String) -> Void) -> AnyView)? {
+        guard presentation?.optionsSource?.name == "catalog.models" else { return nil }
+        return { add in
+            AnyView(SettingsModelPicker(setting: setting, target: target, title: "Add model") { value in
+                guard let provider = value.objectValue?["provider"]?.stringValue, let id = value.objectValue?["id"]?.stringValue else { return }
+                add("\(provider)/\(id)")
+            })
         }
     }
 
