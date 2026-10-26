@@ -181,7 +181,7 @@ export interface MacTerminalStatus {
   /** The enrolled key, so the iPhone can tell its own key from a stale one. */
   enrolledKey?: string;
   /** The argv the iPhone's SSH session runs to reach the shell host that keeps
-   * Mac Terminal's shells across disconnects (machine/mac-terminal-host.ts).
+   * Mac Terminal's shells across disconnects (modules/mac-terminal/mac-terminal-host.ts).
    * Absent when this Gateway has no compiled host; the iPhone then opens a
    * plain login shell that ends with its connection. */
   hostCommand?: string[];

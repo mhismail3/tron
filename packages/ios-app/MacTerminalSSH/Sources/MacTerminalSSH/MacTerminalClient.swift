@@ -23,7 +23,7 @@ public struct MacTerminalEndpoint: Codable, Equatable, Sendable {
     /// The Mac's sshd host public keys in OpenSSH form, pinned at enrollment.
     public var hostKeys: [String]
     /// The argv that reaches the Mac's shell host, which keeps shells across
-    /// disconnects (Gateway `machine/mac-terminal-host.ts`). Absent from a Mac
+    /// disconnects (Gateway `modules/mac-terminal/mac-terminal-host.ts`). Absent from a Mac
     /// whose Tron has none; Mac Terminal then opens a plain login shell.
     public var hostCommand: [String]?
 

@@ -3,14 +3,14 @@
 ## Purpose
 
 The Gateway's reach into this Mac: filesystem and Git browsing, Project-root
-resolution, worktrees, uploads, PTY terminals, the Mac Terminal shell host, and the
-native capture and `computer` clients.
+resolution, worktrees, uploads, PTY terminals, and the native capture and
+`computer` clients.
 
 ## Owns
 
 `filesystem-service.ts`, `workspace-inspection-service.ts` (workspace projection),
 `git-worktree-service.ts`, `upload-store.ts`, `terminal-service.ts`,
-`mac-terminal-host.ts`, `native-capture-client.ts`, `native-capture-transport.ts`,
+`native-capture-client.ts`, `native-capture-transport.ts`,
 `cua-client.ts`, path containment and workspace bounds.
 
 ## Contract
@@ -43,14 +43,8 @@ only enrolls and revokes keys (`src/security/mac-terminal.ts`) and ships the hos
   (`on`/`off`/`unknown` from one loopback connect; Tron never changes it), `enrolled`,
   and `hostCommand`, the argv that reaches the shell host (omitted with no compiled
   host).
-- **The shell host** (`mac-terminal-host.ts`) is `TerminalService` in its own process,
-  so shells survive Gateway restarts and disconnects. `connect` relays stdio to
-  `<tronHome>/gateway/mac-terminal/host-1.sock` (dir 0700), starting `serve` detached
-  if none answers. One JSON object per line: `{"hello":{"protocol":1}}`, then `list`,
-  `open`, `attach` (`after` sequence), `detach`, `write`, `resize`, `terminate`, with
-  `output` and `exit` events. The socket name carries the protocol version. Idle period:
-  `setup.terminalIdleMinutes`. With no shell and no connection for 24 hours the host
-  exits. Diagnostics: `gateway/mac-terminal/host.log` (truncated past 1 MiB).
+- **The shell host** belongs to [gateway/mac-terminal](../modules/mac-terminal/README.md)
+  and uses this module's `TerminalService` in its own process.
 - **The key** is the Global setting `permissions.macTerminalKey` (qualified by
   `device`): one `~/.ssh/authorized_keys` line restricted to Tailscale ranges with no
   forwarding, admitting only `ecdsa-sha2-nistp256` (Secure Enclave) keys. Adding is
@@ -111,7 +105,6 @@ enforces its executable bit and terminal tests open a real PTY.
 |---|---|---|
 | `terminal.auto-closed` | info | The Gateway closed a non-busy app terminal: terminal id, `reason` (`idle`, `restart`), `elapsedMs` since its last input or attachment; never content or cwd |
 | `terminal.idle-check-failed` | warning | An idle pass could not read the idle setting or process table; every terminal is kept: `error` |
-| `host.started`, `host.stopped`, `host.idle-exit`, `shell.opened`, `shell.exited`, `shell.quit`, `terminal.auto-closed`, `terminal.idle-check-failed` in `gateway/mac-terminal/host.log` | JSON lines with `at` and `event` (not the Gateway log) | Mac Terminal's shell host (`mac-terminal-host.ts`) lifecycle and idle closures: `pid`, `protocol`, shell id, `exitCode`, `closed`, `reason`, `elapsedMs`; never input, output or cwd |
 | `uploads.storage-pressure` | info on return to `normal`; warning otherwise | A 10-minute maintenance pass changed attachment storage pressure; free bytes and the floor in the message |
 | `storage.maintenance-failed` | warning | The bounded artifact maintenance pass threw and will retry: `error` |
 

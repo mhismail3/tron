@@ -1,7 +1,7 @@
 import Foundation
 import Synchronization
 
-/// One shell the Mac's shell host holds (Gateway `machine/mac-terminal-host.ts`).
+/// One shell the Mac's shell host holds (Gateway `modules/mac-terminal/mac-terminal-host.ts`).
 public struct MacShell: Codable, Equatable, Sendable, Identifiable {
     public let id: String
     public let createdAt: String

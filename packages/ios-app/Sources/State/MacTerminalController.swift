@@ -18,7 +18,7 @@ struct MacTerminalStatus: Decodable, Equatable, Sendable {
 }
 
 /// Mac Terminal's shells (#1075). The shells live on the Mac, in the shell host
-/// (Gateway `machine/mac-terminal-host.ts`), reached over SSH without the
+/// (Gateway `modules/mac-terminal/mac-terminal-host.ts`), reached over SSH without the
 /// Gateway; this app-scoped controller is the iPhone's view of them. Closing
 /// the sheet or leaving the app only closes the SSH link, which detaches: the
 /// shell, its programs and its output stay on the Mac until the user exits or
