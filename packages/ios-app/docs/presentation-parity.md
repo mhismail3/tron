@@ -211,6 +211,8 @@ compact status extends the shared pill palette's semantic success role, not per-
   oldest contiguous individual message explains the resolution change, not exclusion.
   Reads are revisioned snapshots, labelled as such; a new canonical Home snapshot retires
   old pages/cursors and hides stale resolution markers before its replacement read.
+  The revision reads AppModel's canonical snapshot forwarding accessor in both hosted
+  validation and signed device builds; it does not maintain separate snapshot state.
 - Technical detail uses `TronMetadataTable` for metadata and JSON (field, short type, trailing code
   preview; stacked at accessibility sizes); the raw JSON reader is one selectable, wrapping,
   vertically scrolling sheet, never a horizontal viewport.

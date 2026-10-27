@@ -902,9 +902,10 @@ extension AppModel {
         )
     }
 
+    var selectedSnapshot: SessionSnapshot? { sessionPresentation.snapshot }
+
     #if HOSTED_TEST
     var selectedSessionID: String? { sessionPresentation.selectedSessionID }
-    var selectedSnapshot: SessionSnapshot? { sessionPresentation.snapshot }
 
 
     func installHostedSecondaryProjection(
