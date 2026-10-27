@@ -29,12 +29,8 @@ extension HomeTaskSheet.PendingRevocation.Target {
 extension HomeTaskSheet {
     func permissionList(_ permissions: HomeTaskPermissionsDTO) -> some View {
         TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, hidesLoneHeading: true) {
-            TronSettingsGroup(permissionTitle) {
+            TronSettingsGroup("Permissions") {
                 VStack(spacing: 0) {
-                    if let permissionSettings {
-                        permissionSettings
-                        TronSettingsDivider()
-                    }
                     if permissions.scopes.isEmpty {
                         TronSettingsRow(icon: "lock.shield", title: "Delegation: All trusted projects") {
                             TronStatusPill(text: "Not authorized", accent: .tronSlate)

@@ -83,6 +83,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   same writes, approvals and Revert path; changing the card changes no scope semantics. The model
   header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
   Home Settings has one untitled Settings container (Models: workers/delegation only, Tools, More Settings).
+  Worker settings render independently of delegation permission reads; an uninitialized task namespace
+  must not hide the saved Home profile editors.
   Session Settings has one Settings container (Compaction, Tools, Project Trust, More Settings),
   no Models subsheet. Overridable keys only; Project-owned controls are read-only with “Set by Project settings”;
   explicit overrides have Overridden and circular Revert. `SettingsProjectGroups` shows applied

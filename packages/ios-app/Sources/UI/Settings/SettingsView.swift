@@ -311,10 +311,11 @@ struct SettingsSectionLinks: View {
                         ForEach(members(id)) { section in
                             if section.id == "workers", let homeProfileID,
                                let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter({ $0.group == "workers" }) {
-                                HomeTaskSheet(permissionsFor: homeProfileID, title: section.title, settings: AnyView(
+                                TronSettingsGroup(section.title) {
                                     SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
                                         projectCWD: projectCWD, presentation: .keys(keys.map(\.key)), detailedKeys: true, selection: selection)
-                                ))
+                                }
+                                HomeTaskSheet(permissionsFor: homeProfileID)
                             } else {
                                 SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
                                     projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
