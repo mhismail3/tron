@@ -1,5 +1,4 @@
 import type { ModuleDescriptor } from "../kernel/host/module-host.js";
-import type { RunRuntime } from "../kernel/run/run-runtime.js";
 import type { DisplayArtifactStore } from "./display-artifact-store.js";
 import type { BrowserLiveViewRegistry } from "./browser-live-view.js";
 import type { BlobByteRange } from "../sessions/blob-store.js";
@@ -10,10 +9,10 @@ import { workspaceModule } from "../workspace/workspace-module.js";
 import { createTronDisplayExtension } from "./tron-display-extension.js";
 import { admitToolDisplayProjection, displayReferences } from "./display-contract.js";
 import { observeTrustedAgentBrowserResult } from "./browser-live-view-adapter.js";
-import type { ToolResultProjection } from "../kernel/projection/tool-result.js";
+import type { ToolReferences, ToolResultProjection } from "../kernel/projection/tool-result.js";
 import { createTronNativeCaptureExtension } from "./tron-native-capture-extension.js";
 
-type DisplayRuntime = Pick<RunRuntime<unknown>, "disposed" | "toolResultReferences">;
+type DisplayRuntime = { readonly disposed: boolean; toolResultReferences(): ToolReferences };
 
 /** Native session facts, never a second catalog, deletion flag or runtime owner. */
 interface DisplaySessions {

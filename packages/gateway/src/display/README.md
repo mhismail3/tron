@@ -23,7 +23,8 @@ consumer operations, not a second display service port.
 
 **Display descriptors.** `display-modules.ts` owns `DisplayOwner` and display/native-capture
 metadata. Composition supplies its shared store, live views and lazy native session reads;
-native capture remains absent without live views. Transport consumes the owner directly.
+Display reads only disposal and canonical `ToolReferences`, not the Run implementation.
+Native capture remains absent without live views. Transport consumes the owner directly.
 The display projection also admits canonical artifact/live-view references in one scan;
 runtime slots cache its result only for the exact current session and leaf.
 It also admits each extension load with a display-owned session/generation/token scope;
