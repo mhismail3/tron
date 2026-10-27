@@ -2229,7 +2229,7 @@
       },
       {
         "name": "settings",
-        "schema": "sha256:6162d65d4971f08b9adfb0bcacf715b3334cf4f4b9d9a9077d51f623c4264fb4"
+        "schema": "sha256:65a7da3047854092dea74aa9ffe726ea877f980ece27503a0b82e2b9a950d093"
       },
       {
         "name": "projects",
@@ -2263,7 +2263,7 @@
       },
       {
         "name": "settings",
-        "schema": "sha256:6162d65d4971f08b9adfb0bcacf715b3334cf4f4b9d9a9077d51f623c4264fb4"
+        "schema": "sha256:65a7da3047854092dea74aa9ffe726ea877f980ece27503a0b82e2b9a950d093"
       },
       {
         "name": "projects",
@@ -3949,13 +3949,13 @@
               }
             },
             {
-              "description": "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve awaits his tap (pending). Request always creates a pending approval and returns immediately; chat shows the maintainer the request. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
+              "description": "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve awaits his tap (pending). Request opens a blocking approval sheet and returns his decision; Stop cancels the pending request. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
               "name": "settings",
               "parameters": {
                 "additionalProperties": false,
                 "properties": {
                   "action": {
-                    "description": "resolve: read values and where each comes from. change: set or unset keys at their normal tier. request: always ask the maintainer to approve, without waiting.",
+                    "description": "resolve: read values and where each comes from. change: set or unset keys at their normal tier. request: ask the maintainer to approve and wait for his decision.",
                     "enum": [
                       "resolve",
                       "change",
@@ -5357,13 +5357,13 @@
               }
             },
             {
-              "description": "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve awaits his tap (pending). Request always creates a pending approval and returns immediately; chat shows the maintainer the request. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
+              "description": "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve awaits his tap (pending). Request opens a blocking approval sheet and returns his decision; Stop cancels the pending request. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
               "name": "settings",
               "parameters": {
                 "additionalProperties": false,
                 "properties": {
                   "action": {
-                    "description": "resolve: read values and where each comes from. change: set or unset keys at their normal tier. request: always ask the maintainer to approve, without waiting.",
+                    "description": "resolve: read values and where each comes from. change: set or unset keys at their normal tier. request: ask the maintainer to approve and wait for his decision.",
                     "enum": [
                       "resolve",
                       "change",
