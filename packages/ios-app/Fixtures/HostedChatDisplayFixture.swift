@@ -1352,7 +1352,9 @@ private actor HostedHomeShellGateway {
 
     private func memoryLine(start: Int, span: Int) -> JSONValue {
         var line: [String: JSONValue] = ["start": .number(Double(start)), "span": .number(Double(span)),
-            "truncated": .bool(false), "firstAt": .string(memoryTime(start)), "lastAt": .string(memoryTime(start + span - 1))]
+            "truncated": .bool(false), "firstAt": .string(memoryTime(start)), "lastAt": .string(memoryTime(start + span - 1)),
+            "inCurrentView": .bool(Self.memoryViewParts.contains { $0.start == start && $0.span == span }),
+            "startsIndividualMessages": .bool(start == 34 && span == 1)]
         if span == 1 {
             let message = memoryMessage(start)
             line["text"] = .string(message.text); line["kind"] = .string(message.kind); line["item"] = memoryItem(start)
@@ -1457,6 +1459,8 @@ private actor HostedHomeShellGateway {
                 "currentEntries": .number(12), "recoveryDecision": .string("none")]) : .null,
             "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
                 "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null,
+                "episodic": .object(["messages": .number(Double(Self.memoryTotal)),
+                    "view": .object(["built": .number(Double(Self.memoryViewParts.count)), "unbuilt": .number(0)])]),
                 "spentTokens": .number(10_000_000), "models": .array((configuredModels.isEmpty && configured ? ["anthropic/claude-haiku-5-5"] : configuredModels).map(JSONValue.string))])])
     }
 }

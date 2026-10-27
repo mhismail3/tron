@@ -22,6 +22,25 @@ final class TronHomeSheetsUITests: XCTestCase {
         return app
     }
 
+    // Visual approval captures only; value and RPC regression coverage follows approval.
+    @MainActor func testMemoryResolutionPreviewLight() { captureMemoryResolution("light", arguments: []) }
+    @MainActor func testMemoryResolutionPreviewDark() { captureMemoryResolution("dark", arguments: ["-home-dark"]) }
+
+    @MainActor private func captureMemoryResolution(_ appearance: String, arguments: [String]) {
+        let app = launchPolishManage(arguments); defer { app.terminate() }
+        shot("2063-rows-\(appearance)")
+        open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "2063-memory")
+        expand(app, done: "home-sheet-done-memory")
+        for _ in 0..<6 {
+            let boundary = element(app, "home-memory-resolution-boundary")
+            if boundary.exists && boundary.isHittable && boundary.frame.maxY < app.frame.maxY - 200 { break }
+            app.swipeUp(velocity: .slow)
+        }
+        // Do not press/drag a tappable summary to frame the screenshot: it opens
+        // the detail sheet. The scroll above leaves the divider and summaries visible.
+        shot("2063-boundary-\(appearance)")
+    }
+
     // Approved geometry: the ring tracks the combined title/subtext at every reviewed size.
     @MainActor func testRingAlignmentReviewLight() { captureRingAlignment("light", arguments: []) }
     @MainActor func testRingAlignmentReviewDark() { captureRingAlignment("dark", arguments: ["-home-dark"]) }

@@ -70,6 +70,8 @@ struct HomeMemoryViewDTO: Decodable, Equatable, Sendable {
         /// Display text without kind prefixes; nil while the line is not summarized yet.
         let text: String?
         let truncated: Bool
+        let inCurrentView: Bool
+        let startsIndividualMessages: Bool
         let kind: HomeMemoryItemDTO.Kind?
         let firstAt: String?
         let lastAt: String?
@@ -78,6 +80,7 @@ struct HomeMemoryViewDTO: Decodable, Equatable, Sendable {
         var isSummary: Bool { span > 1 }
         var valid: Bool {
             start >= 0 && span >= 1 && span & (span - 1) == 0 && start % span == 0
+                && (!startsIndividualMessages || (inCurrentView && span == 1 && start > 0))
                 && (text?.utf16.count ?? 0) <= 4096
                 && [firstAt ?? "", lastAt ?? ""].allSatisfy { $0.utf8.count <= 64 }
                 && (span == 1 ? item.map { $0.valid && $0.index == start && $0.kind == kind } == true : item == nil && kind == nil)

@@ -75,7 +75,10 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   a node only when unbuilt, its children built and its context summarized; up to
   `JOBS` at once, refilled per completion; paid merges only while the view exceeds
   `VIEW`. Chapter topics are a newest-first non-overlapping cover of built nodes and
-  never start work.
+  never start work. Browser lines report exact live-view membership and mark
+  the oldest leaf of its contiguous single-message tail when older summaries exist;
+  chapter-filtered or zoomed children are not falsely marked as view lines. These
+  facts share the browser revision and never reconstruct a past activation.
 - **Departures.** Context sent as cache pieces then the step; contexts stored as level
   runs; the view refolds from message 0 only at load (yielding every 2,000
   messages); revoked merged parts expand to leaves; invalidation carries ancestors and

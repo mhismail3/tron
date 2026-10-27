@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
-import type { HomeMemoryEvidence, HomeMemoryView } from "../protocol/types.js";
+import type { HomeMemoryEvidence, HomeMemoryView, HomeMemoryViewLine } from "../protocol/types.js";
 import { HOME_MEMORY_PAGE_BYTES, HOME_MEMORY_DISPLAY_BYTES, encodeHomeMemoryCursor, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "../modules/home/home-memory-browser.js";
 import type { AssistantMessage } from "../kernel/pi/ai.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -372,6 +372,19 @@ export class EpisodicMemory {
   browserView(request: HomeMemoryViewRequest): HomeMemoryView {
     this.assertOpen();
     const chapter = request.sessionId;
+    // Derive resolution from the same live layout as the page revision. A chapter
+    // split or zoom child is not itself a view line, even if its parent is.
+    const addresses = new Set(this.view.map(part => `${part.start}+${part.span}`));
+    let individualFrom = this.messages.size;
+    for (let index = this.view.length - 1; index >= 0; index -= 1) {
+      const part = this.view[index]!;
+      if (part.span !== 1) break;
+      individualFrom = part.start;
+    }
+    const lineFor = (part: EpisodicViewPart): HomeMemoryViewLine => homeMemoryLine(part, this.messages, this.nodes, nodeAddress, {
+      inCurrentView: addresses.has(`${part.start}+${part.span}`),
+      startsIndividualMessages: part.span === 1 && part.start === individualFrom && individualFrom > 0,
+    });
     const baseRevision = this.browserRevision();
     const revision = chapter === undefined ? baseRevision : episodicDigest(JSON.stringify([baseRevision, chapter]));
     if (request.cursor && request.cursor.revision !== revision) throw homeMemoryRevisionChanged();
@@ -398,7 +411,7 @@ export class EpisodicMemory {
         { level: level - 1, index: index * 2, start, span: half },
         { level: level - 1, index: index * 2 + 1, start: start + half, span: half },
       ];
-      const lines = parts.map(part => homeMemoryLine(part, this.messages, this.nodes, nodeAddress));
+      const lines = parts.map(lineFor);
       return { homeId: this.dependencies.sessionId, revision, totalMessages: this.messages.size, lines };
     }
     for (const part of this.view) add(part);
@@ -410,7 +423,7 @@ export class EpisodicMemory {
     let position = offset;
     let bytes = Buffer.byteLength(JSON.stringify(result)) + 1024;
     for (; position < ranges.length && result.lines.length < request.limit; position += 1) {
-      const line = homeMemoryLine(ranges[position]!, this.messages, this.nodes, nodeAddress);
+      const line = lineFor(ranges[position]!);
       const size = Buffer.byteLength(JSON.stringify(line)) + 1 + (line.item ? HOME_MEMORY_DISPLAY_BYTES : 0);
       if (bytes + size > HOME_MEMORY_PAGE_BYTES) break;
       bytes += size;

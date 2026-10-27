@@ -53,6 +53,15 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     }
 
     struct Memory: Decodable, Equatable, Sendable {
+        struct Episodic: Decodable, Equatable, Sendable {
+            struct View: Decodable, Equatable, Sendable {
+                let built: Int
+                let unbuilt: Int
+            }
+            let messages: Int
+            let view: View
+        }
+        let episodic: Episodic?
         let configured: Bool
         let open: Bool
         let paused: Bool?
@@ -124,6 +133,8 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
               status.readiness.gaps.allSatisfy({ $0.utf8.count <= 256 }),
               status.generation.map({ $0 >= 0 }) ?? true,
               status.memory.spentTokens.map({ $0 >= 0 }) ?? true,
+              status.memory.episodic.map({ $0.messages >= 0 && $0.view.built >= 0 && $0.view.unbuilt >= 0
+                  && $0.view.built <= $0.messages && $0.view.unbuilt <= $0.messages - $0.view.built }) ?? true,
               (status.memory.models ?? []).count <= 8 && (status.memory.models ?? []).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 421 }),
               status.chapter.map({ $0.count > 0 && ($0.currentBytes ?? 0) >= 0 && ($0.currentEntries ?? 0) >= 0 }) ?? true,
               [status.reason, status.recovery.reason, status.memory.blocked, status.memory.reason,
@@ -185,14 +196,15 @@ enum HomeStatusLinePresentation {
 
     /// The Memory row's subtitle. A blocked or unresolved memory names its reason
     /// here, while the state pill carries the headline.
-    static func memory(_ status: HomeStatusDTO, summaries: Int?, unresolvedCommand: Bool) -> String {
+    static func memory(_ status: HomeStatusDTO, unresolvedCommand: Bool) -> String {
         if unresolvedCommand { return "Home change unresolved" }
         if status.memory.paused == true { return "Paused" }
         if let blocked = status.memory.blocked { return "Blocked · \(blocked)" }
         if !status.memory.configured { return "Choose background models" }
         guard status.memory.open else { return "Configured" }
-        guard let summaries else { return "Available" }
-        return "Available · \(summaries.formatted()) \(summaries == 1 ? "summary" : "summaries")"
+        guard let memory = status.memory.episodic else { return "Available" }
+        let lines = memory.view.built + memory.view.unbuilt
+        return "\(memory.messages.formatted()) \(memory.messages == 1 ? "message" : "messages") · \(lines.formatted()) \(lines == 1 ? "line" : "lines") in view"
     }
 }
 
@@ -214,7 +226,7 @@ enum HomeManageRowPresentation {
         let count = list.chapters.count == 1 ? "1 chapter" : "\(list.chapters.count.formatted()) chapters"
         guard let active = list.chapters.last(where: { $0.state == .active }),
               let percent = HomeChapterPresentation.softPercent(active, limits: list.limits) else { return count }
-        return "\(count) · \(percent)% of limit"
+        return "\(count) · Active chapter \(percent)% of soft limit"
     }
 
     /// Active and finished counts from the first page. A further page makes the

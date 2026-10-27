@@ -1165,6 +1165,10 @@ export interface HomeMemoryItem {
 /** One range in Home's rendered memory view. Leaf messages carry the same
  * bounded projection/evidence object as the independent evidence read. */
 export interface HomeMemoryViewLine {
+  /** Exact member of the live tree view, not a child opened by filtering or zoom. */
+  inCurrentView: boolean;
+  /** Oldest leaf of the contiguous individual-message tail, when older summaries exist. */
+  startsIndividualMessages: boolean;
   start: number;
   span: number;
   text: string | null;

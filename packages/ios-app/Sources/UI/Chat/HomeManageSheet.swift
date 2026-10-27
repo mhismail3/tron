@@ -38,7 +38,6 @@ extension HomeSheet {
     /// secondary line is read from this sheet's load, never from a sub-sheet.
     func manageRows(_ read: HomeManageDTO, unresolved: Bool) -> some View {
         let status = read.status
-        let summaries = read.context.breakdown?.sections.first { $0.id == .memory }?.count
         let memoryBrowser = model.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true
         let chapterList = model.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
         let profileList = model.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
@@ -53,7 +52,7 @@ extension HomeSheet {
                 }
                 if memoryBrowser {
                     navigationRow(icon: "brain",
-                                  subtitle: HomeStatusLinePresentation.memory(status, summaries: summaries, unresolvedCommand: unresolved),
+                                  subtitle: HomeStatusLinePresentation.memory(status, unresolvedCommand: unresolved),
                                   destination: .memory(sessionID: nil, chapterOrdinal: nil), id: "home-manage-memory-browser")
                 }
                 if let chapter = status.chapter, chapterList {

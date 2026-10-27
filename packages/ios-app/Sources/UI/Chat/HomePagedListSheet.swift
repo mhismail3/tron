@@ -14,10 +14,23 @@ struct HomePagedListSheet: View {
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var token
     @Environment(\.tronSettingsVisualTheme) private var theme
-    @PresentationState private var store = FeedStore<HomeSheetContent, HomeSheetReadQuery, HomeSheetReadIdentity>()
+    @PresentationState private var store = FeedStore<HomeSheetContent, HomeSheetReadQuery, ReadIdentity>()
     @PresentationState private var child: HomeSheetDestination?
 
-    private var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
+    /// A new canonical Home snapshot retires every old cursor and resolution marker.
+    /// The feed remains the sole read owner; no polling or second memory cache.
+    private struct ReadIdentity: PresentationReadIdentity, Hashable {
+        let admission: HomeSheetReadIdentity
+        let sourceRevision: Int?
+        func retainsContent(from previous: Self) -> Bool {
+            admission.retainsContent(from: previous.admission) && sourceRevision == previous.sourceRevision
+        }
+    }
+    private var identity: ReadIdentity? {
+        model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token).map {
+            ReadIdentity(admission: $0, sourceRevision: isMemory ? model.selectedSnapshot?.revision : nil)
+        }
+    }
     private var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     private var accent: Color { theme?.accent ?? .tronPrimary }
     private var isMemory: Bool { if case .memory = destination { return true }; return false }
@@ -58,7 +71,7 @@ struct HomePagedListSheet: View {
         return taskPages.flatMap(\.items).filter { seen.insert($0.id).inserted }.enumerated().map { TaskRow(row: $1, position: $0 + 1) }
     }
 
-    private struct LoadKey: Hashable { let identity: HomeSheetReadIdentity?; let active: Bool }
+    private struct LoadKey: Hashable { let identity: ReadIdentity?; let active: Bool }
 
     var body: some View {
         NavigationStack {
@@ -121,7 +134,7 @@ struct HomePagedListSheet: View {
 
     @ViewBuilder private var captions: some View {
         TronSettingsCaption(isMemory
-            ? "Newest first. Open a message for full content, or a summary to see what it covers."
+            ? "Newest first. View line marks the current memory view at this read, not a past activation. Older messages remain in coarser summaries."
             : "Newest first. Open a task to see its brief, worker and check-ins.").containerValue(\.tronSettingsSection, false)
         if case .memory(.some, let ordinal) = destination {
             TronSettingsCaption(ordinal.map { "Chapter \($0) only" } ?? "This chapter only").containerValue(\.tronSettingsSection, false)
@@ -154,8 +167,9 @@ struct HomePagedListSheet: View {
     }
 
     private func memoryRow(_ line: HomeMemoryViewDTO.Line) -> some View {
+        VStack(spacing: TronListMetrics.headerGap) {
         TronFeedCard {
-            TronListButton(HomeMemoryPresentation.rowContent(line),
+            TronListButton(HomeMemoryPresentation.rowContent(line, showsResolution: store.identity == identity),
                            identifier: line.isSummary ? "home-memory-summary-\(line.start)-\(line.span)" : "home-memory-row-\(line.start)") {
                 guard canAct else { return }
                 if let item = line.item { child = .memoryItem(item) }
@@ -165,6 +179,19 @@ struct HomePagedListSheet: View {
         .tronListMarker(.container)
         .tronListMarkers("home-memory-card-\(line.start)")
         .imageScale(.small)
+        if line.startsIndividualMessages, store.identity == identity {
+            VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
+                TronListDivider(inset: 0)
+                Text("Newer messages are shown individually")
+                    .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronPrimary)
+                Text("Older messages are folded into summaries.")
+                    .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
+            }
+            .padding(.horizontal, TronListMetrics.horizontalPadding).padding(.vertical, 8)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("home-memory-resolution-boundary")
+        }
+        }
     }
 
     private func taskRow(_ row: HomeTaskPageDTO.Row) -> some View {
@@ -177,11 +204,11 @@ struct HomePagedListSheet: View {
         .tronListMarkers("home-task-card-\(row.taskId)")
     }
 
-    private func load(_ request: FeedStore<HomeSheetContent, HomeSheetReadQuery, HomeSheetReadIdentity>.Request,
-                      identity: HomeSheetReadIdentity) async {
+    private func load(_ request: FeedStore<HomeSheetContent, HomeSheetReadQuery, ReadIdentity>.Request,
+                      identity: ReadIdentity) async {
         let initial = destination.initialQuery
         await store.load(request, identity: identity, isCurrent: { active && self.identity == identity }) { cursor in
-            try await model.readHomeSheet(cursor ?? initial, identity: identity,
+            try await model.readHomeSheet(cursor ?? initial, identity: identity.admission,
                                           isCurrent: { active && self.identity == identity })
         }
     }
@@ -218,11 +245,13 @@ extension HomeMemoryPresentation {
         }
     }
 
-    static func rowContent(_ line: HomeMemoryViewDTO.Line, now: Date = .now) -> TronListRowContent {
+    static func rowContent(_ line: HomeMemoryViewDTO.Line, showsResolution: Bool = true, now: Date = .now) -> TronListRowContent {
         let kind = kind(line)
         return TronListRowContent(
             leading: .icon(kind.icon, kind.tone), title: line.item?.isToolActivity == true ? text(line) : SessionHistoryPreview.plain(text(line)),
             preview: line.item?.isToolActivity != true,
+            status: showsResolution && line.inCurrentView && line.isSummary
+                ? TronListStatus(text: "View line", tone: .tronPrimary) : nil,
             tags: [TronListTag(text: line.isSummary ? title(line) : kind.label)],
             timestamp: line.isSummary ? HomeSheetTime.range(line.firstAt, line.lastAt) : TronListTime.short(iso: line.firstAt, now: now))
     }

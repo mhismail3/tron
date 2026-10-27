@@ -149,14 +149,14 @@ function lineText(text: string | undefined): { text: string | null; truncated: b
   return { text: bounded, truncated: bounded.length < clean.length };
 }
 
-export function homeMemoryLine(part: EpisodicViewPart, messages: Map<number, EpisodicMessageRecord>, nodes: Map<string, EpisodicNodeRecord>, nodeAddress: (level: number, index: number) => string): HomeMemoryViewLine {
+export function homeMemoryLine(part: EpisodicViewPart, messages: Map<number, EpisodicMessageRecord>, nodes: Map<string, EpisodicNodeRecord>, nodeAddress: (level: number, index: number) => string, resolution: { inCurrentView: boolean; startsIndividualMessages: boolean }): HomeMemoryViewLine {
   const message = messages.get(part.start);
   const node = nodes.get(nodeAddress(Math.log2(part.span), part.start / part.span));
   const firstAt = message?.timestamp;
   const lastAt = messages.get(part.start + part.span - 1)?.timestamp;
   const cleaned = lineText(node?.text);
   return {
-    start: part.start, span: part.span, ...cleaned,
+    start: part.start, span: part.span, ...cleaned, ...resolution,
     ...(part.span === 1 && message ? { kind: message.kind, item: homeMemoryItem(message, nodes.get(nodeAddress(0, part.start))) } : {}),
     ...(firstAt === undefined ? {} : { firstAt }),
     ...(lastAt === undefined ? {} : { lastAt }),

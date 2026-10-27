@@ -204,6 +204,13 @@ compact status extends the shared pill palette's semantic success role, not per-
   12 pt subtext, then tags and time; a row with neither status nor time carries its tags top-right
   (below the title when both do not fit). Actions are in the detail and a matching long-press menu.
   Instructions subsheet entries are `TronSettingsRow`s: centred icon, trailing source tag.
+  Manage Home's Memory subtitle counts catalog messages and current tree-view lines (built
+  plus unbuilt), not stored summary nodes or the last activation's frozen view. Chapters
+  names the active chapter's soft-limit share: the larger of bytes/24 MiB and entries/50,000.
+  Memory summary rows tag exact current-view members; a primary-tinted divider after the
+  oldest contiguous individual message explains the resolution change, not exclusion.
+  Reads are revisioned snapshots, labelled as such; a new canonical Home snapshot retires
+  old pages/cursors and hides stale resolution markers before its replacement read.
 - Technical detail uses `TronMetadataTable` for metadata and JSON (field, short type, trailing code
   preview; stacked at accessibility sizes); the raw JSON reader is one selectable, wrapping,
   vertically scrolling sheet, never a horizontal viewport.
