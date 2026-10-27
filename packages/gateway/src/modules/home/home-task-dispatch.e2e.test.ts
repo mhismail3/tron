@@ -5,17 +5,18 @@ import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, cp, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { HomeTaskStore, taskIntentDigest } from "./home-task-store.js";
-import { HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "./home-task-dispatcher.js";
+import { type HomeTaskDispatcher, successorTaskId, HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "./home-task-dispatcher.js";
 import { HomeMemoryRefusal } from "./home-request-policy.js";
 import { UploadStore } from "../../machine/upload-store.js";
 import { EpisodicMemoryError } from "../../errors.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { delegatedArtifactRoot } from "../../kernel/delegation/delegated-provider.js";
 import { RunMarkerStore } from "../../kernel/run/run-markers.js";
 import { stopTaskWorker, taskWorkerSteeringInput } from "../../kernel/delegation/worker-control.js";
 import { SessionCatalog } from "../../sessions/session-catalog.js";
@@ -1795,6 +1796,156 @@ describe("Home task production dispatch", () => {
     await waitFor(() => slot.snapshot().configurationBlocker === null, "ordinary producer terminal");
     evidence.push({ case: "ordinary-async-negative-control", admitted: true, injectedProducer: true });
   }, 20_000);
+
+  it("keeps a failed worker admission from poisoning the unbound chat", async () => {
+    const f = await fixture();
+    f.faux.setResponses(Array.from({ length: 8 }, () => fauxAssistantMessage("refusal acknowledged")));
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    await f.registry.acquire(f.home.sessionId);
+    let worker: Awaited<ReturnType<typeof f.registry.create>> | undefined;
+    const create = f.registry.delegation.createWorker.bind(f.registry.delegation);
+    // Fail after the actual worker/SDK/lease exist, at the configuration I/O edge.
+    // No fake registry, dispatcher, lane, report owner or task store is substituted.
+    vi.spyOn(f.registry.delegation, "createWorker").mockImplementation(async (...args) => {
+      const lease = await create(...args);
+      worker = lease.slot;
+      vi.spyOn(worker, "setHomeTaskModelQueues").mockRejectedValueOnce(new Error("worker configuration refused"));
+      return lease;
+    });
+    await expect(dispatch(f, "failed-unbound-worker")).rejects.toThrow("worker configuration refused");
+    await waitFor(async () => (await homeOwnerOf(f.registry).taskResult("failed-unbound-worker")).lifecycle === "terminal", "failed admission receipt");
+    await waitForTaskAcknowledgement(f, "failed-unbound-worker");
+    await waitFor(async () => !(await f.registry.acquire(f.home.sessionId)).isBusy, "refusal wake settles");
+    const sessionId = worker!.id;
+    // The refused task never acquired this chat. A real ordinary prompt must
+    // remain possible; a live stale report currently redirects it into steering.
+    const reopened = await f.registry.acquire(sessionId);
+    f.faux.setResponses([fauxAssistantMessage("ordinary chat remains usable")]);
+    await expect(reopened.prompt("ordinary prompt after refused admission")).resolves.toEqual({ operationId: expect.any(String) });
+    await waitFor(() => !reopened.isBusy, "ordinary failed-worker chat finishes");
+    expect(reopened.snapshot().transcript.some(row => row.kind === "message" && row.role === "assistant"
+      && row.content.some(part => part.type === "text" && part.text === "ordinary chat remains usable"))).toBe(true);
+    evidence.push({ case: "failed-worker-binding-retirement", sessionId, ordinaryPrompt: "completed" });
+  });
+
+  it.each(["rebuild-failure", "late-cancelled-bind"] as const)("keeps a worker resumable after %s", async failure => {
+    const f = await fixture();
+    const owner = homeOwnerOf(f.registry);
+    f.faux.setResponses(Array.from({ length: 16 }, () => (context: unknown) => JSON.stringify(context).includes("This is a finite Home task")
+      ? fauxAssistantMessage([reportCall("seed-retirement")], { stopReason: "toolUse" }) : fauxAssistantMessage("acknowledged")));
+    const model = f.faux.getModel();
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    await f.registry.acquire(f.home.sessionId);
+    const seed = await dispatch(f, "worker-retirement-seed");
+    const seedRecord = await seed.completion;
+    await waitForTaskAcknowledgement(f, seed.taskId);
+    await waitFor(async () => !(await f.registry.acquire(f.home.sessionId)).isBusy, "seed wake settles");
+    const worker = await f.registry.acquire(seed.sessionId);
+    const request = { taskId: seed.taskId, operationId: seed.operationId };
+    if (failure === "rebuild-failure") {
+      // Fault at the actual native reconstruction edge; the real K5 lane,
+      // dispatcher, lease, binding, records and later retry all still execute.
+      vi.spyOn(worker, "replaceRuntime").mockRejectedValueOnce(new Error("worker rebuild refused"));
+      await expect(owner.resumeTask(request)).rejects.toThrow("worker rebuild refused");
+    } else {
+      const tasks = (owner as unknown as { tasks: HomeTaskDispatcher }).tasks;
+      const actualResume = f.registry.delegation.resumeWorker.bind(f.registry.delegation);
+      let entered = false;
+      let released = false;
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      let late: Promise<unknown> | undefined;
+      const held = vi.spyOn(f.registry.delegation, "resumeWorker").mockImplementation((...args) => {
+        const step = (async () => {
+          const lease = await actualResume(...args);
+          const releaseLease = lease.release;
+          lease.release = () => { releaseLease(); released = true; };
+          entered = true; // The REAL binding/reconstruction finished before cancellation.
+          await gate;
+          return lease;
+        })();
+        late = step;
+        return step;
+      });
+      const controller = new AbortController();
+      const resuming = tasks.resume({ homeId: seedRecord.homeId, generation: seedRecord.generation,
+        routeGeneration: seedRecord.routeGeneration }, request, { signal: controller.signal });
+      void resuming.catch(() => {});
+      try {
+        await waitFor(() => entered, "resumed worker really bound before cancellation");
+        controller.abort();
+        await expect(resuming).rejects.toMatchObject({ stage: "create-worker", outcome: "cancelled" });
+      } finally {
+        release();
+        await late;
+        held.mockRestore();
+      }
+      await waitFor(() => released, "the abandoned real lease is released");
+    }
+    const tasks = (owner as unknown as { tasks: HomeTaskDispatcher }).tasks;
+    await waitFor(async () => (await tasks.store.read(successorTaskId(seed.taskId)))?.lifecycle === "terminal", "refused successor settles");
+    await waitForTaskAcknowledgement(f, successorTaskId(seed.taskId));
+    await waitFor(async () => !(await f.registry.acquire(f.home.sessionId)).isBusy, "refusal wake settles");
+    f.faux.setResponses([fauxAssistantMessage([reportCall("retried-retirement")], { stopReason: "toolUse" }),
+      ...Array.from({ length: 8 }, () => fauxAssistantMessage("acknowledged"))]);
+    // Actual public Home continuation must succeed in the SAME canonical chat,
+    // not through idle eviction or a substituted worker/controller.
+    const retried = await owner.resumeTask(request);
+    expect(retried.sessionId).toBe(seed.sessionId);
+    expect((await retried.completion).terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    evidence.push({ case: `failed-worker-retirement-${failure}`, sessionId: seed.sessionId, retried: retried.taskId });
+  });
+
+  it("does not let an ambient artifact read publish or persist after native retirement", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const slot = await f.registry.create(f.cwd);
+    f.faux.setResponses([fauxAssistantMessage("canonical session persisted")]);
+    await slot.prompt("establish the canonical session file");
+    await waitFor(() => !slot.isBusy, "canonical seed settles before the retirement race");
+    const runId = "retired-ambient-run";
+    const toolCallId = "retired-ambient-call";
+    const asyncDir = join(delegatedArtifactRoot(f.tronHome), "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true, mode: 0o700 });
+    // Real canonical Pi evidence is the artifact's ownership proof.
+    slot.sessionManager.appendMessage({ role: "toolResult", toolCallId, toolName: "subagent",
+      content: [{ type: "text", text: "launched" }], details: { runId, asyncDir, mode: "single", state: "running" },
+      isError: false, timestamp: Date.now() });
+    const owner = slot.ownedTurns;
+    let entered = false;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const read = owner.artifacts.readExtensionStatusArtifactWithReplacementRetry.bind(owner.artifacts);
+    const held = vi.spyOn(owner.artifacts, "readExtensionStatusArtifactWithReplacementRetry").mockImplementation(async (...args) => {
+      const value = await read(...args); // Read the real admitted file BEFORE holding its delivery.
+      entered = true;
+      await gate;
+      return value;
+    });
+    let refresh: Promise<unknown> | undefined;
+    try {
+      const now = Date.now();
+      await writeFile(join(asyncDir, "status.json"), JSON.stringify({ lifecycleArtifactVersion: 3,
+        runId, cwd: f.cwd, sessionId: slot.id, state: "completed", startedAt: now - 1_000,
+        lastUpdate: now, endedAt: now }));
+      refresh = owner.discoverExtensionArtifact(asyncDir);
+      await waitFor(() => entered, "actual ambient artifact read held before delivery");
+      await slot.dispose();
+      const canonicalAtRetirement = await readFile(slot.sessionFile!, "utf8");
+      const eventCut = f.events.length;
+      release();
+      await refresh;
+      await slot.runPersistence.waitForReceiptWrites();
+      // The observable boundary is the real retired session file, not a mock
+      // call count or a source-text assertion. Retirement cannot append a receipt.
+      expect(await readFile(slot.sessionFile!, "utf8")).toBe(canonicalAtRetirement);
+      expect(f.events.slice(eventCut).filter(event => event.topic === "session.extensionActivity")).toEqual([]);
+    } finally {
+      release();
+      await refresh;
+      held.mockRestore();
+    }
+  });
 
   it("records unknown rather than final when tracked detached work outlives an explicit report", async () => {
     const f = await fixture();

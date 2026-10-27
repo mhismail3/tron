@@ -29,7 +29,10 @@ native catalog/attention batching reads/registers this owner and keeps its origi
 acknowledgement lane and publication ordering. No parallel index or token map exists.
 Worker resume acquires the canonical native lease here, invokes the existing K5
 owned-turn owner's lane-protected bind, and releases that same lease on failure.
-SDK rebuild and physical publication remain native I/O. Registry supplies only
+A failed rebuild restores the previous report binding. Refused admission retires
+its report callbacks; an acquired or late lease joins K5's exact-binding release
+and native toolset rebuild before releasing its pin. A superseding binding is
+never cleared by an older admission. SDK rebuild and physical publication remain native I/O. Registry supplies only
 its actual persisted-session acquisition; it has no resume forwarding route.
 
 Native Session/Run owns ordinary leases, prompt admission and canonical recovery/marker
@@ -72,7 +75,9 @@ same maps. No native subagent artifact parser, run-control method, second index 
 exists. Native branch/disposal boundaries call this owner's reset/retirement operations;
 watched refresh checks generation and disposed-frame identity after its read. Admission
 retains bounded path/header/inode proofs; ambient discovery uses attribution and receipt-claim
-checks but has no disposed-frame guard after its read. Native alone writes SDK invocation
+checks and fences the actual disposed frame at entry, after its read and on read
+failure, before shared recency, lifecycle publication or canonical receipt writes.
+Native alone writes SDK invocation
 rows; K5 writes their activity projection
 through the actual Native resource operation without borrowing the tool-row map.
 The bounded Gateway discovery scheduler offers each frame's actual K5 owner directly.

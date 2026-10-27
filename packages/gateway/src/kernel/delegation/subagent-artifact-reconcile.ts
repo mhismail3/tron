@@ -18,6 +18,7 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
   asyncDir: string,
   canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
 ): Promise<ExtensionArtifactDiscoveryOutcome> {
+  if (turns.operations.disposed) return "transient";
   let diagnosticOwner: string | undefined;
   let missingToolCallId: string | undefined;
   let claimedReceipt: { activityId: string; owner: ArtifactReceiptOwner } | undefined;
@@ -35,6 +36,7 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
     }
     diagnosticOwner = turns.extensionArtifactOwnerForDirectory(realAsyncDir);
     const rawValue = await turns.artifacts.readExtensionStatusArtifactWithReplacementRetry(realAsyncDir);
+    if (turns.operations.disposed) return "transient";
     if (rawValue === undefined) {
       if (bound) turns.observeMissingExtensionArtifact(bound[1].toolCallId);
       if (diagnosticOwner) turns.warnExtensionArtifact("artifact-replacement-in-progress", diagnosticOwner);
@@ -247,6 +249,7 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
     return "accepted";
   } catch (error) {
     if (claimedReceipt) turns.releaseExtensionReceiptOwnership(claimedReceipt.activityId, claimedReceipt.owner);
+    if (turns.operations.disposed) return "transient";
     if (error instanceof OversizedExtensionArtifactError && missingToolCallId) {
       turns.observeMissingExtensionArtifact(missingToolCallId);
     }
