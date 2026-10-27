@@ -72,7 +72,8 @@ request. To retry a failed creation's trust phase, explicitly request `trust`.
 - Git subprocesses are bounded, noninteractive and ignore inherited `GIT_*` selectors;
   hooks/templates and repository-configured log signature programs do not execute.
   GitHub stderr/credential-bearing config is not returned.
-- Existing generic iOS approval chips/sheets show action items; no custom UI is introduced.
+- The shared iOS approval chip and sheet show action items; no custom UI is introduced. The
+  `projects` tool's `wait` waits in the asking chat for the decision; otherwise it returns pending.
 
 ## Native RPC
 

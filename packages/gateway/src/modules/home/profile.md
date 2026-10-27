@@ -70,8 +70,11 @@ proposals with a reason, including an unconfirmed standing/default/correction
 proposal. Sorting a confirmed/private note or a standing/default/correction kind,
 retiring another author's or confirmed note, and all content refinements require
 an exact maintainer decision through `home.profile.review`.
-Original notes remain unchanged while pending. The stored action binds exact
-before/after values and source revisions. Supersede previews show both the old
+Original notes remain unchanged while pending. `wait: true` keeps the call waiting in
+Home's chat for the decision; otherwise it returns pending. The review shows each note's
+own words and its areas (`Unsorted › Review → Communication › Questions`); the stored
+action binds exact before/after values and source revisions, shown behind the sheet's
+technical disclosure. Supersede previews show both the old
 note becoming superseded and the replacement's text, kind, confirmation, placement
 and source link. Stale approvals fail rather than overwrite a later native edit.
 Approval apply borrows the already-held Home subject stripe; it does not acquire

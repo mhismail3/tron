@@ -253,10 +253,19 @@ struct SettingsApprovalReviewContent: View {
                 VStack(spacing: 0) {
                     ForEach(Array(review.rows.enumerated()), id: \.offset) { index, row in
                         if index > 0 { TronSettingsDivider() }
-                        TronSettingsRow(icon: nil, title: row.title,
-                                        subtitle: [row.value, row.detail].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: "\n"),
-                                        subtitleLineLimit: nil)
+                        TronSettingsRow(icon: nil, title: row.title, subtitle: row.value, subtitleLineLimit: nil)
                             .textSelection(.enabled)
+                        if let detail = row.detail, !detail.isEmpty {
+                            // A wrapping note under its row, in the rows' own muted subtext.
+                            Text(detail)
+                                .font(TronTypography.settingsSubtext(adjustment: 0))
+                                .foregroundStyle(Color.tronTextMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                                .padding(.top, -TronSpacing.md)
+                                .padding(.bottom, TronSpacing.xl)
+                        }
                         if technical, let exact = row.exact {
                             TronTechnicalJSONRow(value: exact, title: "Exact identity", sheetTitle: row.title)
                         }

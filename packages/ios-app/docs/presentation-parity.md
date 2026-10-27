@@ -178,12 +178,15 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 
 ## Approval presentation
 
-Chat request/outcome chips, settings push review and Changes use `SettingsApprovalSheet`
-(`UI/Settings/SettingsApprovalsSection.swift`) and the existing receipt-backed
-`SettingsTrustCoordinator`. `SettingsApprovalPresentationModels` reads canonical structured
-facts, never prose. The transcript route owner retains approval sheets above lazy rows;
-Manage Home/Session do not duplicate them. Pending uses the Approve title and top-right red
-X/green check, no Done/bottom bar; native dismissal never submits. Current Gateway values/action
+Every agent request kind shows as `SettingsApprovalChip` (`UI/Chat/SettingsApprovalChips.swift`)
+in its chat and in Changes' Waiting for you, and opens `SettingsApprovalSheet`
+(`UI/Settings/SettingsApprovalsSection.swift`) over the receipt-backed `SettingsTrustCoordinator`
+and its open-request projection. `SettingsApprovalReview` reads canonical structured facts,
+never prose, and lays them out in standard `TronSettingsRow`s inside `TronGlassCard`/
+`TronSettingsGroup` with `tronPrimary` chrome. The transcript route owner retains approval
+sheets above lazy rows and presents a waiting tool's request once; Manage Home/Session do not
+duplicate them. Pending uses the Approve title and top-right red X/green check, no Done/bottom
+bar; native dismissal never submits. Current Gateway values/action
 previews and digest bind a deliberate tap. Terminal receipts/outcomes are read-only, with full
 wrapping uncertainty text; missing or incomplete proof stays unavailable, not applied/failed.
 Global Changes remains the audit/Undo surface; owner actions have no generic Undo. Positive

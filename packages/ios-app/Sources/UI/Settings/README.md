@@ -11,7 +11,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
   `SettingsChoiceSlider`, `SettingsAutosave`.
 - Audit and approvals: `SettingsChangesView`, `SettingsChangeRow`, `SettingsApprovalSheet`
-  and `SettingsApprovalRequestSummary` (in `SettingsApprovalsSection.swift`).
+  and `SettingsApprovalReviewContent` (in `SettingsApprovalsSection.swift`).
 - Agent configuration: `ConfigurationSlider(Surface)`,
   `CustomModelsSettingsView` with `CustomModelDraftTransformation`, `DefaultToolsSettingsSection`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
@@ -94,16 +94,17 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Project/Session/Global, pins approvals above history and keeps last-look per Mac. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
   entries never show their definition.
-- **Approvals.** Chat request/outcome chips, push review and Changes reuse `SettingsApprovalSheet`.
-  It re-reads `settings.approvals` and displays the Gateway's exact values or registered action
-  preview. Only its red X/green check submits `settings.decide` with that displayed digest through
-  `SettingsTrustCoordinator`'s receipt owner; pending has no Done or bottom action bar, and swipe
-  dismissal leaves it pending. A two-minute push intent opens current requester candidates, never
-  auto-decides. Manage Home/Session have no duplicate waiting sections. Proven receipts and canonical
-  outcomes are read-only; missing pending state is not a terminal result. Historical request chips
-  resolve a bounded history cut by request ID and every original change ID; incomplete cuts remain
-  unavailable. Failure text retains uncertainty and is selectable/wrapping. Global Changes keeps
-  fenced Undo for applied/approved values, never registered actions.
+- **Approvals.** One chip (`SettingsApprovalChip`) and one sheet (`SettingsApprovalSheet`) for
+  every agent request kind (#2050): a chat's request chips, a waiting request's own presentation,
+  an approval push and Changes' Waiting for you all open the same sheet. Every surface reads
+  `SettingsTrustCoordinator`'s open-request projection of `settings.approvals`; a
+  `settings.approvalsChanged` resolution or a decision removes a request at once. The sheet lays
+  out who asks and why, what it applies to, its expiry and each change in standard settings rows;
+  exact identities and values stay behind the technical toggle. Only its red X/green check submits
+  `settings.decide` with the displayed digest through the receipt owner; a waiting request has no
+  Done, and swipe dismissal leaves it waiting behind its chip. A decided request reopens in the
+  same layout from bounded history (Applied, Declined, Expired, Superseded, Failed); missing
+  proof stays unavailable, never inferred.
 - **Providers.** Configured above Available. Connect/Configure opens one sheet showing every
   advertised method; the visible sheet owns the operation's prompts, and an answered choice
   restarts with `replaceOperationId` (`ProviderAuthSelectionTrail`). Usage rows reserve a skeleton

@@ -88,14 +88,14 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   owns display, memory-bounded photo previews and honest load-failure fallback. Technical details hold JSON. `TaskToolDetailPresentation` shows catalog rows/counts,
   status, paged reports and receipts; unknown shapes stay generic. Check-ins lead with the step/summary,
   then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Worker reports render their invocation’s outcome, Markdown summary and acceptance evidence through shared Home sections; opaque receipts stay in Technical details. Report/check-in sheets use `tronPrimary`. `ToolDetailPresentation` owns one name/icon catalog for transcript, nested calls, sheets and resource tools; unknown extension/MCP names are humanized without changing invocation identity. Task reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
-- **Settings approvals.** The settings tool blocks on the same semantic form sheet as
-  ask_user, showing scope, layer, reason and diff. The explicit approval form mode
-  uses standard text/icon toolbar actions (Deny/X left, destructive; Approve/checkmark
-  right, success), with no body choices or separate Submit. Swipe dismissal is local
-  only; the pending settings tool reopens the same request through the exact operation/owner
-  matcher, and silence never decides it. Approval context preserves full JSON values and
-  literal URLs/markup through the shared native selectable text owner. The original
-  tool result receives the decision; no completed-pending request chip is rendered.
+- **Approval requests.** Any tool call that asked the maintainer's approval (settings,
+  profile, projects) renders as the shared approval chip (`SettingsApprovalRequestChip`), named
+  by its result's `approval` reference or, while it waits, its approval form; the open-request
+  projection says whether it still waits, otherwise the resolution's or result's status shows.
+  A waiting tool's request presents the shared approval sheet once, like a question; swipe
+  dismissal leaves it waiting behind its chip, which reopens the same sheet. An approval push
+  opens its chat's requests. The ask-user form sheet has no approval mode: approval forms are
+  presentation only, decided through `settings.decide`.
   Gateway-attributed `tron.settings-outcome.v1` contexts open the read-only outcome sheet; unknown
   versions/shapes retain the ordinary context viewer. `ChatTranscriptSheetRoutes` owns these sheets
   above lazy rows, including push review, so scrolling cannot dismiss them. Positive status uses
@@ -219,10 +219,11 @@ ordering. Its capture-only method provides light/dark visual review, not behavio
 check-in attention/Next, friendly transcript chips, aggregate navigation and extension/MCP
 humanization. `TronWorkerToolPreviewTests` captures light/dark native review surfaces only.
 
-`TronSettingsApprovalFormUITests` exercises automatic hosted presentation and a scoped Deny
-submission through the shared ask_user form sheet, retaining light/dark simulator captures.
-The Gateway's `settings-approval-blocking.e2e.test.ts` owns decision, expiry and Stop proof;
-hosted captures are not evidence of real-Gateway delivery.
+`TronSettingsApprovalFormUITests` exercises the approval chip, its sheet, dismissal and a
+decision in Changes settling the chat's chip over the hosted RPC socket, retaining light/dark
+captures. `RealGatewayPairAndChatUITests/testAgentApprovalRequestsAppearInTheirChatAndSettleEverywhere`
+proves both modes and cross-surface settlement at the real Gateway; the Gateway's
+`settings-approval-blocking.e2e.test.ts` owns decision, expiry and Stop proof.
 
 `TronSixSmallUIRegressionTests` exercises scoped row ordering, primary toast ink, model ID/type
 metrics and retained search/selection, workspace path/status separation at standard/narrow/accessibility

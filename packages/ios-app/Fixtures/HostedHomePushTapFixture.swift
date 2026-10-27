@@ -33,11 +33,13 @@ struct HostedHomePushTap: ViewModifier {
                     guard phase == .active, backgrounded, !requested else { return }
                     requested = true
                     let ordinary = ProcessInfo.processInfo.arguments.contains("-home-push-ordinary")
+                    // An approval push carries the relay's category: its tap opens the chat's sheet (#2050).
+                    let approval = ProcessInfo.processInfo.arguments.contains("-home-push-approval")
                     model.requestPushNavigation(PushNotificationTap.admit([
                         "tron": ["kind": "agent_notification", "requestId": "fixture-home-push-0001"],
                         "sessionId": ordinary ? "ordinary-session" : "home-session",
                         "machineId": machineID ?? "",
-                    ]))
+                    ], categoryIdentifier: approval ? "settings-approval" : ""))
                 }
         }
     }
