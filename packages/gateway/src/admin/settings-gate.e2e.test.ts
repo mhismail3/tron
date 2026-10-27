@@ -945,7 +945,8 @@ describe("settings risk gate", () => {
     expect(await f.decide(second.requestId, second.digest, false)).toMatchObject({ status: "declined" });
     expect((await f.trust.inspect(f.other)).savedDecision ?? null).toBeNull();
     const trustEntries = (await f.history()).filter(entry => entry.key === "permissions.projectTrust").map(entry => entry.status);
-    expect(trustEntries).toEqual(expect.arrayContaining(["pending", "approved", "declined"]));
+    expect(trustEntries).toEqual(expect.arrayContaining(["approved", "declined"]));
+    expect(trustEntries).not.toContain("pending");
     steps.push({ step: "trust declined", statuses: trustEntries });
 
     // The original tool turn owns the declined outcome; no autonomous turn repeats it.
@@ -1005,7 +1006,8 @@ describe("settings risk gate", () => {
     await expect(f.decide(replacement.approval!.requestId, replacement.approval!.digest, true)).rejects.toMatchObject({ code: "conflict" });
     expect((await f.macDocument()).defaultTools).toBeUndefined();
     const statuses = (await f.history()).filter(entry => entry.key === "tools.active").map(entry => entry.status);
-    expect(statuses).toEqual(expect.arrayContaining(["pending", "superseded", "expired"]));
+    expect(statuses).toEqual(expect.arrayContaining(["superseded", "expired"]));
+    expect(statuses).not.toContain("pending");
     expect(statuses).not.toContain("applied");
     expect((await f.run(slot, "next", [])).outcomes).toEqual([]);
     transcript.push({ case: "superseded and expired", steps: [{ statuses }] });
@@ -1021,7 +1023,7 @@ describe("settings risk gate", () => {
     expect(await f.approvals()).toEqual([]);
     await expect(f.decide(pending.requestId, pending.digest, true)).rejects.toMatchObject({ code: "not_found" });
     expect((await f.trust.inspect(f.other)).savedDecision ?? null).toBeNull();
-    expect((await f.history()).filter(entry => entry.key === "permissions.projectTrust").map(entry => entry.status)).toEqual(expect.arrayContaining(["pending", "expired"]));
+    expect((await f.history()).filter(entry => entry.key === "permissions.projectTrust").map(entry => entry.status)).toEqual(["expired"]);
     expect(f.settle((await asked).results)).toMatchObject({ status: "expired" });
     expect((await f.run(home, "next", [])).outcomes).toEqual([]);
     expect(await f.canonicalOutcomes()).toEqual([]);

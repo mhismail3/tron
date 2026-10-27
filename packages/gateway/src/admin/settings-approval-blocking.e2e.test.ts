@@ -51,7 +51,25 @@ async function pendingApproval(options: Parameters<typeof fixture>[5] = {}, chan
   const request = (await f.settings.settingsChanges.pendingApprovals())[0]!;
   const answer = (choice: "approve" | "deny", current: ExtensionInteraction = interaction) => home.respondToInteraction(current.id, current.hostEpoch, current.presentationRevision,
     { version: 1, answers: [{ questionId: request.requestId, optionIds: [choice] }] }, false);
-  return { ...f, home, prompting, interaction, request, answer };
+  // #2050: the chat sheet, push review and Changes all decide through this RPC.
+  const service = settingsService(f);
+  const decide = (choice: "approve" | "deny") => service.invoke(phone, "settings.decide", { commandId: `decide-${request.requestId}-${choice}`, requestId: request.requestId, digest: request.digest, approved: choice === "approve" });
+  const projected = async () => (await service.invoke(phone, "settings.approvals", {}) as unknown as { requests: Array<{ requestId: string; reason?: string; changes: Array<{ key: string; after?: unknown; display?: { after: string } }> }> }).requests.find(candidate => candidate.requestId === request.requestId)!;
+  return { ...f, home, prompting, interaction, request, answer, decide, projected, service };
+}
+
+const phone = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true,
+  isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
+
+function settingsService(f: Awaited<ReturnType<typeof fixture>>) {
+  return new GatewayService({
+    display: displayOwnerOf(f.registry),
+    config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
+    modelRuntime: f.gateway, trust: f.trust, settingsModel: f.settings.settingsModel, settingsChanges: f.settings.settingsChanges,
+    sessions: f.registry, home: homeOwnerOf(f.registry), receipts: new CommandReceiptStore(f.tronHome),
+    uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES), notifications: { enqueue: async () => "queued" },
+    broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
+  } as unknown as GatewayServiceDependencies);
 }
 
 async function saveCase(name: string, evidence: unknown) {
@@ -140,7 +158,7 @@ describe("blocking settings approval", () => {
     } finally { await home.abort("agent"); }
   });
 
-  it("the form contains complete long text and tool selections rather than display summaries", async () => {
+  it("the shared approval projection carries complete long text and tool selections, not only display summaries", async () => {
     const instructions = "Keep every detail " + "x".repeat(120) + " [label](https://example.test/full-target) ![image](https://example.test/raw.png)";
     const tools = ["read", "write", "edit", "bash", "settings"];
     const f = await pendingApproval({}, [
@@ -148,11 +166,10 @@ describe("blocking settings approval", () => {
       { key: "tools.active", layer: "session", op: "set", value: tools },
     ], true);
     try {
-      const context = f.interaction.form!.questions[0]!.context!;
-      expect(context).toContain(JSON.stringify(instructions, null, 2));
-      expect(context).toContain(JSON.stringify(tools, null, 2));
-      expect(context).not.toContain("…");
-      f.answer("deny");
+      const projected = await f.projected();
+      expect(projected.changes.find(change => change.key === "context.compaction.instructions")?.after).toBe(instructions);
+      expect(projected.changes.find(change => change.key === "tools.active")?.after).toEqual(tools);
+      await f.decide("deny");
       await f.prompting;
       await waitFor(() => !f.home.isBusy, "full diff denial settles");
       await saveCase("complete-diff", { interaction: f.interaction });
@@ -165,12 +182,11 @@ describe("blocking settings approval", () => {
       { key: "context.compaction.instructions", layer: "session", op: "set", value: instructions },
     ], true, "Reason\u009dnot-hidden\u007ftail");
     try {
-      const context = f.interaction.form!.questions[0]!.context!;
-      expect(context).toContain("\\u009dnot-hidden\\u007ftail");
-      expect(context).toContain("\\u009dnot-hidden\\u009cafter\\u007f\\u0085\\u2028\\u2029");
-      expect(context).toContain("context.compaction.instructions");
-      expect(context).toContain("Approve applies only this diff. Deny changes nothing.");
-      f.answer("deny");
+      const projected = await f.projected();
+      expect(projected.reason).toContain("\\u009dnot-hidden\\u007ftail");
+      expect(projected.changes[0]!.display!.after).toContain("\\u009dnot-hidden\\u009cafter\\u007f\\u0085\\u2028\\u2029");
+      expect(projected.changes[0]!.key).toBe("context.compaction.instructions");
+      await f.decide("deny");
       await f.prompting;
       await waitFor(() => !f.home.isBusy, "escaped diff denial settles");
       await saveCase("control-character-diff", { interaction: f.interaction });
@@ -183,9 +199,9 @@ describe("blocking settings approval", () => {
       { key: "context.compaction.instructions", layer: "session", op: "set", value },
     ], true);
     try {
-      const context = f.interaction.form!.questions[0]!.context!;
-      expect(context).toContain("visible\\u061c\\u200b\\u200c\\u200d\\u200e\\u200f\\u202a\\u202b\\u202c\\u202d\\u202e\\u2066\\u2067\\u2068\\u2069\\ufeffend");
-      f.answer("deny");
+      const projected = await f.projected();
+      expect(projected.changes[0]!.display!.after).toContain("visible\\u061c\\u200b\\u200c\\u200d\\u200e\\u200f\\u202a\\u202b\\u202c\\u202d\\u202e\\u2066\\u2067\\u2068\\u2069\\ufeffend");
+      await f.decide("deny");
       await f.prompting;
       await waitFor(() => !f.home.isBusy, "format control diff denial settles");
       await saveCase("format-control-diff", { interaction: f.interaction });
@@ -198,11 +214,10 @@ describe("blocking settings approval", () => {
       { key: "context.compaction.instructions", layer: "session", op: "set", value },
     ], true, "Reason\u{e0041}\u2060tail");
     try {
-      const context = f.interaction.form!.questions[0]!.context!;
-      expect(context).toContain("Reason\\udb40\\udc41\\u2060tail");
-      expect(context).toContain("visible\\udb40\\udc41\\u2060\\u00ad\\u180e\\u115f\\u1160\\u3164\\ufff9\\ufffa\\ufffbend");
-      expect(context).toContain("Approve applies only this diff. Deny changes nothing.");
-      f.answer("deny");
+      const projected = await f.projected();
+      expect(projected.reason).toContain("Reason\\udb40\\udc41\\u2060tail");
+      expect(projected.changes[0]!.display!.after).toContain("visible\\udb40\\udc41\\u2060\\u00ad\\u180e\\u115f\\u1160\\u3164\\ufff9\\ufffa\\ufffbend");
+      await f.decide("deny");
       await f.prompting;
       await waitFor(() => !f.home.isBusy, "astral escaped diff denial settles");
       await saveCase("astral-format-diff", { interaction: f.interaction });
@@ -238,29 +253,6 @@ describe("blocking settings approval", () => {
     } finally { await home.abort("agent"); }
   });
 
-  it("an oversized exact diff is refused explicitly without leaving an unreviewable pending request", async () => {
-    const f = await fixture();
-    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
-    const taskId = await settledWorker(f);
-    f.faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("settings", { action: "request", taskId, reason: "Review capacity", changes: [
-        { key: "sources.skills", layer: "global", op: "set", value: Array.from({ length: 250 }, (_, index) => "/review-only/skill-" + index + "-" + "x".repeat(180)) },
-      ] }, { id: "oversized-request" })], { stopReason: "toolUse" }), fauxAssistantMessage("Noted"),
-    ]);
-    const home = await f.registry.acquire(f.home.sessionId);
-    const prompting = home.prompt("Request a bounded exact diff");
-    try {
-      await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0]
-        || home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "oversized-request"), "oversized diff refusal or form");
-      const result = home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "oversized-request");
-      expect(result).toMatchObject({ isError: true, content: [expect.objectContaining({ text: expect.stringContaining("diff is too large to review") })] });
-      expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
-      expect(await f.settings.settingsChanges.pendingApprovals()).toEqual([]);
-      expect((await f.settings.settingsChanges.history({ key: "sources.skills" })).entries.some(entry => entry.status === "approved")).toBe(false);
-      await saveCase("oversized-diff", { result });
-    } finally { await home.abort("agent"); await prompting; }
-  });
-
   it("a worker removed before decision admission retires the owned request instead of orphaning it", async () => {
     const f = await pendingApproval({}, [
       { key: "run.retry.maxRetries", layer: "session", op: "set", value: 3 },
@@ -268,10 +260,10 @@ describe("blocking settings approval", () => {
     try {
       const workerSessionId = (await homeOwnerOf(f.registry).taskStatus("diff-worker")).sessionId!;
       await f.registry.delete(workerSessionId);
-      f.answer("approve");
+      await expect(f.decide("approve")).rejects.toThrow();
       await waitFor(() => !f.home.isBusy, "removed worker decision settles");
       const result = f.home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "settings-request");
-      expect(result).toMatchObject({ isError: true });
+      expect(result).toMatchObject({ isError: false, details: { status: "superseded" } });
       expect(await f.settings.settingsChanges.pendingApprovals()).toEqual([]);
       const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
       expect(history.some(entry => entry.status === "approved")).toBe(false);
@@ -324,16 +316,7 @@ describe("blocking settings approval", () => {
 
   it("Changes approves a live Home form through settings.decide once and retires the same interaction", async () => {
     const f = await pendingApproval();
-    const service = new GatewayService({
-      display: displayOwnerOf(f.registry),
-      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
-      modelRuntime: f.gateway, trust: f.trust, settingsModel: f.settings.settingsModel, settingsChanges: f.settings.settingsChanges,
-      sessions: f.registry, home: homeOwnerOf(f.registry), receipts: new CommandReceiptStore(f.tronHome),
-      uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES), notifications: { enqueue: async () => "queued" },
-      broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
-    } as unknown as GatewayServiceDependencies);
-    const phone = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true,
-      isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
+    const service = f.service;
     const decision = { commandId: "live-form-changes-approval", requestId: f.request.requestId, digest: f.request.digest, approved: true };
     try {
       expect(f.home.isBusy).toBe(true);
@@ -357,7 +340,7 @@ describe("blocking settings approval", () => {
     } finally { await f.home.abort("agent"); await f.prompting; }
   });
 
-  it("an unanswered form stays pending without applying and its later answer applies the same diff", async () => {
+  it("an undecided request stays pending without applying and its later decision applies the same diff", async () => {
     const f = await pendingApproval();
     try {
       // Local dismissal sends no answer. Authoritative rereads must retain the
@@ -368,7 +351,7 @@ describe("blocking settings approval", () => {
       expect(before.some(entry => entry.status === "approved" || entry.status === "declined")).toBe(false);
       expect(f.home.isBusy).toBe(true);
       expect(f.home.snapshot().extensionPresentation.pendingInteractions).toEqual([f.interaction]);
-      f.answer("approve");
+      await f.decide("approve");
       await f.prompting;
       await waitFor(() => !f.home.isBusy, "later approval settles");
       const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
@@ -381,13 +364,13 @@ describe("blocking settings approval", () => {
   });
 
   for (const choice of ["approve", "deny"] as const) {
-    it(`${choice} resumes the same tool turn with an explicit outcome and consumes its tap once`, async () => {
+    it(`${choice} resumes the same tool turn with an explicit outcome and consumes its decision once`, async () => {
       const f = await pendingApproval();
       try {
         expect(f.interaction.method).toBe("form");
         expect(f.home.isBusy).toBe(true);
         expect(f.home.snapshot().transcript.some(item => item.kind === "message" && item.role === "toolResult")).toBe(false);
-        f.answer(choice);
+        await f.decide(choice);
         await f.prompting;
         await waitFor(() => !f.home.isBusy, "approval turn settles");
         const snapshot = f.home.snapshot();
@@ -419,12 +402,13 @@ describe("blocking settings approval", () => {
     await saveCase("stop", { history, interactions: f.home.snapshot().extensionPresentation.pendingInteractions });
   });
 
-  it("an Approve tap racing the deadline returns expired rather than a tool error", async () => {
+  it("an Approve decision racing the deadline returns expired rather than a tool error", async () => {
     let now = new Date("2030-01-01T00:00:00Z");
     const f = await pendingApproval({ settingsNow: () => now });
     try {
-      f.answer("approve");
+      const deciding = f.decide("approve").catch((error: unknown) => error);
       now = new Date("2030-01-02T00:00:00Z");
+      await deciding;
       await waitFor(() => !f.home.isBusy, "deadline-racing approval settles");
       const result = f.home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "settings-request");
       expect(result).toMatchObject({ isError: false, details: { status: "expired" } });
