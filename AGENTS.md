@@ -134,14 +134,14 @@ no queue, gate or auto-revert.
 - **Feature pause for every worker:** no new features in `RuntimeSlot`, `RuntimeRegistry`,
   `GatewayService`, `GatewayServer`, `gateway-main`, `protocol/types.ts`, `projection.ts`,
   `AppModel`, `SessionPresentationStore`, `ChatView`, `GatewayClient` until their target
-  module exists. Bug fixes and disjoint leaf work continue; bug fixes in those owners
-  announce their files in the module issue (or #1345) first.
+  module exists. Heavy cleanup, test-health and robustness belong in #1345; other fixes
+  and leaf features use targeted checks, not exhaustive legacy triage. Bug fixes in paused
+  owners announce their files in the module issue (or #1345) first.
 - Fresh read-only review before landing for new tooling, locks and kernel semantics, not
   clean moves (plan §8.4); the worker fixes defects. Closing evidence ≤ 1,500 characters
   (App. D). ≤ 4 restructure workers + 1 steward; coordinate up to 3 simulator-heavy jobs across workers (one/worktree); stop on plan §4.2.
 
 ## Documentation
-
 - Owners: `README.md` (≤ 250 lines), `packages/gateway/README.md`, `packages/ios-app/docs/`, `packages/mac-app/docs/`,
   repo runbooks `docs/development.md` and `scripts/tron --help`, `tools/work/README.md`, skills only in `.agents/skills/`.
 - When a repository's documentation and its existing code disagree, follow the conventions used in the existing code,
