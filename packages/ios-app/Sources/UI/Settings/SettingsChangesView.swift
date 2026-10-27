@@ -48,7 +48,6 @@ struct SettingsChangesView: View {
     @PresentationState private var lookedStorageKey: String?
     @PresentationState private var installedLoadID: LoadID?
     @PresentationState private var rows: [SettingsChangeRow] = []
-    @PresentationState private var pending: [SettingsApprovalRequest] = []
     @PresentationState private var cursor: String?
     @PresentationState private var actorFilter = ""
     @PresentationState private var contextFilter = "context"
@@ -102,11 +101,13 @@ struct SettingsChangesView: View {
                     if let errorMessage {
                         TronSettingsNotice(message: errorMessage, title: "Changes unavailable", retry: retry)
                     }
+                    // The same open requests and chip the asking chat shows (#2050).
                     if !pending.isEmpty {
-                        Text("Waiting for you")
-                            .font(TronTypography.headline)
-                            .accessibilityAddTraits(.isHeader)
-                        ForEach(pending) { request in pendingCard(request) }
+                        TronSettingsGroup("Waiting for you", surfaceStyle: .uncontained) {
+                            VStack(alignment: .leading, spacing: TronSpacing.md) {
+                                ForEach(pending) { request in pendingChip(request) }
+                            }
+                        }
                     }
                     // An empty page with a cursor is not the end: only the end is "No changes".
                     if rows.isEmpty && cursor == nil && !loading && errorMessage == nil {
@@ -190,6 +191,7 @@ struct SettingsChangesView: View {
         }
         .task(id: PresentationActivityTaskID(source: loadID, presentationActive: presentationActivity.allowsPresentationPublication)) {
             guard presentationActivity.allowsPresentationPublication else { return }
+            try? await model.refreshSettingsApprovals()
             if lookedStorageKey != lastLookStorageKey {
                 lookedStorageKey = lastLookStorageKey
                 previousLookedAt = UserDefaults.standard.string(forKey: lastLookStorageKey)
@@ -277,18 +279,22 @@ struct SettingsChangesView: View {
         .accessibilityLabel(isNew ? "\(row.accessibilityLabel), Since you last looked" : row.accessibilityLabel)
     }
 
-    private func pendingCard(_ request: SettingsApprovalRequest) -> some View {
-        Button {
+    /// Open requests in this scope, newest first: the shared projection, so a
+    /// decision anywhere removes its row at once.
+    private var pending: [SettingsApprovalRequest] {
+        (model.openSettingsApprovals ?? []).filter { $0.belongs(to: activeScope) }.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private func pendingChip(_ request: SettingsApprovalRequest) -> some View {
+        SettingsApprovalChip(review: SettingsApprovalReview(request: request), identifier: "settings-changes-pending-\(request.requestId)") {
             approvalSelection = .request(SettingsApprovalReference(requestID: request.requestId, changeIDs: request.changes.map(\.changeId)))
-        } label: { SettingsApprovalRequestSummary(request: request) }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("settings-changes-pending-\(request.requestId)")
+        }
     }
 
     private func resetAndLoad() async {
         loadGeneration &+= 1
         loading = false
-        rows = []; pending = []; cursor = nil; errorMessage = nil
+        rows = []; cursor = nil; errorMessage = nil
         installedLoadID = nil
         await loadNextPage(reset: true)
     }
@@ -306,7 +312,6 @@ struct SettingsChangesView: View {
         let currentCursor = reset ? nil : cursor
         let request = loadID
         do {
-            async let approvalsTask = model.allSettingsApprovals()
             // The Gateway filters within its record pages and this feed filters
             // by scope, so a page can be empty yet not the end. Follow a bounded
             // run of empty pages, so opening the sheet shows its first entries
@@ -329,7 +334,6 @@ struct SettingsChangesView: View {
                 pageCursor = nextCursor
                 pagesRead += 1
             } while visible.isEmpty && nextCursor != nil && pagesRead < Self.maximumPagesPerLoad
-            let approvals = try await approvalsTask
             guard request == loadID, admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
             installedLoadID = request
             UserDefaults.standard.set(ISO8601DateFormatter().string(from: visitStartedAt), forKey: lastLookStorageKey)
@@ -337,7 +341,6 @@ struct SettingsChangesView: View {
                 let known = Set(rows.map(\.id))
                 rows.append(contentsOf: visible.filter { !known.contains($0.id) })
             }
-            pending = approvals.filter { $0.belongs(to: request.scope) }.sorted { $0.createdAt > $1.createdAt }
             cursor = nextCursor
             errorMessage = nil
         } catch is CancellationError {

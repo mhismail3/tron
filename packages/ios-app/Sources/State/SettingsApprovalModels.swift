@@ -45,6 +45,13 @@ struct SettingsApprovalRequest: Decodable, Equatable, Sendable, Identifiable {
             let label: String
             let value: String
             let detail: String?
+            /// The operation's exact identity, for the technical disclosure only.
+            let exact: String?
+        }
+        /// The preview an action's audit fact records: what the maintainer approved.
+        struct Preview: Decodable, Equatable, Sendable {
+            let title: String
+            let items: [Item]
         }
         let subject: String
         let title: String

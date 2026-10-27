@@ -83,9 +83,6 @@ struct HostedSessionConfigurationFixture: View {
                 model.installHostedSubscribedSnapshot(snapshot)
                 let catalog = HostedSessionConfigurationSocket.models
                 model.installHostedProviderCatalog(ProviderCatalog(providers: [], models: catalog), for: .session(id: snapshot.sessionId))
-                if let action = Self.settingsApprovalPushActionIdentifier(ProcessInfo.processInfo.arguments) {
-                    model.stageSettingsDecision(from: Self.settingsApprovalPush(actionIdentifier: action))
-                }
                 ready = true
             } catch { self.error = String(describing: error) }
         }
@@ -115,28 +112,6 @@ struct HostedSessionConfigurationFixture: View {
                 modelRequests = count
             }
         }.padding()
-    }
-
-    /// The launch flag names the Approve or Decline action the push would carry.
-    private static func settingsApprovalPushActionIdentifier(_ arguments: [String]) -> String? {
-        if arguments.contains("-session-settings-approval-push-approve") {
-            return SettingsApprovalNotification.approveActionIdentifier
-        }
-        if arguments.contains("-session-settings-approval-push-decline") {
-            return SettingsApprovalNotification.declineActionIdentifier
-        }
-        return nil
-    }
-
-    /// The push the relay delivers for a settings change, admitted by the production path.
-    private static func settingsApprovalPush(actionIdentifier: String) -> PushNotificationTap {
-        PushNotificationTap.admit([
-            "aps": ["category": SettingsApprovalNotification.categoryIdentifier,
-                    "alert": ["title": "Approval needed", "body": "A chat's agent asks to change Active tools"]],
-            "tron": ["kind": "agent_notification", "requestId": "fixture-relay-request-0001"],
-            "sessionId": "configuration-fixture",
-            "machineId": "fixture-machine",
-        ], categoryIdentifier: SettingsApprovalNotification.categoryIdentifier, actionIdentifier: actionIdentifier)
     }
 }
 

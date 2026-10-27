@@ -1,56 +1,30 @@
 import UIKit
 @preconcurrency import UserNotifications
 
-/// The Approve or Decline action a settings-approval push carries (decision 35).
-enum SettingsApprovalPushDecision: String, Equatable, Sendable {
-    case approve, decline
-}
-
-/// The relay maps the Gateway's allowlisted category to `aps.category`; the
-/// identifiers here must match that allowlist.
+/// The relay maps the Gateway's allowlisted category to `aps.category`. A tap on
+/// an approval push opens the requesting chat's approval sheet (#2050); the push
+/// itself carries no decision.
 enum SettingsApprovalNotification {
     static let categoryIdentifier = "settings-approval"
-    static let approveActionIdentifier = "settings-approval.approve"
-    static let declineActionIdentifier = "settings-approval.decline"
-
-    static var category: UNNotificationCategory {
-        UNNotificationCategory(
-            identifier: categoryIdentifier,
-            actions: [
-                UNNotificationAction(
-                    identifier: approveActionIdentifier,
-                    title: "Approve",
-                    options: [.foreground, .authenticationRequired]
-                ),
-                UNNotificationAction(
-                    identifier: declineActionIdentifier,
-                    title: "Decline",
-                    options: [.foreground, .authenticationRequired, .destructive]
-                ),
-            ],
-            intentIdentifiers: [],
-            options: []
-        )
-    }
 }
 
 struct PushNotificationTap: Equatable, Sendable {
     let sessionID: String?
     let machineID: String?
     let requestID: String?
-    /// Set only for an admitted settings-approval push whose Approve or Decline action was chosen.
-    let settingsDecision: SettingsApprovalPushDecision?
+    /// An admitted approval push: its chat opens the approval sheet.
+    let opensApproval: Bool
 
     init(
         sessionID: String?,
         machineID: String?,
         requestID: String? = nil,
-        settingsDecision: SettingsApprovalPushDecision? = nil
+        opensApproval: Bool = false
     ) {
         self.sessionID = sessionID
         self.machineID = machineID
         self.requestID = requestID
-        self.settingsDecision = settingsDecision
+        self.opensApproval = opensApproval
     }
 
     var route: (sessionID: String, machineID: String)? {
@@ -60,31 +34,19 @@ struct PushNotificationTap: Equatable, Sendable {
 
     static func admit(
         _ userInfo: [AnyHashable: Any],
-        categoryIdentifier: String = "",
-        actionIdentifier: String = ""
+        categoryIdentifier: String = ""
     ) -> PushNotificationTap {
         let requestID = admitRequestID((userInfo["tron"] as? [AnyHashable: Any])?["requestId"])
         guard let sessionID = admitSessionID(userInfo["sessionId"]),
               let machineID = admitMachineID(userInfo["machineId"]) else {
             return PushNotificationTap(sessionID: nil, machineID: nil, requestID: requestID)
         }
-        let settingsDecision = categoryIdentifier == SettingsApprovalNotification.categoryIdentifier
-            ? admitSettingsDecision(actionIdentifier)
-            : nil
         return PushNotificationTap(
             sessionID: sessionID,
             machineID: machineID,
             requestID: requestID,
-            settingsDecision: settingsDecision
+            opensApproval: categoryIdentifier == SettingsApprovalNotification.categoryIdentifier
         )
-    }
-
-    private static func admitSettingsDecision(_ actionIdentifier: String) -> SettingsApprovalPushDecision? {
-        switch actionIdentifier {
-        case SettingsApprovalNotification.approveActionIdentifier: .approve
-        case SettingsApprovalNotification.declineActionIdentifier: .decline
-        default: nil
-        }
     }
 
     private static func admitSessionID(_ value: Any?) -> String? {
@@ -126,7 +88,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
-        UNUserNotificationCenter.current().setNotificationCategories([SettingsApprovalNotification.category])
         return true
     }
 
@@ -169,11 +130,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         didReceive response: UNNotificationResponse
     ) async {
         let content = response.notification.request.content
-        let tap = PushNotificationTap.admit(
-            content.userInfo,
-            categoryIdentifier: content.categoryIdentifier,
-            actionIdentifier: response.actionIdentifier
-        )
+        let tap = PushNotificationTap.admit(content.userInfo, categoryIdentifier: content.categoryIdentifier)
         await deliverNotificationTap(tap)
     }
 }

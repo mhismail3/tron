@@ -115,3 +115,94 @@ enum SettingsApprovalSelection: Equatable, Identifiable {
         }
     }
 }
+
+/// One approval request as every approval surface lays it out (#2050): the chat
+/// sheet (waiting or not), push review, Changes, and the decided state reopened
+/// from an outcome or history. All words are Gateway text; `exact` is the
+/// request's exact identity or values, shown only behind the technical toggle.
+struct SettingsApprovalReview: Equatable, Sendable {
+    struct Row: Equatable, Sendable {
+        let title: String
+        let value: String
+        let detail: String?
+        let exact: JSONValue?
+    }
+    let requestID: String
+    /// `pending` or the request's terminal status.
+    let status: String
+    let requester: String
+    let reason: String?
+    let target: SettingsApprovalRequest.Target
+    let expiresAt: Date?
+    let heading: String
+    let rows: [Row]
+    let summary: String?
+    let failure: String?
+    let digest: String?
+
+    init(request: SettingsApprovalRequest) {
+        requestID = request.requestId; status = "pending"; requester = request.requester
+        reason = request.reason; target = request.target; expiresAt = request.expiryDate
+        heading = request.action?.title ?? (request.changes.count == 1 ? "Change" : "Changes")
+        rows = (request.action?.items.map { Row(title: $0.label, value: $0.value, detail: $0.detail, exact: $0.exact.map(Self.exact)) } ?? [])
+            + request.changes.map { change in
+                Row(title: change.label,
+                    value: change.redacted == true ? "New value hidden" : change.display.map { "\($0.before) → \($0.after)" } ?? "Exact values in technical details",
+                    detail: [settingsLayerLabel(change.layer), change.confirm].compactMap { $0 }.joined(separator: " · "),
+                    exact: change.redacted == true ? nil : .object(["before": change.before ?? .null, "after": change.after ?? .null]))
+            }
+        summary = nil; failure = nil; digest = request.digest
+    }
+
+    init(outcome: SettingsApprovalOutcome) {
+        requestID = outcome.requestId; status = outcome.status; requester = outcome.requester.label
+        reason = outcome.reason; target = outcome.target; expiresAt = nil
+        heading = outcome.action?.title ?? (outcome.items.count == 1 ? "Change" : "Changes")
+        rows = outcome.items.map { item in
+            Row(title: item.label, value: item.redacted == true ? "Value hidden" : "\(item.before ?? "Not set") → \(item.after ?? "Not set")",
+                detail: settingsLayerLabel(item.layer), exact: nil)
+        }
+        summary = outcome.action?.summary; failure = outcome.failure; digest = nil
+    }
+
+    /// The decided state read back from history: the request's terminal facts.
+    /// An action's fact records the exact preview the maintainer approved.
+    init?(history entries: [SettingsChangeHistoryEntry]) {
+        guard let first = entries.first, let requestID = first.requestId else { return nil }
+        self.requestID = requestID; status = first.status
+        requester = first.presentation?.actor ?? first.actor.kind.capitalized
+        reason = first.reason; target = SettingsApprovalRequest.Target(kind: first.target.kind, sessionId: first.target.sessionId, cwd: first.target.cwd)
+        expiresAt = nil
+        if first.action == true, let preview = try? first.after?.decode(SettingsApprovalRequest.Action.Preview.self) {
+            heading = preview.title
+            rows = preview.items.map { Row(title: $0.label, value: $0.value, detail: $0.detail, exact: $0.exact.map(Self.exact)) }
+        } else {
+            heading = entries.count == 1 ? "Change" : "Changes"
+            rows = entries.map { entry in
+                Row(title: entry.title, value: entry.redacted == true ? "Value hidden" : entry.presentation.map { "\($0.display.before) → \($0.display.after)" } ?? "Recorded outcome",
+                    detail: entry.presentation?.layer ?? settingsLayerLabel(entry.layer),
+                    exact: entry.redacted == true ? nil : .object(["before": entry.before ?? .null, "after": entry.after ?? .null]))
+            }
+        }
+        summary = nil; failure = first.failure; digest = nil
+    }
+
+    private static func exact(_ text: String) -> JSONValue {
+        (try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))) ?? .string(text)
+    }
+
+    var isPending: Bool { status == "pending" }
+
+    /// The status as the sheet's pill and the chip name it.
+    static func statusLabel(_ status: String) -> String {
+        switch status {
+        case "pending": "Waiting for you"
+        case "approved": "Applied"
+        case "declined": "Declined"
+        case "expired": "Expired"
+        case "superseded": "Superseded"
+        case "failed": "Failed"
+        default: "Decided"
+        }
+    }
+}

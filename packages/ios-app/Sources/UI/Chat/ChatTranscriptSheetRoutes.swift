@@ -110,6 +110,9 @@ struct ChatTranscriptSheetHost: ViewModifier {
     @Environment(\.tronPresentationActivity) private var activity
     @State private var toolRun: ToolRunResolvedState?
     @State private var displayHandoff = ToolDisplayHandoff()
+    /// Waiting requests this chat already presented: a dismissed one stays
+    /// pending behind its chip and is not presented again (#2050).
+    @State private var presentedApprovals: Set<String> = []
 
     func body(content: Content) -> some View {
         content
@@ -153,19 +156,35 @@ struct ChatTranscriptSheetHost: ViewModifier {
                 if phase != .active { displayHandoff.cancel() }
                 else { presentStagedApproval() }
             }
-            .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in presentStagedApproval() }
+            .onChange(of: model.stagedApprovalReview?.id, initial: true) { _, _ in presentStagedApproval() }
+            .onChange(of: waitingApprovalIDs, initial: true) { _, _ in presentStagedApproval() }
             .onChange(of: activity.allowsPresentationPublication) { _, active in if active { presentStagedApproval() } }
     }
 
-    /// Push carries a requester session, not an approval digest. Review the
-    /// owner's current candidates; never turn the push's action into a decision.
+    /// Requests this chat's tools are waiting on: each approval form names one.
+    private var waitingApprovalIDs: [String] {
+        guard let sessionID = installationTag?.sessionID else { return [] }
+        return (model.authoritativeSnapshot(for: sessionID)?.extensionPresentation.pendingInteractions ?? [])
+            .filter { $0.method == .form && $0.form?.presentation == .approval }
+            .compactMap { $0.form?.questions.first?.id }
+    }
+
+    /// One approval sheet route for every way in (#2050): a tool that waits
+    /// presents its request once, like a question; an approval push opens this
+    /// chat's requests. Neither decides; the sheet's toolbar does.
     private func presentStagedApproval() {
         guard routes.route == nil, activity.allowsPresentationPublication,
-              let sessionID = installationTag?.sessionID,
-              let staged = model.freshStagedSettingsDecision(),
-              staged.sessionID == sessionID || sessionID == model.homeStatus.status?.sessionId else { return }
-        model.consumeStagedSettingsDecision(staged.id)
-        routes.present(.settingsApproval(.session(staged.sessionID)))
+              let sessionID = installationTag?.sessionID else { return }
+        if let staged = model.freshStagedApprovalReview(),
+           staged.sessionID == sessionID || sessionID == model.homeStatus.status?.sessionId {
+            model.consumeStagedApprovalReview(staged.id)
+            routes.present(.settingsApproval(.session(staged.sessionID)))
+            return
+        }
+        if let requestID = waitingApprovalIDs.first(where: { !presentedApprovals.contains($0) }) {
+            presentedApprovals.insert(requestID)
+            routes.present(.settingsApproval(.request(SettingsApprovalReference(requestID: requestID, changeIDs: []))))
+        }
     }
 
     @ViewBuilder

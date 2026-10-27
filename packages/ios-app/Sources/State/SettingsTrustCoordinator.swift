@@ -35,9 +35,16 @@ final class SettingsTrustCoordinator {
 
     private(set) var settingsInvalidationGeneration = 0
     private(set) var trustRevision = 0
-    /// Advances on `settings.approvalsChanged` and on profile change, so a
-    /// surface showing pending changes re-reads `settings.approvals`.
+    /// Advances on `settings.approvalsChanged`, a decision and profile change, so
+    /// the open-request projection and history surfaces re-read.
     private(set) var approvalsRevision = 0
+    /// The Gateway's open approval requests (#2050): the one client projection the
+    /// chat chips, the approval sheet and Changes read. Nil until read for this
+    /// profile. A resolution event or decision removes its request at once.
+    private(set) var openApprovals: [SettingsApprovalRequest]?
+    /// Terminal statuses that resolution events and decisions named, by request.
+    private(set) var approvalOutcomes: [String: String] = [:]
+    private var approvalsRead: (revision: Int, task: Task<Void, Error>)?
 
     init(
         client: GatewayClient,
@@ -173,17 +180,35 @@ final class SettingsTrustCoordinator {
         settingsInvalidationGeneration &+= 1
     }
 
-    func noteApprovalsChanged() {
+    /// A resolution names its request and terminal status, so every surface drops
+    /// it before the confirming read (#2050).
+    func noteApprovalsChanged(resolved requestID: String? = nil, status: String? = nil) {
+        if let requestID, let status, SettingsApprovalOutcome.terminalStatuses.contains(status) { settle(requestID, status) }
         approvalsRevision &+= 1
     }
 
-    /// The open pending changes (docs/settings-model.md 5.5). A disposable read:
-    /// the surface fences publication with its own presentation activity.
-    func pendingApprovals() async throws -> [SettingsApprovalRequest] {
+    /// Brings the open-request projection up to the current revision. Concurrent
+    /// callers share one read; a read overtaken by a newer revision is discarded.
+    func refreshApprovals() async throws {
+        if let read = approvalsRead, read.revision == approvalsRevision { return try await read.task.value }
         let admittedProfileGeneration = profileGeneration
-        let value = try await client.requestValue("settings.approvals", JSONValue.object([:]))
-        try requireProfile(admittedProfileGeneration)
-        return try value.decode(SettingsApprovalsResponse.self).requests
+        let revision = approvalsRevision
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let value = try await client.requestValue("settings.approvals", JSONValue.object([:]))
+            try requireProfile(admittedProfileGeneration)
+            let requests = try value.decode(SettingsApprovalsResponse.self).requests
+            guard revision == approvalsRevision else { return }
+            openApprovals = requests
+        }
+        approvalsRead = (revision, task)
+        defer { if approvalsRead?.revision == revision { approvalsRead = nil } }
+        try await task.value
+    }
+
+    private func settle(_ requestID: String, _ status: String) {
+        openApprovals?.removeAll { $0.requestId == requestID }
+        approvalOutcomes[requestID] = status
     }
 
     /// One bounded audit page. Empty pages may still carry a cursor; callers
@@ -243,12 +268,19 @@ final class SettingsTrustCoordinator {
             "commandId": .string(commandID), "requestId": .string(request.requestId),
             "digest": .string(request.digest), "approved": .bool(approved),
         ]
-        let value = try await mutationExecutor.performValue(method: "settings.decide", commandID: commandID) {
-            try await client.requestValue("settings.decide", JSONValue.object(params))
+        let value: JSONValue
+        do {
+            value = try await mutationExecutor.performValue(method: "settings.decide", commandID: commandID) {
+                try await client.requestValue("settings.decide", JSONValue.object(params))
+            }
+        } catch {
+            // A refused decision (superseded, expired) still changed what is open.
+            if profileGeneration == admittedProfileGeneration { noteApprovalsChanged() }
+            throw error
         }
         try requireProfile(admittedProfileGeneration)
-        approvalsRevision &+= 1
         let result = try value.decode(SettingsChangeResult.self)
+        if let status = result.status { noteApprovalsChanged(resolved: request.requestId, status: status) } else { noteApprovalsChanged() }
         try result.throwIfRefused()
         return result
     }
@@ -374,6 +406,10 @@ final class SettingsTrustCoordinator {
         refreshes.values.forEach { $0.task.cancel() }
         refreshes = [:]
         settingsInvalidationGeneration &+= 1
+        approvalsRead?.task.cancel()
+        approvalsRead = nil
+        openApprovals = nil
+        approvalOutcomes = [:]
         approvalsRevision &+= 1
     }
 

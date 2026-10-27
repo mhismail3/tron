@@ -2428,63 +2428,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "session-settings-approval-declined")
     }
 
-    /// A settings-approval push action opens this chat's Manage Session with one
-    /// confirmation over its row. The push alone decides nothing; the dialog's button does.
-    @MainActor
-    func testSettingsApprovalPushApproveConfirmsTheRow() {
-        assertSettingsApprovalPushConfirms(
-            pushFlag: "-session-settings-approval-push-approve",
-            confirmButton: "Approve change",
-            outcome: "approved",
-            screenshot: "settings-approval-push-approve-confirm"
-        )
-    }
-
-    @MainActor
-    func testSettingsApprovalPushDeclineConfirmsTheRow() {
-        assertSettingsApprovalPushConfirms(
-            pushFlag: "-session-settings-approval-push-decline",
-            confirmButton: "Decline change",
-            outcome: "declined",
-            screenshot: "settings-approval-push-decline-confirm"
-        )
-    }
-
-    @MainActor
-    private func assertSettingsApprovalPushConfirms(
-        pushFlag: String,
-        confirmButton: String,
-        outcome: String,
-        screenshot: String
-    ) {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-session-configuration-fixture", "-session-settings-approvals", pushFlag]
-        app.launch()
-        defer { app.terminate() }
-        let decisions = app.staticTexts["fixture.session-settings-decisions"]
-        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-        app.buttons["Stop session"].tap()
-        XCTAssertTrue(app.buttons[confirmButton].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "read, bash → read, bash, fetch_page")).firstMatch.exists,
-                      app.debugDescription)
-        XCTAssertEqual(app.alerts.count, 0)
-        keepScreenshot(named: screenshot)
-        // The managed child hides its parent probe from accessibility. Cancel
-        // first and observe the actual server counter, rather than reading covered UI.
-        app.buttons["confirmation-cancel"].tap()
-        XCTAssertTrue(waitForLabel(decisions, containing: "decisions:none", timeout: 5), "A pushed decision that was cancelled writes nothing")
-        app.terminate(); app.launch()
-        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-        app.buttons["Stop session"].tap()
-        XCTAssertTrue(app.buttons[confirmButton].waitForExistence(timeout: 5))
-        app.buttons[confirmButton].tap()
-        XCTAssertTrue(waitForLabel(decisions, containing: "\(outcome):settings-session-request", timeout: 5))
-        XCTAssertFalse(decisions.label.contains("settings-other-request"),
-                       "Another chat's request is never decided from this chat's push")
-        XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
-    }
-
     @MainActor
     func testSettingsChangesOpensRequestingChatOnItsOwningMac() {
         continueAfterFailure = false

@@ -62,11 +62,11 @@ struct HostedAskUserFixtureView: View {
                             .accessibilityIdentifier("ask-user-mutation-count")
                         Text(receipt.summary)
                             .accessibilityIdentifier("ask-user-receipt")
-                        if fixture.form.presentation == .approval || ProcessInfo.processInfo.arguments.contains("-tron-ask-user-tool-row") {
+                        if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-tool-row") {
                             ToolCard(data: fixture.pendingFormTool)
                                 .environment(\.canonicalResourceSessionID, sessionID)
                                 .environment(\.pendingExtensionInteractionPresenter, { value in interaction = value })
-                                .accessibilityIdentifier(fixture.form.presentation == .approval ? "settings-approval-pending-tool" : "ask-user-pending-tool")
+                                .accessibilityIdentifier("ask-user-pending-tool")
                         } else {
                             Button("Reopen Ask User") { interaction = fixture.interaction }
                                 .accessibilityIdentifier("ask-user-reopen")
@@ -119,7 +119,6 @@ struct HostedAskUserFixtureView: View {
         .environment(model)
         .environment(\.tronPresentationActivityCoordinator, presentationActivity)
         .tronPresentation()
-        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("Dark") ? .dark : nil)
         .task {
             do {
                 try await model.connectHostedGateway(profile: fixture.profile, token: fixture.token)
@@ -170,11 +169,11 @@ private struct HostedAskUserFixture {
     let model: AppModel
 
     var pendingFormTool: ChatToolPresentation {
-        ChatToolPresentation(id: "hosted-form-call", title: form.presentation == .approval ? "Settings" : "Ask User",
-            toolName: form.presentation == .approval ? "settings" : "ask_user", subtitle: "Running",
+        ChatToolPresentation(id: "hosted-form-call", title: "Ask User",
+            toolName: "ask_user", subtitle: "Running",
             request: nil, response: nil, content: "", fallbackContent: nil, error: false,
             startedAt: nil, completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil,
-            extensionOrigin: ExtensionToolOrigin(source: form.presentation == .approval ? "inline" : AskUserToolPresentation.tronSource, owner: interaction.owner),
+            extensionOrigin: ExtensionToolOrigin(source: AskUserToolPresentation.tronSource, owner: interaction.owner),
             toolSegmentId: "tool-segment:\"hosted-ask-user-operation\"")
     }
 
@@ -182,8 +181,7 @@ private struct HostedAskUserFixture {
     init() {
         let receipt = HostedAskUserFixtureReceipt()
         self.receipt = receipt
-        let settingsApproval = ProcessInfo.processInfo.arguments.contains("-tron-settings-approval-form")
-        let allowCancel = !settingsApproval && !ProcessInfo.processInfo.arguments.contains("-tron-ask-user-no-cancel")
+        let allowCancel = !ProcessInfo.processInfo.arguments.contains("-tron-ask-user-no-cancel")
         let styled = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-styled")
         // Agent-authored URL, inline code and a fenced command (#941).
         let copyable = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-copyable")
@@ -217,28 +215,15 @@ private struct HostedAskUserFixture {
             ] : []),
             allowCancel: allowCancel
         )
-        let presentedForm = settingsApproval ? ExtensionFormDescriptor(
-            version: 1, title: "Settings approval",
-            questions: [ExtensionFormQuestion(
-                id: "settings-approval", question: "Approve these settings changes?",
-                context: "Scope: Home\nReason: Retry a transient failure\n\nRetries (run.retry.maxRetries)\nLayer: Session\nBefore:\nnull\nAfter:\n3\n\nApprove applies only this diff. Deny changes nothing."
-                    + (ProcessInfo.processInfo.arguments.contains("-tron-settings-approval-literal")
-                       ? "\n[label](https://example.test/full-target) ![image](https://example.test/raw.png)" : ""),
-                options: [ExtensionFormOption(id: "approve", label: "Approve", description: nil),
-                          ExtensionFormOption(id: "deny", label: "Deny", description: nil)],
-                multiSelect: false, allowOther: false
-            )], allowCancel: false, presentation: .approval
-        ) : form
-        self.form = presentedForm
+        self.form = form
         let interaction = ExtensionInteraction(
             id: "ask-user-interaction",
             hostEpoch: "hosted-ask-user-epoch",
             presentationRevision: 1,
             method: .form,
-            title: presentedForm.title,
-            form: presentedForm,
-            owner: settingsApproval ? ExtensionOwner(id: "hosted-settings-owner", title: "Tron Settings", source: "inline")
-                : ExtensionOwner(id: "tron-ask-user", title: "Ask User", source: AskUserToolPresentation.tronSource),
+            title: form.title,
+            form: form,
+            owner: ExtensionOwner(id: "tron-ask-user", title: "Ask User", source: AskUserToolPresentation.tronSource),
             invocationId: "hosted-ask-user-invocation",
             operationId: "hosted-ask-user-operation"
         )

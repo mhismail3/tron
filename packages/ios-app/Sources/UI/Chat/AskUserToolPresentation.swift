@@ -43,8 +43,7 @@ enum PendingExtensionInteractionToolPresentation {
                 tool.isRunning
                     && toolOperationID(tool) == operationID
                     && (ownersMatch(interaction: interaction, tool: tool) || hostsNestedAskUserForm(interaction, tool))
-                    && (interaction.method != .form || isAskUser(tool) || hostsNestedAskUserForm(interaction, tool)
-                        || (tool.toolName == "settings" && interaction.form?.presentation == .approval))
+                    && (interaction.method != .form || isAskUser(tool) || hostsNestedAskUserForm(interaction, tool))
             }
         }
         if operationMatches.count == 1 { return operationMatches[0] }
@@ -62,6 +61,17 @@ enum PendingExtensionInteractionToolPresentation {
                 && (ownersMatch(interaction: interaction, tool: tool) || hostsNestedAskUserForm(interaction, tool))
         }
         return formMatches.count == 1 ? formMatches[0] : nil
+    }
+
+    /// The request a running tool waits on (#2050): its approval form names the
+    /// request, which the tool's approval chip and the shared sheet show.
+    static func approvalRequestID(tool: ChatToolDescriptor, pendingInteractions: [ExtensionInteraction]) -> String? {
+        guard tool.isRunning, let operationID = toolOperationID(tool) else { return nil }
+        let matches = pendingInteractions.filter { interaction in
+            interaction.method == .form && interaction.form?.presentation == .approval
+                && interaction.operationId == operationID && ownersMatch(interaction: interaction, tool: tool)
+        }
+        return matches.count == 1 ? matches[0].form?.questions.first?.id : nil
     }
 
     private static func isAskUser(_ tool: ChatToolDescriptor) -> Bool {
