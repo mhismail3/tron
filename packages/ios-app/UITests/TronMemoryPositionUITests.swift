@@ -106,8 +106,8 @@ import XCTest
             let scroll = app.scrollViews.allElementsBoundByIndex.last { $0.frame.height > 150 && $0.isHittable }!
             let bar = app.navigationBars.allElementsBoundByIndex.last!.frame
             let down = target.frame.minY < bar.maxY
-            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: down ? 0.45 : 0.75))
-                .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: down ? 0.75 : 0.45)))
+            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: down ? 0.3 : 0.85))
+                .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: down ? 0.85 : 0.3)))
         }
         XCTAssertTrue(target.isHittable, app.debugDescription)
         return target
@@ -115,8 +115,12 @@ import XCTest
     private func expand(_ app: XCUIApplication, _ title: String) {
         let heading = app.navigationBars.staticTexts[title].firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 10))
-        heading.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)))
+        // Drag the toolbar's empty leading space, not the large-type title.
+        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        for _ in 0..<4 where heading.frame.minY > 120 {
+            origin.withOffset(CGVector(dx: 60, dy: heading.frame.midY))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
+        }
     }
     private func shot(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
