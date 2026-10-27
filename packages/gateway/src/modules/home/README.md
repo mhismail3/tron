@@ -194,7 +194,7 @@ changes keep its store, cursors and spend.
 - Typed role queues and worker thinking are the machine-routing authority; learned
   delegation notes are never parsed as queue configuration. Explicit task choices
   remain overrides. `home-task-worker-model.e2e.test.ts` exercises a contradictory
-  active Knowledge note while the actual worker follows the typed settings.
+  active v2-placed Knowledge note while the actual worker follows the typed settings.
 
 ## Entry points
 
@@ -217,6 +217,11 @@ changes keep its store, cursors and spend.
 ## Verify
 `scripts/tron verify --module gateway/home` or `scripts/tron test gateway <file>` covers
 `src/modules/home/*.test.ts` and `src/sessions/home-*.test.ts` (nested suites add `--config vitest.nested.config.ts`).
+Boundary fixtures read session presence/files through Native; chapter metrics remain Home-owned.
+The redelivery rollover case keeps the result pending across rollover, observes the
+successor wake's acknowledgement, then waits for both `hasActiveAgentRun` and
+`isBusy` to clear before proving logical prompting uses that successor without
+duplicating the result or changing sealed bytes.
 Managed queue persistence allows 60 s for two cold reopens; crash suites cover process abandonment, not power loss.
 Backlog fixtures budget the full current Home catalog plus output reserve; the
 never-fit case must still prove a large report is referenced, its small successor

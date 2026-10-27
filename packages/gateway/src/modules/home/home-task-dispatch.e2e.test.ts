@@ -1327,8 +1327,9 @@ describe("Home task production dispatch", () => {
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const task = await (await dispatch(f)).completion;
     const port = (owner as any).options.sessions;
-    const present = port.sessionPresent.bind(port);
-    const missing = vi.spyOn(port, "sessionPresent").mockImplementation((id: string) => id === f.home.sessionId ? Promise.resolve(false) : present(id));
+    const runtimes = (owner as any).options.runtimes;
+    const present = runtimes.sessionPresent.bind(runtimes);
+    const missing = vi.spyOn(runtimes, "sessionPresent").mockImplementation((id: string) => id === f.home.sessionId ? Promise.resolve(false) : present(id));
     const replacement = await owner.designate({ model: { provider: model.provider, id: model.id } }); missing.mockRestore();
     expect(replacement.sessionId).not.toBe(f.home.sessionId);
     expect((await owner.status() as any).routeGeneration).toBe(task.routeGeneration + 1);
@@ -1349,12 +1350,20 @@ describe("Home task production dispatch", () => {
     expect(await service.invoke(client, "home.redeliverTaskResult", command)).toEqual({ accepted: true });
     const pending = await owner.taskResult(task.taskId);
     expect(pending).toMatchObject({ wake: { state: "pending", redeliveries: [{ from: task.routeGeneration, to: task.routeGeneration + 1 }] } });
-    const oldPath = (await port.sessionFile(replacement.sessionId))!;
+    const oldPath = (await runtimes.sessionFile(replacement.sessionId))!;
     const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 25 * 1024 * 1024, entries: 10, quiescent: true });
-    await owner.chapterQuiescent(replacement.sessionId); metrics.mockRestore();
-    const sealed = await readFile(oldPath);
+    let sealed!: Buffer;
     f.faux.setResponses([fauxAssistantMessage("current chapter receives result")]);
-    const accepted = await observeTaskAcknowledgement(f, task.taskId, () => service.invoke(client, "home.prompt", { commandId: "next-chapter-message", text: "Review the task" })) as any;
+    // Rollover wakes the pending redelivery. Observe its actual acknowledgement
+    // before sending the logical prompt, rather than racing that activation.
+    await observeTaskAcknowledgement(f, task.taskId, async () => {
+      await owner.chapterQuiescent(replacement.sessionId); metrics.mockRestore();
+      sealed = await readFile(oldPath);
+    });
+    const successor = await f.registry.acquire((await owner.status()).sessionId!);
+    await waitFor(() => !successor.hasActiveAgentRun && !successor.isBusy, "rollover wake settles");
+    f.faux.setResponses([fauxAssistantMessage("current chapter reviews the result")]);
+    const accepted = await service.invoke(client, "home.prompt", { commandId: "next-chapter-message", text: "Review the task" }) as any;
     expect(accepted.sessionId).not.toBe(replacement.sessionId);
     const current = await f.registry.acquire(accepted.sessionId);
     expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
