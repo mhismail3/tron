@@ -120,6 +120,11 @@ Composition supplies the same late K6 settings, Knowledge and raw model owners.
   persisted. `prepareRequest`, `transformContext` and `streamFunction` enforce this fail-closed;
   a refusal sends nothing and shows one fixed, non-retryable sentence
   (`HOME_REFUSAL_SENTENCES`), with detail in `home.context`.
+- **Delivery headroom** reserves the replacement request head, including the learned
+  profile at its bound, over the same frozen memory cut. Framing, admission and final
+  overflow checks share one head constructor: recorded text/sections are replaced,
+  declared tools are preserved and charged with `instructions`, and profile is counted
+  separately. Historical system deltas are not additional heads. Output reserve remains.
 - `home.context` breaks the last request into `instructions`, `profile`, `memory`, `chapter`,
   `results`, `input`. For caching, system prompt and tools are byte-stable, the view only
   grows between rebalances, and Home requests ask for `long` retention.
