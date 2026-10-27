@@ -320,18 +320,23 @@ describe("Home task bounded backlogs", () => {
     // Budget the current full Home tool/profile prefix plus its output reserve
     // and a reference with one small successor. The unchanged reference/content
     // checks below still prove the 64 KiB report itself never fits inline.
-    const f = await fixture(undefined, false, 10_000); const model = f.faux.getModel();
+    const f = await fixture(undefined, false, 14_000); const model = f.faux.getModel();
     const owner = homeOwnerOf(f.registry);
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
+    // Keep automatic Home wakes from consuming the scripted worker responses.
+    await owner.pauseMemory();
     f.faux.setResponses([fauxAssistantMessage([reportCall("large", "🦊".repeat(16384))], { stopReason: "toolUse" })]);
     const large = await (await dispatch(f, "large")).completion;
     f.faux.setResponses([fauxAssistantMessage([reportCall("small", "Small complete report")], { stopReason: "toolUse" })]);
     const small = await (await dispatch(f, "small")).completion;
     const home = await f.registry.acquire(f.home.sessionId); let request = "";
     f.faux.setResponses([(context) => { request = JSON.stringify(context); return fauxAssistantMessage("Read references"); }]);
+    await owner.resumeMemory();
     await home.prompt("Review"); await waitFor(() => home.snapshot().configurationBlocker === null, "reference inbox");
     const messages = home.canonicalSessionEntries().filter(e => e.type === "custom_message" && e.customType === "tron.home-task-result.v1") as any[];
     expect(messages.map(m => m.details.taskId)).toEqual([large.taskId, small.taskId]);
+    expect(messages.map(m => m.details.terminalEvidence.outcome)).toEqual(["final", "final"]);
+    expect(messages[1].content).toContain("Small complete report");
     expect(messages[0].content).toMatch(/immutable report.*task.*report/s);
     expect(messages[0].content).toContain(`taskId=${large.taskId}`);
     expect(messages[0].content).not.toContain("x".repeat(100));
