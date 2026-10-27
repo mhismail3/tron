@@ -20,6 +20,11 @@ export interface DisplayArtifactDescriptor {
   kind: DisplayArtifactKind;
 }
 
+export interface DisplayMarkdownImage {
+  destination: string;
+  artifact: DisplayArtifactDescriptor;
+}
+
 export interface BrowserLiveViewDescriptor {
   schema: typeof BROWSER_LIVE_VIEW_SCHEMA;
   viewId: string;
@@ -53,6 +58,7 @@ export interface DisplayProjection {
   eligibleSurfaces: DisplaySurface[];
   fallbackText: string;
   artifact?: DisplayArtifactDescriptor;
+  markdownImages?: DisplayMarkdownImage[];
   remoteURL?: string;
   liveView?: LiveViewDescriptor;
 }

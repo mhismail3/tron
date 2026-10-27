@@ -47,6 +47,8 @@ local, private, reserved, link-local or multicast address; the Gateway never fet
 them. The tool's model guidance asks for proactive, honestly labelled visuals and
 prefers `inline` for bounded images; that is guidance, not a transport default.
 
+**Markdown images.** The first 16 distinct standalone image targets may snapshot visible relative PNG/JPEG/GIF/WebP children beneath the document directory, at most 25 MiB combined. Refused or missing targets count toward this bounded scan. The canonical `markdownImages` mappings contain destinations and ordinary immutable artifact descriptors, not filesystem authority. Missing/refused children stay unavailable; no remote fetch, traversal, symlink or lazy source resolver is admitted. Projection reference collection includes children for exact-branch reads, fork/rekey, restart reconciliation and deletion. [Rendering contract](../../../ios-app/docs/display-artifacts.md#markdown-images).
+
 **Artifact store.** `DisplayOwner` coordinates one durable store constructed by
 composition, separate from the transient `BlobStore`. Its traced lane admits reads and
 session removal; Core supplies live deletion/membership facts and one exact-leaf reference

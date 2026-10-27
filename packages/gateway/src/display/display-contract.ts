@@ -122,7 +122,7 @@ function admitDisplayProjection(toolName: string | undefined, value: unknown): D
   const item = candidate as Record<string, unknown>;
   if (!hasOnlyKeys(item, [
     "schema", "displayId", "revision", "title", "caption", "altText", "kind",
-    "presentation", "eligibleSurfaces", "fallbackText", "artifact", "remoteURL", "liveView",
+    "presentation", "eligibleSurfaces", "fallbackText", "artifact", "markdownImages", "remoteURL", "liveView",
   ])) return undefined;
   if (item.schema !== DISPLAY_SCHEMA || !boundedString(item.displayId, 1, 200)
     || item.revision !== 1 || !boundedString(item.title, 1, 256)
@@ -157,6 +157,32 @@ function admitDisplayProjection(toolName: string | undefined, value: unknown): D
       size: source.size as number,
       kind: source.kind,
     };
+  }
+
+  let markdownImages: DisplayProjection["markdownImages"];
+  if (item.markdownImages !== undefined) {
+    if (item.kind !== "markdown" || !Array.isArray(item.markdownImages)
+      || item.markdownImages.length < 1 || item.markdownImages.length > 16) return undefined;
+    markdownImages = [];
+    let bytes = 0;
+    const destinations = new Set<string>();
+    for (const entry of item.markdownImages) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return undefined;
+      const image = entry as Record<string, unknown>;
+      if (!hasOnlyKeys(image, ["destination", "artifact"]) || !boundedString(image.destination, 1, 4_096)
+        || destinations.has(image.destination)) return undefined;
+      const projection = admitDisplayProjection("display", { display: {
+        schema: DISPLAY_SCHEMA, displayId: item.displayId, revision: 1,
+        title: item.title, altText: item.altText, kind: "image",
+        presentation: item.presentation, eligibleSurfaces: eligibleDisplaySurfaces("image"),
+        fallbackText: item.fallbackText, artifact: image.artifact,
+      } });
+      if (!projection?.artifact) return undefined;
+      bytes += projection.artifact.size;
+      if (bytes > 25 * 1_024 * 1_024) return undefined;
+      destinations.add(image.destination);
+      markdownImages.push({ destination: image.destination, artifact: projection.artifact });
+    }
   }
 
   let liveView: LiveViewDescriptor | undefined;
@@ -212,6 +238,7 @@ function admitDisplayProjection(toolName: string | undefined, value: unknown): D
     eligibleSurfaces: eligible,
     fallbackText: item.fallbackText,
     ...(artifact ? { artifact } : {}),
+    ...(markdownImages ? { markdownImages } : {}),
     ...(remoteURL ? { remoteURL } : {}),
     ...(liveView ? { liveView } : {}),
   };
@@ -230,6 +257,7 @@ export function displayReferences(entries: readonly unknown[], sessionId: string
       details, value.message.toolCallId, sessionId,
     );
     if (display?.artifact) ids.add(display.artifact.id);
+    for (const image of display?.markdownImages ?? []) ids.add(image.artifact.id);
     if (display?.liveView) liveViews.add(`${display.liveView.viewId}\0${display.liveView.generation}`);
     const nested = details && typeof details === "object" && !Array.isArray(details)
       ? (details as Record<string, unknown>).tronNested : undefined;
@@ -239,6 +267,7 @@ export function displayReferences(entries: readonly unknown[], sessionId: string
       if (!item || typeof item !== "object" || Array.isArray(item)) continue;
       const nestedDisplay = admitDisplayProjection("display", { display: (item as Record<string, unknown>).display });
       if (nestedDisplay?.artifact) ids.add(nestedDisplay.artifact.id);
+      for (const image of nestedDisplay?.markdownImages ?? []) ids.add(image.artifact.id);
     }
     const browserLiveViews = nested && typeof nested === "object" && !Array.isArray(nested)
       ? (nested as Record<string, unknown>).browserLiveViews : undefined;

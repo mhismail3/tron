@@ -10,6 +10,37 @@ not browse, cache, or mirror the internal workspace. Missing/unavailable roots,
 managed-state paths, traversal, hidden components, and symlinks are rejected by
 the Gateway before presentation.
 
+## Markdown images
+
+Displayed Markdown supports standalone image blocks with alt text and a relative filename.
+The Gateway considers the first 16 distinct standalone image targets (including
+missing or refused targets), with a 25 MiB combined encoded snapshot budget,
+beneath the document's own directory. PNG, JPEG,
+GIF and WebP children use the existing no-follow ingest and immutable artifact
+store; code fences and indented code do not grant resource access. Traversal,
+hidden components, symlinks, URL/encoded paths and remote images grant no access.
+The supported block form has a non-whitespace destination without parentheses;
+inline/reference images and optional image titles are not resolved.
+
+The canonical display carries only the admitted destination-to-artifact mappings,
+never source directory paths. Child images share the document's exact-branch read
+admission, fork/rekey ownership, cold-reopen retention and session deletion.
+Missing, refused, unsupported or unretained targets render alt text plus “image
+unavailable.” Existing displays without retained children cannot browse their old
+source directories. There is no lazy filesystem lookup, network image fetch or
+automatic refresh of changed sources.
+
+Ordinary attachment/workspace previews and transcript Markdown keep their existing
+parsing; only displayed documents opt into image blocks. The shared Markdown reader fits images to its content width (520-point height
+ceiling), exposes their alt text, and loads through the existing bounded
+`ChatMediaLoader.inlineArtifact(for:)` owner. This avoids the full-preview slot's
+single replacement flight cancelling adjacent images. Cancellation, managed
+presentation activity and exact profile/session/media identity fence publication.
+The hosted `TronDisplayDocumentThemeUITests` image journey checks decoded PNG
+pixels and unavailable states in both appearances; the Gateway image-lifetime
+integration journey checks sibling admission and retention across source removal,
+cold reopen and session deletion.
+
 ## Live browser and native Mac views
 
 A trusted `agent_browser` `get cdp-url` result can supply an opaque `browser_live` source to `display`. iOS requires the authenticated `browser-live-view.v1` capability before opening it. Only an active sheet or eligible, genuinely visible floating panel mounts a viewer; retained pills/history do no capture, delivery or decoding. Live browsers default to a floating panel with aspect-fit content. Before the first admitted renderable frame it uses the 4:3 fallback; afterward the existing floating host fits each admitted frame's validated dimensions (including portrait, landscape and extreme ratios) to its native available container while retaining standard close/expand controls and exact source identity across action/display chips. Expanding uses themed Tron title/Done chrome, starts at the medium detent, permits medium/large detents and hides the drag indicator. The covered floating owner stops viewing and shows a centered popped-out icon until the exact managed sheet retires. This visual state comes from the presentation coordinator's mounted descendant topology, not a second flag or the sheet binding (which may clear before native dismissal finishes). Later actions do not reopen a manually dismissed browser; an explicit chip tap does. Closed-browser results remain manually inspectable but do not automatically open an unavailable panel. Reopening never launches a browser and can attach only to the original still-live generation. Actual 1024×768 browser-content defaults belong to the native provider's local-launch initialization, not the phone's panel layout; explicit window/viewport controls and attached browsers are not reset by viewing.

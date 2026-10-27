@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -9,6 +9,60 @@ import { createTestRegistry, displayOwnerOf, displayStoreOf } from "../../test-s
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
+
+it("retains only authorized sibling Markdown images through source removal, cold reopen and session deletion", async () => {
+  const fixture = await displayedPhotoFixture();
+  let registry = fixture.registry;
+  const sessionID = fixture.slot.id;
+  const evidence: Record<string, unknown> = {};
+  try {
+    const files = join(fixture.options.tronHome, "workspace/files/review");
+    await mkdir(files, { recursive: true });
+    await writeFile(join(files, "preview.png"), fixture.image);
+    await writeFile(join(files, "ignored.png"), fixture.image);
+    await writeFile(join(files, "../outside.png"), fixture.image);
+    await symlink(join(files, "../outside.png"), join(files, "linked.png"));
+    await writeFile(join(files, "report.md"), [
+      "# Review", "![Preview](preview.png)", "![Missing](missing.png)",
+      "![Outside](../outside.png)", "![Linked](linked.png)",
+      "![Remote](https://example.test/tracker.png)", "```md", "![Code](ignored.png)", "```",
+    ].join("\n\n"));
+    fixture.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("display", {
+        title: "Review images", altText: "Internal report", source: { kind: "internal_file", path: "review/report.md" },
+      })], { stopReason: "toolUse" }), fauxAssistantMessage("done"),
+    ]);
+    await fixture.slot.prompt("Display the review document");
+    await waitFor(() => !fixture.slot.isBusy, "Markdown display idle");
+    const row = fixture.slot.snapshot().transcript.findLast(item => item.kind === "message" && item.display?.title === "Review images");
+    if (row?.kind !== "message" || !row.display?.artifact) throw new Error("Markdown display missing");
+    // Read the actual projected contract, without an implementation helper.
+    const display = row.display as typeof row.display & { markdownImages?: Array<{ destination: string; artifact: { id: string } }> };
+    expect(display.markdownImages?.map(image => image.destination)).toEqual(["preview.png"]);
+    const imageID = display.markdownImages![0]!.artifact.id;
+    expect(await previewBytes(registry, sessionID, imageID)).toEqual(fixture.image);
+    await rm(files, { recursive: true });
+    expect(await previewBytes(registry, sessionID, imageID)).toEqual(fixture.image);
+    evidence.afterSourceDeletion = "identical retained sibling image";
+    await registry.dispose();
+    registry = await createTestRegistry(fixture.options);
+    await registry.initialize();
+    await registry.initializeBlobStorage();
+    await registry.acquire(sessionID);
+    expect(await previewBytes(registry, sessionID, imageID)).toEqual(fixture.image);
+    evidence.afterColdReopen = "identical retained sibling image";
+    await registry.delete(sessionID);
+    await displayOwnerOf(registry).removeArtifacts(sessionID);
+    await expect(displayOwnerOf(registry).acquireArtifact(sessionID, imageID)).rejects.toMatchObject({ code: "not_found" });
+    evidence.afterSessionDeletion = "unavailable";
+  } finally {
+    await registry.dispose();
+    await rm(fixture.root, { recursive: true, force: true });
+    const output = join(process.cwd(), "test-results/display-markdown-images.json");
+    await mkdir(dirname(output), { recursive: true });
+    await writeFile(output, `${JSON.stringify(evidence, null, 2)}\n`);
+  }
+}, 30_000);
 
 it("keeps a displayed photo viewable after source deletion and cold reopen until session deletion", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-display-lifetime-"));
@@ -127,7 +181,7 @@ async function displayedPhotoFixture() {
     const row = slot.snapshot().transcript.find(item => item.kind === "message" && item.display?.artifact);
     if (row?.kind !== "message" || !row.display?.artifact) throw new Error("Real Pi display result missing");
     const artifactID = row.display.artifact.id;
-    return { root, options, registry, slot, image, artifactID, rekeys,
+    return { root, options, registry, slot, image, artifactID, rekeys, faux,
       content: join(root, "tron", "gateway", "display-artifacts", "artifacts", artifactID, "content") };
   } catch (error) {
     await registry?.dispose();

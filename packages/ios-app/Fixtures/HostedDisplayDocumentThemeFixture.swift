@@ -7,6 +7,8 @@ import TronMobileCore
 enum HostedDisplayDocumentThemeFixture {
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-theme") }
     static var home: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-home") }
+    static var images: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-images") }
+    static let imageID = "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc41"
     static var authoredHTML: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-html") }
     static let markdown = """
     # Home audit report
@@ -36,7 +38,7 @@ enum HostedDisplayDocumentThemeFixture {
     <p id="details">This HTML owns its styling; a local artifact is not a Tron theme contract.</p></body></html>
     """
     static var payload: ChatMediaPayload {
-        ChatMediaPayload(data: Data((authoredHTML ? html : markdown).utf8),
+        ChatMediaPayload(data: Data((authoredHTML ? html : images ? "# Review images\n\n![Preview](preview.png)\n\n![Missing](missing.png)\n\n![Outside](../outside.png)" : markdown).utf8),
                          mimeType: authoredHTML ? "text/html" : "text/markdown")
     }
     @MainActor static var transcript: [TranscriptItem] {
@@ -52,6 +54,11 @@ enum HostedDisplayDocumentThemeFixture {
                                "name": authoredHTML ? "report.html" : "report.md",
                                "mimeType": authoredHTML ? "text/html" : "text/markdown",
                                "size": payload.data.count, "kind": kind]
+        if images {
+            display["markdownImages"] = [["destination": "preview.png", "artifact": [
+                "id": imageID, "name": "preview.png", "mimeType": "image/png", "size": 1024, "kind": "image",
+            ]]]
+        }
         rows[1]["display"] = display
         return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
     }

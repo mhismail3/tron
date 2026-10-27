@@ -3,6 +3,36 @@ import UIKit
 
 /// Rendered color at the real chip → managed sheet → document reader boundary.
 @MainActor final class TronDisplayDocumentThemeUITests: XCTestCase {
+    func testSiblingMarkdownImageAndUnavailableTargets() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-chat-display-fixture", "-display-document-theme", "-display-document-images",
+                                   "-display-document-home", "-themeColor", "burgundy"]
+                + (mode == "light" ? ["-polish-light"] : [])
+            app.launch()
+            defer { app.terminate() }
+            let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Home audit report")).firstMatch
+            XCTAssertTrue(chip.waitForExistence(timeout: 20), app.debugDescription)
+            chip.tap()
+            let image = app.images["Preview"].firstMatch
+            XCTAssertTrue(image.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertGreaterThan(image.frame.width, 100, "Sibling capture is readable, not an icon")
+            let frame = image.frame.insetBy(dx: 8, dy: 8)
+            let top = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height / 3)
+            let bottom = CGRect(x: frame.minX, y: frame.maxY - frame.height / 3, width: frame.width, height: frame.height / 3)
+            let red = chroma(app, top), blue = chroma(app, bottom)
+            XCTAssertGreaterThan(red[0], red[2] + 0.5, "Actual sibling PNG pixels render red above blue")
+            XCTAssertGreaterThan(blue[2], blue[0] + 0.5, "Actual sibling PNG pixels render red above blue")
+            XCTAssertTrue(app.staticTexts["Missing: image unavailable."].firstMatch.exists, app.debugDescription)
+            XCTAssertTrue(app.staticTexts["Outside: image unavailable."].firstMatch.exists, app.debugDescription)
+            capture(app, "2027-markdown-images-\(mode)")
+            app.buttons["Done"].tap()
+            XCTAssertTrue(chip.isHittable, "The reader remains dismissible")
+            app.terminate()
+        }
+    }
+
     func testRepresentativePreviews() {
         for (theme, mode, home) in [("burgundy", "dark", true), ("oliveGold", "light", false)] {
             let app = open(theme: theme, mode: mode, home: home)

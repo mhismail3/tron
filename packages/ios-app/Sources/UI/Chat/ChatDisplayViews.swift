@@ -707,6 +707,7 @@ struct DisplayArtifactContent: View {
             }
         }
         .environment(\.displayRenderContext, context)
+        .environment(\.markdownImageContext, MarkdownImageContext(sessionID: sessionID, images: display.markdownImages ?? []))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(display.altText)
     }
@@ -889,7 +890,8 @@ private struct DisplayTextArtifactView: View {
                 return try await AttachmentFilePreviewPolicy.prepare(
                     data: payload.data,
                     name: artifact.name,
-                    mimeType: artifact.mimeType
+                    mimeType: artifact.mimeType,
+                    rendersMarkdownImages: true
                 )
             }
             // A retired surface or a superseded identity publishes nothing.
@@ -1412,7 +1414,10 @@ struct DisplaySheet: View {
                 mimeType: artifact.mimeType,
                 source: .remote(identity: identity, leaseID: documentLeaseID),
                 title: route.display.title,
-                fallbackText: route.display.fallbackText
+                fallbackText: route.display.fallbackText,
+                markdownImages: route.display.markdownImages ?? [],
+                markdownSessionID: route.sessionID,
+                rendersMarkdownImages: true
             )
             .accessibilityLabel(route.display.altText)
         } else {

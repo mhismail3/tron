@@ -97,6 +97,11 @@ package struct DisplayArtifactDescriptor: Codable, Hashable, Sendable {
     }
 }
 
+package struct DisplayMarkdownImage: Codable, Hashable, Sendable {
+    package let destination: String
+    package let artifact: DisplayArtifactDescriptor
+}
+
 package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
     let schema: String
     let displayId: String
@@ -109,6 +114,7 @@ package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
     let eligibleSurfaces: [DisplaySurface]
     package let fallbackText: String
     package let artifact: DisplayArtifactDescriptor?
+    package let markdownImages: [DisplayMarkdownImage]?
     package let remoteURL: String?
     package let liveView: LiveViewDescriptor?
 
@@ -126,7 +132,7 @@ package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case schema, displayId, revision, title, caption, altText, kind, presentation,
-             eligibleSurfaces, fallbackText, artifact, remoteURL, liveView
+             eligibleSurfaces, fallbackText, artifact, markdownImages, remoteURL, liveView
     }
 
     #if HOSTED_TEST
@@ -142,6 +148,7 @@ package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
         eligibleSurfaces: [DisplaySurface],
         fallbackText: String,
         artifact: DisplayArtifactDescriptor? = nil,
+        markdownImages: [DisplayMarkdownImage]? = nil,
         remoteURL: String? = nil,
         liveView: LiveViewDescriptor? = nil
     ) {
@@ -156,6 +163,7 @@ package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
         self.eligibleSurfaces = eligibleSurfaces
         self.fallbackText = fallbackText
         self.artifact = artifact
+        self.markdownImages = markdownImages
         self.remoteURL = remoteURL
         self.liveView = liveView
     }
@@ -174,6 +182,7 @@ package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
         eligibleSurfaces = try values.decode([DisplaySurface].self, forKey: .eligibleSurfaces)
         fallbackText = try values.decode(String.self, forKey: .fallbackText)
         artifact = try values.decodeIfPresent(DisplayArtifactDescriptor.self, forKey: .artifact)
+        markdownImages = try values.decodeIfPresent([DisplayMarkdownImage].self, forKey: .markdownImages)
         remoteURL = try values.decodeIfPresent(String.self, forKey: .remoteURL)
         liveView = try values.decodeIfPresent(LiveViewDescriptor.self, forKey: .liveView)
 
@@ -211,6 +220,24 @@ package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
                     forKey: .artifact,
                     in: values,
                     debugDescription: "Display artifact metadata is invalid"
+                )
+            }
+        }
+        if let markdownImages {
+            guard kind == .markdown, (1...16).contains(markdownImages.count),
+                  Set(markdownImages.map(\.destination)).count == markdownImages.count,
+                  markdownImages.allSatisfy({ image in
+                      let artifact = image.artifact
+                      return Self.admits(image.destination, minimum: 1, maximum: 4_096)
+                          && UUID(uuidString: artifact.id) != nil
+                          && Self.admits(artifact.name, minimum: 1, maximum: 160)
+                          && !artifact.name.contains("/") && !artifact.name.contains("\\")
+                          && Self.admits(artifact.mimeType, minimum: 1, maximum: 200)
+                          && artifact.kind == .image && artifact.size > 0 && artifact.size <= 25 * 1_024 * 1_024
+                  }),
+                  markdownImages.reduce(0, { $0 + $1.artifact.size }) <= 25 * 1_024 * 1_024 else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .markdownImages, in: values, debugDescription: "Markdown image metadata is invalid"
                 )
             }
         }

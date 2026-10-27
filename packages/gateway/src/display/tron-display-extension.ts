@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ingestMarkdownImages } from "./markdown-images.js";
 import { Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { boundedString, eligibleDisplaySurfaces, normalizePublicDisplayURL } from "./display-contract.js";
@@ -109,6 +110,7 @@ export function createTronDisplayExtension(input: {
         const displayID = randomUUID();
         let kind: DisplayKind;
         let artifact: DisplayProjection["artifact"];
+        let markdownImages: DisplayProjection["markdownImages"];
         let remoteURL: string | undefined;
         let liveView: DisplayProjection["liveView"];
         const fallbackText = params.fallbackText ?? params.altText;
@@ -119,9 +121,14 @@ export function createTronDisplayExtension(input: {
           const root = params.source.kind === "path" ? input.cwd() : await input.internalFilesRoot!();
           if (signal?.aborted) throw new Error("Display operation aborted");
           artifact = await input.artifacts.ingest(root, params.source.path, sessionID);
-          if (signal?.aborted) {
+          try {
+            const images = await ingestMarkdownImages(input.artifacts, root, params.source.path, sessionID, artifact, signal);
+            if (images.length) markdownImages = images;
+            if (signal?.aborted) throw new Error("Display operation aborted");
+          } catch (error) {
             await input.artifacts.revoke(artifact.id, sessionID);
-            throw new Error("Display operation aborted");
+            await Promise.all((markdownImages ?? []).map(image => input.artifacts.revoke(image.artifact.id, sessionID)));
+            throw error;
           }
           kind = artifact.kind;
         } else if (params.source.kind === "browser_live" || params.source.kind === "native_live") {
@@ -146,6 +153,7 @@ export function createTronDisplayExtension(input: {
           eligibleSurfaces: eligibleDisplaySurfaces(kind, artifact?.size),
           fallbackText,
           ...(artifact ? { artifact } : {}),
+          ...(markdownImages ? { markdownImages } : {}),
           ...(remoteURL ? { remoteURL } : {}),
           ...(liveView ? { liveView } : {}),
         };

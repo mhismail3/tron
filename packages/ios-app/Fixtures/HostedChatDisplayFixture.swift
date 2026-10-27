@@ -99,8 +99,8 @@ struct HostedChatDisplayFixture: View {
             client: GatewayClient(socketFactory: GatewaySocketFactory { _ in socket }),
             profiles: GatewayProfileStore(defaults: defaults),
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "chat-display-fixture")),
-            chatMediaFetch: { _ in
-                HostedDisplayDocumentThemeFixture.enabled ? HostedDisplayDocumentThemeFixture.payload
+            chatMediaFetch: { identity in
+                HostedDisplayDocumentThemeFixture.enabled && identity.blobID != HostedDisplayDocumentThemeFixture.imageID ? HostedDisplayDocumentThemeFixture.payload
                     : ChatMediaPayload(data: image, mimeType: "image/png")
             }
         ))

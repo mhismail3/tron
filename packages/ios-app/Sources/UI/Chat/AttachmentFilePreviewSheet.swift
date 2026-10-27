@@ -99,7 +99,8 @@ enum AttachmentFilePreviewPolicy {
     static func prepare(
         data: Data,
         name: String,
-        mimeType: String
+        mimeType: String,
+        rendersMarkdownImages: Bool = false
     ) async throws -> PreparedAttachmentFilePreview {
         guard ChatMediaPolicy.admitsEncodedByteCount(data.count) else {
             throw ChatMediaLoadError.encodedPayloadTooLarge
@@ -108,14 +109,15 @@ enum AttachmentFilePreviewPolicy {
         // preparation cannot observe outer cancellation once it has begun.
         try Task.checkCancellation()
         return try await Task.detached(priority: .userInitiated) {
-            try prepareSynchronously(data: data, name: name, mimeType: mimeType)
+            try prepareSynchronously(data: data, name: name, mimeType: mimeType, rendersMarkdownImages: rendersMarkdownImages)
         }.value
     }
 
     nonisolated static func prepareSynchronously(
         data: Data,
         name: String,
-        mimeType: String
+        mimeType: String,
+        rendersMarkdownImages: Bool = false
     ) throws -> PreparedAttachmentFilePreview {
         switch kind(name: name, mimeType: mimeType) {
         case .image:
@@ -126,7 +128,7 @@ enum AttachmentFilePreviewPolicy {
         case .markdown:
             let decoded = try decodedTextPrefix(data)
             return PreparedAttachmentFilePreview(
-                content: .markdown(MarkdownPresentation.Document(source: decoded.text)),
+                content: .markdown(MarkdownPresentation.Document(source: decoded.text, rendersImages: rendersMarkdownImages)),
                 isTruncated: decoded.isTruncated
             )
         case .plainText:
@@ -221,6 +223,9 @@ struct AttachmentFilePreviewSheet: View {
     let source: AttachmentFilePreviewSource
     var title: String? = nil
     var fallbackText: String? = nil
+    var markdownImages: [DisplayMarkdownImage] = []
+    var markdownSessionID: String? = nil
+    var rendersMarkdownImages = false
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -295,6 +300,7 @@ struct AttachmentFilePreviewSheet: View {
                 VStack(alignment: .leading, spacing: TronSpacing.lg) {
                     truncationNotice(if: preview.isTruncated)
                     TronMarkdownView(document: document, streaming: false)
+                        .environment(\.markdownImageContext, MarkdownImageContext(sessionID: markdownSessionID, images: markdownImages))
                 }
                 .padding(.horizontal, TronSpacing.xlarge)
                 .padding(.vertical, TronSpacing.large)
@@ -379,7 +385,8 @@ struct AttachmentFilePreviewSheet: View {
             let prepared = try await AttachmentFilePreviewPolicy.prepare(
                 data: payload.data,
                 name: name,
-                mimeType: effectiveMIME
+                mimeType: effectiveMIME,
+                rendersMarkdownImages: rendersMarkdownImages
             )
             guard admitsLoad(generation, admission: admission),
                   presentationActivity.allowsPresentationPublication else { return }

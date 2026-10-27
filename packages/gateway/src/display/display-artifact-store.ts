@@ -60,6 +60,15 @@ function isValidUtf8(bytes: Uint8Array): boolean {
   }
 }
 
+/** Only source-path access errors become an unavailable resource; raw errors
+ * from staging, publication and durable storage must remain operational failures. */
+function refuseUnavailableSource(error: unknown): never {
+  if (["ENOENT", "ENOTDIR", "ENAMETOOLONG", "EACCES", "EPERM", "ELOOP"].includes((error as NodeJS.ErrnoException)?.code ?? "")) {
+    throw new GatewayError("invalid_request", "Display source is unavailable or unreadable");
+  }
+  throw error;
+}
+
 function safeName(input: string): string {
   const value = basename(input).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 160);
   return value || "artifact";
@@ -277,22 +286,22 @@ export class DisplayArtifactStore {
     if (components.some((value) => !value || value === "." || value === ".." || value.startsWith("."))) {
       throw new GatewayError("invalid_request", "Display path must be a visible relative path inside the session workspace");
     }
-    const root = await realpath(resolve(workspace));
-    const rootInfo = await lstat(root);
+    const root = await realpath(resolve(workspace)).catch(refuseUnavailableSource);
+    const rootInfo = await lstat(root).catch(refuseUnavailableSource);
     if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) {
       throw new GatewayError("conflict", "The session workspace is no longer a directory", true);
     }
     let source = root;
     for (const component of components) {
       source = join(source, component);
-      const info = await lstat(source);
+      const info = await lstat(source).catch(refuseUnavailableSource);
       if (info.isSymbolicLink()) throw new GatewayError("invalid_request", "Display paths cannot contain symbolic links");
     }
-    const opened = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW).catch(refuseUnavailableSource);
     let staging: string | undefined;
     try {
       const before = await opened.stat();
-      const actualSource = await realpath(source);
+      const actualSource = await realpath(source).catch(refuseUnavailableSource);
       if (!inside(root, actualSource) || !before.isFile() || before.size < 1 || before.size > this.maximumItemBytes) {
         throw new GatewayError("conflict", `Display artifacts may contain 1 through ${this.maximumItemBytes} bytes`);
       }
@@ -329,7 +338,7 @@ export class DisplayArtifactStore {
       try { await syncDurably(stagedHandle); }
       finally { await stagedHandle.close(); }
       const after = await opened.stat();
-      const current = await lstat(source);
+      const current = await lstat(source).catch(refuseUnavailableSource);
       if (!after.isFile() || current.isSymbolicLink() || !current.isFile()
         || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
         || before.mtimeMs !== after.mtimeMs || current.dev !== before.dev || current.ino !== before.ino

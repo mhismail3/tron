@@ -104,6 +104,9 @@ struct TronMarkdownView: View {
                             }.padding(.leading, CGFloat(item.depth) * 14)
                         }
                     }
+                case .image(let alt, let destination):
+                    MarkdownResourceImage(alt: alt, destination: destination)
+                        .id(block.id)
                 case .table(let rows):
                     MarkdownTable(rows: rows)
                 case .rule:

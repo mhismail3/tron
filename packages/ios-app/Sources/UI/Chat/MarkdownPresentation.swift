@@ -7,9 +7,9 @@ enum MarkdownPresentation: Sendable {
         let source: String
         let blocks: [Block]
 
-        init(source: String) {
+        init(source: String, rendersImages: Bool = false) {
             self.source = source
-            blocks = ColdParser.parse(source)
+            blocks = ColdParser.parse(source, rendersImages: rendersImages)
         }
 
         var accountedByteCount: Int {
@@ -65,6 +65,7 @@ enum MarkdownPresentation: Sendable {
     struct Block: Identifiable, Hashable, Sendable {
         enum Kind: Hashable, Sendable {
             case paragraph(Inline)
+            case image(alt: String, destination: String)
             case heading(level: Int, inline: Inline)
             case code(language: String?, code: String)
             case quote(Inline)
@@ -86,6 +87,8 @@ enum MarkdownPresentation: Sendable {
                     rows.reduce(0) { total, row in
                         total + row.reduce(0) { $0 + $1.accountedByteCount }
                     }
+                case .image(let alt, let destination):
+                    alt.utf8.count + destination.utf8.count
                 case .rule:
                     0
                 }
@@ -168,7 +171,7 @@ enum MarkdownPresentation: Sendable {
     }
 
     private enum ColdParser {
-        static func parse(_ source: String) -> [Block] {
+        static func parse(_ source: String, rendersImages: Bool = false) -> [Block] {
             let lines = sourceLines(source)
             var result: [Block] = []
             var index = 0
@@ -177,6 +180,13 @@ enum MarkdownPresentation: Sendable {
                 let line = lines[index].text
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty {
+                    index += 1
+                    continue
+                }
+                if rendersImages, !line.hasPrefix("    "), !line.hasPrefix("\t"),
+                   let match = trimmed.wholeMatch(of: /^!\[([^\]\n]*)\]\(([^)\s]+)\)$/) {
+                    append(.image(alt: String(match.1), destination: String(match.2)),
+                           lines: lines, start: index, end: index + 1, source: source, to: &result)
                     index += 1
                     continue
                 }
@@ -332,7 +342,7 @@ enum MarkdownPresentation: Sendable {
                     let value = next.trimmingCharacters(in: .whitespacesAndNewlines)
                     if value.isEmpty || codeFence(value) != nil || heading(value) != nil
                         || value.hasPrefix(">") || listItemComponents(next) != nil
-                        || isRule(value) {
+                        || isRule(value) || (rendersImages && value.wholeMatch(of: /^!\[([^\]\n]*)\]\(([^)\s]+)\)$/) != nil) {
                         break
                     }
                     paragraph.append(next)
