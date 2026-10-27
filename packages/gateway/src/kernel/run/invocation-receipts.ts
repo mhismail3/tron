@@ -3,6 +3,7 @@ import { SETTINGS_OUTCOME_MESSAGE } from "../settings/tool-contract.js";
 import type { ChatOrigin, InvocationLifecycle, JsonValue, ResourceInvocation } from "../../protocol/types.js";
 import { GatewayError } from "../../errors.js";
 import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "../../sessions/resource-invocation.js";
+import { MAX_ID_BYTES, MAX_NAME_BYTES, validOrigin, validText, validTimestamp } from "../../sessions/receipt-fields.js";
 
 /** Internal folded lifecycle derived from canonical invocation receipts. */
 export interface InvocationProjection {
@@ -32,8 +33,6 @@ export const HOME_TASK_RESULT_MESSAGE = "tron.home-task-result.v1";
 export const INVOCATION_RECEIPT_TYPE = "tron.chat-invocation.v1";
 const INVOCATION_RECEIPT_WRITER = "gateway";
 export const MAX_RECEIPT_BYTES = 400 * 1_024;
-export const MAX_ID_BYTES = 256;
-const MAX_NAME_BYTES = 512;
 const TERMINAL_LIFECYCLES = new Set<InvocationLifecycle>(["completed", "failed", "interrupted", "outcomeUnknown"]);
 const LIFECYCLES = new Set<InvocationLifecycle>([
   "staged", "accepted", "queued", "running", "waitingForInput", "retrying", "settling", "completed", "failed", "interrupted", "outcomeUnknown",
@@ -45,8 +44,6 @@ export type InvocationSource = "plain" | "skill" | "prompt" | "extension" | "sub
 const SOURCES = new Set<InvocationSource>(["plain", "skill", "prompt", "extension", "subagentWake", "homeWake"]);
 /** Sources that carry no name or arguments: a plain prompt or a Gateway-authored wake. */
 const UNNAMED_SOURCES: ReadonlySet<unknown> = new Set<InvocationSource>(["plain", "subagentWake", "homeWake"]);
-const ORIGIN_KINDS = new Set(["user", "subagent", "extension", "process", "gateway", "assistant", "unknown"] as const);
-const ORIGIN_CONFIDENCE = new Set(["boundary", "receipt", "adapter", "unknown"] as const);
 
 type ReceiptKind = "start" | "transition" | "terminal" | "binding";
 type ReceiptSource = InvocationSource;
@@ -118,12 +115,6 @@ type InvocationReceiptInput =
   | ReceiptInput<InvocationTerminalReceipt>
   | ReceiptInput<InvocationBindingReceipt>;
 
-export function validText(value: unknown, bytes: number, allowNewlines = false): value is string {
-  const controls = allowNewlines ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u : /[\u0000-\u001f\u007f]/u;
-  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= bytes
-    && !controls.test(value);
-}
-
 function validArguments(value: unknown): value is string {
   return typeof value === "string" && value.length > 0
     && Buffer.byteLength(value, "utf8") <= RESOURCE_ARGUMENTS_MAX_BYTES
@@ -146,28 +137,12 @@ function validResources(value: unknown, source: unknown, name: unknown, argument
   return valid && seen.size === value.length && first?.source === source && first?.name === name;
 }
 
-export function validTimestamp(value: unknown): value is string {
-  if (!validText(value, 64)) return false;
-  const time = Date.parse(value);
-  return Number.isFinite(time) && new Date(time).toISOString() === value;
-}
-
 function canonicalJSON(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJSON).join(",")}]`;
   if (value && typeof value === "object") {
     return `{${Object.keys(value as Record<string, unknown>).sort().map(key => `${JSON.stringify(key)}:${canonicalJSON((value as Record<string, unknown>)[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
-}
-
-export function validOrigin(value: unknown): value is ChatOrigin {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const origin = value as Record<string, unknown>;
-  return ORIGIN_KINDS.has(origin.kind as ChatOrigin["kind"])
-    && ORIGIN_CONFIDENCE.has(origin.confidence as ChatOrigin["confidence"])
-    && (origin.ownerId === undefined || validText(origin.ownerId, MAX_ID_BYTES))
-    && (origin.title === undefined || validText(origin.title, MAX_NAME_BYTES))
-    && Object.keys(origin).every(key => ["kind", "confidence", "ownerId", "title"].includes(key));
 }
 
 const COMMON_KEYS = ["writer", "version", "receiptId", "receiptKind", "invocationId", "operationId", "sessionId", "source", "sequence", "createdAt"];

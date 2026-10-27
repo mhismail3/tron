@@ -3,7 +3,6 @@
   "violations": [
     "two-way gateway/episodic <-> gateway/home",
     "two-way gateway/extension-activity <-> gateway/projection",
-    "two-way gateway/extension-activity <-> gateway/run",
     "two-way gateway/foundation <-> gateway/util",
     "two-way gateway/projection <-> gateway/run",
     "two-way gateway/run <-> gateway/session-catalog"

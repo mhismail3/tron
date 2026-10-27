@@ -5,6 +5,7 @@
     "extension-activity-recency.ts",
     "extension-activity.module.json",
     "extension-artifact-discovery.ts",
-    "extension-notification-receipts.ts"
+    "extension-notification-receipts.ts",
+    "receipt-fields.ts"
   ]
 }

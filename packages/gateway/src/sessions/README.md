@@ -20,10 +20,10 @@ Shared deadline bookkeeping lives in `../util/recency-deadlines.ts`; activity ow
 
 ## Contract
 
-- **Canonical JSONL is authoritative.** The Gateway is the sole live owner of
-  invocation, operation and activity identity. Bounded `tron.chat-invocation.v1`
-  records persist causal start, terminal and binding facts in the same branch and
-  never enter model context; plain prompt bodies stay only in their user entries.
+- **Canonical JSONL is authoritative.** The Gateway is sole live owner of invocation, operation and activity identity.
+  `receipt-fields.ts` owns shared text/origin/time bounds; each receipt family retains its grammar.
+  Bounded `tron.chat-invocation.v1` records persist causal start, terminal and binding facts in the same
+  branch, never enter model context; plain prompt bodies stay only in their user entries.
 - **Terminal receipts** are decided only at final `agent_settled` or at transfer to a
   distinct follow-up or extension operation, never at a response completion
   (compaction and same-owner continuation may still run, and Stop stays

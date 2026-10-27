@@ -4,7 +4,7 @@ import {
   validOrigin,
   validText,
   validTimestamp,
-} from "../kernel/run/invocation-receipts.js";
+} from "./receipt-fields.js";
 
 /** Canonical, non-context extension notification persisted in Pi JSONL. */
 export const EXTENSION_NOTIFICATION_RECEIPT_TYPE = "tron.extension-notification.v1";
