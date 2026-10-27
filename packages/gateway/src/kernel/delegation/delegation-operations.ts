@@ -12,7 +12,7 @@ type OwnedLease<Session> = { slot: Session; release: () => void };
  * existing lane/rebuild operation, never through a second runtime or state copy. */
 type OwnedSession = {
   retainLease(): () => void;
-  readonly ownedTurns: Pick<OwnedTurnOwner, "worker" | "bindWorker">;
+  readonly ownedTurns: Pick<OwnedTurnOwner, "worker" | "bindWorker" | "releaseUnadmittedWorker">;
   prompt(...input: ReturnType<typeof taskWorkerSteeringInput>): Promise<unknown>;
 };
 type InterruptWorkerTools<Session> = (slot: Session, by: string, before?: () => Promise<void>) => Promise<string[]>;
@@ -88,6 +88,13 @@ export class DelegationOperations<Session extends OwnedSession> {
       await lease.slot.ownedTurns.bindWorker(report, exceptWorkToken);
       return lease;
     } catch (error) { lease.release(); throw error; }
+  }
+
+  /** An admission that never started a turn releases its binding/toolset too,
+   * not just its pin. A later binding is fenced by the actual K5 owner. */
+  async abandonWorker(lease: OwnedLease<Session>, report: HomeTaskReportOwner): Promise<void> {
+    try { await lease.slot.ownedTurns.releaseUnadmittedWorker(report); }
+    finally { lease.release(); }
   }
 
   async acknowledge(sessionId: string, operationId: string, lease: OwnedLease<Session>): Promise<void> {

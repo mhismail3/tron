@@ -52,7 +52,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.checkin"; taskHash: string; operationHash: string; revision: number; attention: HomeTaskCheckin["attention"] }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
-  | { event: "home.task.dispatch-stage"; taskHash: string; stage: HomeTaskDispatchStage; outcome: "slow" | "timeout" | "cancelled"; durationMs: number }
+  | { event: "home.task.dispatch-stage"; taskHash: string; stage: HomeTaskDispatchStage; outcome: "slow" | "timeout" | "cancelled" | "abandon-failed"; durationMs: number }
   | HostPressureDiagnostic
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
@@ -374,7 +374,9 @@ export class HomeTaskDispatcher {
       }
       return value;
     } catch (error) {
-      if (error instanceof HomeTaskDispatchStageError) void step.then(value => abandon?.(value), () => {});
+      if (error instanceof HomeTaskDispatchStageError) void step.then(value => abandon?.(value), () => {}).catch(() => {
+        this.diagnostic?.({ event: "home.task.dispatch-stage", taskHash: hash(taskId), stage, outcome: "abandon-failed", durationMs: Date.now() - started });
+      });
       throw error;
     } finally {
       clearTimeout(timer);
@@ -528,6 +530,8 @@ export class HomeTaskDispatcher {
     const taskId = task.taskId;
     let lease: Awaited<ReturnType<SessionOperations["acquireOwnedSessionLease"]>> | undefined;
     let deadline: OwnedOperationDeadline | undefined;
+    let admissionReport: HomeTaskReportOwner | undefined;
+    const dispatch = this.sessions.delegation;
     try {
       const operationId = launch.operationId ?? `task-${randomUUID()}`;
       const reports = new HomeTaskReportOwner({ taskId: task.taskId, homeId: task.homeId, generation: task.generation, operationId }, async () => {
@@ -554,6 +558,7 @@ export class HomeTaskDispatcher {
         if (accepted.attention === "requested") await this.inbox.publishAttention(saved.taskId).catch(() => {});
         return accepted;
       });
+      admissionReport = reports;
       reports.limitBudget(async entries => {
         const current = await this.policy.budget().catch(() => undefined);
         const limit = (field: "inputTokens" | "outputTokens") => Math.min(task.budget?.[field] ?? Infinity, current?.[field] ?? Infinity);
@@ -566,14 +571,13 @@ export class HomeTaskDispatcher {
         // The input budget is documented "cached included": every prompt token counts.
         return homeTaskPromptTokens(spend) >= limit("inputTokens") || spend.outputTokens >= limit("outputTokens");
       });
-      const dispatch = this.sessions.delegation;
       // Trust is rechecked by the neutral creation/admission boundary too.
       // A worker created after admission was refused is released, never prompted.
       const resume = launch.resume;
       lease = resume
         // A resumed task rebinds its predecessor's worker session in place (#929).
-        ? await this.stage("create-worker", taskId, signal, () => dispatch.resumeWorker(resume.sessionId, reports, resume.exceptWorkToken), late => late.release())
-        : await this.stage("create-worker", taskId, signal, () => dispatch.createWorker(task.target, reports), late => late.release());
+        ? await this.stage("create-worker", taskId, signal, () => dispatch.resumeWorker(resume.sessionId, reports, resume.exceptWorkToken), late => dispatch.abandonWorker(late, reports))
+        : await this.stage("create-worker", taskId, signal, () => dispatch.createWorker(task.target, reports), late => dispatch.abandonWorker(late, reports));
       const { slot } = lease;
       const appliedChoice = resume ? "" : await (async () => {
       const configured = await this.stage("configure-worker", taskId, signal, async () => {
@@ -709,10 +713,17 @@ export class HomeTaskDispatcher {
       return { taskId: task.taskId, sessionId: slot.id, operationId, completion };
     } catch (error) {
       deadline?.disarm();
-      lease?.release();
+      admissionReport?.retire();
+      let failure = error;
+      try {
+        if (lease && admissionReport) await dispatch.abandonWorker(lease, admissionReport);
+        else lease?.release();
+      } catch (retirementError) {
+        failure = new AggregateError([error, retirementError], "Task admission and worker retirement failed");
+      }
       this.releaseSlot(taskId);
       await this.admissionFailed(task, error);
-      throw error;
+      throw failure;
     }
   }
 

@@ -107,14 +107,32 @@ export class OwnedTurnOwner {
         hostEpoch: this.operations.ui.hostEpoch,
       });
       try {
+        const previous = this.worker;
         this.worker = report;
-        await this.operations.replaceRuntime();
+        try { await this.operations.replaceRuntime(); }
+        catch (error) { this.worker = previous; throw error; }
         this.operations.revision += 1;
         this.operations.emit("session.resourcesChanged", {});
         this.operations.publishSnapshot();
       } finally {
         work.settle();
       }
+    });
+  }
+
+  /** Failed admission owns no turn. Retire its exact binding and rebuild the
+   * native toolset without its report callbacks before releasing its lease. */
+  async releaseUnadmittedWorker(report: HomeTaskReportOwner): Promise<void> {
+    report.retire();
+    await this.operations.lane.run(async () => {
+      if (this.worker !== report) return;
+      this.worker = undefined;
+      if (this.operations.disposed) return;
+      this.operations.assertUsable();
+      await this.operations.replaceRuntime();
+      this.operations.revision += 1;
+      this.operations.emit("session.resourcesChanged", {});
+      this.operations.publishSnapshot();
     });
   }
 
