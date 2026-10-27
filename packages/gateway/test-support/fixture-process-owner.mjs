@@ -77,9 +77,20 @@ export function disposeFixtureProcesses() {
     const deadline = Date.now() + 5_000;
     const escalateAt = Date.now() + 1_000;
     let escalated = false;
+    let escalationError;
     while (remaining().length || children.some(child => !child.exited)) {
-      if (!escalated && Date.now() >= escalateAt) { escalated = true; send("SIGKILL"); }
-      if (Date.now() >= deadline) throw new Error(`fixture process owner failed to join PIDs: ${remaining().map(row => row.pid).join(",")}`);
+      if (!escalated && Date.now() >= escalateAt) {
+        escalated = true;
+        try { send("SIGKILL"); }
+        catch (error) {
+          if (error.code !== "EPERM") throw error;
+          // Another inherited owner may be finishing the same tree. A live
+          // post-signal snapshot is not terminal evidence: join without
+          // resending, and retain the denial if any writer stays live.
+          escalationError = error;
+        }
+      }
+      if (Date.now() >= deadline) throw escalationError ?? new Error(`fixture process owner failed to join PIDs: ${remaining().map(row => row.pid).join(",")}`);
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   })().catch(error => {

@@ -49,7 +49,10 @@ one accepted recovery through the existing work owner.
   which files are nested.
 - **Fixture processes.** `fixture-process-owner.mjs` records spawned handles and
   groups, stops and joins them (TERM then one KILL) before roots are removed, and
-  writes join failures to `TRON_TEST_PROCESS_OWNER_FAILURE`.
+  writes join failures to `TRON_TEST_PROCESS_OWNER_FAILURE`. A KILL permission
+  denial retains its error while the existing bounded join observes terminal
+  state, without resending or extending the deadline. Only a fully joined tree
+  succeeds; a still-live target fails with the original denial and live PIDs.
 - Home task fixtures await an offline model refresh after provider registration,
   before returning either the Gateway-wide or a session runtime. Early refusal tests
   can otherwise delete their root while registration still holds its catalog lock.
@@ -86,7 +89,9 @@ composition a test registry takes, with deferred registry-owned module ports), `
 
 ## Signals
 
-None; failures surface as labelled test errors.
+| Signal | One-step diagnosis |
+| --- | --- |
+| Fixture process join failure | Read the JSONL file named by `TRON_TEST_PROCESS_OWNER_FAILURE`: `pids` identifies remaining live targets, `attemptedSignals` lists the requested signal passes, and `error` preserves the cause. Keep the failed fixture root while any target could write. |
 
 ## Verify
 

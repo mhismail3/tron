@@ -63,7 +63,7 @@ for (const exit of ["normal", "failure", "signal"]) test(`joins a detached grand
   }
 });
 
-for (const transition of ["already zombie", "zombie during signal", "reaped during signal", "live permission failure"]) {
+for (const transition of ["already zombie", "zombie during signal", "reaped during signal", "live permission failure", "exits after escalation denial", "live escalation permission failure"]) {
   test(`joins only non-writing processes: ${transition}`, { timeout: 15_000 }, async () => {
     const fixture = await mkdtemp(join(tmpdir(), "tron-fixture-zombie-"));
     const root = join(fixture, "writer-root");
@@ -90,6 +90,7 @@ def publish(path, text):
 pid = os.fork()
 if pid == 0:
  os.setsid()
+ if ${JSON.stringify(transition)} in ['exits after escalation denial', 'live escalation permission failure']: signal.signal(signal.SIGTERM, signal.SIG_IGN)
  publish(${JSON.stringify(pidFile)}, str(os.getpid()))
  # The child stays live until its release file or its parent's join; no clock
  # can expire while the owner is still inspecting it.
@@ -97,7 +98,7 @@ if pid == 0:
  os._exit(0)
 def finish(signum, frame):
  signal.signal(signal.SIGTERM, signal.SIG_IGN)
- while ${JSON.stringify(transition)} in ['zombie during signal', 'reaped during signal'] and not os.path.exists(${JSON.stringify(signalFile)}) and os.getppid() == host: time.sleep(.01)
+ while ${JSON.stringify(transition)} in ['zombie during signal', 'reaped during signal', 'exits after escalation denial', 'live escalation permission failure'] and not os.path.exists(${JSON.stringify(signalFile)}) and os.getppid() == host: time.sleep(.01)
  try: os.kill(pid, signal.SIGKILL)
  except (ProcessLookupError, PermissionError): pass
  os.waitpid(pid, 0)
@@ -130,6 +131,15 @@ finish(None, None)
       };
       if (${JSON.stringify(transition)} === 'already zombie') makeZombie();
       process.kill = (target, value) => {
+        if (target === -parent.pid && value === 'SIGKILL' && ['exits after escalation denial', 'live escalation permission failure'].includes(${JSON.stringify(transition)})) {
+          // Both real processes are still held here. Only the concurrent-exit
+          // case releases them after the failing syscall's synchronous cut.
+          if (${JSON.stringify(transition)} === 'exits after escalation denial') queueMicrotask(() => {
+            writeFileSync(${JSON.stringify(releaseFile)}, 'exit');
+            writeFileSync(${JSON.stringify(signalFile)}, 'complete');
+          });
+          const error = new Error('injected live escalation permission failure'); error.code = 'EPERM'; throw error;
+        }
         if (target === -parent.pid && value === 'SIGTERM' && !['zombie during signal', 'reaped during signal'].includes(${JSON.stringify(transition)})) {
           // Delay only this fixture's parent until the synchronous send pass
           // ends, so the child cannot disappear before it is inspected.
@@ -165,6 +175,11 @@ finish(None, None)
           const record = JSON.parse(readFileSync(${JSON.stringify(failureFile)}, 'utf8').trim());
           assert.ok(record.pids.includes(pid), 'live writer PID retained in diagnostic');
           assert.deepEqual(record.attemptedSignals, ['SIGTERM']);
+        } else if (${JSON.stringify(transition)} === 'live escalation permission failure') {
+          await assert.rejects(disposeFixtureProcesses(), /injected live escalation permission failure/);
+          const record = JSON.parse(readFileSync(${JSON.stringify(failureFile)}, 'utf8').trim());
+          assert.ok(record.pids.includes(pid), 'live writer PID retained after denied escalation');
+          assert.deepEqual(record.attemptedSignals, ['SIGTERM', 'SIGKILL']);
         } else {
           await disposeFixtureProcesses();
           assert.equal(existsSync(${JSON.stringify(failureFile)}), false, 'no join failure');
@@ -191,7 +206,7 @@ finish(None, None)
     const closed = once(host, "close");
     try {
       const [code] = await closed;
-      assert.equal(code, transition === "live permission failure" ? 1 : 0, await diagnostics(failureFile, stderr));
+      assert.equal(code, ["live permission failure", "live escalation permission failure"].includes(transition) ? 1 : 0, await diagnostics(failureFile, stderr));
       let proof;
       try { proof = JSON.parse(await readFile(proofFile, "utf8")); }
       catch { assert.fail(`host did not complete join assertions; ${await diagnostics(failureFile, stderr)}`); }
@@ -200,6 +215,9 @@ finish(None, None)
       if (transition === "live permission failure") {
         const record = JSON.parse((await readFile(failureFile, "utf8")).trim());
         assert.match(record.error, /injected live-group permission failure/);
+      } else if (transition === "live escalation permission failure") {
+        const record = JSON.parse((await readFile(failureFile, "utf8")).trim());
+        assert.match(record.error, /injected live escalation permission failure/);
       }
     } finally {
       if (exists(host.pid)) host.kill("SIGTERM");

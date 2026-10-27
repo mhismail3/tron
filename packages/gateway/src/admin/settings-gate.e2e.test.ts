@@ -108,6 +108,11 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     homeWebTransport: {
       fetcher: async () => new Response("<html><head><title>Page</title></head><body><article><p>A page body long enough to extract as readable text, repeated. A page body long enough to extract as readable text, repeated.</p></article></body></html>", { status: 200, headers: { "content-type": "text/html" } }),
       resolveHost: async () => [PUBLIC_ADDRESS],
+      // Public-page preflight and renderer API are distinct remote boundaries.
+      providerFetcher: async () => Response.json({ success: true, data: {
+        markdown: "A page body long enough to extract as readable text, repeated.",
+        metadata: { statusCode: 200, sourceURL: "https://example.org/page", title: "Page" },
+      } }),
     },
   });
   registries.push(registry);

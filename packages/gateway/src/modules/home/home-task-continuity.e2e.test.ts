@@ -146,16 +146,17 @@ describe("resuming a stopped Home worker in place", () => {
     const result = await run.completion;
     const stop = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "stop", taskId: run.taskId })
       .then(() => "accepted", (error: Error) => error.message);
-    const diagnostics = f.events.filter(event => event.topic === "session.diagnostic");
+    const diagnostics = () => f.events.filter(event => event.topic === "session.diagnostic");
     evidence.push({ case: "reported-worker-resume", result: result.terminalEvidence, stop,
-      snapshot: { phase: slot.snapshot().phase, operation: slot.snapshot().operation }, diagnostics });
+      snapshot: { phase: slot.snapshot().phase, operation: slot.snapshot().operation }, diagnostics: diagnostics() });
     expect(result.terminalEvidence).toMatchObject({ outcome: "progress", reason: "explicit-report" });
     await app.open(run.sessionId);
     const resumed = await app.send(run.sessionId, "Continue the same worker");
     await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("reported-worker.resume-1")).lifecycle === "terminal", "reported worker continuation settles");
     expect(await homeOwnerOf(f.registry).taskStatus("reported-worker.resume-1")).toMatchObject({ sessionId: run.sessionId, operationId: resumed.operationId,
       terminalEvidence: { outcome: "final", reason: "explicit-report" } });
-    expect(diagnostics).toEqual([]);
+    // Settings application is informational; every other diagnostic remains a failure.
+    expect(diagnostics().filter(event => (event.payload as { data?: { code?: string } }).data?.code !== "settings-run-applied")).toEqual([]);
   }, 60_000);
   it("keeps bounded worker check-ins through stop, cold reads and resume with exact operation attribution", async () => {
     const f = await fixture();
