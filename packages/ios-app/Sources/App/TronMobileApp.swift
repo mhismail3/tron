@@ -118,6 +118,8 @@ struct TronMobileApp: App {
                 HostedAgentInstructionsFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-mac-terminal-fixture") {
                 HostedMacTerminalFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-settings-list-refresh-fixture") {
+                HostedSettingsListRefreshFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-settings-renderer-fixture") {
                 HostedSettingsRendererFixture()
             } else {

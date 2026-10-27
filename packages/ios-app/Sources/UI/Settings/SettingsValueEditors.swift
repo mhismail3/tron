@@ -128,14 +128,15 @@ struct SettingsListEditor: View {
     /// Catalog-backed lists add through the shared picker, never free-form model IDs.
     let entryPicker: ((@escaping (String) -> Void) -> AnyView)?
     let onChange: (JSONValue?) -> Void
-    @State private var items: [Item]
-    @State private var next = ""
+    @PresentationState private var items: [Item]
+    @PresentationState private var next = ""
     @Environment(\.dismiss) private var dismiss
 
     init(title: String, help: String, entry: SettingsEntryGuidance?, values: [String],
          entryPicker: ((@escaping (String) -> Void) -> AnyView)? = nil, onChange: @escaping (JSONValue?) -> Void) {
         self.title = title; self.help = help; self.entry = entry; self.entryPicker = entryPicker; self.onChange = onChange
-        _items = State(initialValue: values.map { Item(text: $0) })
+        // Seed once for this presentation, not again when canonical settings refresh.
+        _items = PresentationState(wrappedValue: values.map { Item(text: $0) })
     }
 
     var body: some View {
