@@ -182,6 +182,8 @@ finish(None, None)
           assert.deepEqual(record.attemptedSignals, ['SIGTERM', 'SIGKILL']);
         } else {
           await disposeFixtureProcesses();
+          assert.notEqual(parent.exitCode, null, 'direct parent joined before disposal resolves');
+          assert.equal(state(pid), '', 'writer reaped before disposal resolves');
           assert.equal(existsSync(${JSON.stringify(failureFile)}), false, 'no join failure');
         }
       } finally {
