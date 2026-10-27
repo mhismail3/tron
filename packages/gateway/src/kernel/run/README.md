@@ -118,6 +118,8 @@ actual K3 host; native frames do not select product modules or keep another list
   no-agent/command settlement, preserving live successor ownership across receipt I/O.
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option
   replacement, live conversion/preparation and ordered stream-policy composition.
+  Its complete abort-aware AgentSession stream boundary handles synchronous/asynchronous
+  setup and result-only streams for ordinary responses and summarization.
 
 ## Contract
 
@@ -153,6 +155,8 @@ Ownership is declared by [`gateway/run`](../../run.module.json).
 
 ## Invariants
 
+An aborted request's error is classified as aborted using the request signal,
+never error-message matching; successful terminal results remain unchanged.
 Abort signals and grace periods, tool text, output and environment filtering remain
 identical to Pi-backed Gateway execution. Cleanup targets only the owned process tree.
 Oversized-request classification retains non-overflow provider errors unchanged.

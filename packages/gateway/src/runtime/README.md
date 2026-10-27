@@ -1,21 +1,15 @@
-# Runtime stream and environment
+# Runtime environment
 
 ## Purpose
 
-Request-stream cancellation and process-environment primitives around Pi.
+Process-environment primitives around the selected Pi runtime.
 
 ## Owns
 
-- `abort-aware-stream.ts`: one AgentSession stream boundary for ordinary responses
-  and summarization, including asynchronous setup and result-only streams.
 - `node-command-environment.ts`: supervised Node/Pi alias validation and ordered
   agent-bin/Homebrew PATH configuration before resource discovery.
 
 ## Contract
-
-An aborted request's error is classified as aborted; successful terminal results
-remain unchanged. Abort classification uses the request signal, never error-message
-matching.
 
 Supervised environment validation applies only to the selected payload Gateway
 entrypoint, never a source child that inherited supervision markers. Alias targets,
@@ -25,18 +19,18 @@ append preserve that precedence. These helpers do not install or restart anythin
 
 ## Entry points
 
-`abortAwareStream`, `configureSupervisedNodeCommandEnvironment`,
+`configureSupervisedNodeCommandEnvironment`,
 `configureAgentBinEnvironment`, `configureHomebrewPath`.
 
 ## Verify
 
 ```bash
-scripts/tron test gateway src/kernel/run/compaction-policy.integration.test.ts src/kernel/run/direct-bash-process-owner.integration.test.ts
+scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts
 scripts/tron verify --module gateway/runtime
 ```
 
 ## Not here
 
-Compaction policy and the live ModuleHost compaction port:
-[gateway/run](../kernel/run/README.md). Run admission and cancellation orchestration
-remain in [sessions](../sessions/README.md).
+Request-stream cancellation classification, compaction policy and the live ModuleHost
+compaction port: [gateway/run](../kernel/run/README.md). Run admission and cancellation
+orchestration remain in [sessions](../sessions/README.md).
