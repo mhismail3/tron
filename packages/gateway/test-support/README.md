@@ -42,6 +42,11 @@ one accepted recovery through the existing work owner.
   resolvers and HTTP stubs. `network-isolation.ts` refuses any non-loopback TCP
   connection from an in-process socket and fails the current test (or file). It does
   not cover child processes or DNS.
+- **Wire inputs.** The protocol lock selects unbranded runtime provenance before
+  constructing its real Gateway. A separate supervised case checks the three
+  explicit identity values and full hello/`system.info` shapes against that base
+  wire plus provenance. Captured frames are never stripped or normalized to hide
+  inherited supervisor fields, and environment restoration follows Gateway disposal.
 - **Two Vitest passes.** `vitest.config.ts` runs the parallel suite with at most four
   workers (shared-host bound, not test selection). `vitest.nested.config.ts` runs, one
   file at a time with its own hang bounds, the files that spawn nested Vitest or real
@@ -77,6 +82,15 @@ one accepted recovery through the existing work owner.
   creation, v2 text edit, then exact historical placement restore.
 - The bounded profile child takes an explicit migration/reorganization mode. The
   v2 deep-history case exercises reorganization with a real 96 MiB process ceiling.
+- The 5,800-session migration/startup corpus is synthetic and owns a short `/tmp`
+  root through its normal per-case cleanup. Canonical paths and cwd strings count
+  against the catalog acquisition byte budget; an inherited nested TMPDIR must not
+  turn that in-budget startup case into an over-budget catalog refusal. The budget
+  and the real over-budget acquisition refusal tests remain unchanged.
+- The Home activation/wake lock supplies the existing lock harness a short `/tmp`
+  root, owned by its Gateway disposer. The real workspace path is part of episodic
+  node text, so unbounded caller TMPDIR length must not cross the positive fixture's
+  512-byte free-parent boundary. The node limit, captured frames and golden stay fixed.
 - No test reaches the network or a real Tron home.
 - A test owns and removes its processes, temp homes and fixtures on success and
   failure.

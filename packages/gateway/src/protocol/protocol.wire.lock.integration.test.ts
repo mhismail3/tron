@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import WebSocket from "ws";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, eventShapePaths, lockPaths, lockUpdateRequested } from "../../test-support/scenario-lock.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -24,7 +24,10 @@ import { waitFor } from "../../test-support/wait-for.js";
 const MODULE = "gateway/protocol";
 const REPOSITORY = resolve(import.meta.dirname, "..", "..", "..", "..");
 const gateways: LockGateway[] = [];
-afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
+afterEach(async () => {
+  try { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); }
+  finally { vi.unstubAllEnvs(); }
+});
 
 /** One raw handshake: the frames received and how the socket closed. */
 async function handshake(gateway: LockGateway, protocolVersion: number): Promise<{ frames: unknown[]; close: { code: number; reason: string } | null }> {
@@ -41,7 +44,34 @@ async function handshake(gateway: LockGateway, protocolVersion: number): Promise
 }
 
 describe("gateway/protocol wire contract locks", () => {
+  it("preserves supervised provenance in raw hello and system.info without changing the base wire", async () => {
+    const identity = { sourceRevision: "fixture-source", buildFingerprint: "fixture-build", runtimeEpoch: "fixture-epoch" };
+    vi.stubEnv("TRON_GATEWAY_SOURCE_REVISION", identity.sourceRevision);
+    vi.stubEnv("TRON_GATEWAY_BUILD_FINGERPRINT", identity.buildFingerprint);
+    vi.stubEnv("TRON_GATEWAY_RUNTIME_EPOCH", identity.runtimeEpoch);
+    const gateway = await startLockGateway("protocol-wire-supervised");
+    gateways.push(gateway);
+    const baseline = JSON.parse(await readFile(lockPaths(import.meta.url, "protocol-wire").goldenPath, "utf8")) as {
+      declared: { gatewayProtocol: { protocolVersion: number } };
+      handshake: { accepted: { frames: string[][] } };
+      methods: Array<{ method: string; response: string[] }>;
+    };
+    const accepted = await handshake(gateway, baseline.declared.gatewayProtocol.protocolVersion);
+    const info = await (await gateway.connect("phone")).request("system.info", {});
+    expect(accepted.frames[0]).toMatchObject(identity);
+    expect(info.ok).toBe(true);
+    expect(info.result).toMatchObject(identity);
+    const supervisedPaths = (base: string[]) => [...base, ...Object.keys(identity).map((key) => `${key}:string`)].sort();
+    expect(eventShapePaths("hello", accepted.frames[0])).toEqual(supervisedPaths(baseline.handshake.accepted.frames[0]!));
+    expect(eventShapePaths("response", info.result)).toEqual(supervisedPaths(baseline.methods.find((entry) => entry.method === "system.info")!.response));
+  });
+
   it("protocol 8: handshake, refusal and the method shapes clients use", async () => {
+    // This lock is the unbranded wire. A supervising Gateway's inherited identity
+    // is not a fixture input; the supervised variant above captures it explicitly.
+    vi.stubEnv("TRON_GATEWAY_SOURCE_REVISION", "");
+    vi.stubEnv("TRON_GATEWAY_BUILD_FINGERPRINT", "");
+    vi.stubEnv("TRON_GATEWAY_RUNTIME_EPOCH", "");
     const gateway = await startLockGateway("protocol-wire");
     gateways.push(gateway);
     gateway.script([() => fauxAssistantMessage("Wire contract answer.")]);

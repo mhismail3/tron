@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
@@ -127,6 +127,8 @@ describe("gateway/home scenario lock", () => {
     let notifications!: NotificationService;
     let gateway!: LockGateway;
     gateway = await startLockGateway(LOCK, {
+      // Workspace text participates in the unchanged 512-byte free-node boundary.
+      root: await mkdtemp("/tmp/tron-home-lock-"),
       home: { memorySummarizer: () => async () => fauxAssistantMessage("Lock memory summary.") },
       notifications: async (tronHome) => {
         const relay = new PushRelayClient(RELAY_ORIGIN, async (url, init) => {

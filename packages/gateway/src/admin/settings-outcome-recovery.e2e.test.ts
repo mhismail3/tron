@@ -58,6 +58,18 @@ async function gateway(contextWindow?: number) {
 }
 
 describe("settings outcome recovery at the real Registry/Pi/store boundary", () => {
+  it("refuses a small input when the full Home catalog leaves no native response headroom", async () => {
+    const f = await fixture(false, false, 8000);
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const calls = f.faux.state.callCount;
+    await home.prompt("A small input still carries the declared Home tools").catch(() => {});
+    await waitFor(() => !home.isBusy && !home.hasActiveAgentRun || undefined, "catalog-only overflow releases native ownership");
+    const observed = { refused: f.signals.some(signal => signal.event === "refused" && signal.reason === "context-overflow"), providerCalls: f.faux.state.callCount - calls };
+    evidence.push({ case: "catalog-only-overflow", ...observed, refusal: f.signals.find(signal => signal.event === "refused" && signal.reason === "context-overflow") });
+    expect(observed).toEqual({ refused: true, providerCalls: 0 });
+  });
+
   it("keeps a later deadline armed after an actual one-shot approvals read failure, without a foreground read", async () => {
     const f = await gateway();
     const requester = await f.registry.create(f.cwd);
@@ -115,7 +127,7 @@ describe("settings outcome recovery at the real Registry/Pi/store boundary", () 
   }, 60_000);
 
   it("drains fitting Home batches through the actual native context budget and successful provider replies", async () => {
-    const f = await gateway(8000); const owner = homeOwnerOf(f.registry); await owner.pauseMemory();
+    const f = await gateway(14000); const owner = homeOwnerOf(f.registry); await owner.pauseMemory();
     const ids: string[] = [];
     for (let index = 0; index < 160; index++) {
       const held = await f.request(`bounded Home batch ${index}`);
@@ -173,7 +185,7 @@ describe("settings outcome recovery at the real Registry/Pi/store boundary", () 
   });
 
   it("retains the outcome when the actual native request overflows context, then delivers on a usable input", async () => {
-    const f = await gateway(8000); const owner = homeOwnerOf(f.registry); const held = await f.request("native refusal");
+    const f = await gateway(14000); const owner = homeOwnerOf(f.registry); const held = await f.request("native refusal");
     const calls = f.faux.state.callCount;
     const heldResponse: FauxResponseFactory = (_context, options) => new Promise(resolve => {
       options?.signal?.addEventListener("abort", () => resolve(fauxAssistantMessage("Stopped owned activation.")), { once: true });

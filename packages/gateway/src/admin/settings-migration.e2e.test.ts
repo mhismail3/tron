@@ -244,7 +244,10 @@ function sessionText(id: string, cwd: string, index: number, legacy: boolean): s
   return `${lines.map(line => JSON.stringify(line)).join("\n")}\n${index === 11 ? `{"type":"message","id":"torn"` : ""}`;
 }
 async function stableShapedState(count = SESSIONS, withUnreadable = false) {
-  const root = await mkdtemp(join(tmpdir(), "tron-settings-startup-")); roots.push(root);
+  // The acquisition budget includes canonical path/cwd bytes, not just row count.
+  // Keep this 5,800-row positive fixture Stable-shaped even under nested TMPDIRs;
+  // the existing roots owner still removes this exact directory after every case.
+  const root = await mkdtemp("/tmp/tron-settings-startup-"); roots.push(root);
   const tronHome = join(root, "tron"), agentDir = join(root, "agent"), sessions = join(agentDir, "sessions");
   for (const directory of ["home", "tmp", "project", "agent", join("tron", "gateway", "home")]) await mkdir(join(root, directory), { recursive: true, mode: 0o700 });
   // The Global the old `mac` frames recorded (unchanged since), with its own retry policy.
