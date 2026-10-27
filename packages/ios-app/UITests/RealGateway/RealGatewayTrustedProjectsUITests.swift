@@ -55,18 +55,23 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(run.waitForExistence(timeout: 30))
         XCTAssertFalse(run.staticTexts["Trust for this project"].exists, "Connection must not duplicate per-project trust")
         XCTAssertFalse(run.staticTexts["Default trust policy"].exists, "Connection must not duplicate the default trust policy")
+        let projects = app.buttons["Trusted Projects"]
+        revealBelowNavigationBar(app, projects)
+        projects.tap()
+        _ = app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"].waitForExistence(timeout: 30)
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings-row-permissions.defaultProjectTrust").count, 1,
                        "The consolidated sheet owns one default trust policy")
         keepScreenshot(app, name: "after-agent-behavior-trusted-projects")
         XCTAssertTrue(app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"].waitForExistence(timeout: 30),
                       app.debugDescription)
-        let seededRow = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "trusted-project")).firstMatch
+        let seededRow = app.buttons.matching(NSPredicate(format: "label == %@", "trusted-project")).firstMatch
         XCTAssertTrue(seededRow.waitForExistence(timeout: 30), "the saved decision is not listed: \(app.debugDescription)")
         XCTAssertEqual(seededRow.value as? String, "1")
 
-        let add = app.buttons["trusted-projects-add"]
+        let add = app.buttons["Add Project"]
         revealBelowNavigationBar(app, add)
         add.tap()
+        app.buttons["Choose Existing Folder"].tap()
         let folder = app.buttons.matching(NSPredicate(format: "label == %@", "added-project")).firstMatch
         XCTAssertTrue(folder.waitForExistence(timeout: 60), app.debugDescription)
         folder.tap()
@@ -74,7 +79,7 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitForEnabled(useCurrent, timeout: 60), app.debugDescription)
         useCurrent.tap()
 
-        let row = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "added-project")).firstMatch
+        let row = app.buttons.matching(NSPredicate(format: "label == %@", "added-project")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 30), "the added project is not listed: \(app.debugDescription)")
         XCTAssertEqual(row.value as? String, "0", "an added project must start untrusted")
         XCTAssertTrue(waitUntil(timeout: 15) { stored("added-project") == false },
@@ -85,6 +90,7 @@ extension RealGatewayPairAndChatUITests {
         // A folder inside a listed (blocked) project is its own project.
         revealBelowNavigationBar(app, add)
         add.tap()
+        app.buttons["Choose Existing Folder"].tap()
         let parentFolder = app.buttons.matching(NSPredicate(format: "label == %@", "blocked-parent")).firstMatch
         XCTAssertTrue(parentFolder.waitForExistence(timeout: 60), app.debugDescription)
         parentFolder.tap()
@@ -93,7 +99,7 @@ extension RealGatewayPairAndChatUITests {
         nestedFolder.tap()
         XCTAssertTrue(waitForEnabled(useCurrent, timeout: 60), app.debugDescription)
         useCurrent.tap()
-        let nestedRow = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "nested-project")).firstMatch
+        let nestedRow = app.buttons.matching(NSPredicate(format: "label == %@", "nested-project")).firstMatch
         XCTAssertTrue(nestedRow.waitForExistence(timeout: 30), "a folder inside a listed project was not added: \(app.debugDescription)")
         XCTAssertTrue(waitUntil(timeout: 15) { stored("nested-project") == false },
                       "the Gateway trust store must record the nested project as not trusted")
