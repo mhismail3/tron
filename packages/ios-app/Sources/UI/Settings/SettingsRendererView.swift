@@ -61,9 +61,10 @@ struct SettingsRendererView: View {
         Group {
             if embedded || isInline {
                 rendererContents
+            } else if case .section(let id) = presentation {
+                scrollingContents.accessibilityIdentifier("settings-section-\(id)-detail")
             } else {
-                ScrollView(.vertical, showsIndicators: true) { rendererContents }
-                    .tronScrollEdgeChrome()
+                scrollingContents
             }
         }
         .environment(\.tronPresentationDependencyRead, PresentationDependencyRead(
@@ -109,6 +110,11 @@ struct SettingsRendererView: View {
     }
 
     private var isInline: Bool { if case .keys = presentation { true } else { false } }
+
+    private var scrollingContents: some View {
+        ScrollView(.vertical, showsIndicators: true) { rendererContents }
+            .tronScrollEdgeChrome()
+    }
 
     @ViewBuilder
     private var rendererContents: some View {
@@ -182,7 +188,7 @@ struct SettingsRendererView: View {
                 VStack(spacing: 0) { rows(only.keys, resolution: resolution, options: options, detailed: true, instanced: only.instanced) }
             }
         } else {
-            TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
+            let contents = TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
                 if ownsDefaultTools {
                     DefaultToolsSettingsSection(projectCWD: target.objectValue?["cwd"]?.stringValue)
                 }
@@ -210,8 +216,14 @@ struct SettingsRendererView: View {
                     }
                 }
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("settings-section-\(id)-detail")
+            if embedded {
+                // Embedded sections need their own AX container. A standalone
+                // section already has one: its native scroll surface.
+                contents.accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("settings-section-\(id)-detail")
+            } else {
+                contents
+            }
         }
     }
 

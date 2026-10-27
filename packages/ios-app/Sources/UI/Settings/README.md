@@ -69,6 +69,9 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   anchored slider with Gateway-served choices; a tap anywhere outside it closes and saves it, even
   below a short embedded section. Embedded renderers inherit the enclosing sheet's slider host;
   only standalone renderers install one, so the editor uses the sheet viewport rather than its card.
+  A standalone section detail identity belongs to its native scroll surface, not a
+  structural group that can collapse onto a lone row. Embedded section identities stay inside
+  their host sheet, whose scroll surface can contain several sections.
   Session and Home retain their scope-specific section drill-in rows; overrides show the
   shared Overridden pill beside the row title and Revert after the value.
 - **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
