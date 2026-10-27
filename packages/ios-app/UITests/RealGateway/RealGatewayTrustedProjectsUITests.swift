@@ -2,14 +2,12 @@ import Foundation
 import XCTest
 
 /// #1517/#2010: Global Settings › Agent Behavior against the real Gateway.
-/// The embedded Trusted Projects group owns the default trust policy and
-/// every saved project decision (the Connection group repeats neither),
-/// and Add Project records the chosen folder through `settings.change` as Not
-/// trusted: it joins the list untoggled and the Gateway's trust store holds
-/// `false` for it. A per-model key's all-models instance is titled "All
-/// models", never by its fixed `role=chat` qualifier. #1569: a folder nested
-/// under a listed project is added as its own entry (the store resolves the
-/// nearest saved decision), and its row then trusts it alone.
+/// The Trusted Projects sheet owns the default policy and saved decisions;
+/// the Connection group repeats neither. Project buttons open detail sheets.
+/// Choosing an existing folder only inspects it (including nested folders),
+/// preserving every trust record. A new project receives trust only after
+/// the separate canonical approval tap. A per-model key's all-models instance
+/// is titled "All models", never by its fixed `role=chat` qualifier.
 extension RealGatewayPairAndChatUITests {
     @MainActor
     func testTrustedProjectsListsAndAddsProjectsUntrusted() throws {
@@ -66,12 +64,21 @@ extension RealGatewayPairAndChatUITests {
                       app.debugDescription)
         let seededRow = app.buttons.matching(NSPredicate(format: "label == %@", "trusted-project")).firstMatch
         XCTAssertTrue(seededRow.waitForExistence(timeout: 30), "the saved decision is not listed: \(app.debugDescription)")
-        XCTAssertEqual(seededRow.value as? String, "1")
+        seededRow.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["project-lifecycle-details"].waitForExistence(timeout: 30),
+                      "A project button must open its project sheet")
+        XCTAssertEqual(stored("trusted-project"), true)
+        func closeSheet() throws {
+            try XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.last(where: { $0.isHittable }),
+                          "The top project sheet must offer Done").tap()
+        }
+        try closeSheet()
+        let trustBeforeSelection = try Data(contentsOf: trustStore)
 
         let add = app.buttons["Add Project"]
         revealBelowNavigationBar(app, add)
         add.tap()
-        app.buttons["Choose Existing Folder"].tap()
+        app.buttons["project-lifecycle-existing"].tap()
         let folder = app.buttons.matching(NSPredicate(format: "label == %@", "added-project")).firstMatch
         XCTAssertTrue(folder.waitForExistence(timeout: 60), app.debugDescription)
         folder.tap()
@@ -79,18 +86,22 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitForEnabled(useCurrent, timeout: 60), app.debugDescription)
         useCurrent.tap()
 
-        let row = app.buttons.matching(NSPredicate(format: "label == %@", "added-project")).firstMatch
+        let row = app.navigationBars.staticTexts["added-project"]
         XCTAssertTrue(row.waitForExistence(timeout: 30), "the added project is not listed: \(app.debugDescription)")
-        XCTAssertEqual(row.value as? String, "0", "an added project must start untrusted")
-        XCTAssertTrue(waitUntil(timeout: 15) { stored("added-project") == false },
-                      "the Gateway trust store must record the added project as not trusted")
-        XCTAssertEqual(seededRow.value as? String, "1", "adding must not change another project's decision")
+        XCTAssertTrue(app.descendants(matching: .any)["project-lifecycle-details"].exists,
+                      "Choosing a folder opens its inspection sheet, not a trust switch")
+        XCTAssertTrue(waitUntil(timeout: 15) { (try? Data(contentsOf: trustStore)) == trustBeforeSelection },
+                      "Inspecting a folder must leave the entire Gateway trust store unchanged")
+        XCTAssertNil(stored("added-project"), "Inspection must not persist even an explicit false decision")
+        XCTAssertEqual(stored("trusted-project"), true, "adding must not change another project's decision")
         keepScreenshot(app, name: "after-trusted-projects-default-policy")
 
-        // A folder inside a listed (blocked) project is its own project.
+        try closeSheet() // Selected folder inspection.
+        try closeSheet() // Add Project, back to the project list.
+        // A folder inside a listed (blocked) project can also be inspected.
         revealBelowNavigationBar(app, add)
         add.tap()
-        app.buttons["Choose Existing Folder"].tap()
+        app.buttons["project-lifecycle-existing"].tap()
         let parentFolder = app.buttons.matching(NSPredicate(format: "label == %@", "blocked-parent")).firstMatch
         XCTAssertTrue(parentFolder.waitForExistence(timeout: 60), app.debugDescription)
         parentFolder.tap()
@@ -99,12 +110,34 @@ extension RealGatewayPairAndChatUITests {
         nestedFolder.tap()
         XCTAssertTrue(waitForEnabled(useCurrent, timeout: 60), app.debugDescription)
         useCurrent.tap()
-        let nestedRow = app.buttons.matching(NSPredicate(format: "label == %@", "nested-project")).firstMatch
+        let nestedRow = app.navigationBars.staticTexts["nested-project"]
         XCTAssertTrue(nestedRow.waitForExistence(timeout: 30), "a folder inside a listed project was not added: \(app.debugDescription)")
-        XCTAssertTrue(waitUntil(timeout: 15) { stored("nested-project") == false },
-                      "the Gateway trust store must record the nested project as not trusted")
+        XCTAssertTrue(waitUntil(timeout: 15) { (try? Data(contentsOf: trustStore)) == trustBeforeSelection },
+                      "Nested inspection must preserve the parent's and every other saved decision")
+        XCTAssertNil(stored("nested-project"), "Nested inspection must not persist a decision")
         XCTAssertEqual(stored("blocked-parent"), false, "adding a nested project must not change its parent's decision")
         keepScreenshot(app, name: "after-trusted-projects-nested-added")
+        try closeSheet()
+        try closeSheet()
+
+        // Exercise the actual native request/decision route, not a settings
+        // write: create records false, and only the separate digest tap trusts.
+        add.tap()
+        app.buttons["Create Project"].tap()
+        let field = app.textFields["project-lifecycle-name"]
+        XCTAssertTrue(field.waitForExistence(timeout: 30), app.debugDescription)
+        field.tap()
+        field.typeText("selection-approved\n")
+        let create = app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Create Project", "Create Project, ")).allElementsBoundByIndex.last(where: { $0.isHittable })
+        try XCTUnwrap(create).tap()
+        let approve = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings-approval-approve-'")).firstMatch
+        XCTAssertTrue(approve.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertEqual(stored("selection-approved"), false, "projects.request alone must not grant trust")
+        approve.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { stored("selection-approved") == true },
+                      "Trust must change only after the separate settings.decide approval tap")
+        XCTAssertEqual(stored("trusted-project"), true)
+        XCTAssertEqual(stored("blocked-parent"), false)
     }
 
     /// #1570: New Session › Project Settings shows a blocked project's trust and
