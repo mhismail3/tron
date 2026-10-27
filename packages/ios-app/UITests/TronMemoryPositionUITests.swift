@@ -7,6 +7,35 @@ import XCTest
     func testScopedMemoryDark() { journey(dark: true, large: false) }
     func testScopedMemoryAccessibility() { journey(dark: false, large: true) }
 
+    func testPagedMemoryAndTasksLabelLoadedItems() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-paging", "-home-browser-paging"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(app.buttons["session-context-button"].waitForExistence(timeout: 10))
+        app.buttons["session-context-button"].tap()
+        expand(app, "Manage Home")
+        for (row, title, viewport, done) in [
+            ("home-manage-memory-browser", "Memory", "home-memory-viewport", "home-sheet-done-memory"),
+            ("home-manage-tasks", "Tasks", "home-tasks-viewport", "home-sheet-done-tasks")
+        ] {
+            reveal(app, row).tap()
+            expand(app, title)
+            element(app, viewport).swipeUp()
+            let chip = app.buttons["feed-position-chip"]
+            XCTAssertTrue(chip.waitForExistence(timeout: 10))
+            XCTAssertTrue(chip.label.hasPrefix("Items "), chip.label)
+            if title == "Memory" {
+                // The fixture refuses its second page. A lower bound cannot be
+                // announced as the exact size of the whole memory.
+                XCTAssertTrue(chip.label.contains("of at least 10"), chip.label)
+            }
+            shot("paged-\(title.lowercased())")
+            app.buttons[done].tap()
+        }
+    }
+
     private func journey(dark: Bool, large: Bool) {
         continueAfterFailure = true
         let app = XCUIApplication()
@@ -47,6 +76,8 @@ import XCTest
 
     private func checkChip(_ app: XCUIApplication, count: Int, mode: String) {
         let chip = app.buttons["feed-position-chip"]
+        // Visibility publishes the scrolling range, not merely sheet expansion.
+        element(app, "home-memory-viewport").swipeUp()
         XCTAssertTrue(chip.waitForExistence(timeout: 10))
         shot("memory-pill-\(mode)")
         // Assert semantics, not a particular number of visible rows or font layout.
@@ -69,7 +100,15 @@ import XCTest
     private func reveal(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         let target = element(app, id)
         XCTAssertTrue(target.waitForExistence(timeout: 10), app.debugDescription)
-        for _ in 0..<12 where !target.isHittable { app.swipeUp() }
+        for _ in 0..<12 where !target.isHittable {
+            // Full-window flings can skip a large-type row in a medium sheet.
+            // Scroll the frontmost sheet in small, directed steps instead.
+            let scroll = app.scrollViews.allElementsBoundByIndex.last { $0.frame.height > 150 && $0.isHittable }!
+            let bar = app.navigationBars.allElementsBoundByIndex.last!.frame
+            let down = target.frame.minY < bar.maxY
+            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: down ? 0.45 : 0.75))
+                .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: down ? 0.75 : 0.45)))
+        }
         XCTAssertTrue(target.isHittable, app.debugDescription)
         return target
     }

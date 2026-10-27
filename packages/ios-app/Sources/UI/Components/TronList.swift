@@ -415,12 +415,14 @@ final class TronFeedPosition {
 /// scrolling range.
 private struct TronFeedChipSpace: View {
     let position: TronFeedPosition
+    @ScaledMetric(relativeTo: .caption) private var height = TronFeedPositionChip.height
     var body: some View {
-        Color.clear.frame(height: position.long ? TronFeedPositionChip.height : 0).accessibilityHidden(true)
+        Color.clear.frame(height: position.long ? height : 0).accessibilityHidden(true)
     }
 }
 
-/// "6,689–6,714 of 6,733", newest first; tapping jumps to the newest entry.
+/// Labelled item positions, never a mixture of catalog addresses and row counts.
+/// A loaded lower bound carries `+` visually and “at least” in VoiceOver.
 /// The capsule's 44-pt target takes every touch on it; beside it, rows stay live.
 struct TronFeedPositionChip: View {
     static let target: CGFloat = 44
@@ -429,29 +431,35 @@ struct TronFeedPositionChip: View {
     let total: Int?
     let totalIsExact: Bool
     let jump: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         if position.long, let newest = position.newest, let oldest = position.oldest {
             let low = min(newest, oldest), high = max(newest, oldest)
             Button(action: jump) {
                 HStack(spacing: 8) {
-                    Text("\(low.formatted())–\(high.formatted())").font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    Text("Items \(low.formatted())–\(high.formatted())\(total.map { " of \($0.formatted())\(totalIsExact ? "" : "+")" } ?? "")")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(Color.tronTextPrimary)
-                    if let total {
-                        Text("of \(total.formatted())\(totalIsExact ? "" : "+")").font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let total, !dynamicTypeSize.isAccessibilitySize {
                         bar(low: low, high: high, total: total)
                     }
                     Image(systemName: "arrow.up").font(.system(size: 11, weight: .bold)).foregroundStyle(Color.tronPrimary)
                 }
                 .monospacedDigit()
-                .padding(.horizontal, 13).frame(height: 30)
+                .padding(.horizontal, 13).padding(.vertical, 6).frame(minHeight: 30)
                 .glassEffect(.regular.interactive(), in: Capsule())
+                // The chip overlays live row text. Keep its existing glass, with
+                // an opaque semantic surface underneath instead of text bleed.
+                .background(Color.tronSurfaceElevated, in: Capsule())
                 .frame(minWidth: Self.target, minHeight: Self.target)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.bottom, 4)
-            .accessibilityLabel("Entries \(low.formatted()) to \(high.formatted())\(total.map { " of \($0.formatted())" } ?? "")")
+            .padding(.horizontal, 16).padding(.bottom, 4)
+            .accessibilityLabel("Items \(low.formatted()) to \(high.formatted())\(total.map { " of \(totalIsExact ? "" : "at least ")\($0.formatted())" } ?? "")")
             .accessibilityHint("Jumps to the newest entry")
             .accessibilityIdentifier("feed-position-chip")
         }

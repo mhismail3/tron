@@ -23,7 +23,7 @@ extension HomeSheet {
             chapterHeader(chapter, limits: limits)
             if let contents = chapter.contents {
                 if let topics = contents.topics, !topics.isEmpty {
-                    TronSettingsGroup("Topics", detail: "From Home's summaries of this chapter.", accent: accent) {
+                    TronSettingsGroup("Topics", accent: accent) {
                         VStack(spacing: 0) {
                             ForEach(Array(topics.enumerated()), id: \.offset) { index, topic in
                                 if index > 0 { divider() }
