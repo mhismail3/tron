@@ -69,8 +69,8 @@ const SLOW_PROMPT_WARNING_MS = 250;
  * an answer nothing consumes once its client stops waiting for it; an accepted
  * mutation, an admitted prompt and `session.sync` all have an owner that must
  * settle them whatever the client does with its wait, so a cancel for any other
- * method is ignored. Mirrors the phone's disposable read policy, and the
- * protocol section of the Gateway README lists exactly this set.
+ * method is ignored. Owner-module READ contracts describe their RPCs; this
+ * transport set owns cancel-frame eligibility, separately from deadlines below.
  */
 const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
   "session.open",

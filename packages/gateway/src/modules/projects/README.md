@@ -81,7 +81,7 @@ routing uses the same owner as the agent tool, not a tool invocation from the UI
 
 - `projects.list({limit?, after?})` returns `{workspace, projects, nextCursor}`.
   Limit is 1–50 (default 25); cursor is the last returned name. It sorts visible
-  direct Workspace folders/symlinks, scanning at most 1,000 entries. Hidden
+  direct Workspace folders/symlinks; directories over 1,000 entries refuse. Hidden
   archives are not listed. Folder paths/names and cursors retain exact whitespace;
   unsupported names are never trimmed into another project. Reads never adopt
   folders, grant trust or reserve moves.
@@ -99,12 +99,16 @@ routing uses the same owner as the agent tool, not a tool invocation from the UI
   with commandId 8–160 characters. Native UI identity is transport-derived, never
   caller-supplied. Creation leaves a local untrusted repository; a separate
   `settings.decide` tap with exact requestId/digest is required to grant trust or
-  apply an action. There is no direct apply/self-approval route.
+  apply an action. The same native maintainer identity can make that separate
+  decision; this request RPC has no approval flag or direct apply route.
 
 Canonical receipts bind caller + commandId + method: retries return the original
 result even if their payload differs. A new intent requires a new ID; different
 methods have separate receipt keys. Native UI terminal requests have no model
 continuation/outbox; their canonical audit and receipts serve the caller.
+The approval index and terminal audit append are separate writes: an I/O failure
+between them can omit the terminal history fact after the native item retires.
+This does not replay the action; inspect its actual state before a new request.
 Disconnect cancels disposable reads, not accepted mutations.
 Refresh after request/decision, reconnect/re-entry, and existing
 `settings.approvalsChanged` (plus relevant trust/settings changes). No second

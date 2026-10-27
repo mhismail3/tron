@@ -545,7 +545,8 @@ export class SettingsChangePath {
    * can never apply a different change than the one shown (doc 5.5).
    */
   async decide(requestId: string, input: { digest: string; approved: boolean; decidedBy: Actor; commandId?: string; session?: ChangeContext["session"]; homeChapter?: ChangeContext["homeChapter"] }): Promise<ChangeResult> {
-    // Only the maintainer's own client decides; no requester can approve itself (F3).
+    // Only a separate maintainer UI decision is accepted (F3). Native UI requests
+    // may share that identity; model/worker requesters cannot make this decision.
     if (input.decidedBy.kind !== "ui") throw new GatewayError("invalid_request", "Only the maintainer decides a settings approval");
     const found = await this.approvals.get(requestId);
     if (!found) throw new GatewayError("not_found", "No such settings approval");
