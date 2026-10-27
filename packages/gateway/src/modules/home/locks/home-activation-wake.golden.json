@@ -2205,7 +2205,7 @@
       },
       {
         "name": "profile",
-        "schema": "sha256:436e875b33d085736433a76cae5ca691d0ae954ac4068bb3e4c194ea8c03336b"
+        "schema": "sha256:33d2ecedf6607b42ca55372e2f5daeb749f00cc2d465a5d16d87bf0b655d9769"
       },
       {
         "name": "web_search",
@@ -2229,11 +2229,11 @@
       },
       {
         "name": "settings",
-        "schema": "sha256:65a7da3047854092dea74aa9ffe726ea877f980ece27503a0b82e2b9a950d093"
+        "schema": "sha256:bd66d6c4e5bf9c4332ff8027a6c6295942dbc26554206c2977bc15616b7e928b"
       },
       {
         "name": "projects",
-        "schema": "sha256:fd4c5a8ae2989b76b5ce39b724761209838f885ecfd2e6f3e4837228319d19f8"
+        "schema": "sha256:07d93a47ba72e0298ac4025db4beee910b271e92c6b374550105dd3ad5c0d11a"
       }
     ],
     "worker": [
@@ -2263,11 +2263,11 @@
       },
       {
         "name": "settings",
-        "schema": "sha256:65a7da3047854092dea74aa9ffe726ea877f980ece27503a0b82e2b9a950d093"
+        "schema": "sha256:bd66d6c4e5bf9c4332ff8027a6c6295942dbc26554206c2977bc15616b7e928b"
       },
       {
         "name": "projects",
-        "schema": "sha256:fd4c5a8ae2989b76b5ce39b724761209838f885ecfd2e6f3e4837228319d19f8"
+        "schema": "sha256:07d93a47ba72e0298ac4025db4beee910b271e92c6b374550105dd3ad5c0d11a"
       },
       {
         "name": "ask_user",
@@ -3575,6 +3575,10 @@
                     "minLength": 64,
                     "pattern": "^[a-f0-9]{64}$",
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "When the maintainer's approval is needed: true shows the request in this chat and waits for his decision (Stop cancels it); false returns pending at once and the outcome arrives later. Default false.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -3949,7 +3953,7 @@
               }
             },
             {
-              "description": "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve awaits his tap (pending). Request opens a blocking approval sheet and returns his decision; Stop cancels the pending request. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
+              "description": "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve needs his tap. Request always asks for his approval. A request needing approval shows in this chat: by default the call waits for his decision (Stop cancels the request); wait false returns pending at once and the outcome arrives later. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
               "name": "settings",
               "parameters": {
                 "additionalProperties": false,
@@ -4049,6 +4053,10 @@
                     "maxLength": 160,
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "When the maintainer's approval is needed: true shows the request in this chat and waits for his decision (Stop cancels it); false returns pending at once and the outcome arrives later. Default true.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -4058,7 +4066,7 @@
               }
             },
             {
-              "description": "Manage direct-child projects in ~/Workspace. create exclusively creates a folder and git repository on main, then requests trust. trust, rename, archive and untrust request the maintainer's tap (24h expiry); never self-approve. Optional github creates a private repository and origin only after approval, without pushing. Existing paths, symlinks and worker/worktree/claim ownership are refused. Archive retains files in ~/Workspace/.archive. Failures may retain partial untrusted work: inspect before retrying.",
+              "description": "Manage direct-child projects in ~/Workspace. create exclusively creates a folder and git repository on main, then requests trust. trust, rename, archive and untrust request the maintainer's tap (24h expiry); never self-approve. The request shows in this chat; wait true waits for his decision, otherwise it returns pending at once. Optional github creates a private repository and origin only after approval, without pushing. Existing paths, symlinks and worker/worktree/claim ownership are refused. Archive retains files in ~/Workspace/.archive. Failures may retain partial untrusted work: inspect before retrying.",
               "name": "projects",
               "parameters": {
                 "additionalProperties": false,
@@ -4090,6 +4098,10 @@
                     "maxLength": 2000,
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "When the maintainer's approval is needed: true shows the request in this chat and waits for his decision (Stop cancels it); false returns pending at once and the outcome arrives later. Default false.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -5357,7 +5369,7 @@
               }
             },
             {
-              "description": "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve awaits his tap (pending). Request opens a blocking approval sheet and returns his decision; Stop cancels the pending request. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
+              "description": "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve needs his tap. Request always asks for his approval. A request needing approval shows in this chat: by default the call waits for his decision (Stop cancels the request); wait false returns pending at once and the outcome arrives later. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
               "name": "settings",
               "parameters": {
                 "additionalProperties": false,
@@ -5457,6 +5469,10 @@
                     "maxLength": 160,
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "When the maintainer's approval is needed: true shows the request in this chat and waits for his decision (Stop cancels it); false returns pending at once and the outcome arrives later. Default true.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -5466,7 +5482,7 @@
               }
             },
             {
-              "description": "Manage direct-child projects in ~/Workspace. create exclusively creates a folder and git repository on main, then requests trust. trust, rename, archive and untrust request the maintainer's tap (24h expiry); never self-approve. Optional github creates a private repository and origin only after approval, without pushing. Existing paths, symlinks and worker/worktree/claim ownership are refused. Archive retains files in ~/Workspace/.archive. Failures may retain partial untrusted work: inspect before retrying.",
+              "description": "Manage direct-child projects in ~/Workspace. create exclusively creates a folder and git repository on main, then requests trust. trust, rename, archive and untrust request the maintainer's tap (24h expiry); never self-approve. The request shows in this chat; wait true waits for his decision, otherwise it returns pending at once. Optional github creates a private repository and origin only after approval, without pushing. Existing paths, symlinks and worker/worktree/claim ownership are refused. Archive retains files in ~/Workspace/.archive. Failures may retain partial untrusted work: inspect before retrying.",
               "name": "projects",
               "parameters": {
                 "additionalProperties": false,
@@ -5498,6 +5514,10 @@
                     "maxLength": 2000,
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "When the maintainer's approval is needed: true shows the request in this chat and waits for his decision (Stop cancels it); false returns pending at once and the outcome arrives later. Default false.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
