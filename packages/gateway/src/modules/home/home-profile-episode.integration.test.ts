@@ -14,6 +14,9 @@ import { TronWorkspace } from "../../workspace/tron-workspace.js";
 // The old/new tool text is from the retained synthetic lock trace, not live notes.
 it("a longer delegate diagnostic crosses the free-parent byte limit, without losing a message", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-lock-home-activation-wake-"));
+  // Keep this synthetic input independent of session storage/TMPDIR while
+  // preserving byte pressure on both sides of the 512-byte free-parent limit.
+  const target = "/fixture/home-profile-episode/projects/retained-synthetic-lock-trace/workspaces/delegated-task/project/notes/workspace";
   const samples = [];
   try {
     for (const diagnostic of [false, true]) {
@@ -24,7 +27,7 @@ it("a longer delegate diagnostic crosses the free-parent byte limit, without los
         + (diagnostic ? "Profile diagnostic: Knowledge is unavailable; preferences could not be applied. " : "")
         + "Worker: tron-lock-home-activation-wake/faux-1 (same as Home), thinking off.";
       manager.appendMessage({ role: "user", content: "Delegate the lock work.", timestamp: Date.now() } satisfies Message);
-      manager.appendMessage(fauxAssistantMessage([fauxToolCall("delegate", { taskId: "lock-task", intent: "Summarize notes.txt in the lock project.", target: join(root, "workspace"), title: "Lock task" }, "delegate") ]));
+      manager.appendMessage(fauxAssistantMessage([fauxToolCall("delegate", { taskId: "lock-task", intent: "Summarize notes.txt in the lock project.", target, title: "Lock task" }, "delegate") ]));
       manager.appendMessage({ role: "toolResult", toolCallId: "delegate", toolName: "delegate", content: [{ type: "text", text: admission }], isError: false, timestamp: Date.now() } satisfies Message);
       manager.appendMessage(fauxAssistantMessage("Delegated the lock task."));
       manager.appendMessage({ role: "user", content: "Read the result.", timestamp: Date.now() } satisfies Message);
@@ -37,7 +40,7 @@ it("a longer delegate diagnostic crosses the free-parent byte limit, without los
         const status = memory.status();
         const persisted = await new EpisodicStore(owner, manager.getSessionId(), EPISODIC_DEFAULTS.maxStoreLineBytes).read();
         const firstFour = [...persisted.nodes.values()].filter(node => node.level === 0).sort((a, b) => a.index - b.index).slice(0, 4).map(node => node.text).join(" ");
-        samples.push({ diagnostic, messages: status.messages, nodes: status.nodes, view: status.view, rawTargetBytes: Buffer.byteLength(join(root, "workspace")), firstFourBytes: Buffer.byteLength(firstFour), limit: EPISODIC_DEFAULTS.nodeBytes, paidRequests });
+        samples.push({ diagnostic, messages: status.messages, nodes: status.nodes, view: status.view, rawTargetBytes: Buffer.byteLength(target), firstFourBytes: Buffer.byteLength(firstFour), limit: EPISODIC_DEFAULTS.nodeBytes, paidRequests });
         expect(status.messages).toBe(6);
         expect(paidRequests).toHaveLength(0);
         expect(status.view.unbuilt).toBe(0);
