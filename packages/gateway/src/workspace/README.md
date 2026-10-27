@@ -19,6 +19,7 @@ apps under `state/apps/` are [swift-apps.md](../../docs/swift-apps.md).
 
 The `resourceRoot` policy supplies this same workspace to the native kernel's
 critical lifetime and context reads; capability stores use the module contract.
+The core extension consumes only `ResourceRoot.describe`, not the concrete workspace implementation.
 `operatingContext` supplies the existing `tronContext` formatter to preview without
 moving its product copy or changing prompt timing.
 

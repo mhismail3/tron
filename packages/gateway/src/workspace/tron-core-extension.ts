@@ -1,7 +1,6 @@
 import { Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
-import type { TronWorkspace } from "./tron-workspace.js";
-import type { TronWorkspaceDescriptor } from "../kernel/resources/resource-root.js";
+import type { ResourceRoot, TronWorkspaceDescriptor } from "../kernel/resources/resource-root.js";
 import { KNOWLEDGE_TOOL_PARAMETERS, type KnowledgeService, type KnowledgeToolParameters } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import { createJevExtension } from "../knowledge/jev-extension.js";
@@ -46,7 +45,7 @@ function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescriptor):
 
 /** The SDK rebuilds the base prompt for each run. Never append a canonical
  * message, load workspace documents, change cwd, or replace project context. */
-export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe">, knowledge?: KnowledgeService, jev?: JevDecisionClient, connections?: Pick<ConnectionAccess, "snapshot">): ExtensionFactory {
+export function createTronCoreExtension(workspace: Pick<ResourceRoot, "describe">, knowledge?: KnowledgeService, jev?: JevDecisionClient, connections?: Pick<ConnectionAccess, "snapshot">): ExtensionFactory {
   return (pi) => {
     if (jev) createJevExtension(jev)(pi);
     if (knowledge) {
