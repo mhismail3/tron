@@ -1,5 +1,5 @@
-import { settingsOutcomeRequestIds, type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
-import { TRON_FORM_CAPABILITY, type FormCapableUI } from "../kernel/host/extension-adapter-contract.js";
+import { approvalWaitParameter, settingsOutcomeRequestIds, type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
+import { approvalFormPresenter } from "../kernel/host/approval-form.js";
 import { StringEnum, Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory, ToolInfo } from "../kernel/pi/coding-agent.js";
 
@@ -71,24 +71,25 @@ const PARAMETERS = Type.Object({
   changes: Type.Optional(Type.Array(CHANGE, { minItems: 1, maxItems: 50, description: "change/request (required): the changes, applied together." })),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "change/request (required): why, for the maintainer." })),
   dryRun: Type.Optional(Type.Boolean({ description: "change/request: validate and return the tier without applying or creating a request." })),
+  wait: approvalWaitParameter(true),
 }, { additionalProperties: false });
 
 type SettingsCall =
   | { action: "resolve"; keys?: string[]; taskId?: string }
-  | { action: "change" | "request"; changes: ChangeRequest[]; reason: string; dryRun?: boolean; taskId?: string };
+  | { action: "change" | "request"; changes: ChangeRequest[]; reason: string; dryRun?: boolean; wait: boolean; taskId?: string };
 
 /** Admits one call with a message naming the field, so a model corrects it in one step. */
-function admitSettingsCall(input: { action: "resolve" | "change" | "request"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean }): SettingsCall {
+function admitSettingsCall(input: { action: "resolve" | "change" | "request"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean; wait?: boolean }): SettingsCall {
   if (input.action === "resolve") {
-    for (const field of ["changes", "reason", "dryRun"] as const) {
+    for (const field of ["changes", "reason", "dryRun", "wait"] as const) {
       if (input[field] !== undefined) throw new Error(`settings resolve: "${field}" is used only by change/request; resolve takes keys? and taskId?`);
     }
     return { action: "resolve", ...(input.keys ? { keys: input.keys } : {}), ...(input.taskId ? { taskId: input.taskId } : {}) };
   }
-  if (input.keys !== undefined) throw new Error(`settings ${input.action}: "keys" is used only by resolve; ${input.action} takes changes, reason, dryRun? and taskId?`);
+  if (input.keys !== undefined) throw new Error(`settings ${input.action}: "keys" is used only by resolve; ${input.action} takes changes, reason, dryRun?, wait? and taskId?`);
   if (!input.changes?.length) throw new Error(`settings ${input.action}: "changes" is required (1 to 50 changes)`);
   if (!input.reason?.trim()) throw new Error(`settings ${input.action}: "reason" is required, written for the maintainer`);
-  return { action: input.action, changes: input.changes as ChangeRequest[], reason: input.reason,
+  return { action: input.action, changes: input.changes as ChangeRequest[], reason: input.reason, wait: input.wait ?? true,
     ...(input.dryRun ? { dryRun: true } : {}), ...(input.taskId ? { taskId: input.taskId } : {}) };
 }
 
@@ -118,7 +119,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
     pi.registerTool({
       name: "settings",
       label: "Settings",
-      description: "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve awaits his tap (pending). Request opens a blocking approval sheet and returns his decision; Stop cancels the pending request. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
+      description: "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve needs his tap. Request always asks for his approval. A request needing approval shows in this chat: by default the call waits for his decision (Stop cancels the request); wait false returns pending at once and the outcome arrives later. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
       promptSnippet: "Change settings with the settings tool, never by editing settings files.",
       promptGuidelines: [
         "Use settings to read or change model, context, tools, permissions and run settings; never edit settings.json, .pi/ or trust files directly.",
@@ -143,23 +144,13 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
         let result = await owner.change(input.changes, {
           reason: input.reason, ...(input.dryRun ? { dryRun: true } : {}), ...(input.action === "request" ? { request: true } : {}), toolCallId, web: marked, ...(input.taskId ? { taskId: input.taskId } : {}),
         });
-        if (result.status === "pending" && !result.dryRun) {
-          const requestForm = context?.hasUI ? (context.ui as typeof context.ui & FormCapableUI)[TRON_FORM_CAPABILITY] : undefined;
+        if (result.status === "pending" && !result.dryRun && input.wait) {
           const worker = result.worker;
-          result = { ...await owner.review(result.approval!.requestId, async (review, reviewSignal) => {
-            if (!requestForm) throw new Error("Settings approval requires an interactive Tron form host");
-            const answer = await requestForm({ signal: reviewSignal, form: {
-              version: 1, title: review.title, allowCancel: false, presentation: "approval",
-              questions: [{ id: review.requestId, question: "Approve these settings changes?", context: review.context,
-                options: [{ id: "approve", label: "Approve" }, { id: "deny", label: "Deny" }],
-                multiSelect: false, allowOther: false }],
-            } });
-            const choice = answer?.answers[0]?.optionIds[0];
-            return choice === "approve" || choice === "deny" ? choice : undefined;
-          }, signal), ...(worker ? { worker } : {}) };
+          result = { ...await owner.wait(result.approval!.requestId, approvalFormPresenter(context), signal), ...(worker ? { worker } : {}) };
         }
         const text = result.dryRun ? result.status === "failed" ? "Dry run refused; nothing changed." : `Dry run: tier ${result.tier}.`
           : result.status === "approved" || result.status === "applied" ? `Applied at tier ${result.tier}.${signalText(result)}`
+          : result.status === "pending" ? "Waiting for the maintainer's approval in this chat; nothing changed yet. The outcome arrives as a later message."
           : `Settings approval ${result.status}; nothing changed.`;
         return { content: [{ type: "text", text: `${text}\n${JSON.stringify(result)}` }], details: result };
       },

@@ -5,7 +5,7 @@ import { profilePath, type ProfileMetadata } from "../../knowledge/knowledge-pro
 import { formatProfileValue } from "../../admin/settings-presentation.js";
 import type { SettingsChangePath, SubjectContext, SubjectWrite, ChangeContext } from "../../kernel/settings/settings-change.js";
 import type { ChangeEntry } from "../../kernel/settings/settings-record.js";
-import type { ChangeResult } from "../../kernel/settings/tool-contract.js";
+import type { ApprovalPresenter, ChangeResult } from "../../kernel/settings/tool-contract.js";
 import { GatewayError } from "../../errors.js";
 import type { KnowledgeListResponse, KnowledgeProvenance, KnowledgeRecord, KnowledgeRelation, NoteContent } from "../../knowledge/knowledge-contract.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
@@ -648,4 +648,6 @@ function homeMayOrganize(note: Extract<KnowledgeRecord, { kind: "note" }>): bool
 export interface HomeProfileChangeAccess {
   deferSorting(commandId: string, version: string): Promise<{ status: "deferred"; version: string }>;
   change(ops: HomeProfileRequest[], input: { toolCallId: string; web: boolean; author: HomeProfileAuthor; commandId: string; reason?: string }): Promise<ProfileChangeResult | (ChangeResult & { saved: []; items: [] })>;
+  /** Waits in Home's chat for the maintainer's decision on its own pending request. */
+  wait(requestId: string, present: ApprovalPresenter, signal?: AbortSignal): Promise<ChangeResult>;
 }

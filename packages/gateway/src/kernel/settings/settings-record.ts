@@ -12,8 +12,9 @@ import { durablePublishBoundedJson, syncDurably } from "../../util/durable-json.
  * Audit and undo only: it is never consulted to compute a value. It is kept
  * forever (decision 12), append-only, in closed segments of at most
  * `SEGMENT_ENTRIES` lines named in `index.json`, so `settings.history` reads one
- * bounded segment per page. A later fact about an entry (approved, expired,
- * committed, outside) is a new entry that refers to it; no line is rewritten.
+ * bounded segment per page (plus the newer segments' settling references). A
+ * later fact about an entry (approved, expired, committed, outside) is a new
+ * entry that refers to it; no line is rewritten.
  */
 
 export type ActorKind = "ui" | "home" | "worker" | "agent" | "outside";
@@ -163,25 +164,34 @@ export class SettingsChangeRecord {
     });
   }
 
-  /** Newest first. The cursor names a segment and how many of its lines remain. */
-  async page(input: { cursor?: string; limit?: number; filter?: (entry: ChangeEntry) => boolean }): Promise<{ entries: ChangeEntry[]; nextCursor?: string }> {
+  /** Newest first. The cursor names a segment and how many of its lines remain.
+   * `settled` names the page's pending facts a later fact already settles, so a
+   * presentation can show the outcome row alone (#2050); audit keeps every fact. */
+  async page(input: { cursor?: string; limit?: number; filter?: (entry: ChangeEntry) => boolean }): Promise<{ entries: ChangeEntry[]; settled: string[]; nextCursor?: string }> {
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
     const index = await this.index();
     const [segmentIndex, remaining] = input.cursor ? parseCursor(input.cursor) : [index.segments.length - 1, Number.POSITIVE_INFINITY];
     const entries: ChangeEntry[] = [];
     const segment = index.segments[segmentIndex];
-    if (!segment) return { entries };
+    if (!segment) return { entries, settled: [] };
     // Bound scanned work, not just returned matches: a sparse filter over the
     // permanent audit must yield an empty page + cursor instead of a full scan.
     const lines = await this.segmentLines(segment.name);
+    // Settling facts are newer than their pending fact: this segment and later ones.
+    const settled = new Set<string>();
+    for (const line of lines) if (line.refersTo) settled.add(line.refersTo);
+    for (let newer = segmentIndex + 1; newer < index.segments.length; newer += 1) {
+      for (const line of await this.segmentLines(index.segments[newer]!.name)) if (line.refersTo) settled.add(line.refersTo);
+    }
     let end = Math.min(remaining, lines.length);
     while (end > 0 && entries.length < limit) {
       end -= 1;
       const entry = lines[end]!;
       if (!input.filter || input.filter(entry)) entries.push(entry);
     }
-    if (end > 0) return { entries, nextCursor: `${segmentIndex}:${end}` };
-    return { entries, ...(segmentIndex > 0 ? { nextCursor: `${segmentIndex - 1}:${Number.MAX_SAFE_INTEGER}` } : {}) };
+    const settledPending = entries.filter(entry => entry.status === "pending" && settled.has(entry.changeId)).map(entry => entry.changeId);
+    if (end > 0) return { entries, settled: settledPending, nextCursor: `${segmentIndex}:${end}` };
+    return { entries, settled: settledPending, ...(segmentIndex > 0 ? { nextCursor: `${segmentIndex - 1}:${Number.MAX_SAFE_INTEGER}` } : {}) };
   }
 
   /** An entry and every later fact that refers to it, oldest first. */

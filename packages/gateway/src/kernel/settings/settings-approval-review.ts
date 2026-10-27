@@ -1,64 +1,46 @@
-import type { SettingsChangePath, ChangeContext } from "./settings-change.js";
-import type { SettingsSchema } from "./settings-schema.js";
-import type { ApprovalRequest } from "./settings-approvals.js";
-import { LAYER_LABELS } from "./settings-types.js";
-import type { ChangeResult, SettingsApprovalPresenter } from "./tool-contract.js";
 import { GatewayError } from "../../errors.js";
+import type { SettingsChangePath } from "./settings-change.js";
+import type { ApprovalRequest } from "./settings-approvals.js";
+import type { ApprovalPresenter, ChangeResult } from "./tool-contract.js";
 
-/** The durable diff owns admission and expiry; the existing host form owns the
- * live continuation. Closing/retiring that continuation never approves a diff. */
-export async function reviewSettingsApproval(input: {
+/**
+ * One agent tool call waiting for the maintainer's decision on its own request
+ * (#2050). The durable request owns admission, decision and expiry; the host form
+ * only shows the request in the asking chat. Every decision (chat sheet, push or
+ * Changes) is `settings.decide`, which settles the request and so ends this wait.
+ * Stop or host retirement supersedes the pending request, never declining it.
+ */
+export async function awaitApprovalDecision(input: {
   path: SettingsChangePath;
-  schema: SettingsSchema;
   requestId: string;
   requesterSessionId: string;
-  present: SettingsApprovalPresenter;
+  present: ApprovalPresenter;
   signal?: AbortSignal;
-  context: (request: ApprovalRequest) => Promise<Pick<ChangeContext, "session" | "homeChapter">>;
 }): Promise<ChangeResult> {
   const { path, requestId, requesterSessionId, signal } = input;
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  signal?.addEventListener("abort", abort, { once: true });
-  const stop = path.onOutcome((sessionId, settledId) => {
-    if (sessionId === requesterSessionId && settledId === requestId) abort();
-  });
   const read = async () => {
     const request = await path.approvals.get(requestId);
     if (!request || request.actor.sessionId !== requesterSessionId) throw new GatewayError("conflict", "This approval belongs to another requester");
     return request;
   };
+  const form = new AbortController();
+  let release!: () => void;
+  const settled = new Promise<void>(resolve => { release = resolve; });
+  const stop = path.onOutcome((sessionId, settledId) => { if (sessionId === requesterSessionId && settledId === requestId) release(); });
+  signal?.addEventListener("abort", release, { once: true });
   try {
     let request = await read();
-    if (signal?.aborted) abort();
-    if (request.status === "pending" && !controller.signal.aborted) {
-      let choice: "approve" | "deny" | undefined;
-      try {
-        choice = await input.present({ requestId, title: "Settings approval", context: reviewText(input.schema, request), expiresAt: request.expiresAt }, controller.signal);
-      } catch (error) {
+    if (request.status === "pending" && !signal?.aborted) {
+      const title = request.action?.preview.title ?? "Approve settings changes";
+      // The form resolves only when its host retires it: approval answers are refused.
+      const host: { refused?: { error: unknown } } = {};
+      const shown = input.present({ requestId, title }, form.signal).then(() => undefined, (error: unknown) => { host.refused = { error }; });
+      await Promise.race([settled, shown]);
+      if (host.refused) {
+        // No host can show it (or the host refused it): retire the request it owns.
         await path.cancelApproval(requestId, requesterSessionId, "turn-ended");
         await path.approvals.acknowledge([requesterSessionId], [requestId]);
-        throw error;
-      }
-      // Stop wins before decision admission. A decision already admitted keeps
-      // its serialized receipt; it is never replayed or rolled back by Stop.
-      if (!signal?.aborted && choice !== undefined) {
-        try {
-          return await path.decide(requestId, { digest: request.digest, approved: choice === "approve", decidedBy: { kind: "ui", id: `interaction:${requestId}` }, ...await input.context(request) });
-        } catch (error) {
-          const settled = await read();
-          if (settled.status === "pending") {
-            // A vanished target/context ends this continuation too. Retire its
-            // owned diff before surfacing the failure, rather than orphaning it.
-            await path.cancelApproval(requestId, requesterSessionId, "decision-failed");
-            throw error;
-          }
-          // A tap can lose to expiry or a newer diff while awaiting the target
-          // stripe. Return that explicit terminal outcome, not an opaque tool error.
-          return terminalResult(settled);
-        } finally {
-          await path.approvals.acknowledge([requesterSessionId], [requestId]);
-        }
+        throw host.refused.error;
       }
       request = await read();
     }
@@ -66,45 +48,30 @@ export async function reviewSettingsApproval(input: {
       await path.cancelApproval(requestId, requesterSessionId, "turn-ended");
       request = await read();
     }
+    // The tool result is this requester's delivery: no later outcome turn repeats it.
     await path.approvals.acknowledge([requesterSessionId], [requestId]);
-    return terminalResult(request);
+    return approvalResult(request);
   } finally {
     stop();
-    signal?.removeEventListener("abort", abort);
-    controller.abort();
+    signal?.removeEventListener("abort", release);
+    form.abort();
   }
 }
 
-function terminalResult(request: ApprovalRequest): ChangeResult {
-  return { status: request.status, tier: "approve", changes: request.changes.map(change => ({
-    changeId: change.changeId, key: change.key, layer: change.layer, tier: change.tier, status: request.status,
-    ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}),
-    ...(change.redacted ? { redacted: true } : { before: change.before ?? null, after: change.after ?? null }),
-    ...(request.failure ? { error: { code: request.status, message: request.failure } } : {}),
-  })) };
-}
-
-function reviewText(schema: SettingsSchema, request: ApprovalRequest): string {
-  const target = request.target.kind === "home" ? "Home" : request.target.kind === "session" ? `Session ${request.target.sessionId}`
-    : request.target.kind === "project" ? `Project ${JSON.stringify(request.target.cwd)}` : "Global";
-  const lines = [`Scope: ${target}`, `Reason: ${JSON.stringify(request.reason ?? "Not provided")}`, ""];
-  for (const change of request.changes) {
-    const key = schema.schemaKey(change.key);
-    const values = change.redacted ? "Before: Hidden value\nAfter: Changed"
-      : `Before:\n${JSON.stringify(change.before ?? null, null, 2)}\nAfter:\n${JSON.stringify(change.after ?? null, null, 2)}`;
-    lines.push(`${key.label} (${change.key})`, `Layer: ${LAYER_LABELS[change.layer]}`, ...(change.qualifiers ? [JSON.stringify(change.qualifiers)] : []), values,
-      ...(key.confirm ? [key.confirm] : []), "");
-  }
-  lines.push(`Expires: ${request.expiresAt}`, "Approve applies only this diff. Deny changes nothing.");
-  // Escape rather than strip author-supplied controls: host sanitization must
-  // never consume a terminal-control payload and silently hide the bound diff.
-  const text = lines.join("\n").replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu,
-    // Keep structural LF only. Astral characters emit both JSON surrogate
-    // escapes, retaining the exact value instead of dropping a low surrogate.
-    character => character === "\n" ? character : character.split("").map(unit =>
-      "\\u" + unit.charCodeAt(0).toString(16).padStart(4, "0")).join(""));
-  if (Buffer.byteLength(text, "utf8") > 32 * 1_024) {
-    throw new GatewayError("invalid_request", "Settings approval diff is too large to review (maximum 32 KiB); request fewer or smaller changes");
-  }
-  return text;
+/** A request's state as every approval-requesting tool reports it: the same
+ * `approval` reference while pending and once settled, so its chat chip persists. */
+export function approvalResult(request: ApprovalRequest): ChangeResult {
+  return {
+    status: request.status, tier: "approve",
+    approval: { requestId: request.requestId, digest: request.digest, expiresAt: request.expiresAt },
+    ...(request.action ? { action: request.action.preview } : {}),
+    ...(request.summary ? { summary: request.summary } : {}),
+    ...(request.failure ? { failure: request.failure } : {}),
+    changes: request.changes.map(change => ({
+      changeId: change.changeId, key: change.key, layer: change.layer, tier: change.tier, status: request.status,
+      ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}),
+      ...(change.redacted ? { redacted: true } : { before: change.before ?? null, after: change.after ?? null }),
+      ...(request.failure ? { error: { code: request.status, message: request.failure } } : {}),
+    })),
+  };
 }

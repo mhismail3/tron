@@ -1,3 +1,4 @@
+import { Type } from "../pi/ai.js";
 /** The settings model's vocabulary (docs/settings-model.md section 4).
  * Every key's behaviour is data here; nothing outside the schema names a key. */
 export const LAYERS = ["project", "session", "global"] as const;
@@ -172,11 +173,15 @@ export interface ChangeResult {
   signal?: SettingsSignal;
   /** A pending action request: the exact preview its digest binds (#1985). */
   action?: ApprovalActionPreview;
+  /** A settled action's own account of what it did, or why it failed. */
+  summary?: string;
+  failure?: string;
 }
 
 /** A maintainer-gated operation that is not a stored setting value (a project
- * lifecycle step): its preview is display text the digest binds. */
-export interface ApprovalActionItem { label: string; value: string; detail?: string }
+ * lifecycle step): its preview is display text the digest binds. `exact` is the
+ * operation's exact identity, shown behind the sheet's technical disclosure. */
+export interface ApprovalActionItem { label: string; value: string; detail?: string; exact?: string }
 export interface ApprovalActionPreview { title: string; items: ApprovalActionItem[]; target: SettingsTarget }
 
 export const SETTINGS_OUTCOME_MESSAGE = "tron.settings-outcome.v1";
@@ -240,14 +245,22 @@ export interface TaskWorkerSettingsView extends TaskWorkerSettingsState {
   resolvedFrom?: string;
 }
 
-/** Presentation is supplied by the existing semantic form host, never by model text. */
-export type SettingsApprovalPresenter = (review: { requestId: string; title: string; context: string; expiresAt: string }, signal: AbortSignal) => Promise<"approve" | "deny" | undefined>;
+/** Shows one request in the asking chat through the host's semantic form until
+ * `signal` aborts. Never decides: decisions are `settings.decide` (#2050). */
+export type ApprovalPresenter = (request: { requestId: string; title: string }, signal: AbortSignal) => Promise<unknown>;
+
+/** The one `wait` parameter every approval-requesting tool takes (#2050). The
+ * default is the tool's own: settings waits, profile and projects do not. */
+export function approvalWaitParameter(waitsByDefault: boolean) {
+  return Type.Optional(Type.Boolean({ description: `When the maintainer's approval is needed: true shows the request in this chat and waits for his decision (Stop cancels it); false returns pending at once and the outcome arrives later. Default ${waitsByDefault}.` }));
+}
 
 /** What the session runtime gives the tool: its own target and identity, or Home's worker target. */
 export interface SettingsToolAccess {
   resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;
   change(changes: ChangeRequest[], input: { reason: string; dryRun?: boolean; request?: boolean; toolCallId: string; web: boolean; taskId?: string }): Promise<ChangeResult & { worker?: TaskWorkerSettingsView }>;
-  review(requestId: string, present: SettingsApprovalPresenter, signal?: AbortSignal): Promise<ChangeResult>;
+  /** Waits in this chat for the maintainer's decision on its own pending request. */
+  wait(requestId: string, present: ApprovalPresenter, signal?: AbortSignal): Promise<ChangeResult>;
   /** Every settled request this chat asked for and has not heard yet (decision 4e6e8f54). */
   takeOutcomes(deliveredRequestIds?: readonly string[]): Promise<SettingsOutcomeMessage | undefined>;
 }

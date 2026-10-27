@@ -57,7 +57,7 @@ import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTas
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
 import type { SessionSettingsSource, SettingsModel } from "../settings/settings-model.js";
-import { reviewSettingsApproval } from "../settings/settings-approval-review.js";
+import { awaitApprovalDecision } from "../settings/settings-approval-review.js";
 import { SETTINGS_OUTCOME_MESSAGE, settingsOutcomeRequestIds, type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import { visitCanonicalSessionEntries } from "../session/canonical-reader.js";
 import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
@@ -526,6 +526,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       presentation,
       (notification) => this.enqueueExtensionNotification(notification),
       (interaction) => {
+        // An approval form's request already pushed once when it was created (#2050).
+        if (interaction.method === "form" && interaction.form.presentation === "approval") return;
         const interactionRequired = this.dependencies.modules.policy("interactionRequired")?.();
         if (!interactionRequired) return;
         // Sample the same token-bound foreground lease at the exact semantic
@@ -811,17 +813,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         });
         return { ...result, worker: { ...task, ...slot.taskWorkerSettingsState() } };
       },
-      review: (requestId, present, signal) => reviewSettingsApproval({ path: owners.changes, schema: owners.model.schema,
-        requestId, requesterSessionId: this.id, present, ...(signal ? { signal } : {}),
-        context: async request => {
-          if (request.target.kind === "session" && request.target.sessionId !== this.id) {
-            const { slot } = await worker(request.actor.taskId!, "change");
-            return { session: slot.taskWorkerSettingsSession() };
-          }
-          return { session: source(), ...(this.usesHomeSettings ? { homeChapter: { ...this.settingsSource(), sessionId: this.id,
-            mutate: operation => operation({ appliers: source().appliers }) } } : {}) };
-        },
-      }),
+      wait: (requestId, present, signal) => awaitApprovalDecision({ path: owners.changes,
+        requestId, requesterSessionId: this.id, present, ...(signal ? { signal } : {}) }),
       takeOutcomes: async delivered => {
         // Home admits settings messages through its bounded, cancellable input
         // envelope for both user turns and wakes; the native hook is ordinary-only.

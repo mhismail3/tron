@@ -9,7 +9,8 @@ import { AsyncMutex } from "../../util/async-mutex.js";
 import type { TrustInspection, TrustService } from "../../kernel/resources/trust-service.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
 import type { Actor } from "../../kernel/settings/settings-record.js";
-import type { ApprovalActionPreview, ChangeResult } from "../../kernel/settings/tool-contract.js";
+import type { ApprovalActionPreview, ApprovalPresenter, ChangeResult } from "../../kernel/settings/tool-contract.js";
+import { awaitApprovalDecision } from "../../kernel/settings/settings-approval-review.js";
 
 const exec = promisify(execFile);
 export const PROJECT_ACTION = "project.lifecycle";
@@ -111,6 +112,12 @@ export class ProjectLifecycle {
     }
     signal?.throwIfAborted();
     return row;
+  }
+
+  /** An agent's tool waits in its chat for the decision on its own request (#2050). */
+  wait(requestId: string, requesterSessionId: string, present: ApprovalPresenter, signal?: AbortSignal): Promise<ChangeResult> {
+    if (!this.changes) throw new GatewayError("busy", "Project lifecycle settings are not available");
+    return awaitApprovalDecision({ path: this.changes, requestId, requesterSessionId, present, ...(signal ? { signal } : {}) });
   }
 
   async request(input: ProjectRequest, actor: Actor, commandId: string): Promise<ChangeResult> {

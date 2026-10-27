@@ -2183,11 +2183,22 @@ export class GatewayService {
           const requestId = string(params.requestId, "requestId", { max: 100 });
           const request = await this.dependencies.settingsChanges.approvals.get(requestId);
           const pending = request?.target;
-          const running = request?.actor.sessionId && request.actor.toolCallId && !request.action && params.approved === true
-            ? (await this.slot({ sessionId: request.actor.sessionId })).settingsApprovalContext(requestId) : undefined;
-          const session = pending?.kind === "session" && params.approved === true
-            ? pending.sessionId === request?.actor.sessionId && running?.session ? running.session
-              : (await this.slot({ sessionId: pending.sessionId })).taskWorkerSettingsSession() : undefined;
+          let running: ReturnType<RuntimeSlot["settingsApprovalContext"]>;
+          let session: ChangeContext["session"];
+          try {
+            running = request?.actor.sessionId && request.actor.toolCallId && !request.action && params.approved === true
+              ? (await this.slot({ sessionId: request.actor.sessionId })).settingsApprovalContext(requestId) : undefined;
+            session = pending?.kind === "session" && params.approved === true
+              ? pending.sessionId === request?.actor.sessionId && running?.session ? running.session
+                : (await this.slot({ sessionId: pending.sessionId })).taskWorkerSettingsSession() : undefined;
+          } catch (error) {
+            // The diff's target chat is gone, so it can never be approved: retire
+            // it (its waiting tool hears superseded) rather than orphan it (#2015).
+            if (request?.status === "pending" && request.actor.sessionId && error instanceof GatewayError && error.code === "not_found") {
+              await this.dependencies.settingsChanges.cancelApproval(requestId, request.actor.sessionId, "decision-failed");
+            }
+            throw error;
+          }
           const homeChapter = pending?.kind === "home" && params.approved === true ? running?.homeChapter ?? await this.settingsHomeChapter(workToken) : undefined;
           return safeJson(await this.dependencies.settingsChanges.decide(requestId, {
             ...(homeChapter ? { homeChapter } : {}),
@@ -2209,7 +2220,10 @@ export class GatewayService {
           ...(params.key === undefined ? {} : { key: string(params.key, "key", { max: 200 }) }),
           ...(params.status === undefined ? {} : { status: string(params.status, "status", { max: 40 }) }),
         });
-        return safeJson({ ...page, entries: page.entries.map(entry => presentHistoryEntry(this.dependencies.settingsModel.schema, entry)) });
+        // A settled request's pending fact is not shown: its outcome row is the request's row (#2050).
+        const settled = new Set(page.settled);
+        return safeJson({ ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+          entries: page.entries.filter(entry => !settled.has(entry.changeId)).map(entry => presentHistoryEntry(this.dependencies.settingsModel.schema, entry)) });
       }
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));
@@ -2589,9 +2603,11 @@ export class GatewayService {
    * to the pending set is broadcast so open clients refresh it (doc 5.5). */
   private settingsApprovalsChanged(event: { kind: "pending" | "resolved"; request: ApprovalRequest }): void {
     if (event.kind === "pending") {
-      const what = event.request.changes.map(change => this.dependencies.settingsModel.schema.schemaKey(change.key).label).join(", ");
+      // One wording for every request kind (#2050): what it is, then why.
+      const what = event.request.action?.preview.title
+        ?? event.request.changes.map(change => this.dependencies.settingsModel.schema.schemaKey(change.key).label).join(", ");
       void this.settingsPush(event.request.actor, `settings-approval:${event.request.requestId}`, "waiting", "Approval needed",
-        `${actorLabel(event.request.actor)} asks to change ${what}${event.request.reason ? `: ${event.request.reason}` : ""}. Approve or decline in Tron.`, "settings-approval");
+        `${actorLabel(event.request.actor)} asks for your approval: ${what}${event.request.reason ? ` — ${event.request.reason}` : ""}`, "settings-approval");
     }
     this.dependencies.broadcast("settings.approvalsChanged", safeJson({ kind: event.kind, requestId: event.request.requestId, status: event.request.status }));
   }

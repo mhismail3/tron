@@ -185,14 +185,24 @@ export function presentResolution(schema: SettingsSchema, resolution: Resolution
   return { ...resolution, renderer: { version: RENDERER_CONTRACT_VERSION }, keys, sections };
 }
 
-/** A pending request as the iPhone shows it: the diff it would approve. */
+/** Control and invisible format characters in a request's text become visible
+ * escapes, so no rendered reason, value or label can hide part of the diff the
+ * maintainer approves (#2015). Structural line feeds stay; astral characters emit
+ * both surrogate escapes rather than dropping half of the exact value. */
+function disclosed(text: string): string {
+  return text.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu,
+    character => character === "\n" ? character : character.split("").map(unit => "\\u" + unit.charCodeAt(0).toString(16).padStart(4, "0")).join(""));
+}
+
+/** A pending request as every approval surface shows it (chat sheet, push review
+ * and Changes): the diff or action preview it would approve, its exact values kept. */
 export function approvalProjection(schema: SettingsSchema, request: ApprovalRequest) {
   return {
     requestId: request.requestId, digest: request.digest, createdAt: request.createdAt, expiresAt: request.expiresAt,
-    target: request.target, actor: request.actor, requester: requesterLabel(request.actor), ...(request.reason ? { reason: request.reason } : {}),
+    target: request.target, actor: request.actor, requester: requesterLabel(request.actor), ...(request.reason ? { reason: disclosed(request.reason) } : {}),
     changes: request.changes.map(change => {
       const key = schema.schemaKey(change.key);
-      const format = (value: unknown) => value === undefined ? "Not set" : key.type.format(value, { modelName: () => undefined });
+      const format = (value: unknown) => disclosed(value === undefined ? "Not set" : key.type.format(value, { modelName: () => undefined }));
       return {
         changeId: change.changeId, key: change.key, label: key.label, ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}),
         layer: change.layer, op: change.op, tier: change.tier, tierBasis: change.tierBasis,
@@ -201,6 +211,8 @@ export function approvalProjection(schema: SettingsSchema, request: ApprovalRequ
       };
     }),
     // An action request (#1985) shows its registered subject and the exact preview approval binds.
-    ...(request.action ? { action: { subject: request.action.subject, title: request.action.preview.title, items: request.action.preview.items } } : {}),
+    ...(request.action ? { action: { subject: request.action.subject, title: disclosed(request.action.preview.title),
+      items: request.action.preview.items.map(item => ({ label: disclosed(item.label), value: disclosed(item.value),
+        ...(item.detail === undefined ? {} : { detail: disclosed(item.detail) }), ...(item.exact === undefined ? {} : { exact: disclosed(item.exact) }) })) } } : {}),
   };
 }

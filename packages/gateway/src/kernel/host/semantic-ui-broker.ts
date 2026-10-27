@@ -150,6 +150,11 @@ export class SemanticUIBroker {
     if (hostEpoch !== this.hostEpoch || presentationRevision !== pending.wire.presentationRevision) {
       throw new GatewayError("conflict", "Extension interaction scope is stale; refresh the session", true);
     }
+    // An approval form only shows its request in this chat (#2050): the one
+    // decision path is the digest-bound settings.decide, never a form answer.
+    if (pending.wire.method === "form" && pending.wire.form.presentation === "approval") {
+      throw new GatewayError("invalid_request", "An approval request is decided with settings.decide, not a form answer");
+    }
     if (cancelled) {
       if (pending.wire.method === "form" && !pending.wire.form.allowCancel) {
         throw new GatewayError("invalid_request", "Extension form does not allow user cancellation");

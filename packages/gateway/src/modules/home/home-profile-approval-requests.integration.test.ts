@@ -40,7 +40,7 @@ it("a waiting profile request appears in its chat, pushes once, settles from Cha
   // A1: one push names the request itself and routes to this chat.
   const pushes = f.pushes.filter(push => (push as { category?: string }).category === "settings-approval");
   expect(pushes).toHaveLength(1);
-  expect(pushes[0]).toMatchObject({ message: expect.stringContaining("Review exact profile changes"), route: { sessionId: f.sessionId } });
+  expect(pushes[0]).toMatchObject({ message: "Home asks for your approval: Review exact profile changes — Sort the confirmed note", route: { sessionId: f.sessionId } });
   // A2: the review names the note and areas, with exact identity kept separately.
   const listed = await f.service.invoke(maintainer, "settings.approvals", {}) as unknown as { requests: Array<{ action: { items: Array<{ label: string; value: string; exact?: string }> } }> };
   const item = listed.requests[0]!.action.items[0]!;
@@ -70,7 +70,7 @@ it("a profile request by default returns pending at once and its history row fol
   expect(f.slot.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
   const [request] = await pendingApprovals(f);
   // A1 and A2 hold for either mode: the push and the review name the request.
-  expect(f.pushes.map(push => push.message)).toEqual([expect.stringMatching(/^Home asks to approve Review exact profile changes: Sort the confirmed note/)]);
+  expect(f.pushes.map(push => push.message)).toEqual([expect.stringMatching(/^Home asks for your approval: Review exact profile changes — Sort the confirmed note$/)]);
   const listed = await f.service.invoke(maintainer, "settings.approvals", {}) as unknown as { requests: Array<{ action: { items: Array<{ label: string; value: string }> } }> };
   expect(listed.requests[0]!.action.items.map(item => [item.label, item.value])).toEqual([["Keeps a paper notebook for travel plans.", "Life & people → Communication › Questions"]]);
   const waiting = await f.service.invoke(maintainer, "settings.history", { limit: 200 }) as unknown as { entries: Array<{ requestId?: string; status: string }> };

@@ -1106,6 +1106,7 @@ function actionPreview(preview: ApprovalActionPreview): ApprovalActionPreview {
   return {
     title: text(preview.title, 200, "title"), target: preview.target,
     items: preview.items.map(item => ({ label: text(item.label, 80, "item label"), value: text(item.value, 1_000, "item value"),
-      ...(item.detail === undefined ? {} : { detail: text(item.detail, 1_000, "item detail") }) })),
+      ...(item.detail === undefined ? {} : { detail: text(item.detail, 1_000, "item detail") }),
+      ...(item.exact === undefined ? {} : { exact: text(item.exact, 2_000, "item exact identity") }) })),
   };
 }
