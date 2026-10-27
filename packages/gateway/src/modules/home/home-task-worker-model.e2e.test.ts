@@ -128,6 +128,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
       commandId: "conflicting-delegation-note", record: { kind: "note", scope: "personal",
         provenance: { actor: "agent", evidence: [] }, relations: [], content: {
           title: mirrored, role: "workflow", confirmed: false, tags: ["home-profile", "kind-delegation-default"],
+          profile: { version: 2, path: ["inferred", "review"] },
         } },
     } });
     await setModelQueue(queueOwners(f), "worker", [`${f.model.provider}/${TASK_REASONING_MODEL_ID}`]);
