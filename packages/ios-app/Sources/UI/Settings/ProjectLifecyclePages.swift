@@ -6,8 +6,13 @@ import TronMobileCore
 struct ProjectLifecycleProject: Identifiable {
     let name: String
     let path: String
+    let displayPath: String
     let trusted: Bool
     var archiveUnavailableReason: String?
+    var trustUnavailableReason: String?
+    var githubUnavailableReason: String?
+    var renameUnavailableReason: String?
+    var untrustUnavailableReason: String?
     var id: String { path }
 }
 
@@ -30,7 +35,7 @@ struct ProjectLifecycleProjectsPage<ProjectDestination: View, AddDestination: Vi
                 identifier: "\(identifierPrefix)-list-rows") { item in
                 ProjectLifecycleSheetRow(content: TronListRowContent(title: item.name,
                     status: TronListStatus(text: item.trusted ? "Trusted" : "Not trusted", tone: item.trusted ? .tronPrimary : .tronSlate),
-                    subtext: item.path, monoSubtext: true)) { projectDestination(item) }
+                    subtext: item.displayPath, monoSubtext: true)) { projectDestination(item) }
             }
             TronListGroup([ProjectLifecycleAddAction.create], identifier: "\(identifierPrefix)-add-row") { _ in
                 ProjectLifecycleSheetRow(content: projectLifecycleRow("Add Project", icon: "plus"), destination: addDestination)
@@ -102,11 +107,15 @@ struct ProjectLifecycleDetailPage<RenameDestination: View>: View {
         ProjectLifecyclePage(project.name, identifier: identifier) {
             TronSettingsGroup(nil) {
                 TronSettingsRow(icon: project.trusted ? "checkmark.shield" : "shield.slash", title: project.trusted ? "Trusted" : "Not trusted",
-                    subtitle: project.path, subtitleLineLimit: nil)
+                    subtitle: project.displayPath, subtitleLineLimit: nil)
             }
             if !project.trusted {
                 ProjectLifecycleGitHubOption(github: $github)
+                    .disabled(project.githubUnavailableReason != nil)
+                if let reason = project.githubUnavailableReason { TronSettingsCaption(reason) }
                 ProjectLifecycleActionButton(title: "Request Trust", icon: "checkmark.shield", subtitle: "Review before extensions and hooks can load", action: requestTrust)
+                    .disabled(project.trustUnavailableReason != nil)
+                if let reason = project.trustUnavailableReason { TronSettingsCaption(reason) }
             }
             TronListGroup(sections: [TronListSection(title: "Manage Project", rows: project.trusted
                 ? [ProjectLifecycleManageAction.rename, .archive, .untrust] : [ProjectLifecycleManageAction.rename, .archive])],
@@ -114,6 +123,7 @@ struct ProjectLifecycleDetailPage<RenameDestination: View>: View {
                 switch item {
                 case .rename:
                     ProjectLifecycleSheetRow(content: projectLifecycleRow("Rename Project", icon: "pencil", subtitle: "Move the folder; GitHub is not renamed"), destination: renameDestination)
+                        .disabled(project.renameUnavailableReason != nil)
                 case .archive:
                     TronListButton(projectLifecycleRow("Archive Project", icon: "archivebox", subtitle: "Move to ~/Workspace/.archive; keep all files"),
                         identifier: "\(identifierPrefix)-archive", action: requestArchive)
@@ -121,8 +131,11 @@ struct ProjectLifecycleDetailPage<RenameDestination: View>: View {
                 case .untrust:
                     TronListButton(projectLifecycleRow("Untrust Project", icon: "shield.slash", subtitle: "Keep the folder; stop loading extensions and hooks"),
                         identifier: "\(identifierPrefix)-untrust", action: requestUntrust)
+                        .disabled(project.untrustUnavailableReason != nil)
                 }
             }
+            if let reason = project.renameUnavailableReason { TronSettingsCaption(reason) }
+            if project.trusted, let reason = project.untrustUnavailableReason { TronSettingsCaption(reason) }
             if let reason = project.archiveUnavailableReason {
                 TronSettingsGroup(nil) {
                     TronSettingsRow(icon: "exclamationmark.triangle", title: "Archive unavailable", subtitle: reason,
@@ -146,7 +159,7 @@ struct ProjectLifecycleRenamePage: View {
     var body: some View {
         ProjectLifecyclePage("Rename Project", identifier: "\(identifierPrefix)-rename") {
             TronSettingsGroup(nil) {
-                TronSettingsRow(icon: "folder", title: "Current location", subtitle: project.path, subtitleLineLimit: nil)
+                TronSettingsRow(icon: "folder", title: "Current location", subtitle: project.displayPath, subtitleLineLimit: nil)
                 TronSettingsDivider()
                 ProjectLifecycleNameField(name: $name, identifier: "\(identifierPrefix)-name")
                 TronSettingsDivider()
@@ -182,6 +195,7 @@ private struct ProjectLifecyclePage<Content: View>: View {
             TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) { content }
                 .padding(20)
         }
+        .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle(title)
         .accessibilityIdentifier(identifier)
@@ -210,6 +224,7 @@ private struct ProjectLifecycleNameField: View {
                 .font(TronTypography.body)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .submitLabel(.done)
                 .accessibilityIdentifier(identifier)
         }.padding(14)
     }

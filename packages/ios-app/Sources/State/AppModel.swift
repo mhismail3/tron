@@ -212,7 +212,7 @@ final class AppModel {
     private let sessionMutations: SessionMutationService
     private let sessionImports: SessionImportCoordinator
     private let terminal: TerminalCoordinator
-    private let settingsTrust: SettingsTrustCoordinator
+    let settingsTrust: SettingsTrustCoordinator
     private let providerAuth: ProviderAuthCoordinator
     private let packageConfiguration: PackageConfigurationCoordinator
     private let customModelConfiguration: CustomModelConfigurationCoordinator

@@ -146,6 +146,12 @@ scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGateway
 `run-ui` pairs the production scene against a fresh fixture per journey, leaving
 `results/<utc>-ui.*`. `status`, `logs`, `stop` and `clean` act only on this worktree's fixture; run
 `clean` before deleting a worktree. DTO changes need Gateway tests and Swift decoding.
+The fixture's canonical lifecycle root is its isolated `HOME/Workspace` (exact spelling).
+`testProjectLifecycleApproveMovesAndArchives`, `testProjectLifecycleDenialRetainsUntrustedRepository`
+and `testProjectLifecycleBusyArchiveUsesCanonicalReason` exercise the native project pages;
+the busy journey seeds an empty trust store and a real linked-worktree repository only in
+that fixture. It never publishes a GitHub repository. Run these selectors individually;
+`TRON_IOS_E2E_UI_RUN_TIMEOUT_SECONDS=300` bounds a journey without changing XCTest oracles.
 
 ## Manual iOS release validation and delivery
 

@@ -93,6 +93,9 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetDark"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleApproveMovesAndArchives"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleDenialRetainsUntrustedRepository"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleBusyArchiveUsesCanonicalReason"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testTrustedProjectsListsAndAddsProjectsUntrusted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsTrustRowTrustsABlockedProject"
 )
@@ -458,7 +461,7 @@ load_state() {
   # Generated exclusively by this script with shell-escaped values.
   # shellcheck disable=SC1090
   source "$state_file"
-  [[ "${TRON_E2E_WORKSPACE:-}" == "$(realpath "$run_root/home/workspace")" \
+  [[ "${TRON_E2E_WORKSPACE:-}" == "$(realpath "$run_root/home/Workspace")" \
       && "${TRON_E2E_GATEWAY_HOME:-}" == "$(realpath "$run_root/home")" \
       && "${TRON_E2E_TRON_HOME:-}" == "$run_root/tron" \
       && "${TRON_E2E_AGENT_DIR:-}" == "$run_root/agent" \
@@ -523,7 +526,7 @@ start_fresh_fixture() {
   stop_gateway
   require_gateway_node
   check_gateway_native_modules
-  local tron_home="$run_root/tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/workspace" port code pi_version
+  local tron_home="$run_root/tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/Workspace" port code pi_version
   rm -rf "$tron_home" "$agent_dir" "$gateway_home"
   mkdir -p "$tron_home/gateway" "$workspace"
   chmod 700 "$tron_home" "$tron_home/gateway" "$gateway_home" "$workspace"
@@ -980,6 +983,15 @@ run_ui_journey() {
   # macOS Bash 3 treats an empty array as unset under nounset.
   start_fresh_fixture ${runtime_limits[@]+"${runtime_limits[@]}"}
   load_state
+  if [[ "$journey" == *testProjectLifecycleBusyArchiveUsesCanonicalReason ]]; then
+    # A real linked worktree exercises the lifecycle owner's canonical busy reason.
+    local busy="$TRON_E2E_WORKSPACE/busy-project"
+    # Empty canonical fixture store: there has been no trust decision to grant.
+    printf '{}\n' >"$run_root/agent/trust.json"
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git init --template= -b main "$busy"
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git -C "$busy" -c user.name=Fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null commit --allow-empty -m fixture
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git -C "$busy" -c core.hooksPath=/dev/null worktree add --detach "$run_root/home/busy-linked"
+  fi
   patch_xctestrun "$xctestrun" "$ui_test_target"
   mkdir -p "$run_root/results"
   attempt_dir="$(mktemp -d "$run_root/results/$(date -u '+%Y%m%dT%H%M%SZ')-ui.XXXXXX")"

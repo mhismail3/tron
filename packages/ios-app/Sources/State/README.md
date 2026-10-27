@@ -24,7 +24,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `ChatMediaLoader`, `SessionExportArtifactStore` | Transcript media by `(profile, lifecycle, session, blob)`; photo decoding preflights dimensions/component depth against 64 MiB, then verifies actual bytes; export artifacts. |
 | `TerminalCoordinator`, `TerminalReducer` | Session terminals: wire, presentation intents, attach/replay, resize. |
 | `MacTerminalController`, `MacTerminalEnrollmentStore` | Mac Terminal enrollment and shells ([Terminal](../UI/Terminal/README.md)). |
-| `SettingsTrustCoordinator` | Settings resolve/change/history/approvals and project trust. |
+| `SettingsTrustCoordinator`, `ProjectLifecycleModels` | Settings resolve/change/history/approvals, project trust and the native lifecycle read/request contract. |
 | `ProviderAuthCoordinator` | Provider/model catalogs, auth operations and prompts, MCP sign-in. |
 | `PackageConfigurationCoordinator`, `CustomModelConfigurationCoordinator`, `ConfigurationAutosaveCoordinator` | Packages, custom models, autosaved configuration writes. |
 | `HomeStatusPresentationOwner`, `HomeSheetReadOwner`, `HomeMutationCoordinator` | Home status, Home sheet reads, Home commands. |
@@ -49,6 +49,10 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
   with `SettingsTarget.keyChange`, so iOS holds no settings-path table. Trust is the
   `permissions.projectTrust` key. `SettingsTrustCoordinator` keeps one bounded `SettingsSnapshot`
   per target that every renderer for that target reads; generic edits dry-run first.
+  Native project lifecycle uses `projects.lifecycle.v1`: disposable `projects.list`/`inspect`
+  projections and receipt-owned `projects.request`, followed by a separate exact-digest
+  `settings.decide` tap. `ProjectLifecycleModels` decodes that contract strictly; names,
+  paths and cursors are never trimmed. There is no iOS project store or approval engine.
 - **Autosave.** `ConfigurationAutosaveCoordinator` admits writes only from user input, debounces,
   serializes, merges sparse patches per target, retains up to 64 batches (then rejects visibly),
   flushes on dismissal without cancelling accepted commands, and never auto-retries an uncertain

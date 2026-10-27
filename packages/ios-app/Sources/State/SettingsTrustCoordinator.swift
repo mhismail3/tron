@@ -49,6 +49,57 @@ final class SettingsTrustCoordinator {
         self.uuidSource = uuidSource
     }
 
+    /// Native project reads are disposable; every await remains profile-fenced.
+    func listProjects() async throws -> ProjectLifecycleListing {
+        let admission = profileGeneration
+        var cursor: String?, rows: [ProjectLifecycleRow] = []
+        for _ in 0..<20 {
+            var params: [String: JSONValue] = ["limit": .number(50)]
+            if let cursor { params["after"] = .string(cursor) }
+            let value = try await client.requestValue("projects.list", JSONValue.object(params))
+            try requireProfile(admission)
+            try Task.checkCancellation()
+            let page = try value.decode(ProjectLifecycleListing.self)
+            rows.append(contentsOf: page.projects)
+            guard let next = page.nextCursor else {
+                return ProjectLifecycleListing(workspace: page.workspace, projects: rows, nextCursor: nil)
+            }
+            cursor = next
+        }
+        throw GatewayFailure(code: "invalid_response", message: "The project listing exceeded its bounded window.", retryable: false, details: nil)
+    }
+
+    func inspectProject(path: String) async throws -> ProjectLifecycleRow {
+        let admission = profileGeneration
+        let value = try await client.requestValue("projects.inspect", JSONValue.object(["cwd": .string(path)]))
+        try requireProfile(admission)
+        return try value.decode(ProjectLifecycleRow.self)
+    }
+
+    /// The existing receipt executor owns accepted work. This only asks for a
+    /// canonical pending action; SettingsApprovalSheet owns the separate digest tap.
+    func requestProject(_ operation: ProjectLifecycleOperation, name: String, newName: String? = nil, github: Bool = false) async throws -> SettingsApprovalReference {
+        let admission = profileGeneration
+        let commandID = uuidSource.next().uuidString
+        var params: [String: JSONValue] = ["commandId": .string(commandID), "action": .string(operation.rawValue),
+            "name": .string(name), "reason": .string("Requested \(operation.rawValue) from iPhone Trusted Projects")]
+        if let newName { params["newName"] = .string(newName) }
+        if operation == .create || operation == .trust { params["github"] = .bool(github) }
+        let value = try await mutationExecutor.performValue(method: "projects.request", commandID: commandID) {
+            try await client.requestValue("projects.request", JSONValue.object(params))
+        }
+        try requireProfile(admission)
+        try value.decode(SettingsChangeResult.self).throwIfRefused()
+        let pending = try value.decode(ProjectLifecyclePendingResult.self)
+        guard pending.status == "pending", let approval = pending.approval,
+              !approval.requestId.isEmpty, !approval.digest.isEmpty else {
+            throw GatewayFailure(code: "invalid_response", message: "No pending project approval was proven. Inspect the project and Changes before retrying.", retryable: false, details: nil)
+        }
+        noteSettingsChanged()
+        noteApprovalsChanged()
+        return SettingsApprovalReference(requestID: approval.requestId, changeIDs: [])
+    }
+
     func inspectTrust(target: TrustTarget) async throws -> JSONValue {
         let admittedProfileGeneration = profileGeneration
         let value = try await client.requestValue(

@@ -1,75 +1,24 @@
 import SwiftUI
 import TronMobileCore
 
-/// Global Agent Settings: the default trust policy, every project with a
-/// saved trust decision (the schema's `permissions.projectTrust` instances),
-/// and Add Project. Adding
-/// records an explicit Not trusted decision through the ordinary settings
-/// change path, so a project joins the list without being granted trust;
-/// trusting it is the row's own toggle and its confirmation.
+/// Global Settings' single entrypoint. The former embedded toggle/Add write
+/// route is replaced by native lifecycle pages and the canonical approval sheet.
 struct TrustedProjectsSettingsView: View {
     static let key = "permissions.projectTrust"
     static let policyKey = "permissions.defaultProjectTrust"
-    /// The keys this sheet owns; More Settings does not repeat them.
     static let keys: Set<String> = [key, policyKey]
 
-    @Environment(AppModel.self) private var model
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.tronSettingsVisualTheme) private var theme
-    @PresentationState private var choosingFolder = false
-    @PresentationState private var adding = false
-
-    private var target: JSONValue { SettingsTarget.global.gatewayTarget }
-    private var accent: Color { theme?.accent ?? .tronCyan }
-
-    /// The projects already listed. A folder inside one is its own project: the
-    /// trust store resolves the nearest saved decision, so it gets its own row.
-    private var listedProjects: [String] {
-        model.settingsSnapshot(for: target)?.resolution.keys
-            .filter { $0.key == Self.key }.compactMap { $0.qualifiers?["project"] } ?? []
+    private enum Entry: String, Identifiable {
+        case projects
+        var id: String { rawValue }
     }
 
     var body: some View {
-        TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
-                TronSettingsGroup("Trusted Projects") {
-                    SettingsRendererView(target: target, writeLayer: "global", presentation: .keys([Self.policyKey]), detailedKeys: true)
-                }
-                SettingsRendererView(target: target, writeLayer: "global", presentation: .instances(key: Self.key), embedded: true)
-                Button { choosingFolder = true } label: {
-                    TronSettingsRow(
-                        icon: "plus",
-                        title: "Add Project",
-                        accent: accent,
-                        titleColor: TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : accent
-                    )
-                }
-                .buttonStyle(.plain)
-                .tronGlassSurface(accent: accent, interactive: true)
-                .disabled(adding)
-                .accessibilityIdentifier("trusted-projects-add")
-        }
-        .tronManagedSheet(isPresented: $choosingFolder, identity: "settings.trusted-projects.add") {
-            WorkspaceBrowser { path in add(path) }
-        }
-    }
-
-    private func add(_ path: String) {
-        guard !adding, !listedProjects.contains(path) else { return }
-        adding = true
-        let change = JSONValue.object([
-            "key": .string(Self.key), "layer": .string("global"), "op": .string("set"),
-            "qualifiers": .object(["project": .string(path)]), "value": .bool(false),
-        ])
-        // An accepted command, not a presentation read: it is not cancelled with the view.
-        Task { @MainActor in
-            defer { adding = false }
-            do {
-                try await model.changeSetting(target: target, change: change)
-                model.noteSettingsChanged()
-            } catch is CancellationError {
-                return
-            } catch {
-                model.presentError(error)
+        TronListGroup([Entry.projects], identifier: "trusted-projects-entry") { _ in
+            TronProgressiveSheetLink(accessibilityLabel: "Trusted Projects", detents: .fixed([.large])) {
+                ProjectLifecycleView(route: .list)
+            } label: {
+                TronListRow(TronListRowContent(leading: .icon("checkmark.shield", .tronPrimary), title: "Trusted Projects"))
             }
         }
     }

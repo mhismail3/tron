@@ -48,8 +48,8 @@ private struct HostedProjectLifecycleContent: View {
     @PresentationState private var choosingFolder = false
     @PresentationState private var approval: HostedProjectApprovalPreview?
 
-    private let example = ProjectLifecycleProject(name: "Example", path: "~/Workspace/Example", trusted: true)
-    private let fieldNotes = ProjectLifecycleProject(name: "field-notes", path: "~/Workspace/field-notes", trusted: false)
+    private let example = ProjectLifecycleProject(name: "Example", path: "~/Workspace/Example", displayPath: "~/Workspace/Example", trusted: true)
+    private let fieldNotes = ProjectLifecycleProject(name: "field-notes", path: "~/Workspace/field-notes", displayPath: "~/Workspace/field-notes", trusted: false)
 
     var body: some View {
         content
@@ -73,7 +73,7 @@ private struct HostedProjectLifecycleContent: View {
                 approval = .trust
             }
         case "trusted", "untrusted", "busy":
-            let item = surface == "untrusted" ? fieldNotes : ProjectLifecycleProject(name: example.name, path: example.path,
+            let item = surface == "untrusted" ? fieldNotes : ProjectLifecycleProject(name: example.name, path: example.path, displayPath: example.displayPath,
                 trusted: true, archiveUnavailableReason: surface == "busy"
                     ? "An active task is using this project. Wait for it to finish or stop it before archiving." : nil)
             ProjectLifecycleDetailPage(project: item, github: $github, identifierPrefix: "project-preview",

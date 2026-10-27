@@ -194,8 +194,16 @@ presentation. Lists use `TronListGroup`/`TronListRow` without chevrons; fields k
 shared settings controls. Drill-ins use managed sub-sheets, never push routes.
 Callers supply project paths, effective trust, archive refusal reasons, form bindings,
 destinations and effect closures. The views do not infer eligibility or submit RPCs.
-The live Trusted Projects entrypoint is not connected to these pages until a native
-lifecycle read/request API exists; no fake endpoint or agent-tool fallback is used.
+`TrustedProjectsSettingsView` is the single Global entrypoint into these sheets.
+`ProjectLifecycleView` refreshes disposable `projects.list`/`projects.inspect`
+projections on re-entry, reconnect and existing settings/trust/approval revisions;
+profile, activity and generation fences retire stale reads. Saved outside folders
+remain visible/read-only with Gateway reasons. Choose Existing only inspects: it
+never writes an untrusted decision or creates a second project store.
+`SettingsTrustCoordinator` sends `projects.request` through its existing receipt
+executor, with a fresh command ID per intent. The result only opens the canonical
+`SettingsApprovalSheet`; the displayed digest's separate tap owns every decision.
+Requests/decisions revalidate on the Gateway. No agent-tool fallback is used.
 
 `TronProjectLifecyclePreviewUITests` exercises these production-owned views through
 `HOSTED_TEST`'s `HostedProjectLifecyclePreview` in light/dark at Large and XXXL.
@@ -204,6 +212,9 @@ Archive, Untrust, Trust and Rename review reuse `SettingsApprovalSheet` with syn
 socket-served requests; fixture decisions refuse without effects. The route journey
 opens and dismisses detail, rename, approval, Add/Create and folder sub-sheets.
 Captures and route checks are not real-Gateway lifecycle acceptance.
+`RealGatewayProjectLifecycleUITests` owns separate approve/move/archive, denial and
+linked-worktree busy journeys through the real socket and canonical filesystem/trust
+store. The harness seeds only its isolated busy repository; no real GitHub is created.
 
 ## Not here
 
