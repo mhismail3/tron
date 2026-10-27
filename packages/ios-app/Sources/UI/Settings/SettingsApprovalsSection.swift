@@ -253,19 +253,7 @@ struct SettingsApprovalReviewContent: View {
                 VStack(spacing: 0) {
                     ForEach(Array(review.rows.enumerated()), id: \.offset) { index, row in
                         if index > 0 { TronSettingsDivider() }
-                        TronSettingsRow(icon: nil, title: row.title, subtitle: row.value, subtitleLineLimit: nil)
-                            .textSelection(.enabled)
-                        if let detail = row.detail, !detail.isEmpty {
-                            // A wrapping note under its row, in the rows' own muted subtext.
-                            Text(detail)
-                                .font(TronTypography.settingsSubtext(adjustment: 0))
-                                .foregroundStyle(Color.tronTextMuted)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                                .padding(.top, -TronSpacing.md)
-                                .padding(.bottom, TronSpacing.xl)
-                        }
+                        SettingsApprovalItemRow(row: row)
                         if technical, let exact = row.exact {
                             TronTechnicalJSONRow(value: exact, title: "Exact identity", sheetTitle: row.title)
                         }
@@ -384,5 +372,33 @@ struct SettingsApprovalReview: Equatable, Sendable {
         case "failed": "Failed"
         default: "Decided"
         }
+    }
+}
+
+/// One change in a request: the subject in the settings row title type, what
+/// happens to it and any note in the row subtext type. Long subjects (a note's
+/// own words) wrap in full, which the single-line-oriented settings row does not.
+struct SettingsApprovalItemRow: View {
+    let row: SettingsApprovalReview.Row
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: TronSpacing.xs) {
+            Text(row.title)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronTextPrimary)
+            Text(row.value)
+                .font(TronTypography.settingsRowSubtext)
+                .foregroundStyle(Color.tronTextPrimary)
+            if let detail = row.detail, !detail.isEmpty {
+                Text(detail)
+                    .font(TronTypography.settingsRowSubtext)
+                    .foregroundStyle(Color.tronTextMuted)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+        .padding(.vertical, TronSpacing.xl)
+        .textSelection(.enabled)
     }
 }
