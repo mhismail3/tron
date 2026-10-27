@@ -494,6 +494,17 @@ package struct GatewayEventDelivery: Sendable, Equatable {
     }
 }
 
+/// A snapshot of the Gateway transport epoch, including the disconnected state.
+/// Optional reads use this value so a request captured while offline cannot
+/// attach itself to a later connection.
+package struct GatewayConnectionAdmission: Equatable, Sendable {
+    let connectionID: Int?
+
+    package init(connectionID: Int?) {
+        self.connectionID = connectionID
+    }
+}
+
 package struct GatewayConnectionIdentity: Sendable, Equatable {
     package let id: Int
     package let info: GatewayInfo

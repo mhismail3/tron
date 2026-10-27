@@ -1,5 +1,24 @@
 import Foundation
 
+package enum GatewayDiagnosticTopicAdmission {
+    static let recognizedTopics: Set<String> = [
+        "session.snapshot", "session.rebaseline", "session.summary", "session.listChanged",
+        "session.message", "session.progress", "session.toolProgress", "session.extensionActivity",
+        "session.extensionPresentation", "session.compaction", "session.processActivity",
+        "session.closed", "session.operationFailed", "session.extensionError",
+        "session.structureChanged", "session.contextChanged", "session.resourcesChanged",
+        "session.processTranscript.changed", "transport.disconnected", "transport.resyncRequired",
+        "system.stopping", "notification.inbox.changed", "auth.prompt", "auth.event",
+        "auth.completed", "automation.changed", "knowledge.changed", "knowledge.curation.job", "settings.changed", "trust.changed",
+        "providers.changed", "packages.changed", "packages.progress", "packages.completed",
+        "models.customChanged", "models.recentChanged", "models.catalogChanged", "mcp.changed", "devices.changed", "terminal.output", "terminal.exit"
+    ]
+
+    package static func admit(_ topic: String) -> String {
+        recognizedTopics.contains(topic) ? topic : "other"
+    }
+}
+
 package struct GatewayEventBufferPolicy: Sendable {
     let maximumEvents: Int
     let maximumBytes: Int

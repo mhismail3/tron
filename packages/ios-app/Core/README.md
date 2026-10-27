@@ -11,7 +11,9 @@ the hosted test targets link.
 - `Gateway/`: `GatewayClient` (one authenticated WebSocket per connection epoch), protocol
   decoding (`GatewayProtocol`, `GatewayProtocolContract`), `SessionEventSynchronizer`, socket and
   bounded HTTP transports, [`GatewayEventHub`](Gateway/GatewayEventHub.swift) and its event stream,
-  pairing profiles and their store, LAN pin and path snapshots.
+  pairing profiles and their store, LAN pin and path snapshots. Typed RPC admission lives in
+  [`GatewayResponseDecoding`](Gateway/GatewayResponseDecoding.swift); connection admission values
+  live beside protocol identity, and the hub owns its diagnostic topic vocabulary.
 - `Models/`: wire-compatible value types grouped by authority (connection, session catalog,
   transcript, runtime, resources, workspace, terminal, automations, knowledge, notifications…),
   plus `JSONValue` and `ModelDisplayFormatting`.
