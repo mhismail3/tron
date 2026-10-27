@@ -17,13 +17,6 @@ import type { PlannedWrite } from "../kernel/settings/settings-types.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 
-interface PackageUpdateProjection {
-  source: string;
-  displayName: string;
-  type: string;
-  scope: "user" | "project";
-}
-
 const MAXIMUM_PACKAGES = 256;
 const MAXIMUM_RESOURCE_ITEMS = 1_000;
 const MAXIMUM_PACKAGE_UPDATES = 256;
@@ -73,7 +66,7 @@ function validatePackageInventory(packages: InstalledPackage[], resources: Resol
   }
 }
 
-function validatePackageUpdates(updates: PackageUpdateProjection[]): void {
+function validatePackageUpdates(updates: Awaited<ReturnType<DefaultPackageManager["checkForAvailableUpdates"]>>): void {
   if (updates.length > MAXIMUM_PACKAGE_UPDATES) throw new GatewayError("conflict", "Package updates exceed their item limit");
   validateUnique(updates, (value) => `${value.scope}:${value.source}`, "Package updates");
   for (const value of updates) {

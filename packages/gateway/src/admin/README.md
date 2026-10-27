@@ -31,6 +31,11 @@ Durable stores: `<tronHome>/gateway/settings/` (`changes/`, `approvals.json`,
 
 ## Contract
 
+`packages.checkUpdates` validates the Pi manager's own return type without a second DTO.
+The real Gateway/SDK/child-process lock pins accepted fields and user/project scopes,
+256 accepted updates and the 257-item conflict. Oversized/duplicate identities,
+per-field string failures and the aggregate byte-limit failure are not covered by that lock.
+
 `settings-module.ts` owns the settings extension descriptor. Its request/result
 vocabulary is the [kernel settings contract](../kernel/settings/README.md); the
 session resolves its actor and settings owner at every call. Approve-tier tool calls
