@@ -33,6 +33,51 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
 
 
 class ConcurrentPublicationTests(unittest.TestCase):
+    def test_default_runner_never_enters_live_delivery(self) -> None:
+        """Run the real no-argument front door with delivery replaced by a rejecting executable."""
+        with tempfile.TemporaryDirectory(prefix="tron-share-default-") as temporary:
+            root = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c",
+                            "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture"],
+                           check=True, capture_output=True)
+            # Runner artifacts must not trip the old live path's clean-tree check
+            # before the rejecting executable observes its attempted delivery.
+            (root / ".git/info/exclude").write_text("*\n")
+            sentinel, calls = root / "device-sentinel", root / "delivery.jsonl"
+            sentinel.write_text(f'''#!{sys.executable}
+import json, os, sys
+from pathlib import Path
+if sys.argv[1:] == ["share-host", "disable"]:
+    os.execv({str(ROOT / "scripts/tron-ios-device")!r}, [{str(ROOT / "scripts/tron-ios-device")!r}, *sys.argv[1:]])
+with open({str(calls)!r}, "a") as handle:
+    handle.write(json.dumps(sys.argv[1:]) + "\\n")
+sys.exit("REJECTED live source/build/publish sentinel: --notes required; no action performed")
+''')
+            sentinel.chmod(0o755)
+            wrapper = '''import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("share_runner", sys.argv.pop(1))
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+runner.ROOT = pathlib.Path(sys.argv.pop(1))
+runner.COMMAND = pathlib.Path(sys.argv.pop(1))
+runner.FIXTURE_REPORT = runner.ROOT / "test-results/report.json"
+sys.argv = [str(spec.origin)]
+runner.main()
+'''
+            result = subprocess.run([sys.executable, "-c", wrapper,
+                                     str(ROOT / "scripts/test-tron-ios-device-share.py"), str(root), str(sentinel)],
+                                    capture_output=True, text=True, timeout=120)
+            report = {"exit": result.returncode, "stdout": result.stdout, "stderr": result.stderr,
+                      "rejected_delivery": calls.read_text().splitlines() if calls.exists() else [],
+                      "fixture": json.loads((root / "test-results/report.json").read_text())}
+            evidence = ROOT / "test-results/ios-share-default/report.json"
+            evidence.parent.mkdir(parents=True, exist_ok=True)
+            evidence.write_text(json.dumps(report, indent=2) + "\n")
+            self.assertEqual(report["rejected_delivery"], [], json.dumps(report))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(report["fixture"]["passed"])
+
     def test_same_revision_calls_keep_distinct_records_and_urls(self) -> None:
         report = {"scope": "private non-installable fixture; no network or live host", "passed": False, "stages": []}
         try:

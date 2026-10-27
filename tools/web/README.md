@@ -87,11 +87,12 @@ color-independent status. Check actual composited contrast, not swatches alone.
    reduced effects. Use the existing journey, not implementation-detail tests:
 
    ```sh
-   python3 scripts/test-tron-ios-device-share.py --fixture-only
+   python3 scripts/test-tron-ios-device-share.py
    ```
 
-   The command **without flags publishes a real iOS build**. Do not run it as a
-   styling test. Browser fixtures must never install anything. Record meaningful
+   The test runner is fixture-only, including with no arguments; it has no live
+   delivery mode. Real delivery remains only in the explicitly authorized manual
+   `scripts/tron-ios-device share` CLI. Browser fixtures must never install anything. Record meaningful
    test artifacts; source-string/style-value assertions are not behavioral proof.
    Fixture results persist at `test-results/ios-share-publisher/report.json`.
 

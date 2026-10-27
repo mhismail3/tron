@@ -60,8 +60,8 @@ time and identity from `build.json`, not a filename grammar; page/latest aliases
 ```bash
 scripts/tron-ios-device share --title TITLE --notes NOTES
 scripts/tron-ios-device share-host status
-python3 scripts/test-tron-ios-device-share.py --fixture-only  # publisher, server and host, no build
-python3 scripts/test-ios-share-concurrency.py  # eight private publishers, retention and URLs
+python3 scripts/test-tron-ios-device-share.py  # fixture-only publisher, server and host; no build
+python3 scripts/test-ios-share-concurrency.py  # no-live default sentinel, concurrency and URLs
 ```
 
 ### Profiling a real slowdown

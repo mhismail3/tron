@@ -11,12 +11,6 @@
    changing anything, handles an absent handler, and preserves other serve
    ports and retained builds. It never runs the installed Tailscale or
    launchctl.
-3. The live journey (skipped with --fixture-only): the real
-   `scripts/tron-ios-device share` builds, signs, validates and publishes this
-   clean checkout to the share host, then everything the phone fetches - the
-   index, latest.plist, the build manifest and the IPA - is downloaded over the
-   tailnet HTTPS URL with normal certificate verification, and the IPA is
-   checked to be byte-identical, correctly signed and provisioned.
 
 For visual review only, --preview-dir NEW_DIRECTORY renders through the real
 publisher with synthetic metadata and non-installable IPAs, without running
@@ -24,10 +18,8 @@ tests or contacting a live host. Fixture regression results persist at
 `test-results/ios-share-publisher/report.json`. For real-browser acceptance,
 see scripts/test-ios-share-browser.js and tools/web/README.md.
 
-The live journey needs this Mac's development signing, a clean checkout and an
-enabled share host (`scripts/tron-ios-device share-host enable`); it publishes
-a real, installable build. The report is written to
-packages/ios-app/build/share-e2e/report.json.
+Live delivery is not a test mode. It remains only in the explicitly authorized
+manual `scripts/tron-ios-device share` command.
 """
 
 from __future__ import annotations
@@ -58,7 +50,6 @@ ROOT = Path(__file__).resolve().parent.parent
 COMMAND = ROOT / "scripts" / "tron-ios-device"
 PUBLISH = ROOT / "scripts" / "ios-share-publish.py"
 SERVER = ROOT / "scripts" / "ios-share-server.py"
-REPORT = ROOT / "packages" / "ios-app" / "build" / "share-e2e" / "report.json"
 FIXTURE_REPORT = ROOT / "test-results" / "ios-share-publisher" / "report.json"
 CHECKS: list[dict] = []
 BUNDLE_ID = "com.tron.mobile"
@@ -371,93 +362,9 @@ def share_host_journey() -> None:
               "disable with no :8443 handler removes only the LaunchAgent")
 
 
-def live_journey() -> None:
-    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True).stdout
-    if dirty.strip():
-        raise SystemExit("FAIL: share needs a clean checkout; commit first")
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    subject = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=ROOT, text=True).strip()
-
-    started = time.monotonic()
-    refused = subprocess.run([str(COMMAND), "share", "--title", "t"], cwd=ROOT, capture_output=True, text=True)
-    check(refused.returncode != 0 and "--notes" in refused.stderr and time.monotonic() - started < 10,
-          "share without notes is refused before building")
-
-    started = time.monotonic()
-    shared = subprocess.run([str(COMMAND), "share", "--title", "share journey",
-                             "--notes", f"E2E journey build of {head[:9]}: {subject}"],
-                            cwd=ROOT, capture_output=True, text=True)
-    elapsed = time.monotonic() - started
-    if shared.returncode != 0:
-        sys.stderr.write((shared.stdout + shared.stderr)[-4000:])
-    check(shared.returncode == 0, "share succeeds")
-    lines = [line for line in shared.stdout.splitlines() if line.strip()]
-    check(lines[-2].startswith("Install page: https://") and lines[-1].startswith("Install link: itms-services://"),
-          "share prints the install page and link last")
-    page_url = lines[-2].removeprefix("Install page: ")
-    install_link = lines[-1].removeprefix("Install link: ")
-    check(manifest_url(install_link) == page_url + "latest.plist", "install link targets the latest manifest")
-
-    # Every fetch below verifies the certificate, as iOS does.
-    index, _ = fetch(page_url)
-    newest = manifest_url(LINK.findall(index.decode())[0])
-    check(f"<code>{head[:9]}</code>" in index.decode().split("</section>")[0], "index shows this commit first")
-    latest, _ = fetch(page_url + "latest.plist")
-    build_manifest, _ = fetch(newest)
-    check(latest == build_manifest, "latest.plist is the newest build manifest")
-    item = plistlib.loads(latest)["items"][0]
-    ipa_url = item["assets"][0]["url"]
-    check(ipa_url.startswith(page_url) and item["metadata"]["bundle-identifier"] == BUNDLE_ID,
-          "manifest names an IPA on the same tailnet HTTPS origin")
-    ipa_bytes, _ = fetch(ipa_url)
-    record, _ = fetch(ipa_url.rsplit("/", 1)[0] + "/build.json")
-    record = json.loads(record)
-    local_ipa = ROOT / "packages" / "ios-app" / "build" / "share" / "TronMobile.ipa"
-    digest = hashlib.sha256(ipa_bytes).hexdigest()
-    check(digest == record["sha256"] == hashlib.sha256(local_ipa.read_bytes()).hexdigest()
-          and record["commit"] == head, "served IPA is the built IPA of this commit")
-
-    with tempfile.TemporaryDirectory() as tmp:
-        ipa = Path(tmp) / "app.ipa"
-        ipa.write_bytes(ipa_bytes)
-        with zipfile.ZipFile(ipa) as archive:
-            archive.extractall(tmp)
-        apps = list((Path(tmp) / "Payload").glob("*.app"))
-        check(len(apps) == 1, "IPA holds exactly one app under Payload/")
-        app = apps[0]
-        info = plistlib.loads((app / "Info.plist").read_bytes())
-        check(info["CFBundleIdentifier"] == BUNDLE_ID, "IPA app is the canonical device identity")
-        # The device checks this signature after the over-the-air download.
-        verify = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True)
-        check(verify.returncode == 0, f"downloaded app signature verifies {verify.stderr.strip()}")
-        profile = plistlib.loads(subprocess.check_output(
-            ["security", "cms", "-D", "-i", str(app / "embedded.mobileprovision")]))
-        devices = profile.get("ProvisionedDevices", [])
-        check(len(devices) > 0, "development profile lists registered devices for over-the-air install")
-        entitlements = profile.get("Entitlements", {})
-
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text(json.dumps({
-        "commit": head,
-        "share_seconds": round(elapsed, 1),
-        "install_page": page_url,
-        "install_link": install_link,
-        "ipa_url": ipa_url,
-        "ipa_bytes": len(ipa_bytes),
-        "ipa_sha256": digest,
-        "provisioned_device_count": len(devices),
-        "get_task_allow": entitlements.get("get-task-allow"),
-        "aps_environment": entitlements.get("aps-environment"),
-        "bundle_id": BUNDLE_ID,
-    }, indent=2) + "\n")
-    print(f"report: {REPORT.relative_to(ROOT)}")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--fixture-only", action="store_true", help="temporary publisher/server and share-host fixture checks; no live publish")
-    mode.add_argument("--preview-dir", type=Path, help="render a non-installable fixture into a NEW output directory; no tests or live publish")
+    parser.add_argument("--preview-dir", type=Path, help="render a non-installable fixture into a NEW output directory; no tests or live publish")
     args = parser.parse_args()
     if args.preview_dir:
         preview_page(args.preview_dir.resolve())
@@ -470,12 +377,10 @@ def main() -> None:
     finally:
         FIXTURE_REPORT.parent.mkdir(parents=True, exist_ok=True)
         FIXTURE_REPORT.write_text(json.dumps({
-            "command": "python3 scripts/test-tron-ios-device-share.py --fixture-only",
+            "command": "python3 scripts/test-tron-ios-device-share.py",
             "checks": CHECKS, "passed": completed and all(c["passed"] for c in CHECKS),
         }, indent=2) + "\n")
         print(f"fixture report: {FIXTURE_REPORT.relative_to(ROOT)}")
-    if not args.fixture_only:
-        live_journey()
 
 
 if __name__ == "__main__":
