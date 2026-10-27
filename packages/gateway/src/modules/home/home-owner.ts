@@ -510,7 +510,7 @@ export class HomeOwner {
       text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };
   }
 
-  async taskList(input: { limit?: number; cursor?: string }, signal?: AbortSignal) {
+  async taskList(input: { limit?: number; cursor?: string; filter?: "all" | "open" | "finished" }, signal?: AbortSignal) {
     const owner = await this.taskOwner();
     if (this.unavailable) throw new GatewayError("conflict", "Home is unavailable", false, { reason: this.unavailable });
     try { return await owner.list(input, signal); }
@@ -529,6 +529,10 @@ export class HomeOwner {
       if (error instanceof HomeTaskStoreError) throw new GatewayError("conflict", "Home task list refused", false, { reason: error.code });
       throw error;
     }
+  }
+
+  async taskHistory(input: { taskId: string; limit?: number; cursor?: string }, signal?: AbortSignal) {
+    return (await this.taskOwner()).history(input, signal);
   }
 
   async taskResult(taskId: string) {

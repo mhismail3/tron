@@ -197,6 +197,68 @@ describe("resuming a stopped Home worker in place", () => {
     expect((await homeOwnerOf(cold).taskStatus(resumed.taskId) as any).checkins).toEqual(final.checkins);
     evidence.push({ case: "durable-checkins-stop-resume", status, list, resumed: final });
   }, 60_000);
+  it("projects one current row per resumed lineage without merging separate same-title delegations", async () => {
+    const f = await fixture(false, true);
+    const { service } = await listen(f);
+    const client = { clientId: "lineage-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const owner = homeOwnerOf(f.registry);
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("report", { resultId: "first-result", outcome: "needs-input", text: "Awaiting approval", evidence: ["Retained work"] })], { stopReason: "toolUse" })]);
+    const first = await owner.dispatchTask(f.home.sessionId, { taskId: "lineage", intent: "Same title", target: f.cwd });
+    await first.completion;
+    const entered = { count: 0 };
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("checkin", { step: "Review resumed work", done: "Clean 99a69ce97\nretained", next: "Capture 4 light/dark images" })], { stopReason: "toolUse" }), holding(entered)]);
+    const resumed = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: first.taskId }) as { taskId: string; operationId: string };
+    await waitFor(() => entered.count === 1, "resumed worker check-in");
+    const page = await service.invoke(client, "home.taskList", { limit: 1 }) as any;
+    expect(page.items.map((row: any) => row.taskId)).toEqual([resumed.taskId]);
+    expect(page.nextCursor).toBeUndefined();
+    expect(page.counts).toEqual({ active: 1, finished: 0 });
+    expect(page.items[0]).toMatchObject({ sessionId: first.sessionId, lifecycle: "active", attention: false });
+    expect(page.items[0].checkins.at(-1).done).toBe("Clean 99a69ce97\nretained");
+    await owner.stopTask(resumed);
+    await waitFor(async () => (await owner.taskStatus(resumed.taskId)).lifecycle === "terminal", "resume stopped");
+    f.faux.setResponses([fauxAssistantMessage([reportCall("separate-result")], { stopReason: "toolUse" })]);
+    await (await owner.dispatchTask(f.home.sessionId, { taskId: "separate", intent: "Same title", target: f.cwd })).completion;
+    const all = await service.invoke(client, "home.taskList", {}) as any;
+    expect(all.items.map((row: any) => row.taskId)).toEqual(["separate", resumed.taskId]);
+    expect((await service.invoke(client, "home.taskList", { filter: "open" }) as any).items).toEqual([]);
+    expect((await owner.taskStatus(first.taskId)).terminalEvidence?.outcome).toBe("needs-input");
+    evidence.push({ case: "one-row-per-lineage", page, all });
+  }, 60_000);
+
+  it("pages every canonical check-in and every operation across resumes, beyond the recent-record limit", async () => {
+    const f = await fixture(false, true);
+    const { service } = await listen(f);
+    const client = { clientId: "history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const owner = homeOwnerOf(f.registry);
+    const request = { step: "Readable progress", done: "Clean 99a69ce97\nrc65 uncapped 289.538s", next: "Same 4 light/dark captures" };
+    f.faux.setResponses([fauxAssistantMessage(Array.from({ length: 14 }, (_, index) => fauxToolCall("checkin", { ...request, step: `Milestone ${index}` })), { stopReason: "toolUse" }), fauxAssistantMessage([reportCall("history-initial")], { stopReason: "toolUse" })]);
+    const first = await owner.dispatchTask(f.home.sessionId, { taskId: "history-lineage", intent: "Finite history", target: f.cwd });
+    await first.completion;
+    f.faux.setResponses([fauxAssistantMessage([reportCall("history-empty-resume")], { stopReason: "toolUse" })]);
+    const second = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: first.taskId }) as { taskId: string };
+    await waitFor(async () => (await owner.taskStatus(second.taskId)).lifecycle === "terminal", "empty resume settles");
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("checkin", { ...request, step: "Final review" })], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall("history-final")], { stopReason: "toolUse" })]);
+    const third = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: second.taskId }) as { taskId: string };
+    await waitFor(async () => (await owner.taskStatus(third.taskId)).lifecycle === "terminal", "final resume settles");
+    const items: any[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await service.invoke(client, "home.taskHistory", { taskId: first.taskId, limit: 4, ...(cursor ? { cursor } : {}) }) as any;
+      expect(page.items.length).toBeLessThanOrEqual(4);
+      expect(page.total).toBe(18);
+      items.push(...page.items); cursor = page.nextCursor;
+    } while (cursor);
+    const checkins = items.filter(row => row.checkin).map(row => row.checkin);
+    expect(checkins.map(row => row.step)).toEqual(["Final review", ...Array.from({ length: 14 }, (_, index) => `Milestone ${13 - index}`)]);
+    expect(new Set(checkins.map(row => row.id)).size).toBe(15);
+    expect(checkins.every(row => row.done === request.done && row.next === request.next)).toBe(true);
+    expect(items.filter(row => !row.checkin).map(row => row.taskId)).toEqual([third.taskId, second.taskId, first.taskId]);
+    const newest = await service.invoke(client, "home.taskHistory", { taskId: third.taskId, limit: 4 }) as any;
+    expect(newest.items).toEqual(items.slice(0, 4));
+    evidence.push({ case: "all-operation-checkin-history", items });
+  }, 60_000);
+
   it("bounds check-in storage and projections and refuses malformed requests without ending the worker", async () => {
     const f = await fixture(false, true);
     const request = { step: "Validating", done: "Previous milestone", next: "Next milestone" };

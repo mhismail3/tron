@@ -1409,6 +1409,23 @@ export interface HomeTaskSummary extends HomeTaskDisplay {
   checkins: HomeTaskCheckin[];
   pendingGrant: boolean;
 }
+/** A finite lineage event: every operation, including those with no check-ins, and
+ * every accepted canonical check-in. Operation state is current, not state at check-in. */
+export interface HomeTaskHistoryItem {
+  id: string;
+  at: string;
+  taskId: string;
+  operationId: string | null;
+  operationNumber: number;
+  lifecycle: HomeTaskSummary["lifecycle"];
+  outcome: HomeTaskSummary["outcome"];
+  checkin?: HomeTaskCheckin;
+}
+export interface HomeTaskHistoryPage {
+  items: HomeTaskHistoryItem[];
+  total: number;
+  nextCursor?: string;
+}
 export interface HomeTaskPage {
   items: HomeTaskSummary[];
   nextCursor?: string;

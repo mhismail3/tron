@@ -278,7 +278,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "mac.replace.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.view", "home.memory.evidence",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "mac.replace.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.taskHistory", "home.stopTask", "home.memory.view", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -642,9 +642,18 @@ export class GatewayService {
         return safeJson(await this.requireHome().profileList());
       }
       case "home.taskList": {
-        rejectUnknownFields(params, ["limit", "cursor"], method);
+        rejectUnknownFields(params, ["limit", "cursor", "filter"], method);
+        if (params.filter !== undefined && !["all", "open", "finished"].includes(params.filter as string)) throw new GatewayError("invalid_request", "Invalid task filter");
         if (params.limit !== undefined && (!Number.isSafeInteger(params.limit) || (params.limit as number) < 1 || (params.limit as number) > 50)) throw new GatewayError("invalid_request", "Invalid task page limit");
         return safeJson(await this.requireHome().taskList({ ...(params.limit === undefined ? {} : { limit: params.limit as number }),
+          ...(params.filter === undefined ? {} : { filter: params.filter as "all" | "open" | "finished" }),
+          ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 1024 }) }) }, client.signal));
+      }
+      case "home.taskHistory": {
+        rejectUnknownFields(params, ["taskId", "limit", "cursor"], method);
+        if (params.limit !== undefined && (!Number.isSafeInteger(params.limit) || (params.limit as number) < 1 || (params.limit as number) > 50)) throw new GatewayError("invalid_request", "Invalid task history limit");
+        return safeJson(await this.requireHome().taskHistory({ taskId: string(params.taskId, "taskId", { max: 160 }),
+          ...(params.limit === undefined ? {} : { limit: params.limit as number }),
           ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 1024 }) }) }, client.signal));
       }
       case "home.taskStatus": {

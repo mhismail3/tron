@@ -10,6 +10,7 @@ import type { HomeTaskCheckin, HomeTaskCounts } from "../../protocol/types.js";
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 import { homeTaskPromptTokens } from "./home-task-spend.js";
 import { HOME_TASK_CHECKIN_LIMIT, parseHomeTaskCheckin } from "../../kernel/delegation/task-checkin.js";
+import { currentHomeTask, homeTaskLineages, homeTaskNeedsAttention } from "./home-task-lineage.js";
 
 const TASK_BYTES = 256 * 1_024;
 const AUTHORIZATION_BYTES = 4 * 1_024 * 1_024;
@@ -450,7 +451,7 @@ export class HomeTaskStore {
   /** The newest tasks after `cursor`, with exact lifecycle counts for the whole
    * namespace, from one locked pass: the counts read every record anyway, so the
    * page's records come from that same read. Never a report body. */
-  async page(input: { limit?: number; cursor?: string }, signal?: AbortSignal): Promise<{ items: HomeTaskPageItem[]; nextCursor?: string; counts: HomeTaskCounts }> {
+  async page(input: { limit?: number; cursor?: string; lineages?: boolean; filter?: "all" | "open" | "finished" }, signal?: AbortSignal): Promise<{ items: HomeTaskPageItem[]; nextCursor?: string; counts: HomeTaskCounts }> {
     return this.run(async () => {
       const limit = input.limit ?? 20;
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) invalid();
@@ -464,31 +465,40 @@ export class HomeTaskStore {
       if (input.cursor) {
         try {
           const value = JSON.parse(Buffer.from(input.cursor, "base64url").toString("utf8"));
-          if (!keys(value, ["epoch", "createdAt", "taskId"]) || value.epoch !== epoch
+          if (!keys(value, ["epoch", "createdAt", "taskId"], ["filter"]) || value.epoch !== epoch
+            || value.filter !== input.filter
             || !timestamp(value.createdAt) || !identifier(value.taskId)) invalid();
           after = { createdAt: value.createdAt as number, taskId: value.taskId as string };
         } catch { invalid(); }
       }
-      // Each record is read once: it counts, and only the page's newest `limit + 1`
-      // are retained, so the cost is one read per record and memory stays bounded.
+      // Every record is validated once. The lineage read temporarily retains records
+      // to resolve explicit resume links across page boundaries, then discards them;
+      // the operation catalog keeps only its newest `limit + 1` candidates.
       const counts: HomeTaskCounts = { active: 0, finished: 0 };
       const selected: HomeTaskRecord[] = [];
+      const lineageRecords: HomeTaskRecord[] = [];
+      const select = (task: HomeTaskRecord) => {
+        if (task.lifecycle === "terminal") counts.finished += 1;
+        else counts.active += 1;
+        const open = task.lifecycle !== "terminal" || homeTaskNeedsAttention(task);
+        if ((input.filter === "open" && !open) || (input.filter === "finished" && open)) return;
+        if (after && compareTaskNames(task, after) <= 0) return;
+        selected.push(task); selected.sort(compareTaskNames);
+        if (selected.length > limit + 1) selected.pop();
+      };
       for await (const name of this.taskNames()) {
         const task = await this.readNamedTask(name);
         validateAuthorityReferences(task, authority);
-        if (task.lifecycle === "terminal") counts.finished += 1;
-        else counts.active += 1;
-        if (after && compareTaskNames(task, after) <= 0) continue;
-        selected.push(task);
-        selected.sort(compareTaskNames);
-        if (selected.length > limit + 1) selected.pop();
+        if (input.lineages) lineageRecords.push(task);
+        else select(task);
       }
+      if (input.lineages) for (const lineage of homeTaskLineages(lineageRecords)) select(currentHomeTask(lineage));
       const items = selected.slice(0, limit).map(task => ({ task,
         pendingGrant: task.lifecycle === "pending" && authority.requests.some(pending => pending.request.intentDigest === task.intentDigest
           && pending.request.target === task.target && !authority.decisions.some(decision => decision.requestId === pending.id)) }));
       const last = selected[Math.min(limit, selected.length) - 1];
       return { items, counts, ...(selected.length > limit && last
-        ? { nextCursor: Buffer.from(JSON.stringify({ epoch, createdAt: last.createdAt, taskId: last.taskId })).toString("base64url") } : {}) };
+        ? { nextCursor: Buffer.from(JSON.stringify({ epoch, createdAt: last.createdAt, taskId: last.taskId, ...(input.filter ? { filter: input.filter } : {}) })).toString("base64url") } : {}) };
     }, signal);
   }
 
