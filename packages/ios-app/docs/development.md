@@ -134,7 +134,10 @@ PPID 1 nor high CPU proves abandonment: diagnose with `scripts/tron-ios-test sta
 
 ## Gateway fixture work
 
-Real-Gateway boundaries run against a per-worktree fixture Gateway and fault proxy:
+Real-Gateway boundaries run against a per-worktree fixture Gateway and fault proxy.
+Boundary setup writes Home role queues and ordinary-chat model/compaction values to
+their respective Session scopes. Compaction snapshot provenance uses `session`,
+`global`, `project` or `default`; production admission rejects retired `chat` tags.
 
 ```bash
 scripts/ios-gateway-e2e-test all        # prepare, build, run RealGatewayPiBoundaryTests
