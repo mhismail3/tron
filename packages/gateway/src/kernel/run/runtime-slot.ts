@@ -4622,6 +4622,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   private async disposeRuntime(): Promise<void> {
+    this.shuttingDown = true;
     this.runAbort.cancelPreparations();
     this.runTerminal.operationObservations.clear();
     // Borrowed Home views have no attachment to detach; the shared Gateway

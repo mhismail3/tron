@@ -1844,8 +1844,8 @@ describe("Home task production dispatch", () => {
     const worker = await f.registry.acquire(seed.sessionId);
     const request = { taskId: seed.taskId, operationId: seed.operationId };
     if (failure === "rebuild-failure") {
-      // Fault at the actual native reconstruction edge; the real K5 lane,
-      // dispatcher, lease, binding, records and later retry all still execute.
+      // Reject at reconstruction method entry, not after a partial SDK rebuild.
+      // The real K5 lane, dispatcher, lease, records and later retry execute.
       vi.spyOn(worker, "replaceRuntime").mockRejectedValueOnce(new Error("worker rebuild refused"));
       await expect(owner.resumeTask(request)).rejects.toThrow("worker rebuild refused");
     } else {
@@ -1897,7 +1897,7 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: `failed-worker-retirement-${failure}`, sessionId: seed.sessionId, retried: retried.taskId });
   });
 
-  it("does not let an ambient artifact read publish or persist after native retirement", async () => {
+  it.each(["after-dispose", "during-dispose"] as const)("does not let an ambient artifact read publish or persist at %s", async cut => {
     const f = await fixture(false, false, undefined, true);
     const slot = await f.registry.create(f.cwd);
     f.faux.setResponses([fauxAssistantMessage("canonical session persisted")]);
@@ -1923,18 +1923,36 @@ describe("Home task production dispatch", () => {
       return value;
     });
     let refresh: Promise<unknown> | undefined;
+    let disposal: Promise<void> | undefined;
+    let shutdownEntered = false;
+    let releaseShutdown!: () => void;
+    const shutdownGate = new Promise<void>(resolve => { releaseShutdown = resolve; });
+    const actualDispose = slot.runtime.dispose.bind(slot.runtime);
+    const shutdown = cut === "during-dispose" ? vi.spyOn(slot.runtime, "dispose").mockImplementation(async () => {
+      shutdownEntered = true;
+      await shutdownGate;
+      await actualDispose();
+    }) : undefined;
     try {
       const now = Date.now();
+      // The during-dispose cut uses live progress: it detects publication into
+      // a retiring frame without introducing a receipt/lane deadlock on bad code.
       await writeFile(join(asyncDir, "status.json"), JSON.stringify({ lifecycleArtifactVersion: 3,
-        runId, cwd: f.cwd, sessionId: slot.id, state: "completed", startedAt: now - 1_000,
-        lastUpdate: now, endedAt: now }));
+        runId, cwd: f.cwd, sessionId: slot.id, state: cut === "during-dispose" ? "running" : "completed", startedAt: now - 1_000,
+        lastUpdate: now, ...(cut === "after-dispose" ? { endedAt: now } : {}) }));
       refresh = owner.discoverExtensionArtifact(asyncDir);
       await waitFor(() => entered, "actual ambient artifact read held before delivery");
-      await slot.dispose();
+      disposal = slot.dispose();
+      if (cut === "during-dispose") {
+        await waitFor(() => shutdownEntered, "real native disposal is awaiting physical SDK cleanup");
+        expect(slot.isDisposed).toBe(false);
+      } else await disposal;
       const canonicalAtRetirement = await readFile(slot.sessionFile!, "utf8");
       const eventCut = f.events.length;
       release();
       await refresh;
+      releaseShutdown();
+      await disposal;
       await slot.runPersistence.waitForReceiptWrites();
       // The observable boundary is the real retired session file, not a mock
       // call count or a source-text assertion. Retirement cannot append a receipt.
@@ -1942,8 +1960,12 @@ describe("Home task production dispatch", () => {
       expect(f.events.slice(eventCut).filter(event => event.topic === "session.extensionActivity")).toEqual([]);
     } finally {
       release();
+      releaseShutdown();
       await refresh;
+      await disposal;
+      shutdown?.mockRestore();
       held.mockRestore();
+      owner.retireArtifactWatches();
     }
   });
 

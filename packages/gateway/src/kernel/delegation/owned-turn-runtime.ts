@@ -26,6 +26,7 @@ export interface OwnedTurnRuntime {
   readonly cwd: string;
   readonly sessionFile: string | undefined;
   readonly disposed: boolean;
+  readonly shuttingDown: boolean;
   readonly lane: { run<T>(operation: () => T | Promise<T>): Promise<T> };
   readonly runtime: { readonly session: AgentSession };
   readonly dependencies: {

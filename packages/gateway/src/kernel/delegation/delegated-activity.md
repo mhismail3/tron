@@ -75,8 +75,11 @@ same maps. No native subagent artifact parser, run-control method, second index 
 exists. Native branch/disposal boundaries call this owner's reset/retirement operations;
 watched refresh checks generation and disposed-frame identity after its read. Admission
 retains bounded path/header/inode proofs; ambient discovery uses attribution and receipt-claim
-checks and fences the actual disposed frame at entry, after its read and on read
-failure, before shared recency, lifecycle publication or canonical receipt writes.
+checks and reads Native’s existing retirement fence (`shuttingDown` or `disposed`)
+at entry, after its read and on read failure, before shared recency, lifecycle
+publication or canonical receipt writes. Idle retirement sets that same Native
+fence before awaiting SDK cleanup. Watched reads also check their existing read
+generation before missing-file handling or any other post-read effect.
 Native alone writes SDK invocation
 rows; K5 writes their activity projection
 through the actual Native resource operation without borrowing the tool-row map.
