@@ -242,7 +242,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             "commandId": .string(UUID().uuidString),
             "target": .object(["kind": .string("home")]),
             "changes": .array(["worker", "subagent", "background"].map { role in
-                .object(["key": .string("model.queue[role=\(role)]"), "layer": .string("profile"),
+                .object(["key": .string("model.queue[role=\(role)]"), "layer": .string("session"),
                          "op": .string("set"), "value": .array([.string("tron-e2e/e2e-model")])])
             }),
         ]))
@@ -278,32 +278,32 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         // Global extension registration and initial model selection are separate
         // SDK phases. Explicitly choose the fixture provider before testing
         // admission; ambient/default credentials must never decide this case.
-        // The chat's model is its Chat-layer `model.ref[role=chat]`, changed
+        // The chat's model is its Session-scope `model.ref[role=chat]`, changed
         // through the one settings path and fenced to the runtime it read.
         let selected: SettingsChangeResponse = try await firstClient.request("settings.change", JSONValue.object([
             "commandId": .string(UUID().uuidString),
             "target": .object(["kind": .string("session"), "sessionId": .string(created.sessionId)]),
             "fence": .object(["runtimeGeneration": .string(opened.session.runtimeGeneration),
                               "model": try opened.session.model.map { try JSONValue.encode($0) } ?? .null]),
-            "changes": .array([.object(["key": .string("model.ref[role=chat]"), "layer": .string("chat"), "op": .string("set"),
+            "changes": .array([.object(["key": .string("model.ref[role=chat]"), "layer": .string("session"), "op": .string("set"),
                                         "value": .object(["provider": .string("tron-e2e"), "id": .string("e2e-model")])])]),
         ]))
         XCTAssertEqual(selected.status, "applied")
-        // A Chat-layer compaction value (decision 9) is projected with source
-        // "chat"; the app must still admit that authoritative snapshot.
+        // A Session-scope compaction value is projected with source
+        // "session"; the app must still admit that authoritative snapshot.
         let compaction: SettingsChangeResponse = try await firstClient.request("settings.change", JSONValue.object([
             "commandId": .string(UUID().uuidString),
             "target": .object(["kind": .string("session"), "sessionId": .string(created.sessionId)]),
             "fence": .object(["runtimeGeneration": .string(opened.session.runtimeGeneration),
                               "model": .object(["provider": .string("tron-e2e"), "id": .string("e2e-model")])]),
-            "changes": .array([.object(["key": .string("context.compaction.keepRecentTokens"), "layer": .string("chat"), "op": .string("set"),
+            "changes": .array([.object(["key": .string("context.compaction.keepRecentTokens"), "layer": .string("session"), "op": .string("set"),
                                         "value": .number(24_000)])]),
         ]))
         XCTAssertEqual(compaction.status, "applied")
         let configured = try await synchronizedOpen(client: firstClient, sessionID: created.sessionId)
         XCTAssertEqual(configured.session.model?.provider, "tron-e2e")
         XCTAssertEqual(configured.session.model?.id, "e2e-model")
-        XCTAssertEqual(configured.session.compactionPolicy?.next.source["keepRecentTokens"], "chat")
+        XCTAssertEqual(configured.session.compactionPolicy?.next.source["keepRecentTokens"], "session")
         XCTAssertEqual(configured.session.compactionPolicy?.next.keepRecentTokens, 24_000)
         XCTAssertTrue(SessionSnapshotTranscriptAdmissionPolicy.admit(configured.session),
                       "a snapshot with a Chat compaction value must be admitted")
