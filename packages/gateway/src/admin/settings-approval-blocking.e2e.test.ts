@@ -281,6 +281,47 @@ describe("blocking settings approval", () => {
     } finally { await f.home.abort("agent"); await f.prompting; }
   });
 
+  // #2050: the approval form only shows the request in its chat. The one decision
+  // path is settings.decide, shared by the chat sheet, push and Changes.
+  it("an approval form refuses a form answer; only settings.decide settles it", async () => {
+    const f = await pendingApproval();
+    try {
+      expect(() => f.answer("approve")).toThrow(/settings\.decide/);
+      expect(await f.settings.settingsChanges.pendingApprovals()).toEqual([expect.objectContaining({ requestId: f.request.requestId, status: "pending" })]);
+      expect(f.home.snapshot().extensionPresentation.pendingInteractions).toEqual([f.interaction]);
+      await f.settings.settingsChanges.decide(f.request.requestId, { digest: f.request.digest, approved: false, decidedBy: { kind: "ui", id: "phone" } });
+      await f.prompting;
+      await waitFor(() => !f.home.isBusy, "declined request releases the turn");
+      const result = f.home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "settings-request");
+      expect(result).toMatchObject({ isError: false, details: { status: "declined", approval: { requestId: f.request.requestId } } });
+      await saveCase("form-answer-refused", { result });
+    } finally { await f.home.abort("agent"); await f.prompting; }
+  });
+
+  it("wait false returns the pending request at once, with no form, and its outcome reaches the next turn", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "request", wait: false, reason: "Retry a transient failure", changes: [
+        { key: "run.retry.maxRetries", layer: "session", op: "set", value: 3 },
+      ] }, { id: "settings-request" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Asked"),
+      fauxAssistantMessage("Heard the outcome"),
+    ]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    try {
+      await home.prompt("Request a retry setting change without waiting");
+      await waitFor(() => !home.isBusy, "non-waiting turn ends");
+      expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+      const [request] = await f.settings.settingsChanges.pendingApprovals();
+      const result = home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "settings-request");
+      expect(result).toMatchObject({ isError: false, details: { status: "pending", approval: { requestId: request!.requestId } } });
+      await f.settings.settingsChanges.decide(request!.requestId, { digest: request!.digest, approved: true, decidedBy: { kind: "ui", id: "phone" } });
+      expect(await f.settings.settingsChanges.pendingApprovals()).toEqual([]);
+      await saveCase("wait-false", { result });
+    } finally { await home.abort("agent"); }
+  });
+
   it("Changes approves a live Home form through settings.decide once and retires the same interaction", async () => {
     const f = await pendingApproval();
     const service = new GatewayService({
