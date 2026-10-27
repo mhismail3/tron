@@ -38,7 +38,7 @@ final class TronUILockTests: XCTestCase {
     func testChatSettledAndToolSheet() throws {
         for mode in Self.modes {
             let app = try openHomeChat(mode: mode, extra: ["-home-tool-transcript"])
-            let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Memory search, Completed,")).firstMatch
+            let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Search memory, Completed,")).firstMatch
             try require(chip, in: app)
             assertUILock(app, "chat-settled-\(mode)")
             for _ in 0..<12 where !chip.isHittable { app.swipeUp() }
