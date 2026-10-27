@@ -168,7 +168,7 @@ export interface ChangeResult {
   tier: Tier;
   changes: ChangeOutcome[];
   /** A pending request: what the maintainer decides and the exact diff it binds to. */
-  approval?: { requestId: string; digest: string; expiresAt: string };
+  approval?: { requestId: string; digest: string; expiresAt: string; title: string };
   /** A Home task worker target's signal for its applied Session-scope changes (#1336). */
   signal?: SettingsSignal;
   /** A pending action request: the exact preview its digest binds (#1985). */

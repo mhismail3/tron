@@ -50,7 +50,7 @@ export async function awaitApprovalDecision(input: {
     }
     // The tool result is this requester's delivery: no later outcome turn repeats it.
     await path.approvals.acknowledge([requesterSessionId], [requestId]);
-    return approvalResult(request);
+    return approvalResult(request, path.approvalReference(request));
   } finally {
     stop();
     signal?.removeEventListener("abort", release);
@@ -58,12 +58,11 @@ export async function awaitApprovalDecision(input: {
   }
 }
 
-/** A request's state as every approval-requesting tool reports it: the same
- * `approval` reference while pending and once settled, so its chat chip persists. */
-export function approvalResult(request: ApprovalRequest): ChangeResult {
+/** A settled request as every approval-requesting tool reports it: the same
+ * `approval` reference it returned while pending, so its chat chip persists. */
+function approvalResult(request: ApprovalRequest, approval: NonNullable<ChangeResult["approval"]>): ChangeResult {
   return {
-    status: request.status, tier: "approve",
-    approval: { requestId: request.requestId, digest: request.digest, expiresAt: request.expiresAt },
+    status: request.status, tier: "approve", approval,
     ...(request.action ? { action: request.action.preview } : {}),
     ...(request.summary ? { summary: request.summary } : {}),
     ...(request.failure ? { failure: request.failure } : {}),

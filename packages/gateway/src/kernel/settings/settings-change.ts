@@ -304,8 +304,15 @@ export class SettingsChangePath {
       this.observer?.approvals({ kind: "pending", request });
       void this.armExpiry().catch(() => undefined);
       return { status: "pending", tier: "approve", changes: [], action: preview,
-        approval: { requestId: request.requestId, digest: request.digest, expiresAt: request.expiresAt } };
+        approval: this.approvalReference(request) };
     });
+  }
+
+  /** How a tool result names its request, pending or settled, so the asking
+   * chat's chip keeps its title after the request leaves the open list (#2050). */
+  approvalReference(request: ApprovalRequest): NonNullable<ChangeResult["approval"]> {
+    return { requestId: request.requestId, digest: request.digest, expiresAt: request.expiresAt,
+      title: request.action?.preview.title ?? request.changes.map(change => this.model.schema.schemaKey(change.key).label).join(", ") };
   }
 
   private actionEntry(request: ApprovalRequest, commandId?: string): ChangeEntry {
@@ -796,7 +803,7 @@ export class SettingsChangePath {
     this.observer?.approvals({ kind: "pending", request });
     void this.armExpiry().catch(() => undefined);
     return {
-      status: "pending", tier, approval: { requestId: request.requestId, digest: request.digest, expiresAt: request.expiresAt },
+      status: "pending", tier, approval: this.approvalReference(request),
       changes: changes.map(change => this.pendingOutcome(change, "pending")),
     };
   }
