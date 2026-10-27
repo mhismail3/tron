@@ -22,6 +22,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `SessionCatalogCoordinator`, `AutomationDashboardPreferencesOwner` (`DashboardStateOwners`) | Dashboard rows per `(profileID, sessionID)`; Automations sheet preferences. |
 | [`ConfirmedMutationExecutor`](../Kernel/ConfirmedMutationExecutor.swift), `SessionMutationService`, `SessionImportCoordinator` | Kernel receipt policy for every mutation; session command DTOs; file import under one captured lifecycle. |
 | `ComposerDraftCoordinator`, [`ComposerDraftStore`](../Features/Chat/State/ComposerDraftStore.swift) | Composer text, staged resources, annotations, attachments, uploads, submission. |
+| [`ComposerDraftContracts`](../Features/Chat/State/ComposerDraftContracts.swift) | Draft, attachment, editor and submission values, admission policies and injected transport/file-access operations. |
 | `ChatMediaLoader`, `SessionExportArtifactStore` | Transcript media by `(profile, lifecycle, session, blob)`; photo decoding preflights dimensions/component depth against 64 MiB, then verifies actual bytes; export artifacts. |
 | `TerminalCoordinator`, `TerminalReducer` | Session terminals: wire, presentation intents, attach/replay, resize. |
 | `MacTerminalController`, `MacTerminalEnrollmentStore` | Mac Terminal enrollment and shells ([Terminal](../UI/Terminal/README.md)). |
