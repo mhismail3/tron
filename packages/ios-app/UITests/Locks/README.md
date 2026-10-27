@@ -56,7 +56,10 @@ UI locks pin what the user sees in hosted-fixture screen states, so a
 restructure slice can prove it changed nothing visible
 ([plan §6.6](../../../../docs/restructure/plan.md)). Each journey in
 `TronUILockTests` only navigates to a state and calls `assertUILock(app, name)`.
-Behavioral assertions stay in the feature journeys. The stopped-session lock
+Behavioral assertions stay in the feature journeys. The Home Settings hierarchy
+includes off-screen rows: Agent & Tools starts with Agent Behavior, followed by
+Tools, MCP Servers, Extensions and Hooks. Model, trust and connection controls
+live inside Agent Behavior rather than separate root rows. The stopped-session lock
 waits for the Session Settings title; model controls live in Manage Session, so
 this screen has no Models section.
 
