@@ -1,5 +1,5 @@
 import type { ExtensionRunActivity, ExtensionRunVisibility } from "../protocol/types.js";
-import { RecencyDeadlines, systemRecencyClock, type RecencyClock } from "./recency-deadlines.js";
+import { RecencyDeadlines, systemRecencyClock, type RecencyClock } from "../util/recency-deadlines.js";
 
 
 export interface ActivityVisibility {

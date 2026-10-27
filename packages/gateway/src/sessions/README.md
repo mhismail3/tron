@@ -16,6 +16,7 @@ settlement. Other session modules have their own manifests here; projection live
 `restart-drain.ts`
 and the rest of `../run.module.json`. State: Gateway-owned
 bounded run markers and command receipts; Pi owns JSONL. Host recipes are fixed per runtime; append policies resolve recorded identity live.
+Shared deadline bookkeeping lives in `../util/recency-deadlines.ts`; activity owners keep their own partitions and tombstones.
 
 ## Contract
 
