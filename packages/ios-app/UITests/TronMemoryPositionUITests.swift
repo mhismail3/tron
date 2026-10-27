@@ -102,12 +102,11 @@ import XCTest
         XCTAssertTrue(target.waitForExistence(timeout: 10), app.debugDescription)
         for _ in 0..<12 where !target.isHittable {
             // Full-window flings can skip a large-type row in a medium sheet.
-            // Scroll the frontmost sheet in small, directed steps instead.
+            // Swipe the frontmost scroll owner toward the target instead.
             let scroll = app.scrollViews.allElementsBoundByIndex.last { $0.frame.height > 150 && $0.isHittable }!
             let bar = app.navigationBars.allElementsBoundByIndex.last!.frame
             let down = target.frame.minY < bar.maxY
-            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: down ? 0.3 : 0.85))
-                .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: down ? 0.85 : 0.3)))
+            if down { scroll.swipeDown() } else { scroll.swipeUp() }
         }
         XCTAssertTrue(target.isHittable, app.debugDescription)
         return target
