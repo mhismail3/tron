@@ -87,7 +87,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
   Home Settings has one untitled Settings container (Models: workers/delegation only, Tools, More Settings).
   Session Settings has one Settings container (Compaction, Tools, Project Trust, More Settings),
-  no Models subsheet. Overridable keys only; Project-owned controls are read-only with “Set by Project settings”;
+  no Models subsheet. Section links require served rows: retired routine controls do not create
+  destinations in a fresh session. Overridable keys only; Project-owned controls are read-only with “Set by Project settings”;
   explicit overrides have Overridden and circular Revert. `SettingsProjectGroups` shows applied
   Repository Overrides last; `ProjectSettingsSections` owns the unchanged trust editor and ignored
   repository-field notices (no Workspace row in Session Settings). Summaries omit unset values. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.

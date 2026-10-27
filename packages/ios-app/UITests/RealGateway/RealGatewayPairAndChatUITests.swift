@@ -1261,9 +1261,14 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<4 { app.swipeUp() }
         burst("manage-session-rows")
         openSheet("chat-settings-link", "session-settings")
-        let settings = app.descendants(matching: .any)["session-settings-content"]
-        XCTAssertFalse(settings.buttons["Switch Model"].exists)
-        openSheet("settings-section-advanced-open", "session-more", section: "run")
+        XCTAssertTrue(app.descendants(matching: .any)["session-project-settings"].waitForExistence(timeout: 2),
+                      "Session Settings must expose its project/settings content")
+        openSheet("settings-section-tools-open", "session-tools")
+        XCTAssertTrue(app.navigationBars.staticTexts["Tools"].waitForExistence(timeout: 2),
+                      "the Session Tools sheet did not open on its content")
+        XCTAssertTrue(app.descendants(matching: .any)["settings-row-tools.active"].isHittable,
+                      "the Session Tools sheet must expose its Tools row")
+        XCTAssertFalse(loading.exists, "the Session Tools sheet showed a loading state")
         dismissTopSheet(app)
         dismissTopSheet(app) // Session Settings
         dismissTopSheet(app) // Manage Session
@@ -1549,9 +1554,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             globalSettingsGear.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
-        openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 1, "one More Settings row (#1627)")
+        openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Agent Behavior")).count, 1, "one Agent Behavior row (#2010)")
         coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["global"], schema: schema, sectionDestinations: [
-            "workers": "Models", "approvals": "More Settings", "run": "More Settings", "sources": "Extensions", "setup": "Setup"])
+            "model": "Agent Behavior", "workers": "Agent Behavior", "context": "Agent Behavior",
+            "approvals": "Agent Behavior", "run": "Agent Behavior", "sources": "Extensions", "setup": "Setup"])
         openSettingsSection(app, "tools")
         let codeMode = app.buttons["Other tools with codemode"]
         revealBelowNavigationBar(app, codeMode)
