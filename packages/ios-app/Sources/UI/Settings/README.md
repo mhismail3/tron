@@ -198,8 +198,10 @@ destinations and effect closures. The views do not infer eligibility or submit R
 `ProjectLifecycleView` refreshes disposable `projects.list`/`projects.inspect`
 projections on re-entry, reconnect and existing settings/trust/approval revisions;
 profile, activity and generation fences retire stale reads. Saved outside folders
-remain visible/read-only with Gateway reasons. Choose Existing only inspects: it
-never writes an untrusted decision or creates a second project store.
+remain visible/read-only with Gateway reasons. The list omits the Gateway's hidden
+archive namespace and saved deny tombstones whose inspection returns `not_found`;
+these trust records remain untouched. Choose Existing only inspects: it never writes
+an untrusted decision or creates a second project store.
 `SettingsTrustCoordinator` sends `projects.request` through its existing receipt
 executor, with a fresh command ID per intent. The result only opens the canonical
 `SettingsApprovalSheet`; the displayed digest's separate tap owns every decision.
@@ -212,9 +214,9 @@ Archive, Untrust, Trust and Rename review reuse `SettingsApprovalSheet` with syn
 socket-served requests; fixture decisions refuse without effects. The route journey
 opens and dismisses detail, rename, approval, Add/Create and folder sub-sheets.
 Captures and route checks are not real-Gateway lifecycle acceptance.
-`RealGatewayProjectLifecycleUITests` owns separate approve/move/archive, denial and
-linked-worktree busy journeys through the real socket and canonical filesystem/trust
-store. The harness seeds only its isolated busy repository; no real GitHub is created.
+`RealGatewayProjectLifecycleUITests` owns separate approve/move/archive, denial,
+post-archive/departed-list and linked-worktree busy journeys through the real socket
+and canonical filesystem/trust store. The harness seeds only its isolated busy repository; no real GitHub is created.
 
 ## Not here
 

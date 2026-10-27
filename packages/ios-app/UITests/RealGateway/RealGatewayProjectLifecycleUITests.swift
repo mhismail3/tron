@@ -48,6 +48,49 @@ extension RealGatewayPairAndChatUITests {
     }
 
     @MainActor
+    func testProjectLifecycleListOmitsArchivedAndDepartedProjects() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = try lifecycleSettings(fixture)
+        defer { app.terminate() }
+        let source = URL(fileURLWithPath: fixture.workspace).appendingPathComponent("departed-project")
+        let destination = source.deletingLastPathComponent().appendingPathComponent("archived-project")
+        func row(_ name: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", name, name + ", ")).firstMatch
+        }
+        try lifecycleCreate(app, name: source.lastPathComponent)
+        lifecycleDecide(app, approve: false)
+        lifecycleClose(app)
+        lifecycleBackToList(app)
+        XCTAssertTrue(row(source.lastPathComponent).waitForExistence(timeout: 15), "The list selector must find the live source before testing its removal: \(app.debugDescription)")
+        lifecycleTap(app, source.lastPathComponent)
+        lifecycleTap(app, "Rename Project")
+        lifecycleName(app, destination.lastPathComponent)
+        lifecycleTap(app, "Request Rename")
+        lifecycleDecide(app, approve: true)
+        XCTAssertTrue(waitUntil(timeout: 15) { FileManager.default.fileExists(atPath: destination.path) })
+        lifecycleClose(app)
+        lifecycleBackToList(app)
+        lifecycleTap(app, destination.lastPathComponent)
+        lifecycleTap(app, "project-lifecycle-archive")
+        lifecycleDecide(app, approve: true)
+        XCTAssertTrue(waitUntil(timeout: 15) { !FileManager.default.fileExists(atPath: destination.path) })
+        let archives = try FileManager.default.contentsOfDirectory(at: destination.deletingLastPathComponent().appendingPathComponent(".archive"), includingPropertiesForKeys: nil)
+        let retained = try XCTUnwrap(archives.first { $0.lastPathComponent.hasPrefix("archived-project-") })
+        XCTAssertTrue(FileManager.default.fileExists(atPath: retained.appendingPathComponent(".git/HEAD").path))
+        lifecycleClose(app)
+        lifecycleBackToList(app)
+        // Observe the actual refreshed list after both filesystem effects. Keep
+        // all three failures so one run distinguishes tombstones from archives.
+        continueAfterFailure = true
+        for name in [source.lastPathComponent, destination.lastPathComponent, retained.lastPathComponent] {
+            XCTAssertTrue(waitUntil(timeout: 15) { !row(name).exists },
+                          "Departed and archived projects must not return as saved-decision ghost rows: \(name)")
+        }
+        keepScreenshot(app, name: "2023-real-gateway-list-after-archive")
+    }
+
+    @MainActor
     func testProjectLifecycleDenialRetainsUntrustedRepository() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()

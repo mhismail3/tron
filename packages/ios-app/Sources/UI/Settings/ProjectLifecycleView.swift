@@ -143,9 +143,15 @@ struct ProjectLifecycleView: View {
                 let listed = Set(page.projects.map(\.path))
                 let saved = model.settingsSnapshot(for: SettingsTarget.global.gatewayTarget)?.resolution.keys
                     .filter { $0.key == TrustedProjectsSettingsView.key }.compactMap { $0.qualifiers?["project"] } ?? []
+                let archive = URL(fileURLWithPath: page.workspace).appendingPathComponent(".archive").path
                 for path in Set(saved).subtracting(listed).sorted() {
+                    // Trust keeps deny tombstones after moves. They are not
+                    // projects, and must not undo the listing owner's hidden
+                    // archive namespace. Other saved unsupported folders remain.
+                    guard path != archive, !path.hasPrefix(archive + "/") else { continue }
                     let row = try await model.settingsTrust.inspectProject(path: path)
                     guard admits() else { return }
+                    guard row.eligibility.archive.code != "not_found" else { continue }
                     page.projects.append(row)
                 }
                 listing = page
