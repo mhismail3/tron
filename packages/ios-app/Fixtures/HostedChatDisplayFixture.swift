@@ -584,7 +584,8 @@ private actor HostedHomeShellGateway {
                              ])])]),
                 .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
                          "createdAt": .string(isoAgo(3 * 86_400)), "activationStarted": .bool(true),
-                         "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12),
+                         "sessionPresent": .bool(true),
+                         "bytes": .number(ProcessInfo.processInfo.arguments.contains("-memory-boundary-regression") ? 5_536_481 : 480), "entries": .number(12),
                          "contents": .object(["firstAt": .string(isoAgo(3 * 86_400)), "lastAt": .string(isoAgo(3 * 60)),
                              "userMessages": .number(6), "homeReplies": .number(6), "tasksDelegated": .number(1),
                              "topics": .array([.string("Garden redesign")])])]),
@@ -996,6 +997,7 @@ private actor HostedHomeShellGateway {
                 snapshot.transcriptStart = start
                 snapshot.transcriptTotal = transcript.count
             }
+            if sessionID == "home-session" { memorySnapshot = snapshot }
             return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
                 "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(ProcessInfo.processInfo.arguments.contains("-home-dashboard-behavior") ? 1 : 0)]), nil)
         case "session.transcript" where ProcessInfo.processInfo.arguments.contains("-home-tool-paged-transcript"):
@@ -1290,6 +1292,16 @@ private actor HostedHomeShellGateway {
     /// Home's memory view over 40 messages: chapter 1 (sealed) holds messages 0–31
     /// and chapter 2 (active) 32–39. Older ranges are summary lines (`0+16`, `16+8`,
     /// `24+4`, `28+4`, `32+2`); the six newest messages are their own lines.
+    private var memoryAdvanced = false
+    private var memorySnapshot: SessionSnapshot?
+    private var pendingMemorySnapshot: SessionSnapshot?
+    private var memoryParts: [(start: Int, span: Int)] {
+        memoryAdvanced ? [(0, 32), (32, 4)] + (36..<40).map { ($0, 1) } : Self.memoryViewParts
+    }
+    func takeMemorySnapshot() -> SessionSnapshot? {
+        defer { pendingMemorySnapshot = nil }
+        return pendingMemorySnapshot
+    }
     private static let memoryTotal = 40
     private static let memorySealedEnd = 32
     private static let memoryViewParts: [(start: Int, span: Int)] =
@@ -1353,8 +1365,8 @@ private actor HostedHomeShellGateway {
     private func memoryLine(start: Int, span: Int) -> JSONValue {
         var line: [String: JSONValue] = ["start": .number(Double(start)), "span": .number(Double(span)),
             "truncated": .bool(false), "firstAt": .string(memoryTime(start)), "lastAt": .string(memoryTime(start + span - 1)),
-            "inCurrentView": .bool(Self.memoryViewParts.contains { $0.start == start && $0.span == span }),
-            "startsIndividualMessages": .bool(start == 34 && span == 1)]
+            "inCurrentView": .bool(memoryParts.contains { $0.start == start && $0.span == span }),
+            "startsIndividualMessages": .bool(start == (memoryAdvanced ? 36 : 34) && span == 1)]
         if span == 1 {
             let message = memoryMessage(start)
             line["text"] = .string(message.text); line["kind"] = .string(message.kind); line["item"] = memoryItem(start)
@@ -1367,7 +1379,7 @@ private actor HostedHomeShellGateway {
     /// `home.memory.view`: newest first; the whole view pages ten lines then the rest,
     /// a chapter answers its own lines, and a part answers its two halves.
     private func memoryView(_ params: [String: JSONValue], empty: Bool) -> JSONValue {
-        let revision = JSONValue.string(String(repeating: "a", count: 64))
+        let revision = JSONValue.string(String(repeating: memoryAdvanced ? "b" : "a", count: 64))
         func view(_ lines: [JSONValue], next: String? = nil) -> JSONValue {
             var result: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": revision,
                 "totalMessages": .number(Double(empty ? 0 : Self.memoryTotal)), "lines": .array(empty ? [] : lines)]
@@ -1375,14 +1387,25 @@ private actor HostedHomeShellGateway {
             return .object(result)
         }
         if let part = params["part"]?.objectValue, let start = part["start"]?.intValue, let span = part["span"]?.intValue {
-            return view([memoryLine(start: start, span: span / 2), memoryLine(start: start + span / 2, span: span / 2)])
+            let result = view([memoryLine(start: start, span: span / 2), memoryLine(start: start + span / 2, span: span / 2)])
+            // A new activation rerenders memory while its reader is covered by a detail.
+            // Send the real socket event, not a direct AppModel/store mutation.
+            if ProcessInfo.processInfo.arguments.contains("-memory-boundary-regression"), !memoryAdvanced,
+               var snapshot = memorySnapshot {
+                memoryAdvanced = true
+                snapshot.revision += 1
+                snapshot.eventSequence += 1
+                memorySnapshot = snapshot
+                pendingMemorySnapshot = snapshot
+            }
+            return result
         }
         let range = switch params["sessionId"]?.stringValue {
         case "home-chapter-sealed": 0..<Self.memorySealedEnd
         case "home-session": Self.memorySealedEnd..<Self.memoryTotal
         default: 0..<Self.memoryTotal
         }
-        let lines = Self.memoryViewParts.filter { range.contains($0.start) }.reversed().map { memoryLine(start: $0.start, span: $0.span) }
+        let lines = memoryParts.filter { range.contains($0.start) }.reversed().map { memoryLine(start: $0.start, span: $0.span) }
         guard params["sessionId"] == nil, lines.count > 10 else { return view(Array(lines)) }
         return params["cursor"] == nil ? view(Array(lines.prefix(10)), next: "fixture-next") : view(Array(lines.dropFirst(10)))
     }
@@ -1460,7 +1483,7 @@ private actor HostedHomeShellGateway {
             "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
                 "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null,
                 "episodic": .object(["messages": .number(Double(Self.memoryTotal)),
-                    "view": .object(["built": .number(Double(Self.memoryViewParts.count)), "unbuilt": .number(0)])]),
+                    "view": .object(["built": .number(Double(memoryParts.count)), "unbuilt": .number(0)])]),
                 "spentTokens": .number(10_000_000), "models": .array((configuredModels.isEmpty && configured ? ["anthropic/claude-haiku-5-5"] : configuredModels).map(JSONValue.string))])])
     }
 }
@@ -1498,6 +1521,12 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         if let body = result.0 { response["result"] = body }
         if let failure = result.1 { response["error"] = failure }
         await deliver(try JSONEncoder.gateway.encode(JSONValue.object(response)))
+        if let snapshot = await gateway.takeMemorySnapshot() {
+            await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("event"), "topic": .string("session.snapshot"), "sessionId": .string(snapshot.sessionId),
+                "subscriptionToken": .string("fixture-subscription"), "payload": try JSONValue.encode(snapshot)
+            ])))
+        }
         if method == "session.attention.read", ProcessInfo.processInfo.arguments.contains("-home-dashboard-behavior") {
             await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("event"), "topic": .string("session.listChanged"), "payload": .object([:])

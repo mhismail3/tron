@@ -22,6 +22,31 @@ final class TronHomeSheetsUITests: XCTestCase {
         return app
     }
 
+    @MainActor func testManageHomeMemoryAndChapterCountValues() {
+        let app = launchPolishManage(["-memory-boundary-regression"]); defer { app.terminate() }
+        XCTAssertTrue(element(app, "home-manage-memory-browser").label.contains("40 messages · 11 lines in view"))
+        XCTAssertTrue(element(app, "home-manage-chapters").label.contains("2 chapters · Active chapter 22% of soft limit"))
+        shot("2063-count-values")
+    }
+
+    @MainActor func testMemoryBoundaryFollowsCanonicalSnapshotChange() {
+        let app = launchPolishManage(["-memory-boundary-regression"]); defer { app.terminate() }
+        open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "2063-before-change")
+        expand(app, done: "home-sheet-done-memory")
+        for _ in 0..<6 where !element(app, "home-memory-summary-32-2").isHittable { app.swipeUp(velocity: .slow) }
+        open(app, element(app, "home-memory-summary-32-2"), ready: "home-memory-summary-detail", name: "2063-change")
+        app.buttons["home-sheet-done-memory-summary"].tap()
+        // No Reload tap: the socket delivered revision 2 while the parent was covered.
+        XCTAssertTrue(element(app, "home-memory-row-39").waitForExistence(timeout: 5))
+        for _ in 0..<6 where !element(app, "home-memory-summary-32-4").isHittable { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(element(app, "home-memory-summary-32-4").waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(element(app, "home-memory-summary-32-2").exists, "Old view cursors and rows retire with the source snapshot")
+        XCTAssertFalse(element(app, "home-memory-row-34").exists, "Messages 34 and 35 now belong to the coarser summary")
+        XCTAssertTrue(element(app, "home-memory-resolution-boundary").exists)
+        XCTAssertTrue(element(app, "home-memory-summary-32-4").label.contains("View line"))
+        shot("2063-after-snapshot-change")
+    }
+
     // Visual approval captures only; value and RPC regression coverage follows approval.
     @MainActor func testMemoryResolutionPreviewLight() { captureMemoryResolution("light", arguments: []) }
     @MainActor func testMemoryResolutionPreviewDark() { captureMemoryResolution("dark", arguments: ["-home-dark"]) }
