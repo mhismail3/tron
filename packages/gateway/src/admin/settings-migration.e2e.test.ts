@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import WebSocket from "ws";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -36,17 +36,10 @@ async function copiedState() {
   const tronHome = join(root, "home", ".tron"), agentDir = join(tronHome, "agent");
   const profilePath = join(tronHome, "gateway", "home", "profile.json");
   await mkdir(agentDir, { recursive: true, mode: 0o700 }); await mkdir(dirname(profilePath), { recursive: true, mode: 0o700 });
-  // Only owned settings are copied; never credentials, live canonical clients or
-  // a live session directory. Assertions/logs contain no copied personal values.
-  const sourceHome = join(homedir(), ".tron");
-  await cp(join(sourceHome, "agent", "settings.json"), join(agentDir, "settings.json"));
-  await cp(join(sourceHome, "gateway", "home", "profile.json"), profilePath);
-  const global = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
-  const profile = JSON.parse(await readFile(profilePath, "utf8"));
-  // Physical directories are relocated on the copy. Deterministic legacy
-  // choices exercise migration without exposing or contacting copied accounts.
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ ...global, sessionDir: join(agentDir, "sessions"), defaultProvider: "fixture", defaultModel: "global", retry: { maxRetries: 1 } }));
-  await writeFile(profilePath, JSON.stringify({ ...profile, model: { ...profile.model, chat: { provider: "fixture", id: "profile" } } }));
+  // Legacy state is entirely synthetic. Migration needs its historical shape,
+  // not any settings, profile choices or accounts from the invoking HOME.
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: join(agentDir, "sessions"), defaultProvider: "fixture", defaultModel: "global", retry: { maxRetries: 1 } }));
+  await writeFile(profilePath, JSON.stringify({ model: { chat: { provider: "fixture", id: "profile" } } }));
   const options: SettingsMigrationOptions = { schema: TEST_SETTINGS_SCHEMA, tronHome, agentDir };
   const settings = join(tronHome, "gateway", "settings");
   const journalPath = join(settings, "migrations", "three-layer-v1", "journal.json");
@@ -86,7 +79,7 @@ async function journal(f: Awaited<ReturnType<typeof copiedState>>) {
   return JSON.parse(await readFile(f.journalPath, "utf8")) as { state: string; inputs: Array<{ path: string; hash: string | null }>; replacements: Array<{ path: string; index: number }> };
 }
 
-describe("settings startup migration on copied state", () => {
+describe("settings startup migration on synthetic legacy state", () => {
   it("backs up before publication, preserves and rehashes pending approvals, never touches the Home chapter and reruns byte-for-byte as a no-op", async () => {
     const f = await copiedState(); const pending = await legacyApproval(f); const sessionPath = await legacyHomeChapter(f);
     const sessionBefore = await migrationFileHash(sessionPath);

@@ -171,9 +171,7 @@ case "$cmd" in
     suite="${1:-}"; shift || true
     case "$suite" in
       gateway)
-        use_pinned_node
-        cd "$GATEWAY"
-        exec npx vitest run "$@"
+        exec python3 "$ROOT/tools/verify/gateway.py" "$@"
         ;;
       ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
       tooling)

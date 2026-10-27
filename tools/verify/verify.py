@@ -459,7 +459,7 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path):
     if group in ("gateway", "gateway-nested"):
         report = logs / f"{group}-vitest.json"
         config = ["--config", "vitest.nested.config.ts"] if group == "gateway-nested" else []
-        return (node + ["npx", "vitest", "run", *config, "--reporter=default", "--reporter=json",
+        return (["python3", str(ROOT / "tools/verify/gateway.py"), *config, "--reporter=default", "--reporter=json",
                         f"--outputFile.json={report}", *[path[len(GATEWAY) + 1:] for path in files]],
                 ROOT / GATEWAY, vitest_count(report))
     if group == "ios":

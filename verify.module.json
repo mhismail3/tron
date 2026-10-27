@@ -2,6 +2,7 @@
   "layer": "L5",
   "owns": [
     "scripts/test-tron-verify.py",
+    "scripts/test-tron-gateway-isolation.py",
     "scripts/test-tron-verify-tiers.py",
     "tools/verify/**",
     "verify.module.json"

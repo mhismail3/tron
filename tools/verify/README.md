@@ -36,6 +36,16 @@ with the preparation command; a global `tsc` on PATH cannot satisfy it. `tron-no
 resolves the pinned Node independently of interactive shell setup. `--plan` and
 selections that do not use the Gateway need no Gateway compiler.
 
+## Gateway test isolation
+
+Both `scripts/tron test gateway` and verify's Gateway Vitest groups use
+`tools/verify/gateway.py`. It resolves pinned development Node first, then gives
+one test process its own temporary HOME, TMPDIR, Tron data directory and agent
+resource directory. It waits for Vitest before removing those directories, also
+forwarding cancellation to the owned child. It never installs missing packages.
+Migration fixtures seed explicit historical JSON; they never copy the invoking
+user's settings or profile. Test input and output must not depend on live stores.
+
 ## Run output
 
 Execution reads committed state: uncommitted or untracked changes are refused
