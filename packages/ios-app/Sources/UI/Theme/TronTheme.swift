@@ -61,6 +61,8 @@ extension Color {
     static let tronBurgundy = Color(lightHex: "#9F1239", darkHex: "#FB7185")
     static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
     static let tronSlate = Color(lightHex: "#64748B", darkHex: "#94A3B8")
+    /// System settings identity: blue steel, distinct from Accounts indigo and neutral slate.
+    static let tronSteel = Color(lightHex: "#36566F", darkHex: "#9BBAD0")
 
     static let tronBackground = Color(lightHex: "#F7F8FA", darkHex: "#0D0E0F")
     /// Historical neutral tint used by the composer and terminal keyboard bar.

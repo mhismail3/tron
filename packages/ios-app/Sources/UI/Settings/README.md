@@ -26,9 +26,11 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, App Customizations),
   Accounts (indigo: Connections, Model Providers, Connected Services),
-  Agent & Tools (existing adaptive amber: Agent Behavior first, Tools, MCP Servers, Extensions, Hooks),
-  System (slate: Mac Terminal, Push Notifications, Setup, Logs). Agent Behavior
-  opens one primary-accent sheet with the Model, Workers & delegation, Compaction, Trusted Projects,
+  Agent & Tools (the fixed Emerald identity ink: Agent Behavior first, Tools, MCP Servers, Extensions, Hooks),
+  System (steel blue: Mac Terminal, Push Notifications, Setup, Logs). Every category destination
+  inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
+  Emerald uses `ThemeColor.emerald.ink`; System uses `tronSteel`, not the neutral `tronSlate` role.
+  Agent Behavior opens one emerald-accent sheet with the Model, Workers & delegation, Compaction, Trusted Projects,
   Agent changes and Connection groups in place, not another level of section links. The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
   Model contains direct model/thinking; Workers & delegation contains all three ordered model queues

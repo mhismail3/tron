@@ -3,6 +3,37 @@ import XCTest
 /// Navigation-only simulator captures for maintainer review, not regression acceptance.
 @MainActor
 final class TronSheetThemePreviewUITests: XCTestCase {
+    /// Actual category destinations for before/after palette review; no snapshot goldens.
+    func testSettingsSectionColorReviewLightDark() {
+        for mode in ["light", "dark"] {
+            let app = settings(mode)
+            defer { app.terminate() }
+            capture(app, "section-colors-root-top-\(mode)")
+            app.swipeUp()
+            capture(app, "section-colors-root-bottom-\(mode)")
+            open(app, "settings-link-Agent Behavior")
+            expand(app, title: "Agent Behavior")
+            capture(app, "section-colors-agent-\(mode)")
+            app.swipeUp(); app.swipeUp()
+            capture(app, "section-colors-agent-bottom-\(mode)")
+            close(app)
+            open(app, "settings-link-Push Notifications")
+            expand(app, title: "Push Notifications")
+            capture(app, "section-colors-system-\(mode)")
+            close(app)
+            for (id, title) in [("settings-section-tools-open", "Tools"),
+                                ("settings-link-MCP Servers", "MCP Servers"),
+                                ("settings-link-Extensions", "Extensions"),
+                                ("settings-link-Hooks", "Hooks")] {
+                open(app, id)
+                expand(app, title: title)
+                capture(app, "section-colors-\(title)-\(mode)")
+                close(app)
+            }
+            app.terminate()
+        }
+    }
+
     func testSettingsSheetPreviewLightDark() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {

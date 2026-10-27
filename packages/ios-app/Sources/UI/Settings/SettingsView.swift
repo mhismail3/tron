@@ -53,11 +53,11 @@ struct SettingsView: View {
                         }
                     }
                     SettingsGroupCard(.tools) {
-                        TronProgressiveSheetLink(accessibilityLabel: "Agent Behavior", accent: .tronPrimary, surfaceAccent: .tronPrimarySurface) {
+                        TronProgressiveSheetLink(accessibilityLabel: "Agent Behavior") {
                             GlobalAgentBehaviorView()
                         } label: {
                             TronSettingsRow(icon: "slider.horizontal.3", title: "Agent Behavior",
-                                            subtitle: "Models, compaction, trust, and more", accent: .tronPrimary)
+                                            subtitle: "Models, compaction, trust, and more")
                         }
                         .accessibilityIdentifier("settings-link-Agent Behavior")
                         TronSettingsDivider()
@@ -197,10 +197,10 @@ enum SettingsGroupKind {
 
     @MainActor var accent: Color {
         switch self {
-        case .tools: .tronAmber
+        case .tools: ThemeColor.emerald.ink
         case .accounts: .tronIndigo
         case .more, .iphone: .tronPrimary
-        case .diagnostics: .tronSlate
+        case .diagnostics: .tronSteel
         }
     }
 
