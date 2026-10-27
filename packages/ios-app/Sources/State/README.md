@@ -18,6 +18,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `DashboardGatewayConnectionPool` | Shallow catalog connections for the other paired Macs. |
 | [`ChatSessionPresentation`](../Features/Chat/State/ChatSessionPresentation.swift) | ChatView-owned presentation reference and its opening, sheet, selection and composer-view state. |
 | `SessionPresentationStore` | The mounted session: target, subscription lease, synchronization, cursor, paging, presentation lease, process activity, session-keyed secondary reads. |
+| [`SessionPresentationContracts`](../Features/Chat/State/SessionPresentationContracts.swift) | Mounted identity, transcript-window values, open-response admission and the store delegate contract. |
 | `SessionCatalogCoordinator`, `AutomationDashboardPreferencesOwner` (`DashboardStateOwners`) | Dashboard rows per `(profileID, sessionID)`; Automations sheet preferences. |
 | [`ConfirmedMutationExecutor`](../Kernel/ConfirmedMutationExecutor.swift), `SessionMutationService`, `SessionImportCoordinator` | Kernel receipt policy for every mutation; session command DTOs; file import under one captured lifecycle. |
 | `ComposerDraftCoordinator`, [`ComposerDraftStore`](../Features/Chat/State/ComposerDraftStore.swift) | Composer text, staged resources, annotations, attachments, uploads, submission. |
