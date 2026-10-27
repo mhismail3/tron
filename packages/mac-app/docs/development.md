@@ -189,7 +189,10 @@ scripts/tron mac replace --status --follow
   `connection-lost`, `timeout` or each unreachable endpoint.
 - **Preflight** checks source, HEAD, disk, signing, registrations, protocol with the requesting
   iPhone (`--allow-protocol-change`) and that no `mac reinstall` is active; it refuses wrappers
-  without `TronReplacementQuitVersion`, which need one manual reinstall first.
+  without `TronReplacementQuitVersion`, which need one manual reinstall first. Quick also
+  verifies the checkout's installed dependency tree against its lock before stopping workers;
+  missing or partial installs fail here with the pinned `npm ci --include=dev` repair command.
+  An unchanged payload lock alone does not prove the checkout is ready to compile.
 - **Workers** stop through Home's task stop path and can be resumed in place; **Stop** is the
   app's coordinated Quit through the replacement handoff.
 - **Swap** clones `~/.tron` (`state-snapshot`), moves the Stable payload channel and old app into

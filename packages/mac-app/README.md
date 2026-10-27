@@ -144,6 +144,7 @@ record per decision, so a healthy launch of a committed selection records nothin
 | `payload verifier fixtures: generated-input precondition failed; adversarial matrix not run` | test stderr | Unsigned generated inputs failed the baseline; exit 2 is a precondition failure, never a pass; strict rejection stays exit 78 (`test-gateway-payload-precondition.py`) |
 | `deploy.<state>` — states `starting`, `building`, `staging`, `promoting`, `draining`, `ready`, `rollback`, `rolled-back`, `failure` | info; error for `failure`, `rollback`, `rolled-back` | `deploy.jsonl` (`scripts/gateway-payload-deploy.mjs`): one record per state with the ending phase's duration: `commandId`, `durationMs`, `error` |
 | `deploy.source-builder` | info | Source apply selected the trusted checkout's builder: `commandId`, `durationMs`, `builderSha256` |
+| Replace Preflight: `Quick rebuild dependencies do not match package-lock` | error | The checkout install is missing or partial; run the pinned install command in the error, then retry. The operation's `logs/preflight.log` names the first verifier mismatch; workers have not been stopped. |
 | `deploy.source-install-repair` | warning | The checkout's `node_modules` did not match its lock, so the builder runs `npm ci` with the pinned runtime: `commandId`, `drift` (first mismatch) |
 | `deploy.source-install-repaired` | info | That `npm ci` finished with manifest and lock unchanged and the install verified: `durationMs` (repair time) |
 | `deploy.old-process-exited` | info | The drained process disappeared: `commandId`, `durationMs` |

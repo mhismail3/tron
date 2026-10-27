@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +54,65 @@ async function fixture(t, mutate = () => {}) {
   }
   return root;
 }
+
+test("Quick replacement refuses missing or partial installs at Preflight before worker drain", async (t) => {
+  const root = await realpath(await fixture(t));
+  const repo = join(root, "repo");
+  const gateway = join(repo, "packages/gateway");
+  await mkdir(gateway, { recursive: true });
+  await mkdir(join(repo, "scripts"));
+  for (const name of ["package.json", "package-lock.json", "node_modules"]) {
+    await rename(join(root, name), join(gateway, name));
+  }
+  await copyFile(cli, join(repo, "scripts/gateway-install-inputs.mjs"));
+  await writeFile(join(repo, ".gitignore"), "node_modules/\n");
+  const env = { ...process.env, TRON_DATA_DIR: "", TRON_HOME_NAME: "", PI_CODING_AGENT_DIR: "" };
+  for (const args of [["init", "--quiet"], ["add", "."],
+    ["-c", "user.name=Fixture", "-c", "user.email=fixture@invalid", "commit", "--quiet", "-m", "fixture"]]) {
+    await execFileAsync("git", args, { cwd: repo, env });
+  }
+  const scripts = dirname(cli);
+  const child = `
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from tron_mac_replace import Runner, Failure, git
+from tron_mac_replace_journal import Journal
+from tron_mac_replace_platform import MacPlatform
+class Platform(MacPlatform):
+    gateway_label = 'com.tron.fixture.missing-deps'
+    helper_label = gateway_label + '.helper'
+    def node(self):
+        return Path(sys.argv[3]), Path(sys.argv[2]) / 'unused'
+root = Path(sys.argv[2])
+platform = Platform(root / 'home')
+platform.home.mkdir(exist_ok=True)
+revision = git(root, 'rev-parse', 'HEAD')
+journal = Journal.create(root / 'journal', 'fixture', 'quick', 'fixture', {'root': str(root), 'revision': revision})
+try:
+    Runner(platform, journal).step_preflight()
+except Failure as error:
+    sys.exit(str(error))
+`;
+  async function preflight() {
+    try {
+      await execFileAsync("/usr/bin/python3", ["-c", child, scripts, repo, process.execPath], { env });
+      assert.fail("fixture Gateway is deliberately absent");
+    } catch (error) {
+      assert.equal(error.code, 1);
+      return error.stderr;
+    }
+  }
+  // A valid install passes the real verifier and reaches the unrelated fixture registration check.
+  assert.match(await preflight(), /com\.tron\.fixture\.missing-deps is absent/);
+  for (const missing of ["node_modules/required", "node_modules"]) {
+    await rm(join(gateway, missing), { recursive: true, force: true });
+    const message = await preflight();
+    assert.match(message, /Quick rebuild dependencies do not match package-lock/);
+    assert.match(message, /npm ci --include=dev/);
+    assert.doesNotMatch(message, /is absent/);
+  }
+});
 
 test("Debug build input check command refuses stale installs before staging", async (t) => {
   const root = await fixture(t, async (installed) => {

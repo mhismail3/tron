@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -28,7 +29,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tron_mac_replace_journal import Journal, TERMINAL_STATES, describe, now, private_mkdir, write_json_atomic  # noqa: E402
-from tron_mac_replace_platform import Failure, MacPlatform, capture, git, git_succeeds  # noqa: E402
+from tron_mac_replace_platform import Failure, MacPlatform, capture, git, git_succeeds, run  # noqa: E402
 from tron_mac_replace_rpc import RpcError  # noqa: E402
 
 LIBC = ctypes.CDLL(None, use_errno=True)
@@ -180,6 +181,17 @@ class Runner:
             dirty = git(self.root, 'status', '--porcelain', '--untracked-files=no')
             if dirty:
                 raise Failure(f'quick-build source has uncommitted tracked changes:\n{dirty[:600]}')
+            # The source helper loads ws before its build-time repair can run.
+            # Check with the dependency-free verifier before draining workers.
+            node, _ = platform.node()
+            try:
+                run([node, self.root / 'scripts/gateway-install-inputs.mjs', 'check',
+                     self.root / 'packages/gateway', 'full'], self.log('preflight'))
+            except Failure as error:
+                repair = (f'cd {shlex.quote(str(self.root / "packages/gateway"))} && '
+                          f'{shlex.quote(str(self.root / "scripts/tron-node"))} exec npm ci --include=dev')
+                raise Failure(f'Quick rebuild dependencies do not match package-lock. Run: {repair}\n{error}') from None
+            checks.append('installed dependencies match lock')
         checks.append(f'source {self.revision[:9]}')
         free = shutil.disk_usage(platform.home).free
         if free < DISK_RESERVE[path]:
