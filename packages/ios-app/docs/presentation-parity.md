@@ -143,12 +143,13 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   spills from its column while labels keep full Dynamic Type. Section-owned rows add no second
   inset.
 - **Inline actions (#939).** Icon-only actions use `TronInlineActionLabel` without an empty text
-  slot: a 28-point circle trailing-aligned in a 44-point target. Invisible target width is
-  leading, so the zero-gap value/reset cluster shows a 16-point visible gap and the 14-point
-  inset without overlapping hit regions. Every owned override's reset uses this capsule.
+  slot: a 28-point circle in a 44-point target. Reset/Revert aligns the circle leading,
+  with invisible target width trailing, so the zero-gap reset/value cluster preserves a
+  16-point visible gap. Standalone actions align trailing; value pills share the row's
+  trailing edge and 14-point inset without overlapping hit regions.
 - **Overrides.** Inherited values have no source affordance. Session/Home overrides show the
   shared Overridden status pill beside the row title (the value's trailing room is the same with
-  or without it) and Revert after the value. An applied Project value replaces the editor with a
+  or without it) and Revert before the rightmost value pill. An applied Project value replaces the editor with a
   read-only value and a shared Project pill opening file/key information. Absent non-secret values
   render a dash. Values, pills and resets remain independent sibling targets, not nested buttons;
   the Overridden pill and a tool selection's "N of M tools" count never truncate. At

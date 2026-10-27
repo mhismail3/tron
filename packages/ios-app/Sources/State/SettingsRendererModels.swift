@@ -62,6 +62,10 @@ enum SettingsKeySelection: Equatable {
     case projectValues
 
     func includes(_ setting: ResolvedSetting) -> Bool {
+        // These retired controls have no iPhone inspection row, including saved
+        // overrides. Keep canonical values and Gateway write/scope rules untouched.
+        guard setting.key != "context.compaction.enabled",
+              setting.key != "model.thinking[role=summarizer]" else { return false }
         switch self {
         case .all: return true
         case .allExcept(let excluded): return !excluded.contains(setting.key)

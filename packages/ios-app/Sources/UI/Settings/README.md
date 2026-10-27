@@ -31,7 +31,10 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
   Emerald uses `ThemeColor.emerald.ink`; System uses `tronSteel`, not the neutral `tronSlate` role.
   Agent Behavior opens one emerald-accent sheet with the Model, Workers & delegation, Compaction, Trusted Projects,
-  Agent changes and Connection groups in place, not another level of section links. The
+  Agent changes and Connection groups in place, not another level of section links. Each
+  group keeps its shared section heading, without section-description text. Trusted Projects
+  uses the shared settings row so its icon inherits the same sheet tint; known settings use
+  semantic glyphs in the shared renderer, with control-kind glyphs for unknown keys. The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
   Model contains direct model/thinking; Workers & delegation contains all three ordered model queues
   and the task budget. Scoped Home navigation still names its workers/delegation destination Models.
@@ -39,8 +42,10 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   and write only on Save; an empty list is distinct from Reset/Revert to inheritance. The retained
   list editor is keyed by its canonical input so reopening reflects accepted saves. Local changes
   keep stable row identity until Save; the renderer’s existing presentation gate controls refresh.
-  Other routine settings have no editor exposure; explicit values retain read-only Reset/Revert and Project inspection. Compaction
-  appears only while retained values need inspection or Revert. Scoped More Settings contains
+  Other routine settings have no editor exposure; explicit values retain read-only Reset/Revert and Project inspection.
+  Automatic compaction and Summary thinking are excluded by the shared iPhone row selection even
+  when saved; canonical Gateway values, scope rules and writers are unchanged. Other Compaction
+  values appear only while retained values need inspection or Revert. Scoped More Settings contains
   Agent changes and the HTTP proxy; Global embeds those groups directly. There is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
   groups without duplicating them in More Settings.
   Notifications and Changes sit in the toolbar; no Value & Source sheet. Dashboard Settings
@@ -70,7 +75,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   below a short embedded section. Embedded renderers inherit the enclosing sheet's slider host;
   only standalone renderers install one, so the editor uses the sheet viewport rather than its card.
   Session and Home retain their scope-specific section drill-in rows; overrides show the
-  shared Overridden pill beside the row title and Revert after the value.
+  shared Overridden pill beside the row title. The shared settings row places Reset/Revert
+  before the value: the value pill is rightmost, with independent 44-point targets.
 - **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
   `confirm` text asks before sending. Secret drafts start empty and clear on dismissal; list and
   numeric-map drafts write only on Save; unknown fields stay read-only. Outside-change recovery
@@ -184,7 +190,10 @@ approvals and Changes coverage. The surviving memory/provider/queued-editor jour
 `TronForegroundCaptureUITests` own native-stack refresh, draft/focus preservation and invalid-child
 retirement; retired Worker thinking and Transport editor cases do not define that lifecycle.
 
-Hosted values are scripted, not persistence evidence. Real-UI journeys read their key inventory
+`TronAgentBehaviorRegressionUITests` exercises the production Global sheet, medium-first
+project list, error/Retry and missing-response recovery over the hosted socket; it also checks
+Global/Session value/reset order and captures both appearances. Hosted values are scripted,
+not persistence evidence. Real-UI journeys read their key inventory
 from the fixture Gateway's built schema. The [three-layer design](../../../../gateway/docs/settings-three-layer-design.md)
 has a capture-only `TronSettingsThreeLayerPreviewTests` fixture: synthetic SwiftUI layouts, not the
 implemented settings contract. Before device sign-off, change values rapidly, dismiss while saving
@@ -197,7 +206,8 @@ presentation. Lists use `TronListGroup`/`TronListRow` without chevrons; fields k
 shared settings controls. Drill-ins use managed sub-sheets, never push routes.
 Callers supply project paths, effective trust, archive refusal reasons, form bindings,
 destinations and effect closures. The views do not infer eligibility or submit RPCs.
-`TrustedProjectsSettingsView` is the single Global entrypoint into these sheets.
+`TrustedProjectsSettingsView` is the single Global entrypoint into these sheets, using
+`TronProgressiveSheetLink`'s medium-first/large-expandable presentation.
 `ProjectLifecycleView` refreshes disposable `projects.list`/`projects.inspect`
 projections on re-entry, reconnect and existing settings/trust/approval revisions;
 profile, activity and generation fences retire stale reads. Saved outside folders

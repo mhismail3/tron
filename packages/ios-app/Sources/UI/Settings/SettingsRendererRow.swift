@@ -88,8 +88,28 @@ struct SettingsRendererRow: View {
         return [subtitle, hint].compactMap { $0 }.joined(separator: "\n")
     }
 
-    /// Every row carries a glyph so titles align; the glyph names the control kind.
+    /// Semantic glyphs share the standard row's tint and fixed icon column.
+    /// Unknown schema keys retain their control-kind fallback.
+    static func semanticIcon(for key: String) -> String? {
+        switch key {
+        case "model.ref[role=chat]": return "cpu"
+        case "model.thinking[role=chat]": return "brain"
+        case "model.thinking[role=worker]": return "brain.head.profile"
+        case "model.thinkingBudgets": return "gauge.with.dots.needle.50percent"
+        case "model.queue[role=worker]": return "person.crop.rectangle.stack"
+        case "model.queue[role=subagent]": return "person.2"
+        case "model.queue[role=background]": return "moon.stars"
+        case "permissions.budget.task": return "chart.pie"
+        case "context.compaction.enabled": return "arrow.down.right.and.arrow.up.left"
+        case "model.thinking[role=summarizer]": return "text.badge.checkmark"
+        case "permissions.floor": return "hand.raised"
+        case "run.httpProxy": return "network"
+        default: return nil
+        }
+    }
+
     private var icon: String {
+        if let semantic = Self.semanticIcon(for: setting.key) { return semantic }
         if modelConfiguration {
             if setting.key == "model.thinking[role=chat]" { return "brain" }
             if setting.key == "model.contextWindow" { return "gauge.with.dots.needle.50percent" }
@@ -173,7 +193,7 @@ struct SettingsRendererRow: View {
 
     private var resetButton: some View {
         Button { if !resetDisabled { TronHaptics.shared.play(.selectionChanged); onChange(nil) } } label: {
-            TronInlineActionLabel("", icon: "arrow.uturn.backward", accent: theme?.accent ?? .tronPrimary)
+            TronInlineActionLabel("", icon: "arrow.uturn.backward", alignment: .leading, accent: theme?.accent ?? .tronPrimary)
         }
             .controlSize(.small)
             .buttonStyle(.plain)

@@ -75,6 +75,20 @@ enum HostedSettingsReviewSchema {
             help: "Lets this paired iPhone open a shell on the Mac over Tailscale through Remote Login, even when the Gateway is not running.")]
     }()
 
+    /// Agent Behavior review includes the restored queues, not the retired-editor preview.
+    static var agentBehaviorKeys: [JSONValue] {
+        additionalKeys.map { value in
+            guard var row = value.objectValue, row["key"]?.stringValue?.hasPrefix("model.queue[") == true,
+                  var presentation = row["presentation"]?.objectValue else { return value }
+            presentation["control"] = .string("list")
+            presentation["valueKind"] = .string("stringList")
+            presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
+            row["presentation"] = .object(presentation)
+            return .object(row)
+        } + [key("model.queue[role=background]", "workers", "Background models", .array([.string("fixture/pro")]), "1 model", "list", order: 44, essential: true)]
+            + sheetThemeKeys.filter { $0.objectValue?["key"]?.stringValue == "permissions.floor" }
+    }
+
     /// `-settings-scope-review`: the overridden Home, Session and Project values
     /// reported after three-layer settings (#1651), at their real lengths.
     static let scopeReview = ProcessInfo.processInfo.arguments.contains("-settings-scope-review")

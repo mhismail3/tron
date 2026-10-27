@@ -1689,8 +1689,8 @@ struct TronSettingsRow<Trailing: View>: View {
         ) {
             rowLabels
             HStack(spacing: 0) {
-                trailing
                 if let accessory { accessory() }
+                trailing
             }
             .environment(\.tronSettingsRowAccessory, nil)
             .environment(\.tronSettingsRowStatus, nil)
@@ -2255,10 +2255,12 @@ struct TronInlineActionLabel: View {
     /// Optional local override for surfaces whose type scale differs from the
     /// shared compact-control default (for example, in-app notices).
     var fontSize: CGFloat?
+    let alignment: Alignment
     @Environment(\.controlSize) private var controlSize
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    init(_ title: String, icon: String? = nil, isWorking: Bool = false, fontSize: CGFloat? = nil, accent: Color = .tronPrimary, usesSemanticAccent: Bool = false) {
+    init(_ title: String, icon: String? = nil, isWorking: Bool = false, fontSize: CGFloat? = nil, alignment: Alignment = .trailing, accent: Color = .tronPrimary, usesSemanticAccent: Bool = false) {
+        self.alignment = alignment
         self.usesSemanticAccent = usesSemanticAccent
         self.title = title
         self.icon = icon
@@ -2288,9 +2290,9 @@ struct TronInlineActionLabel: View {
             ? (!usesSemanticAccent && TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : resolvedAccent)
             : Color.tronTextMuted)
         // Align painted edges, not the transparent hit frames. A compact circle
-        // stays 28pt inside a 44pt target; its extra width belongs on the leading
-        // side, giving sibling value/reset controls the same 16pt visible gap.
-        // Short labeled pills also align trailing within their minimum target.
+        // stays 28pt inside a 44pt target. Reset aligns leading so its extra
+        // width separates it from the following value by 16pt; standalone actions
+        // and short labeled pills keep their trailing painted edge.
         .padding(.horizontal, iconOnly ? 0 : 10)
         .frame(width: iconOnly ? height : nil, height: iconOnly ? height : nil)
         .frame(minHeight: height)
@@ -2302,7 +2304,7 @@ struct TronInlineActionLabel: View {
                 : 0
         )
         .frame(minWidth: controlSize == .small ? TronSettingsLayoutPolicy.compactPillTargetHeight : nil,
-               alignment: .trailing)
+               alignment: alignment)
         .contentShape(Rectangle())
     }
 }
