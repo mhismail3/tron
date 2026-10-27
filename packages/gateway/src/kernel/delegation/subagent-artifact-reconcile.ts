@@ -18,7 +18,7 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
   asyncDir: string,
   canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
 ): Promise<ExtensionArtifactDiscoveryOutcome> {
-  if (turns.operations.disposed) return "transient";
+  if (turns.operations.disposed || turns.operations.shuttingDown) return "transient";
   let diagnosticOwner: string | undefined;
   let missingToolCallId: string | undefined;
   let claimedReceipt: { activityId: string; owner: ArtifactReceiptOwner } | undefined;
@@ -36,7 +36,7 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
     }
     diagnosticOwner = turns.extensionArtifactOwnerForDirectory(realAsyncDir);
     const rawValue = await turns.artifacts.readExtensionStatusArtifactWithReplacementRetry(realAsyncDir);
-    if (turns.operations.disposed) return "transient";
+    if (turns.operations.disposed || turns.operations.shuttingDown) return "transient";
     if (rawValue === undefined) {
       if (bound) turns.observeMissingExtensionArtifact(bound[1].toolCallId);
       if (diagnosticOwner) turns.warnExtensionArtifact("artifact-replacement-in-progress", diagnosticOwner);
@@ -249,7 +249,7 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
     return "accepted";
   } catch (error) {
     if (claimedReceipt) turns.releaseExtensionReceiptOwnership(claimedReceipt.activityId, claimedReceipt.owner);
-    if (turns.operations.disposed) return "transient";
+    if (turns.operations.disposed || turns.operations.shuttingDown) return "transient";
     if (error instanceof OversizedExtensionArtifactError && missingToolCallId) {
       turns.observeMissingExtensionArtifact(missingToolCallId);
     }
@@ -266,13 +266,15 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
 export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner, toolCallId: string, asyncDir: string): Promise<void> {
   const previous = turns.extensionActivities.get(toolCallId);
   const realAsyncDir = turns.canonicalExtensionArtifactDirectory(asyncDir);
-  if (!previous || turns.operations.disposed || !realAsyncDir) return;
+  if (!previous || turns.operations.disposed || turns.operations.shuttingDown || !realAsyncDir) return;
   const generation = (turns.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1;
   turns.extensionActivityReadGenerations.set(toolCallId, generation);
   let claimedReceiptOwner: ArtifactReceiptOwner | undefined;
   let claimedReceiptActivityId: string | undefined;
   try {
     const rawValue = await turns.artifacts.readExtensionStatusArtifact(realAsyncDir);
+    if (turns.operations.disposed || turns.operations.shuttingDown
+      || turns.extensionActivityReadGenerations.get(toolCallId) !== generation) return;
     if (rawValue === undefined) {
       const tracked = turns.extensionActivityWatchers.get(toolCallId);
       if (tracked && tracked.asyncDir === realAsyncDir) {
@@ -302,7 +304,6 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
       return;
     }
     const raw = admission.artifact;
-    if (turns.operations.disposed || turns.extensionActivityReadGenerations.get(toolCallId) !== generation) return;
     const runId = raw.runId as string;
     if (!runId || runId !== previous.runId) return;
     if (typeof raw.asyncDir === "string") {
@@ -448,6 +449,8 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
     if (!extensionActivityWatchRequired(turns, activity)) turns.stopExtensionActivityWatcher(toolCallId);
   } catch (error) {
     if (claimedReceiptActivityId) turns.releaseExtensionReceiptOwnership(claimedReceiptActivityId, claimedReceiptOwner);
+    if (turns.operations.disposed || turns.operations.shuttingDown
+      || turns.extensionActivityReadGenerations.get(toolCallId) !== generation) return;
     // The next filesystem event or normal snapshot retries; warning is bounded.
     turns.warnExtensionArtifact(
       extensionArtifactReadFailureReason(error),
