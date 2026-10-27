@@ -1,7 +1,7 @@
 import { lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { JsonValue } from "../protocol/types.js";
+import type { CommandReceiptRouteCategory, JsonValue } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { readJson } from "../util/json.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
@@ -42,8 +42,6 @@ export interface CommandReceiptBinding {
   bindingRevision: number;
   physicalSessionId: string;
 }
-
-export type CommandReceiptRouteCategory = "fresh" | "replay";
 
 export interface CommandReceiptExecutionOptions {
   /** The receipt decision owns route signaling: no identities or result data. */

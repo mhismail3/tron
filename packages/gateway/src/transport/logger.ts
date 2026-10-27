@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { redact } from "../util/credential-redaction.js";
 import type { HomeHardBoundary } from "../modules/home/home-diagnostic.js";
-import type { CommandReceiptRouteCategory } from "./command-receipts.js";
+import type { CommandReceiptRouteCategory } from "../protocol/types.js";
 
 /*
  * Level policy (owned by packages/gateway/docs/observability.md): error means

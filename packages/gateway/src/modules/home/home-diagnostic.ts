@@ -1,6 +1,6 @@
 import type { GatewayErrorCode } from "../../errors.js";
-import type { GatewayLogger } from "../../transport/logger.js";
-import type { CommandReceiptRouteCategory } from "../../transport/command-receipts.js";
+import type { ModuleLog } from "../../kernel/host/module-host.js";
+import type { CommandReceiptRouteCategory } from "../../protocol/types.js";
 import type { ReservedHomeSessionScan } from "./home-session-recovery.js";
 
 export type HomeHardBoundary = "hard-bytes" | "hard-entries";
@@ -21,7 +21,7 @@ export type HomeDiagnostic = (diagnostic: HomeDiagnosticRecord) => void;
 
 /** One privacy boundary for Home signals. Never spread caller metadata into the
  * shared logger: canonical identities and evidence belong to their owners. */
-export function logHomeDiagnostic(logger: Pick<GatewayLogger, "log">, diagnostic: HomeDiagnosticRecord): void {
+export function logHomeDiagnostic(logger: ModuleLog, diagnostic: HomeDiagnosticRecord): void {
   const level = (diagnostic.outcome === "client-control" && diagnostic.reason !== "completed") || diagnostic.outcome === "unavailable" || diagnostic.outcome === "refused"
     || diagnostic.outcome === "chapter-refused" || diagnostic.outcome === "chapter-limit-stop" || diagnostic.outcome === "resources-reload"
     || (diagnostic.outcome === "wake" && diagnostic.decision === "refused") ? "warning" : "info";

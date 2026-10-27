@@ -115,6 +115,8 @@ measured volume; measurements are kept in issues, not here.
 - The iOS incident store keeps only structurally admitted records, sanitized by
   an allowlist, and retains the typed event code rather than the response body
   for invalid responses.
+- Home signals use `ModuleLog` and their closed diagnostic union; the writer keeps its allowlist.
+  Receipt route categories are protocol values, not a dependency on the receipt store.
 
 ## Event catalog
 

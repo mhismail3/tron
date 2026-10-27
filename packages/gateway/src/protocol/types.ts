@@ -7,6 +7,8 @@ import type { UpstreamErrorInfo } from "../util/upstream-error.js";
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
+export type CommandReceiptRouteCategory = "fresh" | "replay";
+
 export interface ModelRef {
   provider: string;
   id: string;
