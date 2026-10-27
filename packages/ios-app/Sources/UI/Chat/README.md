@@ -193,7 +193,18 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   independent of the reading family, including View All. `TronSessionRowClockUITests` checks
   their rendered glyph advances and caption metrics against shared code text references.
 - Reduce Motion removes spatial motion and never hides authoritative text.
-- Disable Home's icon, title and subtitle use `tronError`; Pause memory keeps standard styling.
+- Disable Home's icon, title and subtitle use `tronError`; its row overrides the inherited
+  settings theme locally so the decorative icon cannot revert to primary. Pause memory stays standard.
+- Tasks default to in-progress/attention lineages; the shared toolbar filter exposes finished
+  and all work. The Gateway owns grouping by explicit resume links, never by title.
+- Task check-ins use shared settings rows: summary headline, current-operation context,
+  recorded attention metadata and labelled Done/Next/Blocked fields. Relative time opens
+  the exact date and operation, also available to accessibility. Canonical prose stays literal;
+  missing spaces in submitted prose are never guessed by a renderer.
+- View all check-ins uses the shared paged feed across every resume, retaining operation
+  events even when no check-in was sent. A check-in opens its carried full record without
+  another read; the feed's identity fences its filter and each continuation. An explicit
+  incomplete-history notice preserves evidence gaps rather than inventing missing records.
 
 ## Entry points
 

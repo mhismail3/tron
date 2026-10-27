@@ -1066,7 +1066,7 @@ export class HomeTaskDispatcher {
         taskId: task.taskId, createdAt: task.createdAt, updatedAt: task.updatedAt, sessionId: task.sessionId, target: task.target,
         lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
         attention: homeTaskNeedsAttention(task),
-        checkins: (task.checkins ?? []).slice(-HOME_TASK_CHECKIN_VISIBLE), pendingGrant, ...await this.display(task),
+        checkins: (task.checkins ?? []).filter(checkin => checkin.operationId === task.operationId).slice(-HOME_TASK_CHECKIN_VISIBLE), pendingGrant, ...await this.display(task),
       });
     }
     return { items, counts: page.counts, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };

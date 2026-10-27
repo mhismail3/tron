@@ -1,9 +1,10 @@
 import { GatewayError } from "../../errors.js";
 import type { SessionOperations } from "../../kernel/session/runtime-registry.js";
-import { parseHomeTaskCheckin } from "../../kernel/delegation/task-checkin.js";
+import { parseHomeTaskCheckin, parseHomeTaskCheckinRequest } from "../../kernel/delegation/task-checkin.js";
 import type { HomeTaskCheckin, HomeTaskHistoryItem, HomeTaskHistoryPage } from "../../protocol/types.js";
 import type { HomeTaskRecord, HomeTaskStore } from "./home-task-store.js";
 import { homeTaskLineages } from "./home-task-lineage.js";
+import { homeTaskOperationSpan } from "../../kernel/delegation/task-report.js";
 
 const refuse = () => new GatewayError("conflict", "Task history evidence or cursor changed; reload history");
 const compare = (a: Pick<HomeTaskHistoryItem, "at" | "id">, b: Pick<HomeTaskHistoryItem, "at" | "id">) =>
@@ -34,8 +35,13 @@ export async function readHomeTaskHistory(store: HomeTaskStore, sessions: Sessio
       after = value;
     } catch { throw refuse(); }
   }
-  const byTask = new Map(lineage.map(task => [task.taskId, task]));
+  // Refused admissions are retained records, not worker operations or resumes.
+  const operations = lineage.filter(task => task.operationId !== null);
+  const byTask = new Map(operations.map(task => [task.taskId, task]));
   const checkins = new Map<string, HomeTaskCheckin>();
+  const directIds = new Set<string>();
+  const sources = new Map<string, Awaited<ReturnType<SessionOperations["readTaskEvidence"]>>>();
+  let complete = true;
   const accept = (value: unknown) => {
     const checkin = parseHomeTaskCheckin(value);
     const task = byTask.get(checkin.taskId);
@@ -43,20 +49,57 @@ export async function readHomeTaskHistory(store: HomeTaskStore, sessions: Sessio
     const previous = checkins.get(checkin.id);
     if (previous && JSON.stringify(previous) !== JSON.stringify(checkin)) throw refuse();
     checkins.set(checkin.id, checkin);
+    return checkin;
   };
-  for (const task of lineage) for (const checkin of task.checkins ?? []) accept(checkin);
-  for (const sessionId of new Set(lineage.flatMap(task => task.sessionId ? [task.sessionId] : []))) {
+  for (const task of operations) for (const checkin of task.checkins ?? []) accept(checkin);
+  for (const sessionId of new Set(operations.flatMap(task => task.sessionId ? [task.sessionId] : []))) {
     signal?.throwIfAborted();
-    for (const entry of await sessions.readTaskEvidence(sessionId)) {
+    const entries = await sessions.readTaskEvidence(sessionId);
+    sources.set(sessionId, entries);
+    for (const entry of entries) {
       if (entry.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "checkin" || entry.message.isError) continue;
       const details = entry.message.details as { checkin?: unknown } | undefined;
-      if (details?.checkin) accept(details.checkin);
+      if (details?.checkin) {
+        const accepted = accept(details.checkin);
+        if (accepted) directIds.add(accepted.id);
+      } else { complete = false; }
+    }
+  }
+  // Codemode retains nested arguments/status, not their result details. Snapshots
+  // can still supply those exact records; never fabricate an ID or acceptance time
+  // for a nested check-in that has aged out of both sources.
+  const key = (operationId: string, value: HomeTaskCheckin | ReturnType<typeof parseHomeTaskCheckinRequest>) =>
+    JSON.stringify([operationId, value.step, value.done, value.next, value.blocker ?? null, value.needsAttention === true,
+      value.refs?.branch ?? null, value.refs?.commit ?? null, value.refs?.issue ?? null]);
+  const retained = new Map<string, number>();
+  for (const checkin of checkins.values()) if (!directIds.has(checkin.id)) {
+    const id = key(checkin.operationId, checkin); retained.set(id, (retained.get(id) ?? 0) + 1);
+  }
+  for (const task of operations) {
+    if (!task.sessionId || !task.operationId) continue;
+    const span = homeTaskOperationSpan(sources.get(task.sessionId) ?? [], task.operationId);
+    if (span.index < 0) { complete = false; continue; }
+    for (const entry of span.run) {
+      if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
+      const nested = entry.message.nestedCalls;
+      // The SDK owns argument/count limits; incomplete means some calls or full
+      // arguments were omitted, even when every retained call is successful.
+      if (nested?.complete === false) complete = false;
+      for (const call of nested?.calls ?? []) if (call.name === "checkin" && call.status !== "error") {
+        if (call.status !== "ok") { complete = false; continue; }
+        try {
+          const id = key(task.operationId, parseHomeTaskCheckinRequest(call.arguments));
+          const count = retained.get(id) ?? 0;
+          if (!count) { complete = false; } else retained.set(id, count - 1);
+        } catch { complete = false; }
+      }
     }
   }
   signal?.throwIfAborted();
-  if (epoch !== await store.restoreEpoch()) throw refuse();
+  const currentEpoch = await store.restoreEpoch();
+  if (store.writeCount !== writes || epoch !== currentEpoch) throw refuse();
   const items: HomeTaskHistoryItem[] = [];
-  for (const [index, task] of lineage.entries()) {
+  for (const [index, task] of operations.entries()) {
     const operation = { taskId: task.taskId, operationId: task.operationId, operationNumber: index + 1,
       lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome ?? null };
     items.push({ ...operation, id: `operation.${task.taskId}`, at: new Date(task.createdAt).toISOString() });
@@ -66,6 +109,6 @@ export async function readHomeTaskHistory(store: HomeTaskStore, sessions: Sessio
   items.sort(compare);
   const page = items.filter(item => !after || compare(item, after) > 0).slice(0, limit + 1);
   const last = page[Math.min(page.length, limit) - 1];
-  return { items: page.slice(0, limit), total: items.length, ...(page.length > limit && last
+  return { items: page.slice(0, limit), total: items.length, complete, ...(page.length > limit && last
     ? { nextCursor: Buffer.from(JSON.stringify({ epoch, root, at: last.at, id: last.id })).toString("base64url") } : {}) };
 }

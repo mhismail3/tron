@@ -1369,8 +1369,8 @@ export interface HomeTaskDisplay {
   project: string;
 }
 
-/** Exact task counts over the whole task store, independent of any page. `active` covers every
- * non-terminal lifecycle (`pending` and `active`); `finished` covers `terminal`. */
+/** Exact counts over the queried catalog, independent of any page: taskList counts
+ * current lineages; the task tool counts operation records. `active` is non-terminal. */
 export interface HomeTaskCounts {
   active: number;
   finished: number;
@@ -1392,7 +1392,7 @@ export interface HomeTaskCheckin extends HomeTaskCheckinRequest {
   at: string;
   attention: "none" | "requested" | "rate-limited" | "pending";
 }
-/** home.taskList: bounded newest-first task metadata; no canonical reports. */
+/** home.taskList: one current row per resume lineage, newest first; no canonical reports. */
 export interface HomeTaskSummary extends HomeTaskDisplay {
   taskId: string;
   createdAt: number;
@@ -1424,11 +1424,13 @@ export interface HomeTaskHistoryItem {
 export interface HomeTaskHistoryPage {
   items: HomeTaskHistoryItem[];
   total: number;
+  /** False when canonical nested-call details cannot prove older exact records. */
+  complete: boolean;
   nextCursor?: string;
 }
 export interface HomeTaskPage {
   items: HomeTaskSummary[];
   nextCursor?: string;
-  /** Exact counts for the whole store, read with this page; never capped by `limit`. */
+  /** Exact current-lineage counts, read with this page; never capped by `limit`. */
   counts: HomeTaskCounts;
 }

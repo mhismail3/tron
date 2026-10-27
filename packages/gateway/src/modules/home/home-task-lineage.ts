@@ -1,3 +1,4 @@
+import { GatewayError } from "../../errors.js";
 import type { HomeTaskRecord } from "./home-task-store.js";
 
 /** Resume links, not titles (nor reused fixture session IDs), define a delegation.
@@ -9,12 +10,12 @@ export function homeTaskLineages(records: HomeTaskRecord[]): HomeTaskRecord[][] 
     let root = task;
     const visited = new Set<string>();
     while (root.resumes) {
-      if (visited.has(root.taskId)) throw new Error("Cyclic task resume lineage");
+      if (visited.has(root.taskId)) throw new GatewayError("conflict", "Cyclic task resume lineage");
       visited.add(root.taskId);
       const parent = byId.get(root.resumes.taskId);
       if (!parent || parent.operationId !== root.resumes.operationId || parent.homeId !== root.homeId
         || (root.sessionId !== null && root.sessionId !== parent.sessionId))
-        throw new Error("Task resume lineage is missing or contradictory");
+        throw new GatewayError("conflict", "Task resume lineage is missing or contradictory");
       root = parent;
     }
     const lineage = groups.get(root.taskId) ?? [];
