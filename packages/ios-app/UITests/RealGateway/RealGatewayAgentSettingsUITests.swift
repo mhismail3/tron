@@ -30,8 +30,9 @@ extension RealGatewayPairAndChatUITests {
         defer { app.terminate() }
         open(fixture.invitationLink())
         completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitUntil(timeout: 30) { !app.buttons["Finish setup"].exists }, app.debugDescription)
         let home = app.buttons["home-pinned-row"]
-        XCTAssertTrue(waitForEnabled(home, timeout: 90), app.debugDescription)
+        XCTAssertTrue(waitForHittable(home, timeout: 90), app.debugDescription)
         home.tap()
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(waitForEnabled(ring, timeout: 60), app.debugDescription)
@@ -67,6 +68,11 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == nil }, "Home Revert must remove its override")
         XCTAssertNil(queue(globalFile, field: "modelQueues"))
         keepScreenshot(app, name: "2029-home-queue-scope-and-reopen-\(appearance)")
+        let refusal = app.staticTexts["Home task namespace refused: not-initialized"]
+        revealBelowNavigationBar(app, refusal)
+        XCTAssertTrue(refusal.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(app.buttons["home-permissions-reconfirm"].exists)
+        keepScreenshot(app, name: "2029-delegation-refusal-\(appearance)")
     }
 
     @MainActor
