@@ -433,8 +433,7 @@ struct ProjectResourcesView: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronPrimary)
-        .tint(Color.tronPrimary)
+        .tronSettingsVisualTheme(inheriting: .tronPrimary)
     }
 
     /// One container per kind, in the kind's own tint; a kind with nothing loaded says so.

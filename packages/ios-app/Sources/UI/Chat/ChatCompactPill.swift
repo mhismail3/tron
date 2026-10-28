@@ -524,11 +524,14 @@ enum UserPromptTextLayoutPolicy {
 enum UserPromptTextTone: Hashable {
     case user
     case automation
+    /// Body text in a sheet container: the standard primary text, never a producer's tint.
+    case standard
 
     @MainActor var color: Color {
         switch self {
         case .user: .userMessageText
         case .automation: .tronAutomationText
+        case .standard: .tronTextPrimary
         }
     }
 }

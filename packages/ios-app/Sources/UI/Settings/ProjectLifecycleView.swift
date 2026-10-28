@@ -42,7 +42,8 @@ struct ProjectLifecycleView: View {
             } else { content }
         }
         .disabled(submitting)
-        .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
+        // The presenting sheet's theme carries through; only a standalone presentation falls back.
+        .tronSettingsVisualTheme(inheriting: .tronPrimary)
         .tronManagedSheet(item: $approval, identity: { "settings.projects.\($0.id)" }) {
             SettingsApprovalSheet(selection: $0)
         }

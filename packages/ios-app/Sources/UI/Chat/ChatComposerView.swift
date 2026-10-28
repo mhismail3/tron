@@ -403,7 +403,7 @@ private struct ComposerPlaceholder: View {
     var body: some View {
         Text(line)
             .font(TronTypography.input)
-            // All composers use the shared muted placeholder role, not primary ink.
+            // All composers share the placeholder role: the primary ink, dimmed.
             .foregroundStyle(Color.inputPlaceholder)
             .lineLimit(1)
     }

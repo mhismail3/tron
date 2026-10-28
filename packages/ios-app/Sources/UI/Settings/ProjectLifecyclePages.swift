@@ -25,6 +25,9 @@ struct ProjectLifecycleProjectsPage<ProjectDestination: View, AddDestination: Vi
     @ViewBuilder let projectDestination: (ProjectLifecycleProject) -> ProjectDestination
     @ViewBuilder let addDestination: () -> AddDestination
 
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronPrimary }
+
     var body: some View {
         ProjectLifecyclePage("Trusted Projects", identifier: "\(identifierPrefix)-list") {
             TronSettingsGroup(nil) {
@@ -34,11 +37,11 @@ struct ProjectLifecycleProjectsPage<ProjectDestination: View, AddDestination: Vi
             TronListGroup(sections: [TronListSection(title: "Projects", rows: projects)],
                 identifier: "\(identifierPrefix)-list-rows") { item in
                 ProjectLifecycleSheetRow(content: TronListRowContent(title: item.name,
-                    status: TronListStatus(text: item.trusted ? "Trusted" : "Not trusted", tone: item.trusted ? .tronPrimary : .tronSlate),
+                    status: TronListStatus(text: item.trusted ? "Trusted" : "Not trusted", tone: item.trusted ? accent : .tronSlate),
                     subtext: item.displayPath, monoSubtext: true)) { projectDestination(item) }
             }
             TronListGroup([ProjectLifecycleAddAction.create], identifier: "\(identifierPrefix)-add-row") { _ in
-                ProjectLifecycleSheetRow(content: projectLifecycleRow("Add Project", icon: "plus"), destination: addDestination)
+                ProjectLifecycleSheetRow(content: projectLifecycleRow("Add Project", icon: "plus", accent: accent), destination: addDestination)
             }
             TronSettingsCaption("Trust allows a project's extensions and hooks to load. Lifecycle changes always wait for your approval.")
         }
@@ -51,14 +54,17 @@ struct ProjectLifecycleAddPage<CreateDestination: View>: View {
     @ViewBuilder let createDestination: () -> CreateDestination
     let chooseExisting: () -> Void
 
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronPrimary }
+
     var body: some View {
         ProjectLifecyclePage("Add Project", identifier: "\(identifierPrefix)-add") {
             TronListGroup(ProjectLifecycleAddAction.allCases, hasLeading: true, identifier: "\(identifierPrefix)-add-choices") { item in
                 switch item {
                 case .create:
-                    ProjectLifecycleSheetRow(content: projectLifecycleRow("Create Project", icon: "folder.badge.plus", subtitle: "New Git repository on your Mac"), destination: createDestination)
+                    ProjectLifecycleSheetRow(content: projectLifecycleRow("Create Project", icon: "folder.badge.plus", subtitle: "New Git repository on your Mac", accent: accent), destination: createDestination)
                 case .existing:
-                    TronListButton(projectLifecycleRow("Choose Existing Folder", icon: "folder", subtitle: "Inspect a folder without changing its trust"),
+                    TronListButton(projectLifecycleRow("Choose Existing Folder", icon: "folder", subtitle: "Inspect a folder without changing its trust", accent: accent),
                         identifier: "\(identifierPrefix)-existing", action: chooseExisting)
                 }
             }
@@ -103,6 +109,9 @@ struct ProjectLifecycleDetailPage<RenameDestination: View>: View {
     let requestArchive: () -> Void
     let requestUntrust: () -> Void
 
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronPrimary }
+
     var body: some View {
         ProjectLifecyclePage(project.name, identifier: identifier) {
             TronSettingsGroup(nil) {
@@ -122,14 +131,14 @@ struct ProjectLifecycleDetailPage<RenameDestination: View>: View {
                 hasLeading: true, identifier: "\(identifierPrefix)-manage-rows") { item in
                 switch item {
                 case .rename:
-                    ProjectLifecycleSheetRow(content: projectLifecycleRow("Rename Project", icon: "pencil", subtitle: "Move the folder; GitHub is not renamed"), destination: renameDestination)
+                    ProjectLifecycleSheetRow(content: projectLifecycleRow("Rename Project", icon: "pencil", subtitle: "Move the folder; GitHub is not renamed", accent: accent), destination: renameDestination)
                         .disabled(project.renameUnavailableReason != nil)
                 case .archive:
-                    TronListButton(projectLifecycleRow("Archive Project", icon: "archivebox", subtitle: "Move to ~/Workspace/.archive; keep all files"),
+                    TronListButton(projectLifecycleRow("Archive Project", icon: "archivebox", subtitle: "Move to ~/Workspace/.archive; keep all files", accent: accent),
                         identifier: "\(identifierPrefix)-archive", action: requestArchive)
                         .disabled(project.archiveUnavailableReason != nil)
                 case .untrust:
-                    TronListButton(projectLifecycleRow("Untrust Project", icon: "shield.slash", subtitle: "Keep the folder; stop loading extensions and hooks"),
+                    TronListButton(projectLifecycleRow("Untrust Project", icon: "shield.slash", subtitle: "Keep the folder; stop loading extensions and hooks", accent: accent),
                         identifier: "\(identifierPrefix)-untrust", action: requestUntrust)
                         .disabled(project.untrustUnavailableReason != nil)
                 }
@@ -249,14 +258,15 @@ private struct ProjectLifecycleActionButton: View {
     let icon: String
     let subtitle: String
     let action: () -> Void
+    @Environment(\.tronSettingsVisualTheme) private var theme
     var body: some View {
         Button(action: action) {
-            TronSettingsRow(icon: icon, title: title, subtitle: subtitle, subtitleLineLimit: nil, titleColor: .tronPrimary)
+            TronSettingsRow(icon: icon, title: title, subtitle: subtitle, subtitleLineLimit: nil, titleColor: theme?.accent ?? .tronPrimary)
         }.buttonStyle(.plain).tronGlassSurface(accent: .tronPrimarySurface, interactive: true)
     }
 }
 
 @MainActor
-private func projectLifecycleRow(_ title: String, icon: String, subtitle: String? = nil) -> TronListRowContent {
-    TronListRowContent(leading: .icon(icon, .tronPrimary), title: title, subtext: subtitle)
+private func projectLifecycleRow(_ title: String, icon: String, subtitle: String? = nil, accent: Color) -> TronListRowContent {
+    TronListRowContent(leading: .icon(icon, accent), title: title, subtext: subtitle)
 }

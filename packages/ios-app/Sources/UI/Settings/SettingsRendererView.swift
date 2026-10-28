@@ -119,6 +119,10 @@ struct SettingsRendererView: View {
             // Before its rows arrive it is still a (zero-height) view, because an
             // empty one never appears and so would never start its own read.
             if let snapshot { content(snapshot) } else { Color.clear.frame(height: 0) }
+        } else if embedded, let snapshot, sectionHasNoRows(snapshot.resolution) {
+            // A section the Gateway serves no rows for is absent, not an empty
+            // stack: the host's section spacing would otherwise still pay for it.
+            EmptyView()
         } else {
             TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
                 if let snapshot {
@@ -136,6 +140,12 @@ struct SettingsRendererView: View {
             }
             .padding(embedded ? 0 : 20)
         }
+    }
+
+    private func sectionHasNoRows(_ resolution: SettingsResolution) -> Bool {
+        guard case .section(let id) = presentation else { return false }
+        let ownsDefaultTools = id == "tools" && target.objectValue?["kind"]?.stringValue == "global" && writeLayer != nil
+        return !ownsDefaultTools && !resolution.keys.contains { $0.group == id && selection.includes($0) }
     }
 
     @ViewBuilder

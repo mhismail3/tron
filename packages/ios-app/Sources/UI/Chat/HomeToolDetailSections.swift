@@ -132,7 +132,7 @@ struct HomeToolDetailSections: View {
             VStack(alignment: .leading, spacing: 0) {
                 Group {
                     if prompt {
-                        PromptTextPreview(text: text, tone: .automation) {
+                        PromptTextPreview(text: text, tone: .standard) {
                             open(HomeTextReading(id: id, title: title, text: text))
                         }
                     } else {
