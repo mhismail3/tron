@@ -41,7 +41,10 @@ before `devicectl` when their signed protocol metadata differs.
 ## Commands
 
 Choose relevant tests and run them directly. One simulator job per worktree
-at a time (including profiling and Gateway E2E); no global queue or admission.
+at a time (including profiling and Gateway E2E). Host-wide, at most 3
+simulator-heavy jobs run at once: each of these commands takes one of 3 slots
+and waits, printing the holders, when all are taken; there is no other queue or
+admission.
 
 ```bash
 scripts/tron-ios-simulator install
@@ -152,8 +155,18 @@ reclaim simulators yourself.
   or whose creating worktree was deleted (never the default lane) are removed. The runner's sweep also prunes runs beyond the retention windows
   and the products of worktrees that no longer exist. `scripts/tron-ios-test
   reap` runs that same sweep on demand, and `prune` reclaims disk alone.
-- Boots do not use CPU/memory admission or a shared queue. Run only one
-  simulator job per worktree; other worktrees remain independent.
+- Up to 3 simulator-heavy jobs run at once across all worktrees and workers.
+  `scripts/ios-test-lock.py --host-slot` is the one enforcement: `tron-ios-test`
+  (`build`, `run`, `checkpoint`, `prepare`, `diagnose`, so `scripts/tron verify`'s
+  iOS lanes), `tron-profile ios`, `ios-gateway-e2e-test` (all but `stop`/`clean`)
+  and `tron-ios-simulator install` take a slot after their lane's lease, and a
+  fourth waits for one rather than failing. `scripts/tron-ios-test slots` shows
+  the holders. The slot is a kernel `flock`, so a killed or crashed job frees it
+  once its command tree has ended. Never hand-serialize Xcode or simulator work
+  below the cap, and never wait for a worker with a free slot. Each lane keeps
+  its own simulator and DerivedData; a slot admits a job and does not pick a
+  device. There is no CPU/memory admission. Run only one simulator job per
+  worktree.
 - `scripts/tron-ios-test status --all` is the read-only view of everything
   holding this Mac's memory: the Mac's own free memory and swap in use, every
   lane with its worktree, lease holder, uptime

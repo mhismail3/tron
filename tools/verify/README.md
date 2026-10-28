@@ -201,8 +201,9 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
    rebuild before comparing.
 
 `scripts/tron-ios-test` keeps the lane, lease (exit 73 when busy) and cleanup
-ownership. Run one simulator job per worktree; verify never waits for another
-worker.
+ownership. Run one simulator job per worktree. Its `build` and `run` take one of the
+three host-wide simulator slots and wait, naming the holders, when all are taken;
+verify has no other wait.
 
 ## Explicit Mac batches
 

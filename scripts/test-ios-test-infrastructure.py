@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -17,7 +18,7 @@ import sys
 import tempfile
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -99,6 +100,15 @@ if table.exists():
     sys.stdout.write(table.read_text())
 ''',
 }
+
+
+def host_slot_count() -> int:
+    """The cap the lease entry point itself enforces, read from its one constant."""
+    specification = importlib.util.spec_from_file_location("ios_test_lock", LOCK)
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module.HOST_SLOTS
 
 
 def device_process(udid: str, elapsed: str = "00:05") -> str:
@@ -384,6 +394,78 @@ if sys.argv[1:] == ['--version']:
             return (root / "ci-tools/calls").read_text().splitlines()
         except FileNotFoundError:
             return []
+
+    def wait_until(self, condition: Callable[[], bool], what: str, timeout: float = 60) -> None:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if condition():
+                return
+            time.sleep(0.02)
+        self.fail(f"{what} within {timeout:g}s")
+
+    def host_slot_files(self, environment: dict[str, str]) -> list[Path]:
+        """The slot files that name a holder, in the host-wide run state directory."""
+        directory = Path(environment["TRON_IOS_SIMULATOR_STATE_DIR"]) / "ios-host-slots"
+        return [path for path in sorted(directory.glob("slot-*.lock")) if path.read_text().strip()]
+
+    def hold_host_slots(self, environment: dict[str, str], count: int) -> list[subprocess.Popen[bytes]]:
+        """Occupy `count` host-wide simulator slots with idle jobs, through the real lease entry point."""
+        holders: list[subprocess.Popen[bytes]] = []
+        for index in range(count):
+            holders.append(subprocess.Popen(
+                [sys.executable, str(LOCK), "--lock", str(self.contained_root / f"slot-holder-{index}/lease.lock"),
+                 "--host-slot", "--", sys.executable, "-c", "import time; time.sleep(600)"],
+                env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ))
+        self.wait_until(lambda: len(self.host_slot_files(environment)) == count, f"{count} slots held")
+        return holders
+
+    def stop_host_slot_holders(self, holders: list[subprocess.Popen[bytes]]) -> None:
+        for holder in holders:
+            if holder.poll() is None:
+                holder.terminate()
+        for holder in holders:
+            try:
+                holder.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                holder.kill()
+                holder.wait(timeout=5)
+
+    def assert_waits_for_a_host_slot(
+        self, environment: dict[str, str], lane_lease: Path, run: Callable[[], subprocess.CompletedProcess[str]],
+        started: Callable[[], bool] | None, *, status: int | None = 0,
+    ) -> None:
+        """An entry point whose slots are all held waits, starts nothing, and runs when one frees.
+
+        `lane_lease` is the lease file the entry point takes first; while it waits
+        for a slot the holder says so there. `started` reports whether the entry
+        point has begun any simulator work.
+        """
+        cap = host_slot_count()
+        holders = self.hold_host_slots(environment, cap)
+        outcome: list[subprocess.CompletedProcess[str]] = []
+        waiter = threading.Thread(target=lambda: outcome.append(run()))
+        try:
+            waiter.start()
+            self.wait_until(
+                lambda: lane_lease.exists() and '"waiting_for_host_slot": true' in lane_lease.read_text(),
+                "the entry point to queue for a slot",
+            )
+            time.sleep(1)
+            self.assertFalse(started is not None and started(), "work began while every slot was held")
+            self.assertTrue(waiter.is_alive())
+            holders[0].terminate()
+            holders[0].wait(timeout=10)
+            waiter.join(timeout=120)
+            self.assertFalse(waiter.is_alive(), "the entry point never took the freed slot")
+        finally:
+            self.stop_host_slot_holders(holders)
+            waiter.join(timeout=120)
+        if status is not None:
+            self.assertEqual(outcome[0].returncode, status, outcome[0].stdout + outcome[0].stderr)
+        self.assertIn(f"all {cap} host-wide iOS simulator slots are held", outcome[0].stderr)
+        self.assertIn("took host slot", outcome[0].stderr)
+        self.assertTrue(started is None or started())
 
     def close_pipes(self, process: subprocess.Popen[str]) -> None:
         """Close a killed helper's pipes so the fixture can be cleaned up."""
@@ -1386,6 +1468,16 @@ shutil.copytree(source, clone)
                 self.assertEqual(self.device_entry(self.owned_udid())["state"], "Shutdown")
         self.assertEqual(len(self.simctl_calls("shutdown")), len(outcomes))
 
+    def test_run_waits_for_a_host_slot_while_all_are_held(self) -> None:
+        """Every runner command that builds or runs takes a host-wide simulator slot first."""
+        environment = self.contained_environment(self.root)
+        environment["TRON_IOS_SIMULATOR_STATE_DIR"] = str(self.root / "development-state")
+        self.assert_waits_for_a_host_slot(
+            environment, self.state / "lease.lock",
+            lambda: self.invoke(extra_args=["--only-testing", "TronMobileUITests/StubTests"]),
+            lambda: bool(self.simctl_calls("create")),
+        )
+
     def test_keep_booted_is_reused_by_the_next_run_in_the_lane(self) -> None:
         """SIM-1: --keep-booted serves a test-fix loop and still releases at the end.
 
@@ -1829,6 +1921,207 @@ class LockFixture(ContainedFixture, unittest.TestCase):
                 sys.executable, "-c", "pass",
             ], self.root)
             self.assertEqual(third.returncode, 0)
+
+
+class HostSlotFixture(ContainedFixture, unittest.TestCase):
+    """The host-wide cap on simulator-heavy jobs, through the real lease entry point.
+
+    Failure modes these cases target, written before the code:
+
+    1. Every worktree has its own lane and lease, so nothing bounds how many
+       lanes run at once: workers either exceed the cap the maintainer set or,
+       told to take turns by hand, run below it.
+    2. A job beyond the cap fails instead of waiting, or waits without saying
+       who holds the slots and for how long.
+    3. A killed holder keeps its slot, or a slot is freed while the job it
+       admitted is still running.
+
+    The jobs are a synthetic `xcodebuild` that records how many jobs it saw
+    running when it started and then waits for the case to release it; no
+    simulator is involved.
+    """
+
+    JOB = """import os, sys, time
+from pathlib import Path
+state = Path(os.environ['FAKE_JOB_STATE'])
+name = sys.argv[1]
+(state / 'running').mkdir(exist_ok=True)
+(state / 'running' / name).write_text(str(os.getpid()))
+def alive(entry):
+    try:
+        os.kill(int(entry.read_text()), 0)
+    except (OSError, ValueError):
+        return False
+    return True
+overlap = sum(1 for entry in (state / 'running').iterdir() if alive(entry))
+with open(state / 'events', 'a', encoding='utf-8') as events:
+    events.write(f'start {name} {overlap}\\n')
+while not (state / 'release' / name).exists():
+    time.sleep(0.02)
+with open(state / 'events', 'a', encoding='utf-8') as events:
+    events.write(f'end {name}\\n')
+(state / 'running' / name).unlink()
+"""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.environment = self.contained_environment(self.root)
+        self.state = self.root / "jobs"
+        (self.state / "release").mkdir(parents=True)
+        self.environment["FAKE_JOB_STATE"] = str(self.state)
+        self.job = self.root / "bin/xcodebuild"
+        self.synthetic_stub(self.job, self.JOB)
+        self.cap = host_slot_count()
+        self.jobs: dict[str, subprocess.Popen[bytes]] = {}
+
+    def tearDown(self) -> None:
+        try:
+            for name in self.jobs:
+                (self.state / "release" / name).touch()
+            for name, process in self.jobs.items():
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            for pid_file in (self.state / "running").glob("*") if (self.state / "running").exists() else ():
+                try:
+                    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                except (OSError, ValueError):
+                    pass
+            self.assert_no_containment_violations()
+        finally:
+            self.temporary.cleanup()
+
+    def start_job(self, name: str) -> None:
+        """Start one fake simulator job as a worktree's own lane under the lease entry point."""
+        with (self.root / f"{name}.stderr").open("wb") as stderr:
+            self.jobs[name] = subprocess.Popen(
+                [sys.executable, str(LOCK), "--lock", str(self.root / f"lane-{name}/lease.lock"),
+                 "--worktree", str(self.root / f"worktree-{name}"), "--host-slot", "--",
+                 str(self.job), name],
+                env=self.environment, stdout=subprocess.DEVNULL, stderr=stderr,
+            )
+
+    def events(self) -> list[list[str]]:
+        try:
+            return [line.split() for line in (self.state / "events").read_text().splitlines()]
+        except FileNotFoundError:
+            return []
+
+    def started(self) -> list[str]:
+        return [event[1] for event in self.events() if event[0] == "start"]
+
+    def release(self, name: str) -> None:
+        (self.state / "release" / name).touch()
+
+    def test_at_most_the_cap_overlap_and_the_next_job_waits_then_runs(self) -> None:
+        """Failure modes 1 and 2."""
+        names = [f"job{index}" for index in range(self.cap + 1)]
+        for name in names:
+            self.start_job(name)
+        self.wait_until(lambda: len(self.started()) == self.cap, f"{self.cap} jobs to start")
+        # Which job the kernel admits first is not ours to choose: the waiter is the one left.
+        running = self.started()
+        waiter = next(name for name in names if name not in running)
+        # The waiter says who holds the slots and for how long, rather than failing.
+        stderr = self.root / f"{waiter}.stderr"
+        self.wait_until(lambda: "slots are held" in stderr.read_text(), "the waiting job to name the holders")
+        time.sleep(1)
+        self.assertEqual(len(self.started()), self.cap, "a job started beyond the cap")
+        self.assertIsNone(self.jobs[waiter].poll(), "the job beyond the cap must wait, not exit")
+        message = stderr.read_text()
+        self.assertIn(f"all {self.cap} host-wide iOS simulator slots are held", message)
+        self.assertIn("waited 0s", message)
+        self.assertEqual(len(re.findall(r"slot \d: worktree \S+worktree-job\d, PID \d+", message)), self.cap, message)
+        # A freed slot is taken by the waiting job, which starts only after the job it replaces ended.
+        self.release(running[0])
+        self.wait_until(lambda: waiter in self.started(), "the waiting job to start")
+        events = [" ".join(event[:2]) for event in self.events()]
+        self.assertLess(events.index(f"end {running[0]}"), events.index(f"start {waiter}"))
+        for name in names:
+            self.release(name)
+        for name, process in self.jobs.items():
+            self.assertEqual(process.wait(timeout=30), 0, name)
+        overlaps = [int(event[2]) for event in self.events() if event[0] == "start"]
+        self.assertEqual(len(overlaps), self.cap + 1)
+        self.assertEqual(max(overlaps), self.cap, "the jobs must overlap up to the cap and never beyond it")
+        self.assertIn("took host slot", stderr.read_text())
+
+    def test_a_killed_holders_slot_is_reclaimed(self) -> None:
+        """Failure mode 3: a killed holder frees its slot once the job it admitted is gone."""
+        names = [f"job{index}" for index in range(self.cap + 1)]
+        for name in names:
+            self.start_job(name)
+        self.wait_until(lambda: len(self.started()) == self.cap, f"{self.cap} jobs to start")
+        running = self.started()
+        waiter = next(name for name in names if name not in running)
+        self.wait_until(lambda: "slots are held" in (self.root / f"{waiter}.stderr").read_text(), "the waiter to queue")
+
+        # SIGKILL leaves the holder no chance to release anything. Its job still
+        # runs, and still holds the slot: it is the work the slot admits.
+        holder = self.jobs[running[0]]
+        job_pid = int((self.state / "running" / running[0]).read_text())
+        holder.kill()
+        holder.wait(timeout=10)
+        time.sleep(1)
+        self.assertEqual(len(self.started()), self.cap, "a killed holder's live job lost its slot")
+
+        # Once the job is gone as well, the kernel has dropped the slot: no PID file to clear.
+        os.kill(job_pid, signal.SIGKILL)
+        self.wait_until(lambda: waiter in self.started(), "the waiting job to take the killed holder's slot")
+        self.assertLessEqual(max(int(event[2]) for event in self.events() if event[0] == "start"), self.cap)
+
+    def test_a_signalled_holder_frees_its_slot_when_its_command_ends(self) -> None:
+        names = [f"job{index}" for index in range(self.cap + 1)]
+        for name in names:
+            self.start_job(name)
+        self.wait_until(lambda: len(self.started()) == self.cap, f"{self.cap} jobs to start")
+        running = self.started()
+        waiter = next(name for name in names if name not in running)
+        self.wait_until(lambda: "slots are held" in (self.root / f"{waiter}.stderr").read_text(), "the waiter to queue")
+        self.jobs[running[1]].terminate()
+        self.assertEqual(self.jobs[running[1]].wait(timeout=30), 128 + signal.SIGTERM)
+        self.wait_until(lambda: waiter in self.started(), "the waiting job to take the signalled holder's slot")
+
+    def test_a_waiting_job_can_be_interrupted_and_takes_no_slot(self) -> None:
+        holders = self.hold_host_slots(self.environment, self.cap)
+        try:
+            self.start_job("waiter")
+            self.wait_until(lambda: "slots are held" in (self.root / "waiter.stderr").read_text(), "the waiter to queue")
+            self.jobs["waiter"].terminate()
+            self.assertEqual(self.jobs["waiter"].wait(timeout=30), 128 + signal.SIGTERM)
+            self.assertEqual(self.started(), [])
+            lease = self.root / "lane-waiter/lease.lock"
+            self.assertEqual(lease.read_text(), "", "the interrupted job left its lane lease claimed")
+            self.assertEqual(len(self.host_slot_files(self.environment)), self.cap)
+        finally:
+            self.stop_host_slot_holders(holders)
+
+    def test_a_busy_lane_still_fails_at_once_while_slots_are_free(self) -> None:
+        holder = self.hold_host_slots(self.environment, 1)
+        try:
+            lease = self.root / "slot-holder-0/lease.lock"
+            refused = self.run_script([
+                sys.executable, str(LOCK), "--lock", str(lease), "--host-slot", "--", sys.executable, "-c", "pass",
+            ], self.root, stderr=subprocess.PIPE, text=True, timeout=30)
+            self.assertEqual(refused.returncode, 73)
+            self.assertIn("already leased", refused.stderr)
+        finally:
+            self.stop_host_slot_holders(holder)
+
+    def test_the_slots_are_listed_without_taking_one(self) -> None:
+        holders = self.hold_host_slots(self.environment, 2)
+        try:
+            listing = self.run_script([sys.executable, str(LOCK), "--list-host-slots"], self.root,
+                                      stdout=subprocess.PIPE, text=True, timeout=30)
+            self.assertEqual(listing.returncode, 0)
+            self.assertEqual(len(re.findall(r"slot \d: free", listing.stdout)), self.cap - 2, listing.stdout)
+            self.assertEqual(len(re.findall(r"slot \d: PID \d+", listing.stdout)), 2, listing.stdout)
+            self.assertEqual(len(self.host_slot_files(self.environment)), 2)
+        finally:
+            self.stop_host_slot_holders(holders)
 
 
 class OwnedLaneFixture(SyntheticReaders, unittest.TestCase):
@@ -3328,6 +3621,13 @@ class ProfilerLifecycleFixture(LifecycleHarness, unittest.TestCase):
         self.assertIn("shut down", result.stdout)
         self.assertEqual(self.simctl_commands().count("delete"), 0)
 
+    def test_the_profiler_waits_for_a_host_slot_while_all_are_held(self) -> None:
+        self.assert_waits_for_a_host_slot(
+            self.environment, self.state / "lease.lock",
+            lambda: self.profile("--scenario", "control", "--no-build"),
+            lambda: (self.state / "simulator.json").exists(), status=74,
+        )
+
     def test_a_signal_to_the_profiler_releases_the_lane_it_leased(self) -> None:
         """Failure mode 5: the profiler must hand its process over to the lease
         holder, not start it as a child it can kill.
@@ -4462,6 +4762,12 @@ exit 1
         self.assertTrue(self.present(marker["udid"]))
         self.assertEqual(self.simctl_commands().count("delete"), 0)
 
+    def test_an_e2e_build_waits_for_a_host_slot_while_all_are_held(self) -> None:
+        self.assert_waits_for_a_host_slot(
+            self.environment, self.state / "lease.lock", lambda: self.e2e("build"),
+            lambda: (self.state / "simulator.json").exists(),
+        )
+
     def test_an_e2e_build_generates_with_the_xcodegen_the_tools_cache_names(self) -> None:
         """#113 failure modes 3 and 4: every XcodeGen the build resolves is the fixture's."""
         result = self.e2e("build")
@@ -5309,6 +5615,13 @@ class DevelopmentSimulatorFixture(LifecycleHarness, unittest.TestCase):
         return subprocess.run(
             [str(DEVELOPMENT), *arguments], env=self.environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+        )
+
+    def test_install_waits_for_a_host_slot_while_all_are_held(self) -> None:
+        """`install` builds with xcodebuild, so it takes a host-wide slot; the brief `start`/`stop` do not."""
+        self.assert_waits_for_a_host_slot(
+            self.environment, self.development_marker.parent / "ios-simulator.lease.lock",
+            lambda: self.development("install"), None, status=None,
         )
 
     def test_status_reports_how_long_the_remembered_simulator_has_been_booted(self) -> None:

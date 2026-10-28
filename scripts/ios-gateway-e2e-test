@@ -519,11 +519,14 @@ prepare_fixture() {
 # 73. `exec` inside the subshell keeps `$!` the detached process's own pid, and
 # `nohup` keeps it ignoring the SIGHUP the holder forwards to the tree.
 detach() {
-  if [[ -n "${TRON_IOS_TEST_LEASE_FD:-}" ]]; then
-    ( eval "exec ${TRON_IOS_TEST_LEASE_FD}>&-" ; exec "$@" ) &
-  else
-    ( exec "$@" ) &
-  fi
+  # The lease's descriptor and the host slot's: a Gateway that outlives the
+  # command holds neither.
+  (
+    for held_descriptor in "${TRON_IOS_TEST_LEASE_FD:-}" "${TRON_IOS_TEST_SLOT_FD:-}"; do
+      [[ -z "$held_descriptor" ]] || eval "exec ${held_descriptor}>&-"
+    done
+    exec "$@"
+  ) &
 }
 
 start_fresh_fixture() {
@@ -1228,6 +1231,9 @@ if [[ "$command" != status && "$command" != logs && "$command" != -h && "$comman
     # As in scripts/tron-ios-test: only the holder can remove the lane
     # directory `clean` empties down to its lease file.
     [[ "$command" == clean ]] && lock_arguments+=(--remove-empty-lane)
+    # The simulator-heavy commands take one of the three host-wide simulator
+    # slots (waiting for it); `stop` and `clean` only tear down.
+    case "$command" in stop|clean) ;; *) lock_arguments+=(--host-slot) ;; esac
     # The selected journeys travel with the command: the holder starts `run-ui`
     # again, and it must run the journeys the caller named.
     exec python3 "$lock_owner" "${lock_arguments[@]}" -- "$0" "$command" --lane "$test_lane" \

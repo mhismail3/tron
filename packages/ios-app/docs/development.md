@@ -118,8 +118,12 @@ The skill's [Simulator lifecycle](../../../.agents/skills/tron-ios/SKILL.md#simu
 
 ### Parallel-worker resource ownership
 
-Each worktree has its own lane, DerivedData and products; run one simulator job per worktree. The
-Development simulator and each device hold host-wide leases (exit 73 names the holder). Neither
+Each worktree has its own lane, DerivedData and products; run one simulator job per worktree. At most
+3 simulator-heavy jobs run at once on the Mac, across all worktrees and workers: `scripts/ios-test-lock.py
+--host-slot` takes one of 3 slots for every `tron-ios-test` build or run, profiler run, Gateway E2E command
+and `tron-ios-simulator install`, waits (naming the holders) when all are taken, and
+`scripts/tron-ios-test slots` shows them. The Development simulator and each device hold host-wide
+leases (exit 73 names the holder). Neither
 PPID 1 nor high CPU proves abandonment: diagnose with `scripts/tron-ios-test status --all`.
 
 ### Test runner safety contract

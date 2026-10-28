@@ -30,7 +30,8 @@ Commands:
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
   test gateway [vitest args...]      Run Gateway tests directly with pinned Node
-  test ios [runner args...]         Run the owned iOS test runner directly
+  test ios [runner args...]         Run the owned iOS test runner directly (3 host-wide simulator
+                                    slots; a 4th job waits; `test ios slots` shows holders)
   test tooling [test files...]      Run Python script integration suites directly
   build gateway                     Build Gateway directly with pinned Node
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]

@@ -69,8 +69,12 @@ hold_development_lease() {
     if [[ -n "${TRON_IOS_TEST_LEASE_LOCK:-}" && "$TRON_IOS_TEST_LEASE_LOCK" -ef "$LEASE_LOCK" ]]; then
         return
     fi
+    # `install` builds with xcodebuild, so it also takes one of the three
+    # host-wide simulator slots (waiting for it); start and stop are brief.
+    local slot=()
+    [[ "$1" != install ]] || slot=(--host-slot)
     exec python3 "$LOCKER" --lock "$LEASE_LOCK" --resource "Development simulator" \
-        --worktree "$ROOT_DIR" -- "$0" "$@"
+        --worktree "$ROOT_DIR" ${slot[@]+"${slot[@]}"} -- "$0" "$@"
 }
 
 # Each worktree builds into its own DerivedData: two worktrees' installs never

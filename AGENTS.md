@@ -89,8 +89,8 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 - The Mac is shared. Reuse running servers and simulators (`scripts/tron-ios-test status
   --all`); stop what you start (and simulators booted outside the tooling); remove your
   temp files, fixtures and worktrees on success and failure, never leaving them to a
-  sweep. Prefer commands that exit; isolate `HOME`/`TMPDIR` for third-party suites. One
-  simulator job/worktree; no enforced host-wide cap. Tooling owns lanes (never hand-erase). Never `git stash`.
+  sweep. Prefer commands that exit; isolate `HOME`/`TMPDIR` for third-party suites. Tooling owns lanes (never hand-erase). Never `git stash`.
+- Up to 3 simulator-heavy jobs run at once across all workers (one/worktree), enforced by `scripts/ios-test-lock.py --host-slot` (a 4th waits; `scripts/tron-ios-test slots`); never hand-serialize Xcode/simulator work below the cap.
 - No broad kills (`pkill node`, `simctl shutdown all`). Stop only what you started; ask
   when unsure; never touch another session's process, lane or lease, nor Stable or its
   children. Reproduce load in-process; if slow, check swap and report foreign hogs.
@@ -139,7 +139,7 @@ no queue, gate or auto-revert.
   owners announce their files in the module issue (or #1345) first.
 - Fresh read-only review before landing for new tooling, locks and kernel semantics, not
   clean moves (plan §8.4); the worker fixes defects. Closing evidence ≤ 1,500 characters
-  (App. D). ≤ 4 restructure workers + 1 steward; coordinate up to 3 simulator-heavy jobs across workers (one/worktree); stop on plan §4.2.
+  (App. D). ≤ 4 restructure workers + 1 steward; stop on plan §4.2.
 
 ## Documentation
 - Owners: `README.md` (≤ 250 lines), `packages/gateway/README.md`, `packages/ios-app/docs/`, `packages/mac-app/docs/`,

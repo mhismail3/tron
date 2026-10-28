@@ -46,6 +46,7 @@ Commands:
                        simulator no lane owns, the Development simulator, and Simulator.app.
                        Read-only, the same table a refused boot prints, and what an agent
                        runs before its final response.
+  slots                Show the 3 host-wide simulator slots and who holds each. Read-only.
   lanes                List every lane with its worktree, state, lease holder, last use and
                        disk size. Read-only: it takes no lease and removes nothing.
   lane-remove NAME     Delete one lane's simulator and state, and the test products of the
@@ -90,8 +91,13 @@ Options:
 
 Stable exits: 65 test failure, 66 destination, 70 build failure, 73 same-resource
 lease busy, 74 runner failure, 75 process timeout. Signals retain conventional exits.
-There is no host-wide CPU/memory admission or boot queue. Run one simulator job
-per worktree at a time; different worktrees remain independent.
+Host-wide, at most 3 simulator-heavy jobs run at once across every worktree and worker
+(checkpoint, prepare, build, run, diagnose, the profiler, the Gateway E2E harness and
+`scripts/tron-ios-simulator install` each take one of 3 slots). A fourth waits, printing
+who holds the slots and how long it has waited, and starts the moment one frees; a
+killed or crashed holder frees its slot. Do not hand-serialize Xcode or simulator work
+below that cap. Run one simulator job per worktree at a time; every lane has its own
+simulator and DerivedData. There is no CPU/memory admission.
 Every command that provisions the simulator first releases orphaned owned lanes
 and prunes results and products; lanes a live process holds are never touched.
 The profiler (scripts/tron-profile ios) and the Gateway E2E harness
@@ -263,7 +269,7 @@ command="${1:-checkpoint}"
 if [[ "$command" == -h || "$command" == --help || "$command" == help ]]; then usage; exit 0; fi
 shift || true
 case "$command" in
-  checkpoint|prepare|build|run|diagnose|status|reap|prune|lanes|lane-remove|clean-unowned|clean) ;;
+  checkpoint|prepare|build|run|diagnose|status|slots|reap|prune|lanes|lane-remove|clean-unowned|clean) ;;
   *) usage >&2; die "unknown command: $command" ;;
 esac
 
@@ -396,6 +402,10 @@ if [[ "$command" == prune ]]; then
   exit 0
 fi
 
+if [[ "$command" == slots ]]; then
+  exec python3 "$LOCKER" --list-host-slots
+fi
+
 if [[ "$command" == "lanes" ]]; then
   # Read-only by design: it takes no lease, sweeps nothing and creates nothing,
   # so an agent can look at every lane while commands are running.
@@ -460,6 +470,9 @@ if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
   # simulator outlives the command that booted it.
   locker_arguments=(--lock "$LOCK" --marker "$MARKER" --development-state "$DEVELOPMENT_STATE")
   ((keep_booted)) && locker_arguments+=(--keep-booted)
+  # Every command that builds or runs on a simulator takes one of the three
+  # host-wide simulator slots (waiting for it); `clean` only deletes.
+  [[ "$command" == clean ]] || locker_arguments+=(--host-slot)
   # `clean` empties the lane down to its lease file, which only the holder can
   # remove safely: it still holds the lease once the command tree has ended.
   [[ "$command" == clean ]] && locker_arguments+=(--remove-empty-lane)

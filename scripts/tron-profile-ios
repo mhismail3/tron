@@ -1015,7 +1015,7 @@ def main(argv: list[str]) -> int:
             os.execv(sys.executable, [
                 sys.executable, str(LOCKER), "--lock", str(lane.state_root / "lease.lock"),
                 "--marker", str(lane.state_root / "simulator.json"),
-                "--development-state", str(development_state_path()), "--", str(Path(__file__).resolve()),
+                "--development-state", str(development_state_path()), "--host-slot", "--", str(Path(__file__).resolve()),
                 *argv, "--lane", lane.label,
             ])
         except OSError as error:

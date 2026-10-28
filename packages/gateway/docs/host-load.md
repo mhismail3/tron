@@ -6,8 +6,9 @@ observation, never permission to start work or a reason to delay landing.
 
 Workers run their relevant tests directly. There is no shared CPU/memory
 admission, gate, merge lock, hosted check workflow or automatic main revert.
-One worktree runs at most one iOS simulator job at a time; independent
-worktrees do not wait for one another's checks. Exact-device/simulator leases
+One worktree runs at most one iOS simulator job at a time, and at most three
+simulator jobs run at once across all worktrees: a fourth waits for a free slot
+(`scripts/ios-test-lock.py --host-slot`) and never while one is free. Exact-device/simulator leases
 still prevent simultaneous use of the same resource, and each command cleans
 up its own processes and simulator. Do not kill another worker or Stable.
 

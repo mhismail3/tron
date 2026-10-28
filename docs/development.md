@@ -254,3 +254,10 @@ A kernel, toolchain or unowned change runs every lock. It prints live progress,
 stops at the first failure, writes `test-results/verify/<sha>.json`, and fails a
 run that executes no test. A failure that also reproduces on the base commit does
 not block landing; the closing comment cites the base run. [Verify](../tools/verify/README.md).
+
+At most 3 simulator-heavy jobs run at once on this Mac, across all worktrees and workers. The
+iOS test runner (`scripts/tron-ios-test` build/run, so `verify` too), the profiler, the Gateway
+E2E harness and `scripts/tron-ios-simulator install` each take one of three host-wide slots through
+`scripts/ios-test-lock.py --host-slot`, waiting (and naming the holders) when all are held; a killed
+holder frees its slot. `scripts/tron test ios slots` shows them. Do not hand-serialize Xcode or
+simulator work below the cap. [iOS parallel workers](../packages/ios-app/docs/development.md#parallel-worker-resource-ownership).

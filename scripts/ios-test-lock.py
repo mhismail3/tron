@@ -22,6 +22,18 @@ command tree: a signal reaches the whole tree, the release waits for it to end,
 and a holder killed outright leaves an orphan the sweep cannot mistake for an
 idle lane.
 
+With --host-slot, the holder also takes one of the HOST_SLOTS host-wide slots
+before its command starts, so no more than HOST_SLOTS simulator-heavy jobs run
+at once on this Mac, across every worktree and worker, and none waits while a
+slot is free. Each job already has its own simulator (its lane's), so a slot
+admits a job rather than a device. A fourth job waits, printing the slots' holders and
+how long it has waited, instead of failing; the slot is a flock like the lease,
+so a holder that was killed or crashed frees it as soon as the command tree it
+started has ended, and no PID file has to be reclaimed. The lane's lease is taken
+first (a busy lane still fails at once with 73), then the slot, in that order for
+every caller, so two jobs can never wait on each other. `--list-host-slots` prints
+the slots without taking one.
+
 A command that inherits a lease (`TRON_IOS_TEST_LOCK_HELD`) takes none of its
 own, so it proves with --verify-inherited that the inherited lease is the one
 of the lane it names before it touches that lane; every lane tool - the runner,
@@ -48,7 +60,7 @@ import signal
 import subprocess
 import sys
 import time
-from typing import IO
+from typing import Callable, IO
 
 LOCKED_EXIT = 73
 # The runner's own failure status: a command refused for the lease it inherited
@@ -63,6 +75,16 @@ SIMULATOR_TIMEOUT_SECONDS = 120.0
 # keeps a wedged tree from holding the simulator - and the lease - forever.
 COMMAND_TREE_GRACE_SECONDS = 30.0
 SIMULATOR = Path(__file__).resolve().parent / "ios-test-simulator.py"
+# The host-wide cap on simulator-heavy jobs: the one place the number lives.
+HOST_SLOTS = 3
+# The slots sit beside the Development simulator's lease, in the host-wide run
+# state directory (outside every worktree), by the same override the helper uses.
+HOST_SLOT_DIRECTORY_NAME = "ios-host-slots"
+# A waiting job looks for a free slot this often, and says who holds them, and
+# how long it has waited, on its first look and then this often.
+HOST_SLOT_POLL_SECONDS = 0.25
+HOST_SLOT_REPORT_SECONDS = 30.0
+HOST_SLOT_COMMAND_CHARACTERS = 160
 
 
 def write_metadata(handle: IO[str], metadata: dict[str, object]) -> None:
@@ -107,6 +129,85 @@ def describe_holder(text: str) -> str:
     if isinstance(command, str):
         parts.append(f"command {command}")
     return ", ".join(parts) or text
+
+
+def host_slot_directory() -> Path:
+    state = os.environ.get("TRON_IOS_SIMULATOR_STATE_DIR") or str(Path.home() / ".tron/internal/run")
+    return Path(state) / HOST_SLOT_DIRECTORY_NAME
+
+
+def host_slot_path(index: int) -> Path:
+    return host_slot_directory() / f"slot-{index}.lock"
+
+
+def read_slot_holders() -> list[str | None]:
+    """Who holds each slot (None when it is free), without taking any.
+
+    A shared, non-blocking probe: it never keeps a slot from a job taking it,
+    which retries within HOST_SLOT_POLL_SECONDS in any case.
+    """
+    holders: list[str | None] = []
+    for index in range(HOST_SLOTS):
+        try:
+            handle = host_slot_path(index).open("r", encoding="utf-8")
+        except OSError:
+            holders.append(None)
+            continue
+        with handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                holders.append(describe_holder(handle.read().strip()))
+                continue
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            holders.append(None)
+    return holders
+
+
+def format_slots(holders: list[str | None]) -> str:
+    return "\n".join(
+        f"  slot {index}: {holder if holder is not None else 'free'}" for index, holder in enumerate(holders)
+    )
+
+
+def take_host_slot(interrupted: Callable[[], bool], resource: str) -> tuple[int, IO[str]] | None:
+    """Take any free host slot, waiting for one; None if a signal ended the wait.
+
+    The scan is a non-blocking flock on each slot in turn, so the kernel is the
+    only authority on who holds one: a holder that was killed or crashed has no
+    slot to reclaim. Waiting is the contract here (the lane lease alone fails
+    fast), so it names the holders and the wait on the first look and every
+    HOST_SLOT_REPORT_SECONDS after, and says when the wait ended.
+    """
+    directory = host_slot_directory()
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    began = time.monotonic()
+    next_report = began
+    while not interrupted():
+        for index in range(HOST_SLOTS):
+            handle = host_slot_path(index).open("a+", encoding="utf-8")
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                handle.close()
+                continue
+            if time.monotonic() - began >= HOST_SLOT_POLL_SECONDS:
+                print(
+                    f"{resource}: took host slot {index} of {HOST_SLOTS} after waiting {time.monotonic() - began:.0f}s",
+                    file=sys.stderr, flush=True,
+                )
+            return index, handle
+        now = time.monotonic()
+        if now >= next_report:
+            print(
+                f"{resource}: all {HOST_SLOTS} host-wide iOS simulator slots are held; "
+                f"waited {now - began:.0f}s for one. Holders:\n{format_slots(read_slot_holders())}",
+                file=sys.stderr, flush=True,
+            )
+            next_report = now + HOST_SLOT_REPORT_SECONDS
+        time.sleep(HOST_SLOT_POLL_SECONDS)
+    return None
 
 
 def process_group_exists(process_group: int) -> bool:
@@ -264,12 +365,16 @@ def remove_empty_lane(lock: Path, handle: IO[str]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--lock", required=True, type=Path)
+    parser.add_argument("--lock", type=Path)
     parser.add_argument("--marker", type=Path)
     parser.add_argument("--development-state", type=Path)
     parser.add_argument("--keep-booted", action="store_true")
     parser.add_argument("--resource", default="iOS test simulator", help="what the lease protects, named when it is contended")
     parser.add_argument("--worktree", help="the worktree whose command holds the lease, named when it is contended")
+    parser.add_argument("--host-slot", action="store_true",
+                        help=f"also take one of the {HOST_SLOTS} host-wide simulator slots, waiting for one, before the command starts")
+    parser.add_argument("--list-host-slots", action="store_true",
+                        help="take nothing: print who holds each host-wide simulator slot")
     parser.add_argument("--remove-empty-lane", action="store_true",
                         help="when the command ends, remove the lane directory if the lease file is all it holds")
     parser.add_argument("--verify-inherited", metavar="LANE",
@@ -278,6 +383,14 @@ def main() -> int:
     arguments = parser.parse_args()
     if arguments.command[:1] == ["--"]:
         arguments.command = arguments.command[1:]
+    if arguments.list_host_slots:
+        if arguments.command:
+            parser.error("--list-host-slots takes no command")
+        print(f"Host-wide iOS simulator slots ({HOST_SLOTS}):")
+        print(format_slots(read_slot_holders()))
+        return 0
+    if arguments.lock is None:
+        parser.error("--lock is required")
     if arguments.verify_inherited is not None:
         if arguments.command:
             parser.error("--verify-inherited takes no command")
@@ -300,6 +413,7 @@ def main() -> int:
         process: subprocess.Popen[bytes] | None = None
         interrupted: int | None = None
         held = False
+        slot: IO[str] | None = None
 
         def forward(signum: int, _frame: object) -> None:
             nonlocal interrupted
@@ -348,6 +462,31 @@ def main() -> int:
             # read it instead of taking the lease, so it has to be readable as
             # soon as the lease is held, before the simulator below is probed.
             write_metadata(handle, metadata)
+            if arguments.host_slot:
+                # After the lane's own lease (a busy lane failed above, at once),
+                # and shown in its metadata while waiting, so `lanes` names a job
+                # that is queued for a slot rather than showing a holder with no
+                # command.
+                metadata["waiting_for_host_slot"] = True
+                write_metadata(handle, metadata)
+                taken = take_host_slot(lambda: interrupted is not None, arguments.resource)
+                if taken is None:
+                    return 128 + (interrupted or 0)
+                slot_index, slot = taken
+                write_metadata(slot, {
+                    "schema": "tron.ios-host-slot.v1",
+                    "slot": slot_index,
+                    "pid": os.getpid(),
+                    "started_at_epoch_seconds": int(time.time()),
+                    "command": " ".join(os.path.basename(part) if index == 0 else part
+                                        for index, part in enumerate(arguments.command))[:HOST_SLOT_COMMAND_CHARACTERS],
+                    "lock_path": str(arguments.lock.resolve()),
+                    "uid": os.getuid(),
+                    **({"worktree": arguments.worktree} if arguments.worktree is not None else {}),
+                })
+                del metadata["waiting_for_host_slot"]
+                metadata["host_slot"] = slot_index
+                write_metadata(handle, metadata)
             if arguments.marker is not None:
                 metadata["simulator"] = {
                     "marker": str(arguments.marker),
@@ -368,6 +507,10 @@ def main() -> int:
             # lease it inherited is that lane's (T-3).
             environment["TRON_IOS_TEST_LEASE_FD"] = str(handle.fileno())
             environment["TRON_IOS_TEST_LEASE_LOCK"] = str(arguments.lock)
+            if slot is not None:
+                # Named like the lease's so a process the command detaches on
+                # purpose can drop it too.
+                environment["TRON_IOS_TEST_SLOT_FD"] = str(slot.fileno())
             process = subprocess.Popen(
                 arguments.command,
                 env=environment,
@@ -376,7 +519,7 @@ def main() -> int:
                 # The lease's own descriptor: the flock then lives exactly as
                 # long as the command tree, so a sweep cannot release the
                 # simulator while a command a killed holder started still runs.
-                pass_fds=(handle.fileno(),),
+                pass_fds=(handle.fileno(),) if slot is None else (handle.fileno(), slot.fileno()),
             )
             if interrupted is not None:
                 # A signal that arrived while the command was starting is still
@@ -405,6 +548,12 @@ def main() -> int:
                 handle.truncate()
                 if arguments.remove_empty_lane:
                     remove_empty_lane(arguments.lock, handle)
+            if slot is not None:
+                # Last: the slot admits the whole job, including the simulator
+                # release above and the lane's removal.
+                slot.seek(0)
+                slot.truncate()
+                slot.close()
 
 
 if __name__ == "__main__":
