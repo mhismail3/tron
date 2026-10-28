@@ -387,6 +387,39 @@ export function collapseRepeatedRequests(requests: readonly Omit<ProviderRequest
   return collapsed;
 }
 
+/** Shared Home + worker declarations are owned by the real Home activation lock.
+ * Other scenarios retain tool names/order/sampling and their lifecycle data, not
+ * another copy of those schemas. Tools absent from the canonical capture retain
+ * their full declarations with their own scenario.
+ */
+const SHARED_TOOL_SCHEMAS = new Set([
+  "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
+  "web_search", "session_search", "session_read", "knowledge", "read_file", "settings", "projects",
+  "read", "bash", "edit", "write", "jev", "swift_app", "computer", "checkin", "report",
+]);
+const TOOL_SCHEMA_PATH = /(?:^|\.)(?:toolsAdded|availableTools)\[\]\.(?:parameters(?=[:.\[])|description:)/u;
+
+function withoutSharedToolSchemas(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutSharedToolSchemas);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => {
+    if (key === "toolsAdded" && Array.isArray(child)) {
+      return [key, child.map(tool => {
+        if (tool === null || typeof tool !== "object" || !SHARED_TOOL_SCHEMAS.has(tool.name)) return tool;
+        const { description: _description, parameters: _parameters, ...identity } = tool;
+        return identity;
+      })];
+    }
+    // Wire/event shape arrays repeat these same schema subtrees. The canonical
+    // capture keeps their complete values; preserve every other typed path.
+    if ((key === "paths" || key === "response") && Array.isArray(child)) {
+      return [key, child.filter(path => typeof path !== "string" || !TOOL_SCHEMA_PATH.test(path))
+        .map(withoutSharedToolSchemas)];
+    }
+    return [key, withoutSharedToolSchemas(child)];
+  }));
+}
+
 /** The canonical rendering both the golden and the retained artifact use. */
 function renderTrace(trace: unknown): string {
   return `${JSON.stringify(trace, null, 2)}\n`;
@@ -425,7 +458,8 @@ export interface GoldenComparison<Trace = BehaviorTrace> {
  * anything.
  */
 export async function compareWithGolden<Trace>(comparison: GoldenComparison<Trace>): Promise<{ updated: boolean; hunks: number }> {
-  const rendered = renderTrace(comparison.trace);
+  const lock = lockName(comparison.goldenPath);
+  const rendered = renderTrace(lock === "home-activation-wake" ? comparison.trace : withoutSharedToolSchemas(comparison.trace));
   await mkdir(dirname(comparison.actualPath), { recursive: true });
   await writeFile(comparison.actualPath, rendered);
   const golden = await readFile(comparison.goldenPath, "utf8").catch(() => undefined);

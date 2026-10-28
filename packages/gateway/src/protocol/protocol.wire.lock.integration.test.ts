@@ -17,8 +17,9 @@ import { waitFor } from "../../test-support/wait-for.js";
  * the refusal of a client outside the protocol range, and for every method the
  * scenario calls the structure (dotted key paths with leaf types) of its request
  * and of its response or error. Values that vary per run are not shapes, so the
- * golden is stable. A renamed, removed, added or retyped field fails it; such a
- * change belongs to a lockstep slice that updates both ends (plan §4.1 B4).
+ * golden is stable. Shared tool declaration schemas belong to the full Home
+ * schema oracle; other renamed, removed, added or retyped fields fail this lock.
+ * A wire change updates both ends in a lockstep slice (plan §4.1 B4).
  */
 
 const MODULE = "gateway/protocol";

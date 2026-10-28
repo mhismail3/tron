@@ -2,7 +2,7 @@ import UIKit
 import XCTest
 
 /// Restructure UI locks (docs/restructure/plan.md §6.6). A lock pins one
-/// hosted-fixture screen state with two goldens beside this file in `Goldens/`:
+/// hosted-fixture screen state with explicit pixel and optional AX witnesses in `Goldens/`:
 ///
 /// - `<name>.a11y.txt`: the app's accessibility hierarchy as normalized text
 ///   (type, identifier, label, value, traits, frame in whole points), compared
@@ -55,12 +55,17 @@ enum UILock {
 }
 
 extension XCTestCase {
-    /// Locks the app's current state as `name`: waits until its accessibility
-    /// hierarchy and pixels stop changing, then compares or records both goldens.
+    /// Locks the app's current state as `name`: waits until the explicitly
+    /// selected witnesses stop changing. The caller owns the contract explicitly;
+    /// a missing selected golden still fails, never silently downgrades coverage.
     @MainActor
-    func assertUILock(_ app: XCUIApplication, _ name: String, file: StaticString = #filePath, line: UInt = #line) {
-        guard let tree = settledTree(app, name, file: file, line: line),
-              let shot = settledScreenshot(name, file: file, line: line) else { return }
+    func assertUILock(_ app: XCUIApplication, _ name: String, accessibility: Bool, file: StaticString = #filePath, line: UInt = #line) {
+        let tree: String?
+        if accessibility {
+            guard let settled = settledTree(app, name, file: file, line: line) else { return }
+            tree = settled
+        } else { tree = nil }
+        guard let shot = settledScreenshot(name, file: file, line: line) else { return }
         // Checked before recording too: goldens from another device would be
         // silently wrong, and the status-bar mask assumes this 3x screen.
         guard shot.width == UILock.pinnedPixels.width, shot.height == UILock.pinnedPixels.height else {
@@ -68,7 +73,7 @@ extension XCTestCase {
                            + "\(UILock.pinnedPixels.width)×\(UILock.pinnedPixels.height) px of iPhone 17 Pro "
                            + "(config/ci-toolchain.env); use scripts/tron-ios-test", file: file, line: line)
         }
-        checkTree(tree, name, file: file, line: line)
+        if let tree { checkTree(tree, name, file: file, line: line) }
         checkScreenshot(shot, name, file: file, line: line)
     }
 

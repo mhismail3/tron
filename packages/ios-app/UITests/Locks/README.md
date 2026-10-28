@@ -50,136 +50,80 @@ scripts/tron-ios-test run --only-testing TronMobileUITests/SnapshotCachePersiste
 Each final fixture cleanup removes only its UUID root. The cold-relaunch case
 intentionally retains that root between its two processes, then cleans it.
 
-## Visual locks
+## Visual witnesses
 
-UI locks pin what the user sees in hosted-fixture screen states, so a
-restructure slice can prove it changed nothing visible
-([plan §6.6](../../../../docs/restructure/plan.md)). Each journey in
-`TronUILockTests` only navigates to a state and calls `assertUILock(app, name)`.
-Behavioral assertions stay in the feature journeys. The Home Settings hierarchy
-includes off-screen rows: Agent & Tools starts with Agent Behavior, followed by
-Tools, MCP Servers, Extensions and Hooks. Model, trust and connection controls
-live inside Agent Behavior rather than separate root rows. The stopped-session lock
-waits for the Session Settings title; model controls live in Manage Session, so
-this screen has no Models section.
+Use the smallest faithful rendered contract, not a full state × theme × size
+matrix. `TronUILockTests` retains the following explicit witnesses:
 
-## What a lock compares
+| State | Pixel witnesses | AX witnesses | Focused owner |
+|---|---|---|---|
+| Home Settings | light + dark | light + dark | Shared chrome and #1607 source/control metadata |
+| Memory-search tool detail | light + dark | light + dark | Shared chrome and #1607 source/control metadata |
+| Empty chat | light + dark | none | Pixel subtitle tint has no focused successor (#2093) |
+| Settled chat | light + dark | none | Pixel subtitle tint has no focused successor (#2093) |
+| Onboarding welcome | dark | none | No focused equivalent for dark appearance |
+| Session Settings | none | none | `TronSixSmallUIRegressionTests.testSessionSettingsOrder`; `TronConsolidatedUIRegressionTests.testSessionSettingsKeepsWorkerOverridesAndTrustReachable`; retained Home chrome |
+| Onboarding light | none | none | `TronSmokeUITests.testOnboardingPreservesPagedSheetAndPairingJourney`: actual controls, hit geometry, historical feature-print |
 
-Each state has two goldens in `Goldens/`:
+Chat content/tool controls retain `TronWorkerToolRegressionTests.testTranscriptChipsUseFriendlyNames`,
+`TronConsolidatedUIRegressionTests.testMemoryToolRowsAndCanonicalNavigation` and
+the retained tool-detail interaction journey. Empty chat navigation/title are
+required by `TronUILockTests.testChatEmpty`. These checks do not replace the
+unresolved subtitle-tint oracle. The four Home/tool-detail AX witnesses remain;
+an independent permission-row test is not equivalent to their source metadata.
 
-- **`<name>.a11y.txt`** is the app's accessibility hierarchy as text, and must
-  match exactly. One line per element: type, identifier, label, value,
-  placeholder, UIAccessibility traits, `disabled`/`focused`, and the frame
-  rounded to whole points.
-  - Normalization lives in one place, `UILockTree`.
-  - `other` containers with no identifier, label, value or traits are SwiftUI
-    hosting detail. They are elided and their children hoisted.
-  - Hosted fixtures' `fixture.*` probes (request counters, routes) are test
-    instrumentation and are dropped.
-  - Trait bit 33, which XCTest sets on every element, is dropped.
-- **`<name>.png`** is a screenshot, compared pixel by pixel.
-  - System chrome is painted out: the status bar (top 62 pt: clock, battery)
-    and the home indicator (bottom-centre 160×21 pt), whose colour adapts to
-    the content beneath it on the system's schedule.
-  - A pixel differs when any RGBA channel moves by more than 12/255. Between
-    launches of the same build, materials and blurs vary by up to 3/255 and a
-    tool chip's soft shadow over the light grain by up to 11/255.
-  - The lock fails at more than 0 differing pixels.
-  - The device is the one in `config/ci-toolchain.env` (iPhone 17 Pro, iOS
-    26.5) in the lane `scripts/tron-ios-test` provisions. Another screen size
-    fails with a pinned-device message.
+## Comparison and settling
 
-Before capturing, a lock waits until two consecutive snapshots of the hierarchy
-and of the screen are byte-identical (up to 10 s), so it never captures an
-animation. A state that never settles fails and says so. A screen of any other
-size fails before anything is compared or recorded. Byte-identical frames alone
-cannot detect a stable fractional scroll offset left by animated sheet insets.
-The lock launch harness sets `TRON_UI_LOCK_RENDERING=1`; only `HOSTED_TEST`
-consumes it. App startup disables UIKit animations. Retained native sheet canvases
-and actual `TronPresentationSurface` content roots disable SwiftUI animations:
-`.sheet` creates an independent content transaction root, so the presenter's
-transaction does not fence that content's later layout updates. The static setup
-controls these separate update boundaries without relying on transaction inheritance
-across a native presentation. Normal behavioral journeys retain animation. Locks still wait for content to settle and compare the unchanged
-images and hierarchy.
+Each call explicitly selects `assertUILock(app, name, accessibility: Bool)`.
+Pixels are always compared. Only the four shared-chrome calls select AX; a
+missing selected golden fails instead of silently dropping the contract.
+AX equality uses `UILockTree`: type, identifier, label, value, placeholder,
+traits, disabled/focused state and whole-point frames. Anonymous structural
+containers are elided, fixture probes and XCTest's universal trait bit33 dropped.
 
-Fixed inputs:
+Pixels use the pinned simulator in `config/ci-toolchain.env` (iPhone17 Pro,
+iOS26.5): status bar62pt and adaptive home indicator160×21pt are masked.
+A channel delta above12/255 counts; zero differing pixels are allowed.
+Two consecutive selected AX/screenshot captures must be byte-identical within10s.
+Another screen size fails before recording or comparison.
 
-- launches pin `en_US`, English and `TZ=UTC`;
-- each journey sets light or dark through its fixture's own argument;
-- decorative randomness (`DecorativeRandom`: the backdrop grain and the
-  composer's prompt line) is seeded in `HOSTED_TEST` builds only.
+`TRON_UI_LOCK_RENDERING=1` is hosted-only static capture: UIKit animation is
+disabled, with independent SwiftUI transactions fenced at native canvases and
+content roots. Identical frames alone do not prove the correct initial inset.
+Behavior journeys keep animation. Fixtures pin English/en_US/UTC and appearance;
+hosted decorative grain and composer text are seeded.
 
-## Running
+## Run and evidence
 
 ```bash
 scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronUILockTests
 ```
 
-`scripts/tron verify` runs them in its iOS lane: on `--all`, and whenever a
-change touches a module built into the hosted app.
+The module's manifest/consumer graph selects these native tests for affected
+verification. Count executed methods; an unmatched selector is no evidence.
+Captures are retained under `test-results/ui-locks/`; a failure includes AX
+line diff or highlighted pixel diff/count/bounds and the actual beside it.
+The selected source golden is always required, including recorder mode.
 
-Every run writes its captures to `test-results/ui-locks/<name>.{a11y.txt,png}`.
-A failure adds:
+## Record and storage
 
-- an a11y line diff in the message, with the `git diff --no-index` command
-  for the full file;
-- `<name>.diff.png`: the golden dimmed, with differing pixels in red, plus
-  their count and bounds.
-
-## Recording (`--update-locks`)
-
-`TRON_UPDATE_LOCKS` names the modules (comma-separated, or `all`) whose goldens
-a run may rewrite, as for the Gateway's
-[scenario locks](../../../gateway/docs/scenario-locks.md). xcodebuild passes it
-to the test process only with the `TEST_RUNNER_` prefix. These goldens belong
-to `ios-app/ui-tests`. `scripts/tron verify --update-locks ios-app/ui-tests`
-sets it ([verify's iOS lane](../../../../tools/verify/README.md#ios-lane)).
+`TRON_UPDATE_LOCKS` names owning modules (or `all`); Xcode uses its
+`TEST_RUNNER_` prefix. These witnesses belong to `ios-app/ui-tests`.
 
 ```bash
 TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronUILockTests
-scripts/tron-ios-test build   # goldens are source: rebuild before comparing
+scripts/tron-ios-test build
 ```
 
-A missing golden fails; it is never recorded silently. A changed text golden
-is a reviewable `git diff`. The maintainer reviews initial and changed goldens
-(plan §14.7): the request shows the intended before/after of the user-visible
-change next to the actual golden diff, and lists every other state that changed;
-an unintended change blocks.
+Qualify every exact diff before adoption. Human before/after review is for new
+design, taste or intended visible changes, not unchanged behavior or duplicate
+metadata. Never rerecord an unexplained red. Keep any witness without a faithful
+successor; native semantic checks are not lossless incidental pixel/tree parity.
 
-## Golden storage
-
-- **Text goldens are committed** as ordinary files.
-- **PNG goldens are committed in Git LFS** (`.gitattributes` tracks
-  `Goldens/*.png`): Git holds a small pointer, GitHub's LFS store the image.
-  Each state is about 0.3–2.7 MB (the backdrop grain does not compress); every
-  changed PNG adds its full size to the owner's LFS storage, and every download
-  counts against its LFS bandwidth.
-- **Fresh clone:** install `git-lfs` (Homebrew) and run `git lfs install` once
-  per user; `git clone` then fetches the images. In a clone made without it,
-  `git lfs pull` replaces the pointers; a pointer left in place fails the lock
-  with that hint.
-- **Approve or re-record:** run the update command above, review each changed
-  PNG (the run's `test-results/ui-locks/` captures), commit, and push; the push
-  uploads the images. The maintainer approves the change in review.
-
-## Not yet locked
-
-- **A large Dynamic Type size per state** (plan §6.6). The first states lock
-  only the default size; adding the size is a follow-up lock slice.
-- **`DevicePerformance`** also defines `HOSTED_TEST` (its profiling bundle
-  hosts tests), so its grain and composer line are seeded too. That build is
-  for measurement only and never ships.
-
-## Adding a state
-
-Navigate with `require(_:in:)`. It throws on a missing element, so a
-navigation failure stops the journey, while lock failures are recorded and the
-journey moves on to the next state. Then:
-
-1. Lock light and dark.
-2. Record the goldens.
-3. Run twice to prove the state is deterministic.
-4. Show that a deliberate change fails the lock (known-bad, plan §6.6).
+PNG files use Git LFS; AX witnesses are ordinary text. A remaining LFS pointer
+fails with the `git lfs pull` hint. Rebuild after golden edits because they are
+source resources. New witnesses need a bounded risk, known-bad activation and
+repeatability evidence, not automatic theme/size expansion. Still images do not
+prove motion continuity; use native temporal interaction checks.

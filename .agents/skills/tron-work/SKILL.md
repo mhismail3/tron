@@ -14,7 +14,7 @@ main-checker or automatic revert is part of this flow.
 2. Create an isolated task branch/worktree, optionally with
    `scripts/tron work start <issue> --area <path>`. Do not overwrite another
    worker's claim or worktree. Overlap advice is not a lock.
-3. Implement the change with meaningful integration/E2E coverage and owning docs.
+3. Implement with the charter's smallest faithful regression proof and owning docs.
    Commit checkpoints. Run relevant tests directly; no shared queue.
    Each worktree runs at most one iOS simulator job at a time.
 4. Enable `git config rerere.enabled true`. Fetch and rebase or merge

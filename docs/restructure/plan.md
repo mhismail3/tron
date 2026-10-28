@@ -53,7 +53,7 @@ This file's lifecycle:
 | Boundaries | Mechanical import/reference checks with a ratchet first. These are promoted to compiler boundaries (TS project references, Swift modules) once a layer is clean and build cost is measured. |
 | Moves | Progressive, owner by owner, toward a target tree defined up front. |
 | Docs | Co-located, size-budgeted owner docs. Top-level docs become thin indexes. History, evidence and measurements stay out of the repo. |
-| Tests | Journey catalog plus pruning. **Kernel contract tests are allowed** (real kernel, faux model); classic mocked unit tests remain banned. |
+| Tests | Fewest faithful oracles per AGENTS.md: four bounded production-logic groups are allowed; wiring, authority, I/O and native rendering retain real-boundary contracts. |
 | UI proof | Accessibility-tree snapshot **and** screenshot diff per catalogued screen state, plus interaction journeys. |
 | Tooling languages | Prune; no language migration. |
 | Tracking | Epic → Phase → Area → **Module issue** → Slice. Module manifests own every tracked file, and `scripts/tron ownership` proves it (#1687 dropped the file checklists). |
@@ -590,24 +590,20 @@ generated with `scripts/tron docs capabilities`. Starting set for scoping:
   and pass the lockstep mismatch refusal journey.
 
 ### 6.6 iOS UI locks (V5-UI) and lock sensitivity
-- **Screen-state catalog:** each feature's hosted-fixture states are covered by
-  its owned UI locks (selected through its manifest's `verify` entries).
-  For each state:
-  - an **accessibility-tree snapshot** (element type, identifier, label, value,
-    traits, frame rounded to points), which must match exactly;
-  - a **screenshot diff** at a tight perceptual tolerance on one pinned
-    simulator model and OS, with animations off, a fixed clock, locale and
-    time zone, and default plus one large Dynamic Type size.
+- **Small rendered tier:** prefer focused text, screen-space targets and native
+  interaction checks over a state × appearance × size snapshot matrix. Retain
+  only witnesses without a faithful successor; the current catalog and named
+  survivors live in the [UI locks README](../../packages/ios-app/UITests/Locks/README.md).
+  Four Home/tool-detail PNGs and their AX witnesses protect shared chrome;
+  remaining held PNGs protect behavior without a focused successor.
 - Interaction journeys (scroll continuity, composer, keyboard, focus, sheets)
   remain XCUITests and are part of the lock set.
-- **Golden storage (strategy approved by the maintainer, 2026-10-19):** text
-  a11y snapshots are committed across the wider state set. Screenshot goldens
-  are committed as compressed, versioned PNGs for roughly ≤ 80 key UI states.
-  Slice 0.9 stores the PNGs in Git LFS (#1466; see the UI locks README). The approval
-  covers the strategy only. The initial goldens and every later golden change
-  still need the maintainer's review (§14.7). The approval request shows the
-  intended user-visible before/after next to the actual golden diff, and lists
-  every other state that changed; an unintended change blocks.
+- **Storage and review:** PNGs use Git LFS; retained AX witnesses use text.
+  Qualify every delta causally. Human before/after approval is for new design,
+  taste or intended visible changes, not unchanged behavior or each duplicated
+  schema block (§14.7). Show actual diffs beside intended visible changes;
+  never auto-bless an unexplained red. Retire a witness only with its named
+  surviving user-visible oracle; keep it when no successor exists.
 - **Mac:** wizard and menu a11y snapshots use the same pattern.
 - **Known-bad:** each lock records, at creation, a temporary injected change
   that makes it fail. The change is reverted and the evidence kept in the issue.
@@ -949,7 +945,7 @@ Other workers then execute them without re-deriving context.
 | Decision | Slice | Recommendation |
 |---|---|---|
 | Manifest format | 0.4 | Decided 2026-10-19 (#1362): B′, co-located `<name>.module.json` with a derived id and the strict schema in §6.1 |
-| Screenshot golden storage and size budget | 0.9 | Strategy approved 2026-10-19: compressed versioned PNGs for ≤ ~80 key states plus wider text a11y snapshots; initial and changed goldens still need review |
+| Screenshot golden storage and size budget | 0.9 | Small rendered tier, explicit surviving oracles; Git LFS PNGs and only retained AX witnesses; human review for new/intended visible changes (§6.6) |
 | iOS/Mac reference-graph technique | 0.6 | Decided 2026-10-19 (#1457): Xcode index store through bundled `libIndexStore`, with a build stamp matching a clean `HEAD`; no symbol-scan fallback |
 | Mutation tool | 0.10 | Decided 2026-10-19 (#1465): `scripts/tron mutate` (scripted, seeded, sampled; no dependency); Stryker deferred until its vitest runner passes a known-kill probe |
 | Kernel ports and module descriptor | K-0 | Maintainer review |
@@ -1177,8 +1173,8 @@ before retrying, and never replay blindly (work README).
 - Charter 0.1 approval.
 - The K-0 kernel design.
 - Each migration slice.
-- Any golden change, asked with the intended before/after beside the actual
-  diff (§6.6).
+- New design, taste or intended visible changes, with before/after beside
+  the actual golden diff; not unchanged behavior or repeated schema metadata (§6.6).
 - Releasing another session's claim.
 - Deleting any branch or worktree with unmerged or uncertain work.
 - Pausing or resuming feature epics.

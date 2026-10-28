@@ -4,33 +4,25 @@ Lexical inventories, not failure counts. Run from the repository. No tests were 
 
 ## Inventory 1 — 1719 commits
 
-```sh
-git log 47e1b26a24b29e020e57405513b592edfca4b9ae --since=2026-10-18T00:00:00Z --until=2026-10-28T18:07:08Z --format=%H
-```
+`git log 47e1b26a24b29e020e57405513b592edfca4b9ae --since=2026-10-18T00:00:00Z --until=2026-10-28T18:07:08Z --format=%H`
 
 Count empty lines out; deduplicate paths for inventory3. Git default history traversal counts merge commits.
 
 ## Inventory 2 — 589 commits
 
-```sh
-git log 47e1b26a24b29e020e57405513b592edfca4b9ae --since=2026-10-18T00:00:00Z --until=2026-10-28T18:07:08Z --format=%H -- 'packages/**/test*' 'packages/**/Tests/**' 'packages/**/UITests/**' 'packages/**/E2ETests/**' 'scripts/test-*' 'scripts/test_*' 'tools/**/test*' 'tools/**/tests/**' 'test-results/**'
-```
+`git log 47e1b26a24b29e020e57405513b592edfca4b9ae --since=2026-10-18T00:00:00Z --until=2026-10-28T18:07:08Z --format=%H -- 'packages/**/test*' 'packages/**/Tests/**' 'packages/**/UITests/**' 'packages/**/E2ETests/**' 'scripts/test-*' 'scripts/test_*' 'tools/**/test*' 'tools/**/tests/**' 'test-results/**'`
 
 Count empty lines out; deduplicate paths for inventory3. Git default history traversal counts merge commits.
 
 ## Inventory 3 — 234 distinct paths
 
-```sh
-git log 47e1b26a24b29e020e57405513b592edfca4b9ae --since=2026-10-18T00:00:00Z --until=2026-10-28T18:07:08Z --name-only --format= -- '*fixture*' '*Fixture*' '*golden*' '*Goldens/**' 'packages/gateway/test-fixtures/**'
-```
+`git log 47e1b26a24b29e020e57405513b592edfca4b9ae --since=2026-10-18T00:00:00Z --until=2026-10-28T18:07:08Z --name-only --format= -- '*fixture*' '*Fixture*' '*golden*' '*Goldens/**' 'packages/gateway/test-fixtures/**'`
 
 Count empty lines out; deduplicate paths for inventory3. Git default history traversal counts merge commits.
 
 ## Inventory 4 — 138 commits
 
-```sh
-git log 47e1b26a24b29e020e57405513b592edfca4b9ae --since=2026-10-18T00:00:00Z --until=2026-10-28T18:07:08Z --format=%h %cI %s -- '*golden*' '*Goldens*' '*baseline*' '*Baseline*'
-```
+`git log 47e1b26a24b29e020e57405513b592edfca4b9ae --since=2026-10-18T00:00:00Z --until=2026-10-28T18:07:08Z --format='%h %cI %s' -- '*golden*' '*Goldens*' '*baseline*' '*Baseline*'`
 
 ```text
 b24ed6f49 2026-10-27T18:53:48-07:00 test(ios): re-record Session Settings lock goldens for untitled card and footer caption (#2075)

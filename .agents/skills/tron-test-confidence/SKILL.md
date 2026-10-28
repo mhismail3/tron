@@ -5,18 +5,18 @@ description: Judge whether an integration or E2E test proves its behavior, clean
 
 # Test confidence
 
-Apply [project rules](../../../AGENTS.md). Tron validates with integration and E2E
-tests at real boundaries; unit tests are not kept
-([testing policy](../../../AGENTS.md#testing-policy)).
+Apply [project rules](../../../AGENTS.md): keep the fewest faithful oracles.
+The four bounded production-logic groups named in the charter are allowed;
+actual wiring, I/O, authority, ordering and rendering still need real boundaries.
 
 ## Judge a test
 
 Trace the product risk to the real entrypoint, its owner, the setup, the action,
 and the assertion. Ask whether the test would fail if the real behavior broke.
-A test that only reasserts a mock, a fixture constant, a literal, source text, or
-a presentation detail proves nothing: delete it, or replace it with an observable
-outcome (durable bytes, an admitted or rejected operation, the presented
-interface). Mark any boundary the suite does not cross as a gap, and do not
+A test that only reasserts a mock, fixture constant, source text or private call
+proves nothing. Observe a public result: durable bytes, admission, projection
+identity or the presented interface. Rendered text, targets and chrome need
+rendered witnesses; whole-tree equality is not an interaction oracle. Mark any boundary the suite does not cross as a gap, and do not
 claim coverage for it.
 
 ## Diagnose a flake

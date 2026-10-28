@@ -50,7 +50,7 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 ## Engineering rules
 
-- **Ship together:** code, its owning doc and its real-boundary tests in one change.
+- **Ship together:** code, its owning doc and the smallest faithful regression proof in one change.
 - **Delete before adding;** fix root causes; leave coherent code alone; never revive
   retired architecture (README.md, Repository). Test-only hooks stay test-only.
 - **No unrequested compatibility:** no shims, aliases, re-exports, dual schemas, fallbacks
@@ -74,15 +74,15 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 ## Testing policy
 
-- **No unit tests** (mocked or isolated modules re-asserting implementation). **Kernel
-  contract tests are allowed:** real kernel, faux model, naming the port and invariant.
-- Validate at the real boundary crossed: Gateway/RuntimeRegistry with a faux model, a real
-  Pi session, a spawned process or socket, a built binary or script in a temp fixture, or
-  XCUITest. A mixed file keeps only its real-boundary cases.
-- A bug fix starts from a reproducing test shown failing first. E2E runs leave a
-  regenerable artifact at a stable path (`test-results/`). Never assert mocks, literals,
-  source text or presentation details. Delete a test or mechanism only after naming its
-  surviving oracle; grep is not proof.
+- **Fewest faithful oracles:** reuse checks. Allow four bounded production-logic groups:
+  transcript identity (#2097), JSONL decoding (#2098), provider error classification (#2099),
+  memory feed units (#2100). Call shipped logic; no mocks, copied algorithms or private calls.
+- Wiring, I/O, authority, ordering, cleanup, compilation, performance and native rendering
+  need the actual kernel/Gateway/Pi, process, socket, built or UI boundary, not logic alone.
+- Bugs start with a red reproduction. Replace duplicates; prove a deleted check's successor.
+  Keep few rendered witnesses for clipping, targets and chrome, not whole AX trees.
+- Qualify golden reds; never auto-bless. Human approval is only for new design/taste or
+  intended visible change; batch it. Keep `test-results/` artifacts; label base-red/unqualified.
 
 ## Resources and cleanup
 
