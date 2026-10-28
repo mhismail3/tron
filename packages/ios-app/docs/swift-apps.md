@@ -165,6 +165,28 @@ test bundle hands its exact bytes to the hosted fixture (`TRON_HOSTED_SWIFT_APP_
 by displaying the file (inline card or sheet) with the flag on: switch modes, open a row, search
 `1112` and a nonexistent title; Install stays disabled; Done and rerun reset the state.
 
+## Apps design review fixture
+
+`HostedAppsDesignFixture` (`-tron-apps-design-fixture`, hosted builds only) composes the
+shared list/group/feed, tags, Manage rows, metadata table and document sheets for review.
+Its catalog, state and history are synthetic proposals, not installed-app RPC projections.
+Only its Swift row launches the existing interpreter; the HTML rows open proposed metadata,
+not an implemented web backend. It writes no app data and runs no migrations.
+
+`TronAppsDesignUITests` captures Apps and Manage in light/dark and default/Accessibility
+XXXL. `-apps-design-expanded` selects the shared large detent for still captures; the normal
+fixture and interaction journey start medium. XXXL Manage captures include a scrolled
+continuation so a first-viewport image does not imply that all rows fit at once. The focused
+`testCaptureAppsManage…` journeys omit the independent Automations comparison; the original
+comparison journeys remain available separately. Its interaction journey opens the real
+interpreter, returns through Manage and Data, then continues the shared feed. It does not prove
+installed persistence, provenance or HTML launch. No production Apps menu entry is enabled by
+this fixture.
+
+```bash
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronAppsDesignUITests
+```
+
 ## Validation
 
 Hosted journeys in `TronSwiftAppUITests` run the programs in `HostedSwiftAppFixtureSource`
