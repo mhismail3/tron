@@ -184,6 +184,24 @@ import XCTest
         }
     }
 
+    func testModelPickerRevertAndSelectionKeepHomeScope() {
+        let app = manage("light", extra: ["-settings-scope-review"])
+        defer { app.terminate() }
+        let card = e(app, "home-model-summary")
+        tap(app, "manage-model-switch")
+        let revert = app.buttons["settings-row-model.ref_role_chat_-picker-reset"]
+        XCTAssertTrue(revert.waitForExistence(timeout: 8), app.debugDescription)
+        revert.tap()
+        XCTAssertTrue(card.staticTexts["Claude Haiku 5.5"].waitForExistence(timeout: 8),
+                      "Picker Revert acknowledges the Home-scoped inherited value and closes")
+        tap(app, "manage-model-switch")
+        let opus = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Opus 5.5'")).firstMatch
+        XCTAssertTrue(opus.waitForExistence(timeout: 8))
+        opus.tap()
+        XCTAssertTrue(card.staticTexts["Claude Opus 5.5"].waitForExistence(timeout: 8),
+                      "Picking a model keeps the existing Home-scoped receipt path")
+    }
+
     private func visibleDone(_ app: XCUIApplication) -> XCUIElement? {
         app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)
     }

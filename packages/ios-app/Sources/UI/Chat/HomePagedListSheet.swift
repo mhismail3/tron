@@ -218,17 +218,26 @@ struct HomePagedListSheet: View {
         .tronListMarkers("home-memory-card-\(line.start)")
         .imageScale(.small)
         if line.startsIndividualMessages, store.identity == identity {
-            VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
-                TronListDivider(inset: 0)
-                Text("Newer messages are shown individually")
-                    .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronPrimary)
-                    .tronListMarker(.title)
+            VStack(spacing: TronListMetrics.lineGap) {
+                HStack(spacing: TronListMetrics.headerGap) {
+                    TronListDivider(inset: 0)
+                    Text("Newer messages are shown individually")
+                        .font(TronTypography.settingsRowSubtext)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.center)
+                        .layoutPriority(1)
+                        .tronListMarker(.title)
+                    TronListDivider(inset: 0)
+                }
                 Text("Older messages are folded into summaries.")
                     .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
+                    .multilineTextAlignment(.center)
                     .tronListMarker(.subtext)
             }
             .tronListMarkers("home-memory-boundary")
-            .padding(.horizontal, TronListMetrics.horizontalPadding).padding(.vertical, 8)
+            .padding(.horizontal, TronListMetrics.horizontalPadding)
+            .padding(.vertical, TronListMetrics.headerGap)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("home-memory-resolution-boundary")
         }

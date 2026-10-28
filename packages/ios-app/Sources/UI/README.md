@@ -10,7 +10,7 @@ reusable components. Its binding rules are [presentation parity](../../docs/pres
 - `Theme/`: `TronPresentation` (app-wide boundary: managed sheets, settings rows and groups,
   confirmations, loading, top blur, toolbar tint), `TronTheme`, `ThemeColor`, `FontSettings`, `TronFontLoader`,
   `TronSettingControls`, `TronDateControls` (`TronDateValueButton`, `TronDatePickerSheet`, shared by
-  Automations and Home), `TronCardRail`, `TronDisclosure`, `TronContentFitDetent`, `TronWidthCap`,
+  Automations and Home), `TronCardRail`, `TronDisclosure`, `TronWidthCap`,
   `TronSafariView`.
 - `Components/`: `TronDocumentSheet`, `TronList` (the list standard), `TronTextEntrySheet`, `StructuredJSONView`,
   `TechnicalDetailPresentation`, `TronNativeSheetCanvas` (surface-level native containment for
@@ -64,6 +64,9 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
 - Section headings are visible by default, including dashboard and top-level Settings groups.
   Settings drill-in pages opt in with `TronSettingsSections(hidesLoneHeading: true)`;
   only a structurally lone section loses its heading, never its explanatory detail.
+  `TronSettingsGroup.trailingDetail` keeps short counts on the heading baseline, trailing;
+  explanatory `detail` remains below. Keyboard Done uses the native borderless toolbar control,
+  independent of compact settings control sizing.
   `TronSettingsSections` counts structural section slots before eager or lazy layout; it supplies
   the count to groups and custom `tronSectionHeading` labels. Standalone captions opt out of
   the count with `containerValue`; attached captions stay with their section. Each presentation

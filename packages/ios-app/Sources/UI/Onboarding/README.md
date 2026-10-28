@@ -33,6 +33,8 @@ workspace browser, the model picker and the provider authentication prompt sheet
 - **Model picker.** `ModelPicker` (title **Models**) organizes one catalog read into a Recent rail
   (the Gateway's bounded recent-model history), a Latest rail (Gateway release dates) and one
   collapsible section per provider; rail cards show context window and Gateway-projected prices.
+  Selector sheets use the standard medium/large detents from first presentation through loading;
+  rail geometry never resizes a sheet. Provider rows stay lazy and sectioning stays cached.
   List options compose `TronCatalogOptionRow` over `TronSettingsRow`: standard subtext facts and a
   monospaced canonical provider/model ID without a label prefix; search and selection keep their owners. The
   picker owns no usage list, date table or price table. `ModelSelectionAvailability` is a

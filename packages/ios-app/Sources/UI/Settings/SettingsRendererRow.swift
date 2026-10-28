@@ -151,7 +151,7 @@ struct SettingsRendererRow: View {
         let selected = catalog.first { $0.provider == provider && $0.id == id }
         return TronSettingsRow(icon: "cpu", title: selected?.displayName ?? display,
                                titleFont: SessionSummaryTypography.headline) {
-            TronProgressiveSheetLink(accessibilityLabel: "Switch Model", identity: "manage.model.switch", detents: .contentFit) {
+            TronProgressiveSheetLink(accessibilityLabel: "Switch Model", identity: "manage.model.switch") {
                 SettingsModelPicker(setting: setting, target: target, title: "Models",
                                     onReset: canReset ? { onChange(nil) } : nil) { onChange($0) }
             } label: {
@@ -169,7 +169,7 @@ struct SettingsRendererRow: View {
         if let source = setting.projectSetting {
             return { AnyView(
                 TronProgressiveSheetLink(accessibilityLabel: "Set by Project settings",
-                    identity: "settings.project.\(setting.id)", detents: .fixed([.height(300), .medium])) {
+                    identity: "settings.project.\(setting.id)", detents: [.height(300), .medium]) {
                     SettingsProjectInfo(source: source)
                 } label: { TronInlineActionLabel("Set by Project settings").controlSize(.small).fixedSize() }
                 .buttonStyle(.plain)
@@ -479,7 +479,11 @@ private struct SettingsModelPicker: View {
             } else if let models {
                 ModelPicker(selection: selection, models: models)
             } else {
-                TronSheetLoadingState(label: "Loading models…")
+                ScrollView {
+                    TronLoadingState(label: "Loading models…")
+                        .padding(.vertical, TronListMetrics.sectionGap)
+                }
+                .tronScrollEdgeChrome()
             }
         }
             .tronNavigationTitle(title)
