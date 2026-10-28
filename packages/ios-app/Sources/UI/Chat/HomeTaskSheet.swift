@@ -151,7 +151,7 @@ struct HomeTaskSheet: View {
     @ViewBuilder private var content: some View {
         switch owner.state {
         case .idle, .loading(_, nil):
-            TronSheetLoadingState(label: "Loading Home…", accent: accent)
+            loadingState("Loading Home…")
         case .failed(_, let message):
             TronPlaceholderState(title: "Home could not be read", detail: message, icon: "exclamationmark.triangle", actionTitle: "Reload") { reload() }
         case .loaded(let read, let content), .loading(let read, .some(let content)):
@@ -167,8 +167,18 @@ struct HomeTaskSheet: View {
                 default: EmptyView()
                 }
             } else {
-                TronSheetLoadingState(label: "Waiting for Home…", accent: accent)
+                loadingState("Waiting for Home…")
             }
+        }
+    }
+
+    /// Permissions embedded in Home Settings load in their own section: they never ask the
+    /// surface to hide the settings rows beside them. A Home sheet owns its whole content.
+    @ViewBuilder private func loadingState(_ label: String) -> some View {
+        if destination == nil {
+            TronLoadingState(label: label, accent: accent)
+        } else {
+            TronSheetLoadingState(label: label, accent: accent)
         }
     }
 
