@@ -18,6 +18,11 @@ can kill and reopen it to prove interrupted actions are not replayed. Its lifecy
 mode holds a real pending-read return to prove concurrent start and disposal join
 one accepted recovery through the existing work owner.
 
+`apps-crash-child.ts` and its preload hold Apps receipt/publication cuts in a real
+Registry process. The fixture releases its workspace lease before the parent kills
+it; this proves Apps recovery at those cuts, not whole-Gateway ungraceful crash,
+stale-lock or power-loss recovery.
+
 ## Contract
 
 - **Waits are hang bounds, not speed budgets.** Every awaited condition must be

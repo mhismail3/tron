@@ -10,6 +10,8 @@
     "test-fixtures/tron-corpus/**",
     "test-support.module.json",
     "test-support/README.md",
+    "test-support/apps-crash-child.ts",
+    "test-support/apps-crash-preload.mjs",
     "test-support/session-settings-change.ts",
     "test-support/episodic-chapter-source.ts",
     "test-support/fixed-recording.ts",
