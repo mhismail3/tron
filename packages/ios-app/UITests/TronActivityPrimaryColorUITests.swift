@@ -40,6 +40,31 @@ import UIKit
         }
     }
 
+    /// The composer placeholder is the primary ink, dimmed (not grey): its ink has the
+    /// same hue as the composer's plus glyph, in every selectable theme.
+    func testComposerPlaceholderIsDimmedPrimaryInk() {
+        for theme in ["burgundy", "emerald"] {
+            for mode in ["light", "dark"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-subagent-parity-fixture", "-themeColor", theme, "-\(mode)"]
+                app.launch()
+                defer { app.terminate() }
+                let plus = app.buttons["Add attachment"]
+                XCTAssertTrue(plus.waitForExistence(timeout: 15))
+                let screenshot = app.screenshot()
+                guard let image = screenshot.image.cgImage else { XCTFail("No image"); return }
+                let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
+                let field = CGRect(x: plus.frame.maxX + 12, y: plus.frame.midY - 14, width: 220, height: 28)
+                guard let placeholder = inkChroma(image, area: field, scale: scale),
+                      let reference = inkChroma(image, area: centered(plus.frame, size: 20), scale: scale) else {
+                    XCTFail("\(theme)-\(mode): placeholder ink has no theme chroma (grey?)"); continue
+                }
+                let distance = zip(placeholder, reference).map { abs($0 - $1) }.max()!
+                XCTAssertLessThan(distance, 0.2, "\(theme)-\(mode): placeholder \(placeholder) must share the primary hue \(reference)")
+            }
+        }
+    }
+
     private func centered(_ frame: CGRect, size: CGFloat) -> CGRect {
         CGRect(x: frame.midX - size / 2, y: frame.midY - size / 2, width: size, height: size)
     }

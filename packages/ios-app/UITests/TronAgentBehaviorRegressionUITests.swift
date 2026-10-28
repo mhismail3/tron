@@ -128,6 +128,66 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
         }
     }
 
+    /// Agent Behavior is an Emerald sheet; under a Burgundy primary theme its Trusted Projects
+    /// sub-sheet must still be Emerald, not the app's primary.
+    func testTrustedProjectsInheritsAgentBehaviorTheme() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-agent-behavior-regression",
+                                   "-themeColor", "burgundy"] + (mode == "dark" ? ["-settings-renderer-dark"] : [])
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
+            app.buttons["Open Settings"].tap()
+            expand(app, "Global Settings")
+            tap(app, "settings-link-Agent Behavior")
+            expand(app, "Agent Behavior")
+            capture(app, "burgundy-agent-\(mode)")
+            let window = app.windows.firstMatch.frame.width
+            let parentTitle = app.navigationBars.staticTexts["Agent Behavior"].firstMatch
+            guard let parentInk = sheetInk(XCUIScreen.main.screenshot().image, parentTitle.frame, window: window) else {
+                XCTFail("No ink in the Agent Behavior title"); return
+            }
+            tap(app, "Trusted Projects")
+            XCTAssertTrue(app.buttons["Example"].waitForExistence(timeout: 15), app.debugDescription)
+            capture(app, "burgundy-trusted-\(mode)")
+            // Title, section header and the Add Project glyph are inked in the presenting sheet's tint.
+            let screenshot = XCUIScreen.main.screenshot().image
+            let title = app.navigationBars.staticTexts["Trusted Projects"].firstMatch
+            let header = app.staticTexts.matching(identifier: "Projects").allElementsBoundByIndex.last { $0.frame.minY > title.frame.maxY }
+            for (name, frame) in [("title", title.frame), ("Projects header", header?.frame ?? .zero)] {
+                guard let ink = sheetInk(screenshot, frame, window: window) else { XCTFail("\(mode): no ink in \(name)"); continue }
+                let distance = zip(ink, parentInk).map { abs($0 - $1) }.max() ?? 1
+                XCTAssertLessThan(distance, 0.12, "\(mode): Trusted Projects \(name) \(ink) must match the Agent Behavior tint \(parentInk)")
+            }
+            assertToolbarTint(app, title: "Trusted Projects")
+        }
+    }
+
+    /// Projects follows Workers directly when no Compaction rows are served: the gap above its
+    /// header is the same as above every other section header.
+    func testProjectsHeaderGapMatchesOtherSectionHeaders() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-agent-behavior-regression", "-served-agent-behavior"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
+        app.buttons["Open Settings"].tap()
+        expand(app, "Global Settings")
+        tap(app, "settings-link-Agent Behavior")
+        expand(app, "Agent Behavior")
+        let workers = app.descendants(matching: .any)["settings-section-workers-detail"]
+        let projects = app.staticTexts["Projects"].firstMatch
+        let trusted = app.buttons["Trusted Projects"].firstMatch
+        let changes = app.staticTexts["Agent changes"].firstMatch
+        for element in [workers, projects, trusted, changes] { XCTAssertTrue(element.waitForExistence(timeout: 10), app.debugDescription) }
+        let afterWorkers = projects.frame.minY - workers.frame.maxY
+        let afterTrusted = changes.frame.minY - trusted.frame.maxY
+        XCTAssertEqual(afterWorkers, afterTrusted, accuracy: 2, "Gap above Projects \(afterWorkers) must match the gap above Agent changes \(afterTrusted)")
+    }
+
     func testSessionValuePillFollowsRevertLightDark() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {

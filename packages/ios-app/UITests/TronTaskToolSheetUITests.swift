@@ -87,6 +87,23 @@ final class TronTaskToolSheetUITests: XCTestCase {
         }
     }
 
+    /// A control message's body reads in the standard sheet text colour (neutral), not the
+    /// automation cyan its prompt tone once gave it.
+    @MainActor func testMessageBodyUsesStandardTextInk() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            let app = launch("task-steer", mode: mode)
+            defer { app.terminate() }
+            let body = app.descendants(matching: .any)["home-tool-text-message"]
+            XCTAssertTrue(body.waitForExistence(timeout: 5), app.debugDescription)
+            let area = body.frame.insetBy(dx: 16, dy: 16).intersection(CGRect(x: 0, y: 0, width: app.frame.width, height: app.frame.height))
+            guard let ink = textInk(XCUIScreen.main.screenshot().image, CGRect(x: area.minX, y: area.minY, width: area.width, height: min(area.height, 160)),
+                                    window: app.windows.firstMatch.frame.width) else { XCTFail("No text ink"); return }
+            let chroma = (ink.max() ?? 0) - (ink.min() ?? 0)
+            XCTAssertLessThan(chroma, 40, "\(mode): message body ink \(ink) must be the neutral standard text colour, not a tint")
+        }
+    }
+
     @MainActor func testRenameStopFallbackAndErrorUseTheirRecordedOutcomes() {
         continueAfterFailure = false
         for scenario in ["task-rename", "task-stop", "task-fallback", "task-malformed", "task-refused"] {

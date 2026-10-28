@@ -63,4 +63,32 @@ extension XCTestCase {
         }
         return count > 10 ? sum.map { $0 / count } : nil
     }
+
+    /// The ink of text in `area`: the mean of the pixels furthest from the area's
+    /// background (its most common colour), as 0...255 channels. Unlike `sheetInk` it
+    /// also reads neutral ink, so a test can tell grey/black text from tinted text.
+    func textInk(_ image: UIImage, _ area: CGRect, window: CGFloat) -> [Double]? {
+        guard let source = image.cgImage else { return nil }
+        let scale = CGFloat(source.width) / window
+        guard let crop = source.cropping(to: area.applying(CGAffineTransform(scaleX: scale, y: scale))) else { return nil }
+        let width = crop.width, height = crop.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var histogram: [Int: Int] = [:]
+        var all: [[Double]] = []
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let rgb = [Double(pixels[i]), Double(pixels[i + 1]), Double(pixels[i + 2])]
+            all.append(rgb)
+            histogram[(Int(pixels[i]) >> 3) << 10 | (Int(pixels[i + 1]) >> 3) << 5 | Int(pixels[i + 2]) >> 3, default: 0] += 1
+        }
+        guard let top = histogram.max(by: { $0.value < $1.value })?.key else { return nil }
+        let background = [Double((top >> 10) << 3), Double(((top >> 5) & 31) << 3), Double((top & 31) << 3)]
+        let ranked = all.sorted { zip($0, background).map { abs($0 - $1) }.reduce(0, +) > zip($1, background).map { abs($0 - $1) }.reduce(0, +) }
+        let ink = ranked.prefix(max(20, all.count / 100))
+        guard !ink.isEmpty else { return nil }
+        return (0..<3).map { c in ink.map { $0[c] }.reduce(0, +) / Double(ink.count) }
+    }
 }

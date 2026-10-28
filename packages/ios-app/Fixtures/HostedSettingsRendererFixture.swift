@@ -559,6 +559,13 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model", "catalog", essential: true)]
                 + (ProcessInfo.processInfo.arguments.contains("-agent-behavior-regression")
                     ? HostedSettingsReviewSchema.agentBehaviorKeys : HostedSettingsReviewSchema.additionalKeys)
+                    // `-served-agent-behavior`: the Gateway serves Thinking only for a model that thinks and
+                    // no Compaction rows, leaving Model a single row and Projects directly after Workers.
+                    .filter { row in
+                        guard ProcessInfo.processInfo.arguments.contains("-served-agent-behavior") else { return true }
+                        let key = row.objectValue?["key"]?.stringValue ?? ""
+                        return key != "model.thinking[role=chat]" && !key.hasPrefix("context.")
+                    }
                 + (ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
                 + [HostedSettingsReviewSchema.key("setup.sessionDir", "setup", "Session folder", .string("/workspace/sessions"), "/workspace/sessions", "readOnly", help: "Where chats are stored. Applies after a restart."),
                    HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
