@@ -212,13 +212,16 @@ final class TronHomeSheetsUITests: XCTestCase {
                            "\(id) uses the approved reading size, not metadata")
             geometry.append("\(id): \(value.frame)")
         }
-        let checkin = element(app, "home-task-checkin-subtext")
-        XCTAssertTrue(checkin.exists)
-        XCTAssertGreaterThan(checkin.frame.height / lineHeight, 6.5,
-                             "The long check-in wraps to at least seven lines without the default two-line cap")
-        XCTAssertTrue(element(app, "home-task-checkin").label.contains("report the remaining scope"),
+        let step = element(app, "home-task-checkin-summary-title")
+        let done = element(app, "home-task-checkin-done-subtext")
+        let next = element(app, "home-task-checkin-next-subtext")
+        XCTAssertTrue(step.exists && done.exists && next.exists)
+        let checkinHeight = step.frame.height + done.frame.height + next.frame.height
+        XCTAssertGreaterThan(checkinHeight / lineHeight, 4.5,
+                             "The long check-in wraps to at least five lines without the default two-line cap")
+        XCTAssertTrue(element(app, "home-task-checkin-next").label.contains("report the remaining scope"),
                       "The complete check-in, including its final Next instruction, remains available")
-        geometry.append("checkin: \(checkin.frame)")
+        geometry.append("checkin step: \(step.frame) done: \(done.frame) next: \(next.frame) lines: \(checkinHeight / lineHeight)")
         let measurement = XCTAttachment(string: geometry.joined(separator: "\n"))
         measurement.name = "1771-reading-geometry-\(name)"
         measurement.lifetime = .keepAlways
@@ -244,13 +247,16 @@ final class TronHomeSheetsUITests: XCTestCase {
             XCTAssertTrue(value.exists)
             XCTAssertEqual(value.frame.height, lineHeight, accuracy: 0.25, "\(id) matches the approved subheadline reading size")
         }
-        let checkin = element(app, "home-task-checkin-subtext")
-        XCTAssertTrue(checkin.exists)
-        // The fixture's time, step, Done and Next each fit on one line here.
+        let done = element(app, "home-task-checkin-done-subtext")
+        let next = element(app, "home-task-checkin-next-subtext")
+        XCTAssertTrue(done.exists && next.exists)
+        // The fixture's Done and Next each fit on one line here.
         // Compare native reading-size geometry, not a new point-size constant.
-        XCTAssertEqual(checkin.frame.height / 4, lineHeight, accuracy: 0.25,
-                       "Latest check-in uses the approved subheadline size of the single-line Worker values")
-        let measurement = XCTAttachment(string: "standardLine=\(lineHeight), latestCheckin=\(checkin.frame.height)")
+        XCTAssertEqual(done.frame.height, lineHeight, accuracy: 0.25,
+                       "Latest check-in Done uses the approved subheadline size of the single-line Worker values")
+        XCTAssertEqual(next.frame.height, lineHeight, accuracy: 0.25,
+                       "Latest check-in Next uses the approved subheadline size of the single-line Worker values")
+        let measurement = XCTAttachment(string: "standardLine=\(lineHeight), latestCheckinDone=\(done.frame.height), next=\(next.frame.height)")
         measurement.name = "1723-worker-font-geometry"; measurement.lifetime = .keepAlways; add(measurement)
         shot("1723-worker-standard-subtext")
     }
@@ -734,9 +740,11 @@ final class TronHomeSheetsUITests: XCTestCase {
         let brief = element(app, "home-task-brief")
         XCTAssertTrue(brief.exists)
         XCTAssertFalse(app.buttons["Show all"].exists, "The brief never expands in place")
-        let checkin = element(app, "home-task-checkin")
-        XCTAssertTrue(checkin.exists)
-        XCTAssertTrue(checkin.label.contains("Latest check-in") && checkin.label.contains("Gateway journey passed") && checkin.label.contains("Review native screenshots"), checkin.label)
+        let done = element(app, "home-task-checkin-done")
+        let next = element(app, "home-task-checkin-next")
+        XCTAssertTrue(done.exists && next.exists)
+        XCTAssertTrue(done.label.contains("Gateway journey passed") && next.label.contains("Review native screenshots"),
+                      [done.label, next.label].joined(separator: " | "))
         keep("09-task-detail")
         open(app, element(app, "home-task-brief-view-all"), ready: "home-reading-text", name: "brief")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'settings model doc'")).firstMatch.exists, "View All shows the whole brief")
