@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { createServer } from "node:http";
 import WebSocket from "ws";
@@ -267,6 +268,46 @@ if (args.includes("worktree")) {
     await expect(f.service.invoke(phone, "projects.request", { commandId: `native-exact-${++command}`,
       action: "untrust", name: "exact-native ", reason: "Never reinterpret an unsupported folder" })).rejects.toMatchObject({ code: "invalid_request" });
     expect((await f.trust.inspect(f.path("exact-native"))).effectiveDecision).toBe(true);
+  });
+
+  it("projects.list costs one Home task-store pass however long the task history is, and keeps rows exact", async () => {
+    const f = await fixture();
+    const names = ["alpha", "bravo", "charlie"];
+    for (const name of names) {
+      await mkdir(f.path(name));
+      await exec("git", ["-C", f.path(name), "init", "--initial-branch=main"]);
+    }
+    const list = async () => {
+      const started = performance.now();
+      const page = await f.service.invoke(phone, "projects.list", {}) as unknown as NativePage;
+      return { page, ms: performance.now() - started };
+    };
+    const best = async <T extends { ms: number }>(read: () => Promise<T>) => {
+      const first = await read(), second = await read();
+      return first.ms <= second.ms ? first : second;
+    };
+    // Calibrated on this host and run, so load changes neither side of the bound.
+    const bare = await best(list);
+    // Production holds ~900 settled tasks (about 13 KB each) and `projects.list` scales with them.
+    const store = (homeOwnerOf(f.registry) as unknown as { tasks: { store: { initialize(): Promise<boolean>; put(record: unknown, expected: number | null): Promise<unknown> } } }).tasks.store;
+    await store.initialize();
+    const intent = { text: "x".repeat(8_000) };
+    for (let index = 0; index < 300; index += 1) {
+      await store.put({ version: 1, taskId: `history-${index}`, revision: 1, homeId: "home", generation: 1, routeGeneration: 1, intent,
+        intentDigest: createHash("sha256").update(intent.text).digest("hex"), target: f.root, grantRef: null, scopeRef: null,
+        lifecycle: "pending", sessionId: null, operationId: null, stopIntent: null, spend: null, reportRef: null, terminalEvidence: null, wake: null }, null);
+    }
+    const pass = await best(async () => {
+      const started = performance.now();
+      await homeOwnerOf(f.registry).taskList({ limit: 50 });
+      return { ms: performance.now() - started };
+    });
+    const withHistory = await best(list);
+    expect(withHistory.page.projects.map(row => row.name)).toEqual(names);
+    expect(withHistory.page.projects.every(row => row.eligibility.untrust.allowed && row.eligibility.rename.allowed)).toBe(true);
+    evidence.push({ projectsListHistory: { projects: names.length, tasks: 300, bareMs: Math.round(bare.ms), oneTaskPassMs: Math.round(pass.ms), listMs: Math.round(withHistory.ms) } });
+    // A task pass per project eligibility check (and per page of tasks) is the measured defect: one pass is the whole budget.
+    expect(withHistory.ms).toBeLessThan(bare.ms + 8 * pass.ms);
   });
 
   it("native reads cancel on disconnect while accepted commands survive and cannot spoof their actor or approval", async () => {
