@@ -648,7 +648,7 @@ final class TronSmokeUITests: XCTestCase {
                         // AX can serialize 44 as 43.999999999999986.
                         XCTAssertGreaterThanOrEqual(hit.width + 0.001, 44)
                         XCTAssertGreaterThanOrEqual(hit.height + 0.001, 44)
-                        let visible = paintedSettingsControl(target, in: app)
+                        let visible = paintedSettingsControl(target, in: app, backgroundX: inherited.frame.maxX + 6)
                         if circle {
                             XCTAssertEqual(hit.width, hit.height, accuracy: 0.5)
                             XCTAssertEqual(visible.width, 28, accuracy: 1.5, "Round glass diameter, not the hit frame")
@@ -682,7 +682,7 @@ final class TronSmokeUITests: XCTestCase {
     /// No production geometry hook or inferred inset from the 44pt frame: raster
     /// sampling detects a centered 28pt circle ending 8pt before the target edge.
     @MainActor
-    private func paintedSettingsControl(_ target: XCUIElement, in app: XCUIApplication) -> CGRect {
+    private func paintedSettingsControl(_ target: XCUIElement, in app: XCUIApplication, backgroundX: CGFloat) -> CGRect {
         guard let image = XCUIScreen.main.screenshot().image.cgImage else { XCTFail("Missing pixels"); return .zero }
         let frame = target.frame
         let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
@@ -703,7 +703,9 @@ final class TronSmokeUITests: XCTestCase {
             }
             return samples
         }
-        let background = strip(CGRect(x: (frame.maxX + 6) * scale, y: frame.midY * scale, width: 1, height: 1)).first ?? []
+        // Sample beyond the entire action cluster, not just this target. A reset
+        // now precedes its value: target.maxX + 6 falls inside the neighboring pill.
+        let background = strip(CGRect(x: backgroundX * scale, y: frame.midY * scale, width: 1, height: 1)).first ?? []
         func extent(_ rect: CGRect, reversed: Bool = false) -> ClosedRange<CGFloat> {
             let samples = strip(rect)
             let ink = samples.indices.filter { index in

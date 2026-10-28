@@ -186,7 +186,10 @@ scripts/ios-gateway-e2e-test run-ui \
 
 `TronSettingsScopeRowsUITests` checks read-only queue values, independent Revert and Project
 inspection. `TronSmokeUITests` keeps direct model/thinking, shared list/numeric-map editing,
-approvals and Changes coverage. The surviving memory/provider/queued-editor journeys in
+approvals and Changes coverage. Its painted-geometry journey measures the primitive and generic
+schema controls at both text sizes and appearances; background sampling stays outside the whole
+action cluster so a left-hand reset cannot sample its neighboring value pill.
+The surviving memory/provider/queued-editor journeys in
 `TronForegroundCaptureUITests` own native-stack refresh, draft/focus preservation and invalid-child
 retirement; retired Worker thinking and Transport editor cases do not define that lifecycle.
 
