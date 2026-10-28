@@ -217,9 +217,15 @@ TRON_UPDATE_LOCKS=gateway/run npx vitest run src/sessions/run.lock.integration.t
 Store and wire locks run in the parallel pass: `npx vitest run .lock.integration`.
 
 `TRON_UPDATE_LOCKS` names the modules (comma-separated, or `all`) whose goldens
-a run may rewrite. Only an approved behavior change or migration rewrites a
-golden; the approval request shows the intended before/after next to the actual
-diff and lists every hunk. A refactor never rewrites one.
+a run may rewrite. Qualify exact deltas; never auto-bless unexplained failures.
+Human before/after approval is for new design or intended visible changes, not
+unchanged behavior or repeated schema metadata. A refactor never rewrites one.
+
+`home-activation-wake` is the canonical real Home/worker shared tool-schema
+check. Other traces retain declaration names, ordering and constrained sampling,
+not duplicated descriptions/parameters or their wire-shape subtrees. Tools absent
+from that canonical capture retain their full schema with their owning scenario. Only schema blocks are
+projected away; lifecycle fields, tool visibility, receipts and validation remain.
 
 Event shapes leave out admission-window state (`pendingPrompt`,
 `activeToolSegmentId`, a new session's not-yet-persisted context notice), and

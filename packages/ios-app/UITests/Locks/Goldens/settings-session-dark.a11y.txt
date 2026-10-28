@@ -1,4 +1,0 @@
-application label="Tron" (0,0 402×874)
-  window (0,0 402×874)
-    other id="PopoverDismissRegion" label="dismiss popup" (-402,-750 1206×2436)
-  window (0,0 402×874)

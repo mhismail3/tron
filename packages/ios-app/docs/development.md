@@ -95,7 +95,8 @@ What iOS records: [observability](../../gateway/docs/observability.md); export i
 
 ## Efficient focused tests
 
-iOS validation is integration and end-to-end; there is no hosted unit-test target. Build once, run
+Native UI validation is integration/end-to-end; the charter permits four separate bounded logic groups,
+but no hosted logic-test target is introduced here. Build once, run
 only the owning journeys, and rebuild after an edit (stale products are refused):
 
 ```bash

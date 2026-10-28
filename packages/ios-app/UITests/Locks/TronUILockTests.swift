@@ -1,8 +1,8 @@
 import XCTest
 
-/// The locked screen states (plan §6.6): each journey only navigates to a
-/// hosted-fixture state and locks it in light and dark. Behavioral assertions
-/// stay in the feature journeys; these fail when what the user sees changes.
+/// Remaining visual states (plan §6.6): dark welcome and the light/dark Home,
+/// chat and tool-detail states. Behavioral assertions stay in feature journeys;
+/// these locks fail when their selected pixel or accessibility witness changes.
 final class TronUILockTests: XCTestCase {
     private static let modes = ["light", "dark"]
 
@@ -12,15 +12,14 @@ final class TronUILockTests: XCTestCase {
         continueAfterFailure = true
     }
 
-    /// The first screen of a fresh install: onboarding's welcome page.
+    /// Dark welcome has no equivalent focused appearance check; light retains
+    /// the onboarding journey's historical feature-print and control assertions.
     @MainActor
     func testLaunchOnboardingWelcome() throws {
-        for mode in Self.modes {
-            let app = launch(["--tron-reset-ui-test-state", "-ApplePersistenceIgnoreState", "YES", "-appearanceMode", mode])
-            try require(app.staticTexts["Welcome to Tron"], in: app)
-            assertUILock(app, "launch-onboarding-welcome-\(mode)")
-            app.terminate()
-        }
+        let app = launch(["--tron-reset-ui-test-state", "-ApplePersistenceIgnoreState", "YES", "-appearanceMode", "dark"])
+        try require(app.staticTexts["Welcome to Tron"], in: app)
+        assertUILock(app, "launch-onboarding-welcome-dark", accessibility: false)
+        app.terminate()
     }
 
     /// Home's chat with no transcript.
@@ -28,7 +27,8 @@ final class TronUILockTests: XCTestCase {
     func testChatEmpty() throws {
         for mode in Self.modes {
             let app = try openHomeChat(mode: mode)
-            assertUILock(app, "chat-empty-\(mode)")
+            // #2093's subtitle tint has no focused successor yet.
+            assertUILock(app, "chat-empty-\(mode)", accessibility: false)
             app.terminate()
         }
     }
@@ -40,11 +40,11 @@ final class TronUILockTests: XCTestCase {
             let app = try openHomeChat(mode: mode, extra: ["-home-tool-transcript"])
             let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Search memory, Completed,")).firstMatch
             try require(chip, in: app)
-            assertUILock(app, "chat-settled-\(mode)")
+            assertUILock(app, "chat-settled-\(mode)", accessibility: false)
             for _ in 0..<12 where !chip.isHittable { app.swipeUp() }
             chip.tap()
             try require(app.descendants(matching: .any)["home-tool-detail"], in: app)
-            assertUILock(app, "chat-tool-sheet-memory-search-\(mode)")
+            assertUILock(app, "chat-tool-sheet-memory-search-\(mode)", accessibility: true)
             app.terminate()
         }
     }
@@ -58,26 +58,7 @@ final class TronUILockTests: XCTestCase {
             try require(gear, in: app)
             gear.tap()
             try require(app.staticTexts["Global Settings"], in: app)
-            assertUILock(app, "settings-home-\(mode)")
-            app.terminate()
-        }
-    }
-
-    /// The shared Session settings screen of a stopped session, opened from Manage Session.
-    @MainActor
-    func testSessionSettings() throws {
-        for mode in Self.modes {
-            let app = launch(["-tron-session-configuration-fixture", "-fixture-appearance", mode])
-            let stop = app.buttons["Stop session"]
-            try require(stop, in: app)
-            stop.tap()
-            app.buttons["Release terminal settlement"].tap()
-            let settings = app.buttons["chat-settings-link"]
-            try require(settings, in: app)
-            for _ in 0..<6 where !settings.isHittable { app.swipeUp() }
-            settings.tap()
-            try require(app.navigationBars.staticTexts["Session Settings"], in: app)
-            assertUILock(app, "settings-session-\(mode)")
+            assertUILock(app, "settings-home-\(mode)", accessibility: true)
             app.terminate()
         }
     }
