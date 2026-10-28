@@ -109,15 +109,24 @@ struct HostedAutomationFixtureView: View {
 
     var body: some View {
         TronPresentationSurface(id: "hosted-automation-fixture") {
-            if ready {
-                // The real dashboard menu opens the real Automations sheet.
-                VStack {
-                    if let openedSession {
-                        Text("Opened \(openedSession)").accessibilityIdentifier("automation-fixture-opened-session")
-                    }
+            // One stable view tree from the first frame: only the menu button
+            // waits for the Gateway connection. Swapping the whole tree after
+            // an async connect remounts the presenters' native sheet nodes
+            // while the surface settles, and their sheets are never presented.
+            VStack {
+                if let openedSession {
+                    Text("Opened \(openedSession)").accessibilityIdentifier("automation-fixture-opened-session")
+                }
+                if let error {
+                    Text(error)
+                } else if !ready {
+                    ProgressView()
+                }
+                Spacer()
+                HStack {
                     Spacer()
-                    HStack {
-                        Spacer()
+                    if ready {
+                        // The real dashboard menu opens the real Automations sheet.
                         DashboardModeMenuButton(
                             onOpenAutomations: { automationsPresented = true },
                             onOpenKnowledge: {},
@@ -126,32 +135,28 @@ struct HostedAutomationFixtureView: View {
                         .tronDashboardFloatingCircle(accent: .tronEmerald)
                     }
                 }
-                .padding(20)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.tronBackground)
-                .automationsSheet(
-                    isPresented: $automationsPresented,
-                    preferences: $preferences,
-                    onOpenSession: { profileID, sessionID in
-                        automationsPresented = false
-                        openedSession = "\(profileID):\(sessionID)"
-                    }
-                )
-                // Enter the real editor without the catalog/detail AX trees.
-                .tronManagedSheet(isPresented: $dateControlsPresented, identity: "automation.fixture.date-controls") {
-                    AutomationFormView(selection: dateControlsSelection, onSaved: {})
-                        .background(AutomationDateControlsViewport(onReady: { dateControlsReady = true }))
-                        .overlay(alignment: .bottomLeading) {
-                            if dateControlsReady {
-                                Text("Date controls ready").font(.system(size: 1))
-                                    .accessibilityIdentifier("automation-date-controls-ready")
-                            }
-                        }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.tronBackground)
+            .automationsSheet(
+                isPresented: $automationsPresented,
+                preferences: $preferences,
+                onOpenSession: { profileID, sessionID in
+                    automationsPresented = false
+                    openedSession = "\(profileID):\(sessionID)"
                 }
-            } else if let error {
-                Text(error)
-            } else {
-                ProgressView()
+            )
+            // Enter the real editor without the catalog/detail AX trees.
+            .tronManagedSheet(isPresented: $dateControlsPresented, identity: "automation.fixture.date-controls") {
+                AutomationFormView(selection: dateControlsSelection, onSaved: {})
+                    .background(AutomationDateControlsViewport(onReady: { dateControlsReady = true }))
+                    .overlay(alignment: .bottomLeading) {
+                        if dateControlsReady {
+                            Text("Date controls ready").font(.system(size: 1))
+                                .accessibilityIdentifier("automation-date-controls-ready")
+                        }
+                    }
             }
         }
         .environment(model)
