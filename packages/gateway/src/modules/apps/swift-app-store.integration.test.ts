@@ -136,6 +136,44 @@ function bigSource(marker: string): string {
 }
 
 describe("installed Swift apps through the Gateway", () => {
+  it("lets the phone rename, reset and remove an app through idempotent receipts across restart", async () => {
+    const f = await fixture();
+    const source = 'import SwiftUI\nstruct ContentView: View { @AppStorage("count") var count = 0\n var body: some View { Text("\\(count)") } }';
+    await writeFile(join(f.cwd, "Managed.swift"), source);
+    const [installed] = await agentCalls(f, f, [{ action: "install", appId: "managed", name: "Managed", source: { kind: "path", path: "Managed.swift" } }]);
+    expect(installed!.isError).toBe(false);
+    expect(await rpc(f, "apps.commit", { commandId: "manage-seed-1", appId: "managed", expectedRevision: 0, expectedSourceRevision: 1, set: [{ key: "count", value: 4 }] })).toEqual({ appId: "managed", revision: 1 });
+
+    const rename = { commandId: "manage-rename-1", appId: "managed", name: "Renamed app" };
+    const renamed = await rpc(f, "apps.rename", rename) as { app: Record<string, unknown> };
+    expect(renamed.app).toMatchObject({ id: "managed", name: "Renamed app", revision: 1 });
+    expect(await rpc(f, "apps.rename", rename)).toEqual(renamed);
+    expect((await rpcError(f, "apps.rename", { commandId: "manage-rename-2", appId: "managed", name: " " })).code).toBe("invalid_request");
+    // A rename keeps the program identity: its source revision fence is unchanged.
+    expect(await rpc(f, "apps.commit", { commandId: "manage-after-rename", appId: "managed", expectedRevision: 1, expectedSourceRevision: 1, set: [{ key: "count", value: 5 }] })).toEqual({ appId: "managed", revision: 2 });
+
+    const stale = await rpcError(f, "apps.reset", { commandId: "manage-reset-stale", appId: "managed", expectedRevision: 1 });
+    expect(stale.code).toBe("conflict");
+    const reset = { commandId: "manage-reset-1", appId: "managed", expectedRevision: 2 };
+    expect(await rpc(f, "apps.reset", reset)).toEqual({ appId: "managed", revision: 3 });
+    expect(await rpc(f, "apps.reset", reset)).toEqual({ appId: "managed", revision: 3 });
+    expect(await rpc(f, "apps.state", { appId: "managed" })).toEqual({ appId: "managed", revision: 3, entries: [] });
+    // An open program computed from the previous state cannot overwrite the reset.
+    expect((await rpcError(f, "apps.commit", { commandId: "manage-after-reset", appId: "managed", expectedRevision: 2, expectedSourceRevision: 1, set: [{ key: "count", value: 9 }] })).code).toBe("conflict");
+
+    await f.registry.dispose();
+    registries.splice(registries.indexOf(f.registry), 1);
+    const restarted = await gateway(f.root, f.faux);
+    expect(((await rpc(restarted, "apps.get", { appId: "managed" })).app as Record<string, unknown>).name).toBe("Renamed app");
+    expect(await rpc(restarted, "apps.reset", reset)).toEqual({ appId: "managed", revision: 3 });
+    const remove = { commandId: "manage-remove-1", appId: "managed" };
+    expect(await rpc(restarted, "apps.remove", remove)).toEqual({ appId: "managed", removed: true });
+    expect(await rpc(restarted, "apps.remove", remove)).toEqual({ appId: "managed", removed: true });
+    expect(await rpc(restarted, "apps.list")).toEqual({ apps: [] });
+    expect((await rpcError(restarted, "apps.rename", { commandId: "manage-rename-3", appId: "managed", name: "Gone" })).code).toBe("not_found");
+    await expect(stat(join(f.tronHome, "workspace", "state", "apps", "managed"))).rejects.toMatchObject({ code: "ENOENT" });
+  }, 60_000);
+
   it("opens one installed snapshot and refuses interpreter writes from replaced source", async () => {
     const f = await fixture();
     const source = 'import SwiftUI\nstruct ContentView: View { var body: some View { Text("First") } }';

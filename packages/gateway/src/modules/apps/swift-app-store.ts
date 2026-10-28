@@ -313,6 +313,46 @@ export class SwiftAppStore {
     });
   }
 
+  /** Rename only. The source revision is the program identity that open runners
+   * fence their writes on, so a label change must not invalidate them. */
+  async rename(appId: string, rawName: unknown): Promise<{ app: SwiftAppManifest }> {
+    admitSwiftAppId(appId);
+    const name = boundedLabel(rawName, "name", SWIFT_APP_LIMITS.nameBytes);
+    return this.mutex.run(async () => {
+      const directory = await this.appDirectory(appId);
+      const existing = await this.readManifest(directory, appId);
+      const app: SwiftAppManifest = { ...existing, name, updatedAt: new Date().toISOString() };
+      await durableAtomicWriteJson(join(directory, "app.json"), app);
+      return { app };
+    });
+  }
+
+  /** Clear every stored key in one transaction and advance the state revision,
+   * so a runner holding the previous state cannot write it back. */
+  async resetState(appId: string, expectedRevision: number): Promise<{ appId: string; revision: number }> {
+    admitSwiftAppId(appId);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new GatewayError("invalid_request", "expectedRevision must be a non-negative integer");
+    return this.mutex.run(async () => {
+      const directory = await this.appDirectory(appId);
+      return this.withDatabase(directory, database => {
+        database.exec("BEGIN IMMEDIATE");
+        try {
+          const revision = this.revision(database);
+          if (revision !== expectedRevision) {
+            throw new GatewayError("conflict", `App ${appId}'s state is at revision ${revision}, not ${expectedRevision}; reload it`, false, { revision });
+          }
+          database.exec("DELETE FROM state");
+          database.prepare("UPDATE meta SET value = ? WHERE name = 'revision'").run(revision + 1);
+          database.exec("COMMIT");
+          return { appId, revision: revision + 1 };
+        } catch (error) {
+          database.exec("ROLLBACK");
+          throw error;
+        }
+      });
+    });
+  }
+
   async state(appId: string): Promise<SwiftAppStateSnapshot> {
     admitSwiftAppId(appId);
     return this.mutex.run(async () => {

@@ -83,6 +83,7 @@ struct SessionShellView: View {
     @State private var showSettings = false
     @State private var showingAutomations = false
     @State private var showingKnowledge = false
+    @State private var showingApps = false
     @State private var projectSettings: ProjectSettingsRoute?
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
@@ -189,6 +190,9 @@ struct SessionShellView: View {
                     onOpenSession: openKnowledgeEvidence,
                     onDone: { showingKnowledge = false }
                 )
+            }
+            .tronManagedSheet(isPresented: $showingApps, identity: "dashboard.apps") {
+                InstalledAppsSheet()
             }
             .tronManagedSheet(
                 isPresented: $showSettings,
@@ -319,6 +323,7 @@ struct SessionShellView: View {
         // New Session presents from the dashboard once the Knowledge sheet is gone.
         knowledgeDraftPending = true
         showingKnowledge = false
+        showingApps = false
     }
 
     private func openKnowledgeEvidence(sessionID: String, entryID: String) {
@@ -333,6 +338,7 @@ struct SessionShellView: View {
                 let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID, historyEntryID: entryID)
                 guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
                 showingKnowledge = false
+                showingApps = false
                 present(route)
             } catch is CancellationError { return } catch { model.presentError(error) }
         }
@@ -364,6 +370,7 @@ struct SessionShellView: View {
             header: dashboardHeader,
             onOpenAutomations: { showingAutomations = true },
             onOpenKnowledge: { showingKnowledge = true },
+            onOpenApps: { showingApps = true },
             actions: dashboardMenuActions,
             home: showsHomeFloatingButton
                 ? DashboardHomeControl(state: HomeButtonIndicatorState(status: model.homeStatus.status), open: openHome)
@@ -479,6 +486,7 @@ struct SessionShellView: View {
         showSettings = false
         showingAutomations = false
         showingKnowledge = false
+        showingApps = false
         projectSettings = nil
 
         do {

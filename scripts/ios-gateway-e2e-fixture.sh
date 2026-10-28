@@ -5,6 +5,7 @@ write_fixture_extension() {
   pi_ai_url="file://$gateway_dir/node_modules/@earendil-works/pi-ai/dist/index.js"
   mkdir -p "$agent_dir/extensions"
   cat >"$agent_dir/extensions/tron-e2e.ts" <<EOF
+import { existsSync, writeFileSync } from "node:fs";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "$pi_ai_url";
 const faux = fauxProvider({
   provider: "tron-e2e",
@@ -106,7 +107,22 @@ const latestUserText = (context) => {
   }
   return "";
 };
+// A second writer for the installed-app robustness journey: it waits for the
+// phone's go file, reinstalls the app (a new source revision) and then writes the
+// done file the journey polls. Everything here is the real swift_app tool.
+const REINSTALL_MARKER = "INSTALLED-SWIFT-APP-REINSTALL";
+const reinstallTurn = async (context) => {
+  const goFile = (latestUserText(context).match(/INSTALLED-SWIFT-APP-REINSTALL (\S+)/) ?? [])[1];
+  if (context.messages.at(-1)?.role === "toolResult") {
+    writeFileSync(goFile + ".done", "done");
+    return fauxAssistantMessage("Reinstalled the persistence proof app.");
+  }
+  const deadline = Date.now() + 240000;
+  while (!existsSync(goFile) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
+  return fauxAssistantMessage([fauxToolCall("swift_app", { action: "install", appId: "persistence-proof", name: "Persistence proof 2", source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-reinstall" })], { stopReason: "toolUse" });
+};
 const scripted = (context, options, state, model) => {
+  if (latestUserText(context).includes(REINSTALL_MARKER)) return reinstallTurn(context);
   if (latestUserText(context).includes("INSTALLED-SWIFT-APP-PERSISTENCE")) {
     if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Installed persistence proof app.");
     return fauxAssistantMessage([fauxToolCall("swift_app", { action: "install", appId: "persistence-proof", name: "Persistence proof", source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-proof" })], { stopReason: "toolUse" });

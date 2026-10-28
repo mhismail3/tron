@@ -179,8 +179,18 @@ receipt-backed mutations; `apps.open` loads source/state coherently and every in
 commit fences source and state revisions. `SwiftAppRunnerSheet` injects the port only when
 its launch supplies that installed session. Closing stops timers, not accepted writes;
 unsaved/failed changes remain owned and appear in the existing notice/error surfaces.
-Clean reopens read the Gateway afresh. No production Apps launcher or feeds are enabled
-by this persistence connection.
+Clean reopens read the Gateway afresh.
+
+## Apps menu and Manage
+
+The Tron menu's **Apps** item (always offered beside Automations and Knowledge; not gated by the
+"Run Swift files" experiment, which only controls chat Run buttons) opens `InstalledAppsSheet`:
+the selected Gateway's `apps.list`, refreshed on open, pull and after a runner or Manage closes.
+A row opens the app through `apps.open` in the shared runner; touch and hold offers Open and
+Manage. Manage renames, clears data and removes the app (each confirmed, receipts-backed), and
+offers Discard Unsaved Changes when a save was refused. Rows with unsaved work carry an
+Unsaved tag. Feeds, Builds Install, source history and provenance (#1159, #1162, #2078, #2079)
+are not part of this surface; the `HostedAppsDesignFixture` remains the design review fixture.
 
 The Gateway app-store boundary journey compiles its
 [`PersistenceBoundaryMain.swift`](../../gateway/src/modules/apps/fixtures/PersistenceBoundaryMain.swift)

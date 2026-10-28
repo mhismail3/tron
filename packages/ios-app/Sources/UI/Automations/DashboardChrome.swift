@@ -50,6 +50,7 @@ struct DashboardChrome<Content: View>: View {
     let header: DashboardHeaderState
     let onOpenAutomations: @MainActor () -> Void
     let onOpenKnowledge: @MainActor () -> Void
+    let onOpenApps: @MainActor () -> Void
     let actions: DashboardMenuActions
     /// Set where the dashboard offers Home: its one button then opens Home on a
     /// tap and the dashboard menu on touch and hold.
@@ -60,6 +61,7 @@ struct DashboardChrome<Content: View>: View {
         header: DashboardHeaderState,
         onOpenAutomations: @escaping @MainActor () -> Void,
         onOpenKnowledge: @escaping @MainActor () -> Void,
+        onOpenApps: @escaping @MainActor () -> Void,
         actions: DashboardMenuActions,
         home: DashboardHomeControl? = nil,
         @ViewBuilder content: () -> Content
@@ -67,6 +69,7 @@ struct DashboardChrome<Content: View>: View {
         self.header = header
         self.onOpenAutomations = onOpenAutomations
         self.onOpenKnowledge = onOpenKnowledge
+        self.onOpenApps = onOpenApps
         self.actions = actions
         self.home = home
         self.content = content()
@@ -79,6 +82,7 @@ struct DashboardChrome<Content: View>: View {
             DashboardModeMenuButton(
                 onOpenAutomations: onOpenAutomations,
                 onOpenKnowledge: onOpenKnowledge,
+                onOpenApps: onOpenApps,
                 actions: actions,
                 home: home
             )

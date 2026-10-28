@@ -2,25 +2,72 @@ import Foundation
 import Observation
 import TronMobileCore
 
-/// Gateway-bound installed apps. Reads are disposable; accepted action writes
-/// belong to the retained session, not to a sheet or its task cancellation.
-@MainActor
+/// The Gateway-bound installed-app catalog and its retained sessions. Reads are
+/// disposable and fenced to the latest request; accepted writes belong to a
+/// session, not to a sheet or its task cancellation.
+@MainActor @Observable
 final class InstalledSwiftApps {
-    typealias Open = @MainActor (String, String) async throws -> InstalledSwiftAppSnapshot
-    typealias Commit = @MainActor (String, InstalledSwiftAppCommit) async throws -> InstalledSwiftAppAcknowledgement
-    private let load: Open
-    private let commit: Commit
-    private var sessions: [String: InstalledSwiftAppSession] = [:]
-    private var requests: [String: UUID] = [:]
-    var onFailure: ((Error) -> Void)?
+    struct Ports {
+        let list: @MainActor (String) async throws -> [InstalledSwiftAppManifest]
+        let open: @MainActor (String, String) async throws -> InstalledSwiftAppSnapshot
+        let commit: @MainActor (String, InstalledSwiftAppCommit) async throws -> InstalledSwiftAppAcknowledgement
+        let rename: @MainActor (String, String, String) async throws -> InstalledSwiftAppManifest
+        let reset: @MainActor (String, String, Int) async throws -> Void
+        let remove: @MainActor (String, String) async throws -> Void
+        let state: @MainActor (String, String) async throws -> Int
+    }
 
-    init(open: @escaping Open, commit: @escaping Commit) {
-        self.load = open
-        self.commit = commit
+    enum Phase: Equatable { case idle, loading, loaded, failed(String) }
+
+    private(set) var apps: [InstalledSwiftAppManifest] = []
+    private(set) var phase: Phase = .idle
+    /// Bumped when a retained session is dropped, so rows showing its status refresh.
+    private(set) var revision = 0
+    @ObservationIgnored private let ports: Ports
+    @ObservationIgnored private var sessions: [String: InstalledSwiftAppSession] = [:]
+    @ObservationIgnored private var requests: [String: UUID] = [:]
+    @ObservationIgnored private var listRequest: UUID?
+    @ObservationIgnored var onFailure: ((Error) -> Void)?
+
+    init(ports: Ports) { self.ports = ports }
+
+    /// A disposable read of the Gateway's catalog. A later request or sheet
+    /// dismissal supersedes it; a failure keeps the last list visible.
+    func reload(profileID: String) async {
+        let request = UUID()
+        listRequest = request
+        if apps.isEmpty { phase = .loading }
+        do {
+            let loaded = try await ports.list(profileID)
+            guard listRequest == request else { return }
+            guard loaded.count <= 200, Set(loaded.map(\.id)).count == loaded.count else {
+                throw InstalledSwiftAppFailure("The Gateway returned an invalid app list.")
+            }
+            apps = loaded
+            phase = .loaded
+        } catch is CancellationError {
+            if listRequest == request, apps.isEmpty { phase = .idle }
+        } catch {
+            guard listRequest == request else { return }
+            phase = .failed(error.localizedDescription)
+        }
+    }
+
+    /// The only way to give up accepted-but-unsaved work, and only on request: the
+    /// retained session (with its failure) is dropped so the next open reads the Gateway.
+    func discardUnsaved(appID: String, profileID: String) {
+        sessions.removeValue(forKey: key(profileID, appID))
+        revision &+= 1
+    }
+
+    func hasUnsavedChanges(appID: String, profileID: String) -> Bool {
+        _ = revision
+
+        return sessions[key(profileID, appID)]?.hasUnsavedChanges == true
     }
 
     func open(appID: String, profileID: String) async throws -> InstalledSwiftAppSession {
-        let key = "\(profileID)/\(appID)"
+        let key = key(profileID, appID)
         if let retained = sessions[key], retained.hasUnsavedChanges { return retained }
         if sessions[key] == nil, sessions.count >= 200 {
             // Clean projections may be discarded, never accepted/failed work.
@@ -31,18 +78,57 @@ final class InstalledSwiftApps {
         let request = UUID()
         requests[key] = request
         defer { if requests[key] == request { requests.removeValue(forKey: key) } }
-        let snapshot = try await load(profileID, appID).admitted(appID: appID)
+        let snapshot = try await ports.open(profileID, appID).admitted(appID: appID)
         guard !Task.isCancelled, requests[key] == request else { throw CancellationError() }
         // A write accepted during this await owns this identity. A disposable
         // load cannot replace its unsaved projection with an older snapshot.
         if let retained = sessions[key], retained.hasUnsavedChanges { return retained }
         let session = try InstalledSwiftAppSession(snapshot: snapshot, profileID: profileID,
-            commit: { [commit] command in try await commit(profileID, command) },
+            commit: { [ports] command in try await ports.commit(profileID, command) },
             onFailure: { [weak self] error in self?.onFailure?(error) })
         sessions[key] = session
-        requests.removeValue(forKey: key)
         return session
     }
+
+    func rename(appID: String, profileID: String, to name: String) async throws {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.utf8.count <= 80, !trimmed.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else {
+            throw InstalledSwiftAppFailure("A name is 1–80 characters on one line.")
+        }
+        let manifest = try await ports.rename(profileID, appID, trimmed)
+        guard manifest.id == appID else { throw InstalledSwiftAppFailure("The rename result named another app.") }
+        sessions.removeValue(forKey: key(profileID, appID))
+        replace(manifest)
+    }
+
+    /// Clearing data discards unsent changes only after the owner has been told
+    /// there are none; unsaved or failed writes block the destructive action.
+    func resetData(appID: String, profileID: String) async throws {
+        try requireNoUnsaved(appID: appID, profileID: profileID)
+        let revision = try await ports.state(profileID, appID)
+        try requireNoUnsaved(appID: appID, profileID: profileID)
+        try await ports.reset(profileID, appID, revision)
+        sessions.removeValue(forKey: key(profileID, appID))
+    }
+
+    func remove(appID: String, profileID: String) async throws {
+        try requireNoUnsaved(appID: appID, profileID: profileID)
+        try await ports.remove(profileID, appID)
+        sessions.removeValue(forKey: key(profileID, appID))
+        apps.removeAll { $0.id == appID }
+    }
+
+    private func requireNoUnsaved(appID: String, profileID: String) throws {
+        guard !hasUnsavedChanges(appID: appID, profileID: profileID) else {
+            throw InstalledSwiftAppFailure("This app has changes that are not saved yet. Open it and resolve them first.")
+        }
+    }
+
+    private func replace(_ manifest: InstalledSwiftAppManifest) {
+        if let index = apps.firstIndex(where: { $0.id == manifest.id }) { apps[index] = manifest }
+    }
+
+    private func key(_ profileID: String, _ appID: String) -> String { "\(profileID)/\(appID)" }
 }
 
 @MainActor @Observable

@@ -32,6 +32,7 @@ struct DashboardModeMenuButton: UIViewRepresentable {
 
     let onOpenAutomations: @MainActor () -> Void
     let onOpenKnowledge: @MainActor () -> Void
+    let onOpenApps: @MainActor () -> Void
     let actions: DashboardMenuActions
     var home: DashboardHomeControl? = nil
 
@@ -127,11 +128,12 @@ struct DashboardModeMenuButton: UIViewRepresentable {
                     action(.init(title: "Settings", symbol: "gearshape", perform: open)),
                 ]))
             }
-            // Automations and Knowledge are sheets over the Sessions dashboard,
+            // Automations, Knowledge and Apps are sheets over the Sessions dashboard,
             // which is the only dashboard.
             groups.append(UIMenu(options: .displayInline, children: [
                 sheetAction("Automations", symbol: "clock.badge.checkmark", accent: .tronAutomation, perform: parent.onOpenAutomations),
                 sheetAction("Knowledge", symbol: "book.closed", accent: .tronKnowledge, perform: parent.onOpenKnowledge),
+                sheetAction("Apps", symbol: "square.grid.2x2", accent: .tronPrimary, perform: parent.onOpenApps),
             ]))
             groups.append(UIMenu(options: .displayInline, children: actions.creation.map(action)))
             return UIMenu(children: groups)

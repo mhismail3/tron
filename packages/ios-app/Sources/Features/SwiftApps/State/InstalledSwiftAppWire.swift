@@ -65,6 +65,10 @@ struct InstalledSwiftAppAcknowledgement: Codable, Sendable {
     let revision: Int
 }
 
+struct InstalledSwiftAppList: Codable, Sendable { let apps: [InstalledSwiftAppManifest] }
+struct InstalledSwiftAppRenamed: Codable, Sendable { let app: InstalledSwiftAppManifest }
+struct InstalledSwiftAppStateRevision: Codable, Sendable { let revision: Int }
+
 struct InstalledSwiftAppFailure: Error, LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }

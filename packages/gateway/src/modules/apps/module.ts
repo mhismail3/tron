@@ -40,6 +40,21 @@ export const appsModule: ModuleDescriptor = {
           rejectUnknownFields(params, ["appId"], "apps.state");
           return await store.state(admitSwiftAppId(params.appId)) as unknown as JsonValue;
         } },
+        // Phone-side management. Each is a receipt-backed mutation; replay returns
+        // the original result, including a remove after the app is already gone.
+        "apps.rename": { kind: "mutation", handle: async (params) => {
+          rejectUnknownFields(params, ["commandId", "appId", "name"], "apps.rename");
+          return await store.rename(admitSwiftAppId(params.appId), params.name) as unknown as JsonValue;
+        } },
+        "apps.reset": { kind: "mutation", handle: async (params) => {
+          rejectUnknownFields(params, ["commandId", "appId", "expectedRevision"], "apps.reset");
+          return await store.resetState(admitSwiftAppId(params.appId),
+            integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER)) as unknown as JsonValue;
+        } },
+        "apps.remove": { kind: "mutation", handle: async (params) => {
+          rejectUnknownFields(params, ["commandId", "appId"], "apps.remove");
+          return await store.remove(admitSwiftAppId(params.appId)) as unknown as JsonValue;
+        } },
         "apps.commit": { kind: "mutation", handle: async (params) => {
           rejectUnknownFields(params, ["commandId", "appId", "expectedRevision", "expectedSourceRevision", "set", "remove"], "apps.commit");
           return await store.commit({

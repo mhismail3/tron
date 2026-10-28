@@ -65,6 +65,9 @@ when the internal workspace is unavailable.
 | `apps.list` | none | `{apps: [manifest]}`, sorted by id |
 | `apps.get` | `appId` | `{app: manifest, source}` |
 | `apps.open` | `appId` | `{app: manifest, source, state}` from one store-mutex transaction; source/state cannot interleave with install, remove or commit |
+| `apps.rename` | `commandId, appId, name` | `{app: manifest}`; label only, the source revision (runner write fence) is unchanged |
+| `apps.reset` | `commandId, appId, expectedRevision` | `{appId, revision}`; deletes every key in one transaction and advances the state revision so an open runner cannot write old state back |
+| `apps.remove` | `commandId, appId` | `{appId, removed: true}`; deletes source and all data (the phone confirms first) |
 | `apps.state` | `appId` | `{appId, revision, entries: [{key, value}]}`, sorted by key; revision 0 before any commit |
 | `apps.commit` | `commandId, appId, expectedRevision, expectedSourceRevision?, set?: [{key, value}], remove?: [key]` | `{appId, revision}` |
 

@@ -7,7 +7,9 @@ transport, credentials or ambient installed identity.
 
 ## Owns
 - `InstalledSwiftAppWire`: coherent launch, source/state revision fences and bounded DTO admission.
-- `InstalledSwiftApps`: latest-request-fenced opens and at most 200 retained app sessions.
+- `InstalledSwiftApps`: the observable catalog (`apps`, `phase`), latest-request-fenced opens, at most
+  200 retained sessions, and confirmed rename / clear-data / remove / explicit discard-unsaved.
+  `Sources/State/InstalledSwiftAppsGateway` composes its Gateway ports from the lifecycle and receipts owners (AppModel only calls it), keeping this module free of those owners.
 - `InstalledSwiftAppSession`: optimistic JSON projection, bounded unsent key coalescing,
   immutable dispatched command and failed/uncertain changes retained past sheet dismissal.
 
@@ -33,7 +35,9 @@ reopening an unsaved app retains its projection and failure instead of discardin
 
 ## Entry points
 `InstalledSwiftApps.open(appID:profileID:)`, `InstalledSwiftAppSession.accept`, `settle`.
-`SwiftAppRunnerSheet` hosts the projection. The Apps menu/catalog is a separate consumer.
+`SwiftAppRunnerSheet` hosts the projection; `UI/SwiftApps/InstalledAppsSheet` (Tron menu → Apps) is its
+consumer. Clear data and remove refuse while the app has unsaved work; only an explicit confirmed
+discard drops it.
 
 ## Signals
 The existing app error notice and runner error overlay report unsaved writes; the retained
@@ -42,10 +46,11 @@ The existing app error notice and runner error overlay report unsaved writes; th
 ## Verify
 ```bash
 scripts/tron test gateway src/modules/apps/swift-app-store.integration.test.ts
-scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/TronInstalledSwiftAppUITests/testInstalledValuesSurviveRunnerCloseAndReopen
+scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen
 ```
-The latter installs through a real Pi tool and proves fresh runtime state versus stored
-state through the real Gateway, not a fixture key/value store.
+Also `testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded` and
+`testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation`. They install through a real Pi
+tool and drive the production Tron menu, Apps sheet and runner against the real Gateway.
 
 ## Not here
 Interpreter evaluation, sheet visuals, app installation, feeds, HTML execution, catalog UI,

@@ -18,7 +18,7 @@ It serializes operations over `<workspace>/state/apps/<appId>/`: `app.json`,
 - Descriptor `tron-swift-apps` advertises `swift-apps.v1`. Its `swift_app` tool is
   available in ordinary sessions, not Home's curated profile.
 - Reads: `apps.list`, `apps.get`, `apps.state`, coherent `apps.open` (source + state).
-  Mutation: `apps.commit`, under transport command receipts and the expected state revision;
+  Mutations `apps.commit`, `apps.rename`, `apps.reset`, `apps.remove`, under transport command receipts and the expected state revision;
   interpreter writes additionally fence the source revision that produced them.
 - Tool actions: list, install, state, commit and remove. Install reads a visible,
   link-free `.swift` source relative to the session or internal workspace files.
