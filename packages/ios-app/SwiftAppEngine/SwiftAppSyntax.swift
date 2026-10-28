@@ -305,6 +305,8 @@ struct SwiftAppStoredProperty {
     let isStatic: Bool
     /// `var x: T?` without a default starts as nil, as in Swift.
     var isImplicitNil = false
+    /// A literal persistent key; @Persisted without one uses Type.property.
+    var persistenceKey: String? = nil
 }
 
 package final class SwiftAppTypeDeclaration {

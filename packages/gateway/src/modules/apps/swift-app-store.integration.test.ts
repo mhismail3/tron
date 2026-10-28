@@ -20,9 +20,10 @@ import { displayOwnerOf, createTestRegistry } from "../../../test-support/gatewa
  */
 import { execFileSync } from "node:child_process";
 import { constants } from "node:fs";
-import { lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
@@ -135,6 +136,128 @@ function bigSource(marker: string): string {
 }
 
 describe("installed Swift apps through the Gateway", () => {
+  it("opens one installed snapshot and refuses interpreter writes from replaced source", async () => {
+    const f = await fixture();
+    const source = 'import SwiftUI\nstruct ContentView: View { var body: some View { Text("First") } }';
+    await writeFile(join(f.cwd, "Installed.swift"), source);
+    const [installed] = await agentCalls(f, f, [{ action: "install", appId: "installed", name: "Installed", source: { kind: "path", path: "Installed.swift" } }]);
+    expect(installed!.isError).toBe(false);
+    const opened = await rpc(f, "apps.open", { appId: "installed" });
+    expect(opened).toMatchObject({ app: { id: "installed", revision: 1 }, source, state: { appId: "installed", revision: 0, entries: [] } });
+    await writeFile(join(f.cwd, "Installed.swift"), source.replace("First", "Second"));
+    const [reinstalled] = await agentCalls(f, f, [{ action: "install", appId: "installed", name: "Installed", source: { kind: "path", path: "Installed.swift" } }]);
+    expect(reinstalled!.isError).toBe(false);
+    const stale = await rpcError(f, "apps.commit", { commandId: "source-stale-1", appId: "installed", expectedRevision: 0,
+      expectedSourceRevision: 1, set: [{ key: "count", value: 1 }] });
+    expect(stale.code).toBe("conflict");
+    expect(stale.message).toContain("source is at revision 2");
+    expect((await rpc(f, "apps.state", { appId: "installed" })).revision).toBe(0);
+    const params = { commandId: "source-current-1", appId: "installed", expectedRevision: 0, expectedSourceRevision: 2, set: [{ key: "count", value: 2 }] };
+    expect(await rpc(f, "apps.commit", params)).toEqual({ appId: "installed", revision: 1 });
+    expect(await rpc(f, "apps.commit", params)).toEqual({ appId: "installed", revision: 1 });
+    expect(await rpc(f, "apps.open", { appId: "installed" })).toMatchObject({ app: { revision: 2 }, source: source.replace("First", "Second"),
+      state: { revision: 1, entries: [{ key: "count", value: 2 }] } });
+  }, 60_000);
+
+  it.skipIf(process.platform !== "darwin")("persists real native interpreter actions through Gateway receipts and restores a fresh process", async () => {
+    const f = await fixture();
+    const engine = fileURLToPath(new URL("../../../../ios-app/SwiftAppEngine/", import.meta.url));
+    const probe = fileURLToPath(new URL("./fixtures/PersistenceBoundaryMain.swift", import.meta.url));
+    const binary = join(f.root, "persistence-boundary");
+    const swift = (await readdir(engine)).filter(name => name.endsWith(".swift")).map(name => join(engine, name));
+    execFileSync("/usr/bin/xcrun", ["swiftc", "-swift-version", "6", "-package-name", "TronIOSApp", "-parse-as-library", "-D", "SWIFT_APP_PERSISTENCE_BOUNDARY", "-o", binary, ...swift, probe], {
+      timeout: 240_000, env: { ...process.env, CLANG_MODULE_CACHE_PATH: join(f.root, "clang-cache") },
+    });
+    const source = `import SwiftUI
+struct Item { var title: String; var count: Int }
+class Ledger { var count = 0 }
+struct ContentView: View {
+    @AppStorage("count") var count = 0
+    @Persisted var items: [Item] = []
+    @Persisted var unsupported: [Ledger] = []
+    @State var scratch = 0
+    var report: String { "\\(count)|\\(items.count)|\\(items.first?.title ?? "none")|\\(scratch)" }
+    var body: some View { Text(report) }
+    func increment() { count += 1; items.append(Item(title: "Saved", count: count)); scratch += 1 }
+    func rollback() { count = 999; items = []; scratch = 999; let values = [1]; let bad = values[9] }
+    func invalidType() { count += 1; unsupported = [Ledger()]; scratch += 1 }
+    func overflow() { count += 1; items = [Item(title: "${"x".repeat(270_000)}", count: 1)]; scratch += 1 }
+}
+`;
+    await writeFile(join(f.cwd, "Persisted.swift"), source);
+    const [installed] = await agentCalls(f, f, [{ action: "install", appId: "persisted", name: "Persisted", source: { kind: "path", path: "Persisted.swift" } }]);
+    expect(installed!.isError).toBe(false);
+    interface NativeResult {
+      batches: Array<Array<{ key: string; json: string }>>;
+      observations: Array<{ action: string; succeeded: boolean; report: string; error?: string }>;
+      error?: string;
+    }
+    const run = (snapshot: Record<string, unknown>, actions: string[], installed = true, program = source): NativeResult => {
+      const entries = Object.fromEntries((snapshot.entries as Array<{ key: string; value: unknown }>).map(entry => [entry.key, Buffer.from(JSON.stringify(entry.value)).toString("base64")]));
+      return JSON.parse(execFileSync(binary, [], { input: JSON.stringify({ source: program, entries, actions, installed }), timeout: 20_000, encoding: "utf8" })) as NativeResult;
+    };
+    const initial = await rpc(f, "apps.state", { appId: "persisted" });
+    const changed = run(initial, ["increment", "rollback", "invalidType", "overflow", "binding"]);
+    expect(changed.error).toBeUndefined();
+    expect(changed.observations.map(item => [item.action, item.succeeded, item.report])).toEqual([
+      ["opened", true, "0|0|none|0"], ["increment", true, "1|1|Saved|1"],
+      ["rollback", false, "1|1|Saved|1"], ["invalidType", false, "1|1|Saved|1"],
+      ["overflow", false, "1|1|Saved|1"], ["binding", true, "7|1|Saved|1"],
+    ]);
+    expect(changed.batches).toHaveLength(2);
+    let revision = initial.revision as number;
+    for (const [index, batch] of changed.batches.entries()) {
+      const params = { commandId: `native-persist-${index}`, appId: "persisted", expectedRevision: revision,
+        set: batch.map(write => ({ key: write.key, value: JSON.parse(Buffer.from(write.json, "base64").toString("utf8")) })) };
+      const committed = await rpc(f, "apps.commit", params);
+      expect(await rpc(f, "apps.commit", params)).toEqual(committed);
+      revision = committed.revision as number;
+    }
+    const stored = await rpc(f, "apps.state", { appId: "persisted" });
+    expect(stored.revision).toBe(2);
+    expect(run(stored, []).observations).toEqual([{ action: "opened", succeeded: true, report: "7|1|Saved|0" }]);
+    const recordDisplay = source.replace(/var report: String \{[^\n]+\}/u, 'var report: String { "\\(items[0])" }');
+    expect(run(stored, [], true, recordDisplay).observations[0]?.report).toBe('Item(title: "Saved", count: 1)');
+    expect(run(initial, [], false).error).toContain("requires an installed app");
+    await f.registry.dispose();
+    registries.splice(registries.indexOf(f.registry), 1);
+    const restarted = await gateway(f.root, f.faux);
+    const restored = await rpc(restarted, "apps.state", { appId: "persisted" });
+    expect(run(restored, []).observations).toEqual([{ action: "opened", succeeded: true, report: "7|1|Saved|0" }]);
+    report.cases.push({ name: "native-interpreter-persistence", revision, observations: changed.observations, restored: run(restored, []).observations });
+
+    const dictionaries = `import SwiftUI
+struct Item { var title: String }
+struct ContentView: View {
+    @AppStorage("flag") var flag = false
+    @AppStorage("flag") var alias = false
+    @AppStorage("ratio") var ratio = 1.25
+    @AppStorage("label") var label = "initial"
+    @Persisted var table: [String: Item] = [:]
+    @Persisted var numeric: [Int: String] = [:]
+    @Persisted var switches: [Bool: String] = [:]
+    var report: String { "\\(flag)/\\(alias)|\\(ratio)|\\(label)|\\(table["one"]?.title ?? "none")|\\(numeric[2] ?? "none")|\\(switches[true] ?? "none")" }
+    var body: some View { Text(report) }
+    func update() { flag = true; ratio = 2.5; label = "Saved"; table["one"] = Item(title: "record"); numeric[2] = "int"; switches[true] = "bool" }
+}
+`;
+    await writeFile(join(f.cwd, "Dictionaries.swift"), dictionaries);
+    const [secondInstalled] = await agentCalls(f, restarted, [{ action: "install", appId: "dictionaries", name: "Dictionaries", source: { kind: "path", path: "Dictionaries.swift" } }]);
+    expect(secondInstalled!.isError).toBe(false);
+    const empty = await rpc(restarted, "apps.state", { appId: "dictionaries" });
+    const updated = run(empty, ["update"], true, (await rpc(restarted, "apps.get", { appId: "dictionaries" })).source as string);
+    expect(updated.error).toBeUndefined();
+    expect(updated.batches).toHaveLength(1);
+    await rpc(restarted, "apps.commit", { appId: "dictionaries", commandId: "native-dictionary-1", expectedRevision: 0,
+      set: updated.batches[0]!.map(write => ({ key: write.key, value: JSON.parse(Buffer.from(write.json, "base64").toString("utf8")) })) });
+    const dictionariesStored = await rpc(restarted, "apps.state", { appId: "dictionaries" });
+    expect(run(dictionariesStored, [], true, dictionaries).observations).toEqual([
+      { action: "opened", succeeded: true, report: "true/true|2.5|Saved|record|int|bool" },
+    ]);
+    expect(run(restored, [], true, source.replace("var title: String; var count: Int", "var renamed: String; var count: Int")).error).toContain("does not match the current app source");
+    report.cases.push({ name: "native-dictionary-and-scalar-roundtrip", restored: run(dictionariesStored, [], true, dictionaries).observations });
+  }, 300_000);
+
   it("installs from the agent, serves the phone's RPCs, keeps data across reinstall and restart, then removes", async () => {
     const f = await fixture();
     const sourceV1 = bigSource("v1");

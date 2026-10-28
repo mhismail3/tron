@@ -153,7 +153,39 @@ simulator-validated.
   `disabled`, accessibility identifiers and labels.
 
 Not supported: Swift Concurrency (`async`/`await`, `.task`; #1140), other frameworks,
-persistence, custom `ViewModifier`s.
+custom `ViewModifier`s.
+
+## Installed-state engine port
+
+`SwiftAppPersistence` accepts an installed app's bounded JSON snapshot and emits one batch
+of changed keys after a successful synchronous action, including native binding writes.
+`@AppStorage("key")` supports Bool, Int, Double and String defaults. `@Persisted("key")`
+(or `@Persisted`, keyed by `Type.property`) supports arrays/dictionaries containing finite
+scalars and value structs; dictionary keys are String, Int or Bool. Persistent wrappers
+require non-static View/App variables and literal keys. Shared keys share one observable
+slot; incompatible scalar/container declarations diagnose. Constructors, serialization,
+size refusal and failed actions share the existing rollback journal and emit no batch.
+Opening only restores defaults; it never writes them. Chat displays have no installed
+identity and diagnose rather than silently pretending to save.
+
+Scalar entries are ordinary JSON; integers must fit JSON's exact ±(2^53−1) range.
+Collections use the engine's version-1 typed envelope
+(`version`, `value`), preserving numeric, dictionary-key and struct identity; changed struct
+fields or an unknown collection format refuse restoration. This is app-owned JSON inside
+the existing app store, not a store-format migration. Existing key/value bounds apply.
+[`Features/SwiftApps/State`](../Sources/Features/SwiftApps/State/README.md) owns the host
+transport and retained write lifecycle. `AppModel` composes pinned-connection reads and
+receipt-backed mutations; `apps.open` loads source/state coherently and every interpreter
+commit fences source and state revisions. `SwiftAppRunnerSheet` injects the port only when
+its launch supplies that installed session. Closing stops timers, not accepted writes;
+unsaved/failed changes remain owned and appear in the existing notice/error surfaces.
+Clean reopens read the Gateway afresh. No production Apps launcher or feeds are enabled
+by this persistence connection.
+
+The Gateway app-store boundary journey compiles its
+[`PersistenceBoundaryMain.swift`](../../gateway/src/modules/apps/fixtures/PersistenceBoundaryMain.swift)
+with the real engine on macOS, applies its committed batches through real Gateway RPC receipts,
+and restores a fresh native process and Gateway. It is not an iPhone UI persistence proof.
 
 ## Recovered Builds preview (#1319)
 

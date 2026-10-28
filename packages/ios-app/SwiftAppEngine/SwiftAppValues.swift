@@ -444,7 +444,16 @@ package indirect enum SwiftAppValue {
 @MainActor @Observable
 package final class SwiftAppStateStore {
     var values: [String: SwiftAppValue]
-    init(values: [String: SwiftAppValue]) { self.values = values }
+    let persistent: [String: SwiftAppPersistenceSlot]
+
+    init(values: [String: SwiftAppValue], persistent: [String: SwiftAppPersistenceSlot] = [:]) {
+        self.values = values
+        self.persistent = persistent
+    }
+
+    func value(_ name: String) -> SwiftAppValue {
+        persistent[name]?.value ?? values[name] ?? .nilValue
+    }
 }
 
 /// One custom view instance: the props its parent passed plus its own state.

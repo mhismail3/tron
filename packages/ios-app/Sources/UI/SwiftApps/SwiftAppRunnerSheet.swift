@@ -46,10 +46,19 @@ struct SwiftAppLaunch: Identifiable {
     let source: String
     /// The paired Gateway's host: the only host the program's links may open (#1160).
     let linkHost: String?
+    /// Only an installed launch supplies this Gateway-owned state projection.
+    let installed: InstalledSwiftAppSession?
+
+    init(name: String, source: String, linkHost: String?, installed: InstalledSwiftAppSession? = nil) {
+        self.name = name
+        self.source = source
+        self.linkHost = linkHost
+        self.installed = installed
+    }
 }
 
 /// Runs one interpreted single-file SwiftUI app in a large sheet. Dismissing
-/// the sheet discards the program and all of its state.
+/// discards the program and @State; accepted installed-state writes retain their owner.
 ///
 /// The program is hosted in Tron's shared `TronDocumentSheet` (#909): detents,
 /// sheet material, tint and typography. Its first real view sits in a
@@ -65,7 +74,12 @@ struct SwiftAppRunnerSheet: View {
     init(launch: SwiftAppLaunch) {
         self.launch = launch
         _runtime = PresentationState(wrappedValue: Result {
-            try SwiftAppRuntime(source: launch.source, linkPolicy: SwiftAppLinkPolicy(host: launch.linkHost))
+            let persistence = launch.installed.map { session in
+                SwiftAppPersistence(entries: session.entries) { writes in
+                    session.accept(Dictionary(uniqueKeysWithValues: writes.map { ($0.key, $0.value) }))
+                }
+            }
+            return try SwiftAppRuntime(source: launch.source, linkPolicy: SwiftAppLinkPolicy(host: launch.linkHost), persistence: persistence)
         })
     }
 
@@ -119,7 +133,7 @@ struct SwiftAppRunnerSheet: View {
                 // own sheets; a program's own scrollContentBackground wins.
                 .scrollContentBackground(.hidden)
                 .overlay(alignment: .bottom) {
-                    if let message = runtime.actionError {
+                    if let message = launch.installed?.failure ?? runtime.actionError {
                         SwiftAppErrorView(message: message)
                             .padding(TronSpacing.xlarge)
                     }

@@ -220,6 +220,7 @@ final class AppModel {
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
     let gatewayDiagnostics: GatewayDiagnosticsService
     let workspaceInspection: WorkspaceInspectionService
+    let installedApps: InstalledSwiftApps
     private let diagnostics: AppDiagnostics
     private let metricKitDiagnostics: IOSMetricKitDiagnostics?
     /// Bounded, content-free causal trace for intermittent chat viewport and
@@ -696,6 +697,24 @@ final class AppModel {
                 )
             }
         })
+        let installedApps = InstalledSwiftApps(open: { profileID, appID in
+            guard lifecycle.selectedProfileID == profileID, let admission = lifecycle.admission,
+                  let connectionID = admission.connectionID else { throw CancellationError() }
+            struct Params: Encodable { let appId: String }
+            let snapshot: InstalledSwiftAppSnapshot = try await client.request("apps.open", Params(appId: appID), expectedEpochID: connectionID)
+            try lifecycle.require(admission)
+            return snapshot
+        }, commit: { profileID, command in
+            guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
+            return try await mutationExecutor.perform(method: "apps.commit", commandID: command.commandId,
+                replayAdmission: { lifecycle.selectedProfileID == profileID }) {
+                guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
+                guard let connectionID = lifecycle.connectionID else {
+                    throw GatewayDefinitelyNotSentError(failure: GatewayFailure(code: "disconnected", message: "The app's Gateway is reconnecting. Your change was not sent.", retryable: true, details: nil))
+                }
+                return try await client.request("apps.commit", command, expectedEpochID: connectionID)
+            }
+        })
         let workspaceInspection = WorkspaceInspectionService(client: client)
         let knowledge = KnowledgeRPCClient(
             request: { method, params in
@@ -770,6 +789,7 @@ final class AppModel {
         self.extensionInteractionDrafts = extensionInteractionDrafts
         self.gatewayDiagnostics = gatewayDiagnostics
         self.workspaceInspection = workspaceInspection
+        self.installedApps = installedApps
         self.chatMedia = chatMedia
         self.chatMediaMemoryPressureObserver = chatMediaMemoryPressureObserver
         self.sessionPresentation = sessionPresentation
@@ -809,6 +829,7 @@ final class AppModel {
         providerAuth.delegate = self
         packageConfiguration.delegate = self
         customModelConfiguration.delegate = self
+        installedApps.onFailure = { [weak self] error in self?.surface(error) }
         configurationAutosave.didFail = { [weak self] error in
             self?.presentConfigurationActionError(error)
         }

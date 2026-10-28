@@ -72,6 +72,7 @@ die() { echo "error: $*" >&2; exit 1; }
 # so the parse admits only these. Each gets a fresh fixture and pairing code: an
 # invitation is one-use.
 ui_owned_journeys=(
+  'TronMobileUITests/TronInstalledSwiftAppUITests/testInstalledValuesSurviveRunnerCloseAndReopen'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRouteDark'
   "TronMobileUITests/RealGatewayPairAndChatUITests/testRoutineEditorsDisappearAndExplicitGlobalValueResets"
@@ -120,7 +121,7 @@ ui_journey_is_owned() {
 ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
-    *testHomeStatusShowsHostPressureAndWorkers) echo "1 no" ;;
+    *testHomeStatusShowsHostPressureAndWorkers|*testInstalledValuesSurviveRunnerCloseAndReopen) echo "1 no" ;;
     *testForegroundAndReconnectKeepSheetsAndTheirContent|*testProviderLoginSurvivesSafariAndReconnect) echo "2 yes" ;;
     *) echo "0 no" ;;
   esac
@@ -541,6 +542,7 @@ start_fresh_fixture() {
   workspace="$(realpath "$workspace")"
   # Project instructions the Agent Instructions projection must attribute.
   printf '# E2E Project Rules\n\nKeep the boundary fixture honest.\n' >"$workspace/AGENTS.md"
+  cp "$repo_root/packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift" "$workspace/InstalledPersistence.swift"
   python3 - "$tron_home/gateway/gateway.json" <<'PY'
 import json, os, sys
 path = sys.argv[1]

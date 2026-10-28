@@ -58,6 +58,9 @@ export interface SwiftAppStateSnapshot {
 export interface SwiftAppCommit {
   appId: string;
   expectedRevision: number;
+  /** Interpreter writes must still belong to the source that produced them.
+   * Agent data seeding does not execute source and does not supply this fence. */
+  expectedSourceRevision?: number;
   set: Array<{ key: string; value: JsonValue }>;
   remove: string[];
 }
@@ -236,16 +239,31 @@ export class SwiftAppStore {
     return this.mutex.run(async () => {
       const directory = await this.appDirectory(appId);
       const app = await this.readManifest(directory, appId);
-      let read;
-      try { read = await readSecureText(join(directory, "App.swift"), SWIFT_APP_LIMITS.sourceBytes); }
-      catch { read = { present: false as const }; }
-      // The source is published before its manifest, so a torn reinstall shows
-      // as a hash mismatch: refuse it rather than run code the manifest does not name.
-      if (!read.present || createHash("sha256").update(read.value).digest("hex") !== app.sourceSha256) {
-        throw new GatewayError("conflict", `App ${appId}'s source does not match its manifest; reinstall it`);
-      }
-      return { app, source: read.value };
+      return { app, source: await this.readSource(directory, app) };
     });
+  }
+
+  /** One coherent launch snapshot; install/commit/remove cannot interleave. */
+  async open(appId: string): Promise<{ app: SwiftAppManifest; source: string; state: SwiftAppStateSnapshot }> {
+    admitSwiftAppId(appId);
+    return this.mutex.run(async () => {
+      const directory = await this.appDirectory(appId);
+      const app = await this.readManifest(directory, appId);
+      const source = await this.readSource(directory, app);
+      const state = this.withDatabase(directory, database => this.snapshot(database, appId));
+      return { app, source, state };
+    });
+  }
+
+  private async readSource(directory: string, app: SwiftAppManifest): Promise<string> {
+    let read;
+    try { read = await readSecureText(join(directory, "App.swift"), SWIFT_APP_LIMITS.sourceBytes); }
+    catch { read = { present: false as const }; }
+    // Source precedes its manifest: a torn reinstall must never execute.
+    if (!read.present || createHash("sha256").update(read.value).digest("hex") !== app.sourceSha256) {
+      throw new GatewayError("conflict", `App ${app.id}'s source does not match its manifest; reinstall it`);
+    }
+    return read.value;
   }
 
   /** Install, or replace an installed app's source and name while keeping its data. */
@@ -308,6 +326,9 @@ export class SwiftAppStore {
   async commit(input: SwiftAppCommit): Promise<{ appId: string; revision: number }> {
     const appId = admitSwiftAppId(input.appId);
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) throw new GatewayError("invalid_request", "expectedRevision must be a non-negative integer");
+    if (input.expectedSourceRevision !== undefined && (!Number.isSafeInteger(input.expectedSourceRevision) || input.expectedSourceRevision < 1)) {
+      throw new GatewayError("invalid_request", "expectedSourceRevision must be a positive integer");
+    }
     if (!Array.isArray(input.set) || !Array.isArray(input.remove) || input.set.length + input.remove.length === 0
       || input.set.length + input.remove.length > SWIFT_APP_LIMITS.writesPerCommit) {
       throw new GatewayError("invalid_request", `A commit carries 1-${SWIFT_APP_LIMITS.writesPerCommit} writes`);
@@ -333,6 +354,12 @@ export class SwiftAppStore {
     });
     return this.mutex.run(async () => {
       const directory = await this.appDirectory(appId);
+      if (input.expectedSourceRevision !== undefined) {
+        const app = await this.readManifest(directory, appId);
+        if (app.revision !== input.expectedSourceRevision) {
+          throw new GatewayError("conflict", `App ${appId}'s source is at revision ${app.revision}, not ${input.expectedSourceRevision}; reopen it`);
+        }
+      }
       return this.withDatabase(directory, database => {
         database.exec("BEGIN IMMEDIATE");
         try {

@@ -48,6 +48,8 @@ package final class SwiftAppRuntime {
         let field: String
     }
     @ObservationIgnored private var actionJournal: [WriteKey: () -> Void]?
+    @ObservationIgnored private var persistentKeys: Set<String> = []
+    @ObservationIgnored let persistence: SwiftAppPersistence?
     @ObservationIgnored private var committedEffects: [() -> Void] = []
     @ObservationIgnored private var timers: [UUID: (connection: AnyCancellable, failures: Int)] = [:]
 #if HOSTED_TEST
@@ -60,9 +62,15 @@ package final class SwiftAppRuntime {
     /// A committed link request the runner sheet opens (#1160).
     package var pendingLink: SwiftAppLinkPolicy.Link?
 
-    package init(source: String, linkPolicy: SwiftAppLinkPolicy) throws {
+    package init(source: String, linkPolicy: SwiftAppLinkPolicy, persistence: SwiftAppPersistence? = nil) throws {
         self.linkPolicy = linkPolicy
+        self.persistence = persistence
         program = try SwiftAppParser.parse(source)
+        if persistence == nil, program.types.values.contains(where: { declaration in
+            declaration.stored.contains { $0.wrapper == "AppStorage" || $0.wrapper == "Persisted" }
+        }) {
+            throw SwiftAppRuntimeError("Persistence requires an installed app. Install this artifact before running it.")
+        }
         globals = SwiftAppScope(parent: nil)
         guard rootDeclaration != nil else {
             throw SwiftAppRuntimeError("The file needs a struct conforming to View or App")
@@ -167,14 +175,20 @@ package final class SwiftAppRuntime {
         actionJournal = [:]
         do {
             let result = try body()
+            // Serialization is part of the action: an unsupported or over-bound
+            // value rolls every write back before a host can receive any batch.
+            let writes = try persistence?.writes(for: persistentKeys, program: program) ?? []
             actionJournal = nil
+            persistentKeys = []
             let effects = committedEffects
             committedEffects = []
+            persistence?.publish(writes)
             for effect in effects { effect() }
             return result
         } catch {
             let journal = actionJournal
             actionJournal = nil
+            persistentKeys = []
             committedEffects = []
             // Raw restoration must work even after budget exhaustion.
             if let journal { for restore in journal.values { restore() } }
@@ -241,11 +255,31 @@ package final class SwiftAppRuntime {
     }
 
     func set(_ state: SwiftAppStateStore, _ name: String, to value: SwiftAppValue) {
+        if let slot = state.persistent[name] {
+            if actionJournal == nil {
+                // Native controls write bindings outside perform(_:). They need
+                // the same journal and commit boundary as interpreted actions.
+                do {
+                    try transaction { setPersistent(slot, to: value) }
+                    actionError = nil
+                } catch { actionError = "Action cancelled; state restored.\n\(error)" }
+            } else { setPersistent(slot, to: value) }
+            return
+        }
         beforeWrite(state, name) {
             let old = state.values[name]
             return { state.values[name] = old }
         }
         state.values[name] = value
+    }
+
+    private func setPersistent(_ slot: SwiftAppPersistenceSlot, to value: SwiftAppValue) {
+        beforeWrite(slot, "value") {
+            let old = slot.value
+            return { slot.value = old }
+        }
+        slot.value = value
+        persistentKeys.insert(slot.key)
     }
 
     func set(_ object: SwiftAppObject, _ name: String, to value: SwiftAppValue) {

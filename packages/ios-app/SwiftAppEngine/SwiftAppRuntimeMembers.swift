@@ -2,7 +2,7 @@ import SwiftUI
 
 // Name resolution, members, assignment and construction for SwiftAppRuntime.
 extension SwiftAppRuntime {
-    private static let stateWrappers: Set<String> = ["State", "StateObject", "ObservedObject", "Published"]
+    private static let stateWrappers: Set<String> = ["State", "StateObject", "ObservedObject", "Published", "AppStorage", "Persisted"]
 
     func lookup(_ name: String, in scope: SwiftAppScope) throws -> SwiftAppValue {
         if let box = scope.local(name) { return box.value }
@@ -24,7 +24,7 @@ extension SwiftAppRuntime {
             if let property = declaration.stored.first(where: { $0.name == name && !$0.isStatic }) {
                 switch property.wrapper {
                 case let wrapper? where Self.stateWrappers.contains(wrapper):
-                    return instance.state.values[name] ?? .nilValue
+                    return instance.state.value(name)
                 case "Binding":
                     return (instance.properties[name] ?? .nilValue).resolved
                 case "EnvironmentObject":
@@ -227,7 +227,7 @@ extension SwiftAppRuntime {
            let property = instance.declaration.stored.first(where: { $0.name == name }) {
             if let wrapper = property.wrapper, Self.stateWrappers.contains(wrapper) {
                 let state = instance.state
-                return SwiftAppBinding(get: { state.values[name] ?? .nilValue }, set: { [weak self] in self?.set(state, name, to: $0) })
+                return SwiftAppBinding(get: { state.value(name) }, set: { [weak self] in self?.set(state, name, to: $0) })
             }
             if property.wrapper == "Binding", case .binding(let binding)? = instance.properties[name] { return binding }
             if property.wrapper == "EnvironmentObject", let object = instance.environmentObjects[property.typeName ?? ""] {
@@ -661,6 +661,7 @@ extension SwiftAppRuntime {
 
     private func initialStateEntered(for declaration: SwiftAppTypeDeclaration, arguments: [SwiftAppLabeledValue]) throws -> SwiftAppStateStore {
         var values: [String: SwiftAppValue] = [:]
+        var persistent: [String: SwiftAppPersistenceSlot] = [:]
         for property in declaration.stored where !property.isStatic {
             guard let wrapper = property.wrapper, Self.stateWrappers.contains(wrapper) else { continue }
             if let argument = arguments.first(where: { $0.label == property.name }) {
@@ -670,8 +671,17 @@ extension SwiftAppRuntime {
             } else {
                 values[property.name] = SwiftAppValue.nilValue
             }
+            if wrapper == "AppStorage" || wrapper == "Persisted" {
+                guard let persistence else { throw SwiftAppRuntimeError("Persistence requires an installed app") }
+                persistent[property.name] = try persistence.slot(
+                    key: property.persistenceKey ?? "\(declaration.name).\(property.name)",
+                    collection: wrapper == "Persisted",
+                    initial: values.removeValue(forKey: property.name) ?? .nilValue,
+                    program: program
+                )
+            }
         }
-        return SwiftAppStateStore(values: values)
+        return SwiftAppStateStore(values: values, persistent: persistent)
     }
 
     package func properties(for node: SwiftAppViewNode) throws -> [String: SwiftAppValue] {

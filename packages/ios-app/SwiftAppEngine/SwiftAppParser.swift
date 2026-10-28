@@ -277,9 +277,10 @@ struct SwiftAppParser {
 
     /// Attributes of a stored property, keeping `@Environment(\.name)`'s key:
     /// each environment value has its own meaning (`dismiss`, `openURL`).
-    private mutating func parsePropertyAttributes() throws -> (names: [String], environmentKey: String?) {
+    private mutating func parsePropertyAttributes() throws -> (names: [String], environmentKey: String?, persistenceKey: String?) {
         var names: [String] = []
         var environmentKey: String?
+        var persistenceKey: String?
         while consumeSymbol("@") {
             let name = try expectIdentifier()
             names.append(name)
@@ -288,11 +289,24 @@ struct SwiftAppParser {
                 try expectSymbol(".")
                 environmentKey = try expectIdentifier()
                 try expectSymbol(")")
+            } else if name == "AppStorage" || name == "Persisted" {
+                if current.isSymbol("("), !current.spaceBefore {
+                    advance()
+                    guard case .string(let parts) = try parseExpression() else { throw error("Persistent keys must be literal strings") }
+                    var key = ""
+                    for part in parts {
+                        guard case .text(let text) = part else { throw error("Persistent keys cannot use interpolation") }
+                        key += text
+                    }
+                    persistenceKey = key
+                    try expectSymbol(")")
+                } else if name == "AppStorage" { throw error("@AppStorage requires a literal storage key") }
             } else {
                 try skipAttributeArguments()
             }
         }
-        return (names, environmentKey)
+        guard names.filter({ $0 == "AppStorage" || $0 == "Persisted" }).count <= 1 else { throw error("Persistent wrappers cannot be stacked") }
+        return (names, environmentKey, persistenceKey)
     }
 
     private mutating func parseType(keyword: String, into program: inout SwiftAppProgramSyntax) throws {
@@ -423,6 +437,11 @@ struct SwiftAppParser {
                         continue
                     }
                 }
+                if attributes.names.contains("AppStorage") || attributes.names.contains("Persisted") {
+                    guard isVariable, !isStatic, declaration.kind == .structure, declaration.isView || declaration.isApp else {
+                        throw error("Persistent wrappers require a non-static view or app variable")
+                    }
+                }
                 declaration.stored.append(SwiftAppStoredProperty(
                     name: propertyName,
                     wrapper: attributes.names.last,
@@ -430,7 +449,8 @@ struct SwiftAppParser {
                     typeName: typeName,
                     initialValue: initial,
                     isStatic: isStatic,
-                    isImplicitNil: isVariable && isOptional && initial == nil
+                    isImplicitNil: isVariable && isOptional && initial == nil,
+                    persistenceKey: attributes.persistenceKey
                 ))
             default:
                 throw error("Unsupported member '\(word)' in \(name)")

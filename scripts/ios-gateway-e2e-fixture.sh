@@ -107,6 +107,10 @@ const latestUserText = (context) => {
   return "";
 };
 const scripted = (context, options, state, model) => {
+  if (latestUserText(context).includes("INSTALLED-SWIFT-APP-PERSISTENCE")) {
+    if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Installed persistence proof app.");
+    return fauxAssistantMessage([fauxToolCall("swift_app", { action: "install", appId: "persistence-proof", name: "Persistence proof", source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-proof" })], { stopReason: "toolUse" });
+  }
   if (latestUserText(context).includes(APPROVAL_MARKER)) return approvalTurn(context);
   if (latestUserText(context).includes(CODEMODE_MARKER)) return codemodeTurn(context) ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "Unexpected codemode journey turn" });
   if (latestUserText(context).includes("historical sheet replay") && context.messages.at(-1)?.role === "toolResult"

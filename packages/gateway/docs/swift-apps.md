@@ -38,7 +38,7 @@ those slices adds its field, with a manifest version bump, when it consumes it.
 - **Install/update.** Installing an existing id replaces its source, name and
   icon and keeps `data.sqlite`. The source is published before the manifest
   that names its SHA-256, so a crash between the two shows up as a mismatch, and
-  `apps.get` refuses it ("reinstall it") instead of serving code the manifest
+  `apps.get`/`apps.open` refuse it ("reinstall it") instead of serving code the manifest
   does not name. At most 200 apps can be installed.
 - **State.** Keys are 1–256 bytes without control characters. Values are plain
   JSON, nest at most 32 levels and encode to at most 256 KiB. One app holds at
@@ -64,16 +64,20 @@ when the internal workspace is unavailable.
 | --- | --- | --- |
 | `apps.list` | none | `{apps: [manifest]}`, sorted by id |
 | `apps.get` | `appId` | `{app: manifest, source}` |
+| `apps.open` | `appId` | `{app: manifest, source, state}` from one store-mutex transaction; source/state cannot interleave with install, remove or commit |
 | `apps.state` | `appId` | `{appId, revision, entries: [{key, value}]}`, sorted by key; revision 0 before any commit |
-| `apps.commit` | `commandId, appId, expectedRevision, set?: [{key, value}], remove?: [key]` | `{appId, revision}` |
+| `apps.commit` | `commandId, appId, expectedRevision, expectedSourceRevision?, set?: [{key, value}], remove?: [key]` | `{appId, revision}` |
 
 `apps.commit` is a receipt-backed mutation: replaying a `commandId` returns the
 original result without applying the writes again. A key may appear only once
-per commit. Sources and state values are exact data the runner executes and
+per commit. Interpreter commits supply `expectedSourceRevision`; a source replacement
+refuses an older program's write even when its state revision is still current. Agent data
+seeding does not execute source and keeps its state-revision-only contract.
+Sources and state values are exact data the runner executes and
 restores, so these results bypass the transcript projection's string and array
 clipping; the store's bounds are their limit. The reads remain available while
-the Gateway drains. Nothing is broadcast on change yet: the Apps sheet (#1161)
-adds a change event if it needs one, along with any phone-side removal RPC.
+the Gateway drains. Nothing is broadcast on change; installed runs use fenced `apps.open`
+reads on reveal rather than another event or catalog authority.
 
 ## Agent tool
 

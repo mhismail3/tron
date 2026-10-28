@@ -32,15 +32,21 @@ export const appsModule: ModuleDescriptor = {
           rejectUnknownFields(params, ["appId"], "apps.get");
           return await store.get(admitSwiftAppId(params.appId)) as unknown as JsonValue;
         } },
+        "apps.open": { kind: "read", handle: async (params) => {
+          rejectUnknownFields(params, ["appId"], "apps.open");
+          return await store.open(admitSwiftAppId(params.appId)) as unknown as JsonValue;
+        } },
         "apps.state": { kind: "read", handle: async (params) => {
           rejectUnknownFields(params, ["appId"], "apps.state");
           return await store.state(admitSwiftAppId(params.appId)) as unknown as JsonValue;
         } },
         "apps.commit": { kind: "mutation", handle: async (params) => {
-          rejectUnknownFields(params, ["commandId", "appId", "expectedRevision", "set", "remove"], "apps.commit");
+          rejectUnknownFields(params, ["commandId", "appId", "expectedRevision", "expectedSourceRevision", "set", "remove"], "apps.commit");
           return await store.commit({
             appId: admitSwiftAppId(params.appId),
             expectedRevision: integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER),
+            ...(params.expectedSourceRevision === undefined ? {}
+              : { expectedSourceRevision: integer(params.expectedSourceRevision, "expectedSourceRevision", 1, Number.MAX_SAFE_INTEGER) }),
             set: (params.set ?? []) as SwiftAppCommit["set"],
             remove: (params.remove ?? []) as string[],
           }) as unknown as JsonValue;
