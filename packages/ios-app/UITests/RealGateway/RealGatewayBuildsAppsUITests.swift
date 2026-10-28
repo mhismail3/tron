@@ -5,6 +5,60 @@ import CryptoKit
 /// using only the isolated fixture Gateway. Synthetic publisher files are never
 /// opened by iOS: Install Build is inspected, not tapped or claimed installed.
 extension RealGatewayPairAndChatUITests {
+    @MainActor func testPendingAppReviewInstallLight() throws { try pendingAppJourney(dark: false) }
+    @MainActor func testPendingAppReviewInstallDark() throws { try pendingAppJourney(dark: true) }
+
+    @MainActor private func pendingAppJourney(dark: Bool) throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let root = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).deletingLastPathComponent()
+        let appDirectory = root.appendingPathComponent("tron/workspace/state/apps/builds")
+        let suffix = dark ? "dark" : "light"
+        // Apps is independent of the chat-only Run Swift files experiment.
+        let app = launchApp(additionalArguments: ["-appearanceMode", suffix, "-tron.experimental.swiftApps", "NO"])
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        try buildsPrompt(app, "BUILDS-APP-JOURNEY")
+        XCTAssertTrue(app.staticTexts["Builds app ready for review."].firstMatch.waitForExistence(timeout: 60), app.debugDescription)
+        // Leave the producing chat without ever opening its inline offer card.
+        app.buttons["Back"].tap()
+        buildsOpenApps(app)
+        let pending = app.buttons["pending-app-row-builds"]
+        XCTAssertTrue(pending.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(app.buttons["installed-app-row-builds"].exists)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: appDirectory.path), "Listing an offer must not install")
+        keepScreenshot(app, name: "2104-apps-pending-\(suffix)")
+        pending.tap()
+        let review = app.scrollViews["apps.install.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Read-only feed"].firstMatch.exists, app.debugDescription)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: appDirectory.path), "Opening review must not install")
+        keepScreenshot(app, name: "2104-pending-review-\(suffix)")
+        buildsReveal(app, app.buttons["apps.install.source"], in: review)
+        keepScreenshot(app, name: "2104-pending-review-source-\(suffix)")
+        app.buttons["apps.install.source"].tap()
+        XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        keepScreenshot(app, name: "2104-pending-source-\(suffix)")
+        buildsClose(app)
+        buildsReveal(app, app.buttons["apps.install.confirm"], in: review)
+        keepScreenshot(app, name: "2104-pending-review-confirm-\(suffix)")
+        app.buttons["apps.install.confirm"].tap()
+        XCTAssertTrue(app.buttons["apps.install.open"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: appDirectory.appendingPathComponent("app.json").path), "Only explicit confirmation installs")
+        buildsClose(app)
+        let installed = app.buttons["installed-app-row-builds"]
+        XCTAssertTrue(installed.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(pending.exists, "Installed app must leave Pending")
+        keepScreenshot(app, name: "2104-apps-installed-\(suffix)")
+        buildsClose(app)
+        buildsOpenApps(app)
+        XCTAssertTrue(installed.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(pending.exists, "Authoritative reload must keep it installed, not pending")
+    }
+
     @MainActor func testBuildsInstallLight() throws { try buildsJourney(dark: false, large: false) }
     @MainActor func testBuildsInstallDark() throws { try buildsJourney(dark: true, large: false) }
     @MainActor func testBuildsInstallLightXXXL() throws { try buildsJourney(dark: false, large: true) }

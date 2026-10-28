@@ -1,12 +1,18 @@
 import SwiftUI
 
-/// The Tron menu's Apps sheet: the selected Gateway's installed apps, opened in
+/// The Tron menu's Apps sheet: pending reviews and installed apps, opened in
 /// the shared runner with their persisted values. It composes the same shared
 /// document sheet, list rows and settings rows the approved design used; the
 /// catalog and every write belong to `InstalledSwiftApps`.
 struct InstalledAppsSheet: View {
     @Environment(AppModel.self) private var model
     @PresentationState private var managed: InstalledSwiftAppManifest?
+    @PresentationState private var pendingReview: PendingReview?
+    private struct PendingReview: Identifiable {
+        let offer: SwiftAppInstallOffer
+        let profileID: String
+        var id: String { "\(profileID)/\(offer.id)" }
+    }
     @PresentationState private var launch: SwiftAppLaunch?
     @PresentationState private var openError: String?
 
@@ -16,23 +22,38 @@ struct InstalledAppsSheet: View {
     var body: some View {
         TronDocumentSheet(title: "Apps", detents: [.medium, .large], initialDetent: .medium) {
             ScrollView {
-                TronSettingsSections(hidesLoneHeading: true) {
+                TronSettingsSections(hidesLoneHeading: apps.pending.isEmpty) {
                     if let openError { TronInfoCard(icon: "exclamationmark.triangle", text: openError, accent: .tronAmber) }
                     switch apps.phase {
-                    case .idle, .loading where apps.apps.isEmpty:
+                    case .idle, .loading where apps.isEmpty:
                         TronLoadingState(label: "Loading apps")
-                    case .failed(let message) where apps.apps.isEmpty:
+                    case .failed(let message) where apps.isEmpty:
                         TronInfoCard(icon: "exclamationmark.triangle", text: "Apps could not be loaded. \(message)", accent: .tronAmber)
                             .accessibilityIdentifier("installed-apps-error")
                     default:
-                        if apps.apps.isEmpty {
+                        if apps.isEmpty {
                             TronInfoCard(icon: "square.grid.2x2", text: "No apps are installed on this Mac yet. Ask Tron to build one and install it.")
                                 .accessibilityIdentifier("installed-apps-empty")
                         } else {
                             if case .failed(let message) = apps.phase {
                                 TronInfoCard(icon: "exclamationmark.triangle", text: "Showing the last list. \(message)", accent: .tronAmber)
                             }
-                            TronListGroup(apps.apps, hasLeading: true, identifier: "installed-apps-group") { app in row(app) }
+                            if !apps.pending.isEmpty {
+                                TronListGroup(sections: [.init(title: "Pending", rows: apps.pending, tint: .tronPrimary)],
+                                              hasLeading: true, identifier: "pending-apps-group") { offer in
+                                    TronListButton(
+                                        TronListRowContent(leading: .icon(offer.icon ?? "app", .tronPrimary), title: offer.name,
+                                            subtext: "Review to Install App", tags: [TronListTag(text: "Swift app")],
+                                            accessibilityHint: "Opens the source and declared access for review. Does not install the app."),
+                                        identifier: "pending-app-row-\(offer.appId)", action: {
+                                            if let profileID { pendingReview = PendingReview(offer: offer, profileID: profileID) }
+                                        })
+                                }
+                            }
+                            if !apps.apps.isEmpty {
+                                TronListGroup(sections: [.init(title: "Installed", rows: apps.apps, tint: .tronPrimary)],
+                                              hasLeading: true, identifier: "installed-apps-group") { app in row(app) }
+                            }
                         }
                     }
                 }
@@ -44,12 +65,18 @@ struct InstalledAppsSheet: View {
             .tronManagedSheet(item: $managed, identity: { "apps.manage.\($0.id)" }) { app in
                 InstalledAppManageSheet(appID: app.id) { managed = nil }
             }
+            .tronManagedSheet(item: $pendingReview, identity: { "apps.pending.\($0.id)" }) { review in
+                SwiftAppPendingOfferReview(offer: review.offer, profileID: review.profileID)
+            }
             .tronManagedSheet(item: $launch, identity: { "apps.run.\($0.id)" }) { launch in
                 SwiftAppRunnerSheet(launch: launch)
             }
         }
         .onChange(of: launch == nil) { _, closed in
             // The catalog is a projection; a closed runner or Manage may have changed it.
+            if closed { Task { await reload() } }
+        }
+        .onChange(of: pendingReview == nil) { _, closed in
             if closed { Task { await reload() } }
         }
     }

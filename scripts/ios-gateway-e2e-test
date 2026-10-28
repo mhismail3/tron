@@ -72,6 +72,8 @@ die() { echo "error: $*" >&2; exit 1; }
 # so the parse admits only these. Each gets a fresh fixture and pairing code: an
 # invitation is one-use.
 ui_owned_journeys=(
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight'
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallDark'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallDark'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLightXXXL'
@@ -131,7 +133,7 @@ ui_journey_is_owned() {
 ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
-    *testHomeStatusShowsHostPressureAndWorkers|*testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen|*testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded|*testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation|*testCaptureAppsAndManageLight|*testCaptureAppsAndManageDark|*testBuildsInstallLight|*testBuildsInstallDark|*testBuildsInstallLightXXXL|*testBuildsInstallDarkXXXL) echo "1 no" ;;
+    *testPendingAppReviewInstallLight|*testPendingAppReviewInstallDark|*testHomeStatusShowsHostPressureAndWorkers|*testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen|*testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded|*testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation|*testCaptureAppsAndManageLight|*testCaptureAppsAndManageDark|*testBuildsInstallLight|*testBuildsInstallDark|*testBuildsInstallLightXXXL|*testBuildsInstallDarkXXXL) echo "1 no" ;;
     *testForegroundAndReconnectKeepSheetsAndTheirContent|*testProviderLoginSurvivesSafariAndReconnect) echo "2 yes" ;;
     *) echo "0 no" ;;
   esac

@@ -92,6 +92,33 @@ function publish(f: Fixture, title: string): void {
 }
 
 describe("reviewed Swift app lifecycle through the Gateway", () => {
+  it("lists only valid uninstalled offers with a live canonical session/artifact, then moves an installed offer out of pending", async () => {
+    const f = await fixture();
+    await tool(f, offerArgs(["ios-builds"]));
+    const pendingReference = { ...f.displayReference! };
+    const pendingReview = await rpc(f, "apps.review", pendingReference);
+    expect(pendingReview.source).toBe(source);
+    await tool(f, { ...offerArgs(), appId: "installed", name: "Installed" });
+    await rpc(f, "apps.install", installParams(await rpc(f, "apps.review", f.displayReference!), "pending-already-installed"));
+    await tool(f, { ...offerArgs(), appId: "deleted-session", name: "Deleted session" });
+    await f.registry.delete(f.displayReference!.sessionId);
+    await tool(f, { ...offerArgs(), appId: "missing-artifact", name: "Missing artifact" });
+    await displayOwnerOf(f.registry).removeArtifacts(f.displayReference!.sessionId);
+    await tool(f, { ...offerArgs(), appId: "invalid-source", name: "Invalid source" });
+    await tool(f, { ...offerArgs(), appId: "invalid-metadata", name: "Invalid metadata" });
+    const offersRoot = join(f.root, "tron/workspace/state/apps/.offers");
+    for (const directory of await readdir(offersRoot)) {
+      const offer = JSON.parse(await readFile(join(offersRoot, directory, "offer.json"), "utf8"));
+      if (offer.appId === "invalid-source") await writeFile(join(offersRoot, directory, "App.swift"), "changed source");
+      if (offer.appId === "invalid-metadata") await writeFile(join(offersRoot, directory, "offer.json"), "malformed metadata");
+    }
+    expect(await rpc(f, "apps.pending")).toEqual({ offers: [pendingReview.offer] });
+    expect((await rpc(f, "apps.list")).apps.map((app: { id: string }) => app.id)).toEqual(["installed"]);
+    await rpc(f, "apps.install", installParams(await rpc(f, "apps.review", pendingReference), "pending-explicit-install"));
+    expect(await rpc(f, "apps.pending")).toEqual({ offers: [] });
+    expect((await rpc(f, "apps.list")).apps.map((app: { id: string }) => app.id)).toEqual(["builds", "installed"]);
+    results.push("pending read: valid offer only; installed, deleted-session, missing-artifact and invalid-source offers excluded; explicit install moves to installed");
+  });
   it("reclaims deleted-session offer bytes and capacity while preserving live offers and installed apps", async () => {
     const f = await fixture();
     await tool(f, { ...offerArgs(), appId: "kept-app", name: "Kept app" });

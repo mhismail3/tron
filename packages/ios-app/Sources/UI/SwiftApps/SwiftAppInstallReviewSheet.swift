@@ -1,5 +1,77 @@
 import SwiftUI
 
+/// Catalog entry into the same review/receipt owner used by the inline offer.
+/// The row grants nothing: every open re-acquires the canonical artifact/source.
+struct SwiftAppPendingOfferReview: View {
+    let offer: SwiftAppInstallOffer
+    let profileID: String
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @PresentationState private var installation: SwiftAppInstallation?
+    @PresentationState private var source = ""
+    @PresentationState private var problem: String?
+    @PresentationState private var launch: SwiftAppLaunch?
+    @PresentationState private var openRequest = UUID()
+
+    var body: some View {
+        Group {
+            if let launch {
+                SwiftAppRunnerSheet(launch: launch)
+            } else if let installation {
+                SwiftAppInstallReviewSheet(installation: installation, source: source,
+                    artifactName: "App.swift", profileID: profileID, openProblem: problem, onOpen: open)
+            } else {
+                TronDocumentSheet(title: "Install App") {
+                    if let problem {
+                        TronInfoCard(icon: "exclamationmark.triangle", text: problem, accent: .tronAmber)
+                            .padding(TronSpacing.xlarge)
+                    } else {
+                        TronSheetLoadingState(label: "Preparing app review…", accent: .tronPrimary)
+                    }
+                }
+            }
+        }
+        .task(id: PresentationActivityTaskID(source: offer.id, presentationActive: presentationActivity.allowsPresentationPublication)) {
+            guard active, installation == nil else { return }
+            do {
+                let review = try await model.installedApps.review(reference: offer.reference, profileID: profileID)
+                guard !Task.isCancelled, active else { return }
+                guard review.offer.id == offer.id else {
+                    throw InstalledSwiftAppFailure("This offer changed. Reopen Apps to review its current source and access.")
+                }
+                installation = try model.installedApps.installation(review: review, profileID: profileID)
+                source = review.source
+            } catch is CancellationError {
+            } catch {
+                guard !Task.isCancelled, active else { return }
+                problem = "This app offer could not be reviewed. \(error.localizedDescription)"
+            }
+        }
+        .onDisappear { openRequest = UUID() }
+    }
+
+    private var active: Bool {
+        presentationActivity.allowsPresentationPublication && model.selectedGatewayProfileID() == profileID
+    }
+
+    private func open(_ app: InstalledSwiftAppManifest) {
+        let request = UUID()
+        openRequest = request
+        Task {
+            do {
+                let session = try await model.installedApps.open(appID: app.id, profileID: profileID)
+                guard openRequest == request, active else { return }
+                launch = SwiftAppLaunch(name: session.snapshot.app.name, source: session.snapshot.source,
+                    linkHost: model.profiles.selected?.host, installed: session)
+            } catch is CancellationError {
+            } catch {
+                guard openRequest == request, active else { return }
+                problem = error.localizedDescription
+            }
+        }
+    }
+}
+
 /// One Settings-style shell owns preparation and review, so resolving the offer
 /// never replaces navigation chrome or changes the sheet's initial detent.
 struct SwiftAppInstallReviewSheet: View {

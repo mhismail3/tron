@@ -30,6 +30,10 @@ export function createAppsModule(display: () => DisplayOwner): ModuleDescriptor 
           rejectUnknownFields(params, [], "apps.list");
           return { apps: await store.list() } as unknown as JsonValue;
         } },
+        "apps.pending": { kind: "read", handle: async (params) => {
+          rejectUnknownFields(params, [], "apps.pending");
+          return { offers: await store.pending() } as unknown as JsonValue;
+        } },
         // Source and state are exact data the runner executes and restores, so
         // they skip safeJson's presentation clipping; the store bounds them.
         "apps.get": { kind: "read", handle: async (params) => {
@@ -48,7 +52,7 @@ export function createAppsModule(display: () => DisplayOwner): ModuleDescriptor 
           const sessionId = string(params.sessionId, "sessionId", { max: 256 });
           const artifactId = string(params.artifactId, "artifactId", { max: 256 });
           const source = await readSwiftDisplaySource(await display().acquireArtifact(sessionId, artifactId));
-          return { ...await store.review({ sessionId, artifactId }, digest(source)), reference: { sessionId, artifactId } } as unknown as JsonValue;
+          return { ...await store.review({ sessionId, artifactId }, digest(source)), reference: { sessionId, artifactId }, source } as unknown as JsonValue;
         } },
         "apps.install": { kind: "mutation", handle: async (params, context) => {
           rejectUnknownFields(params, ["commandId", "sessionId", "artifactId", "offerId", "expectedRevision", "expectedSourceSha256", "expectedInstanceId", "upgradeToV2"], "apps.install");

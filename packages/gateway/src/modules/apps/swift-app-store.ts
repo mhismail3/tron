@@ -8,9 +8,10 @@ import { GatewayError } from "../../errors.js";
 import type { JsonValue } from "../../protocol/types.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { durableAtomicWriteJson, durableAtomicWriteText, syncDurably } from "../../util/durable-json.js";
-import { readSecureJson, readSecureText } from "../../util/secure-json.js";
+import { readSecureJson, readSecureText, SecureJsonFileError } from "../../util/secure-json.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import type { DisplayOwner } from "../../display/display-modules.js";
+import { readSwiftDisplaySource } from "./swift-app-display.js";
 import { admitDigest, admitFeeds, digest, MANIFEST_BYTES, offerIdentity, referenceKey, readSwiftAppManifest, readSwiftAppOffer,
   type SwiftAppActor, type SwiftAppDisplayReference, type SwiftAppManifest, type SwiftAppOffer, type SwiftAppRevision } from "./swift-app-format.js";
 export type { SwiftAppManifest } from "./swift-app-format.js";
@@ -282,6 +283,39 @@ export class SwiftAppStore {
         manifests.push(await this.readManifest(join(apps, name), name));
       }
       return manifests;
+    });
+  }
+
+  /** A disposable projection of canonical offers, not another catalog. Even a
+   * retained artifact must still be referenced by its producing session. */
+  async pending(): Promise<SwiftAppOffer[]> {
+    return this.mutex.run(async () => {
+      const apps = await this.appsRoot(false);
+      if (!apps) return [];
+      await this.cleanupOffers(apps);
+      const root = join(apps, ".offers");
+      if (!await ownerDirectory(root)) return [];
+      const offers: SwiftAppOffer[] = [];
+      for (const name of (await readdir(root)).sort()) {
+        if (!/^[a-f0-9]{64}$/.test(name)) continue;
+        try {
+          if (!await ownerDirectory(join(root, name))) continue;
+          const raw = await readSecureJson<unknown>(join(root, name, "offer.json"), 4_096);
+          if (!raw.present) continue;
+          const candidate = readSwiftAppOffer(raw.value);
+          if (referenceKey(candidate.reference) !== name || await ownerDirectory(join(apps, candidate.appId))) continue;
+          const { offer } = await this.readOffer(candidate.reference);
+          const displayed = await readSwiftDisplaySource(await this.display().acquireArtifact(offer.reference.sessionId, offer.reference.artifactId));
+          if (digest(displayed) === offer.sourceSha256) offers.push(offer);
+        } catch (error) {
+          // Invalid or no-longer-owned offers are not installable rows. An
+          // unavailable owner/store is not evidence of a successful empty list.
+          if (error instanceof SecureJsonFileError
+            || error instanceof GatewayError && ["not_found", "conflict", "invalid_request"].includes(error.code) && !error.retryable) continue;
+          throw error;
+        }
+      }
+      return offers.sort((a, b) => a.appId.localeCompare(b.appId) || a.id.localeCompare(b.id));
     });
   }
 

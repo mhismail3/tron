@@ -8,7 +8,7 @@ canonical; the interpreter stays synchronous without transport or credentials.
 - `InstalledSwiftAppWire`: bounded explicit v1/v2 launch admission, exact source,
   declared feed and source/state/instance revision fences.
 - `SwiftAppInstallWire`: source/configuration review and immutable install command.
-- `InstalledSwiftApps`: latest-request-fenced catalog/opens, retained sessions and
+- `InstalledSwiftApps`: latest-request-fenced installed/pending catalog and opens, retained sessions and
   installation coordinators, confirmed Manage operations and explicit discard.
 - `SwiftAppInstallation`: one accepted install command/result across dismissal.
 - `InstalledSwiftAppSession`: optimistic JSON, coalesced unsent keys and an immutable
@@ -25,7 +25,11 @@ A review binds the exact producer session/artifact, source SHA and configuration
 to the reviewed existing head. Accepted installation belongs to the Apps owner,
 not its sheet Task. A repeated presentation reuses unresolved work; a settled
 success cannot present Open after an authoritative review observes removal.
-Confirmed removal invalidates completed installation projections.
+Confirmed removal invalidates completed installation projections. Pending rows
+remain disposable offer metadata. Opening one obtains and admits complete source
+from `apps.review`; installation still needs the same explicit review action.
+An install receipt removes pending offers for that app id and fences older list
+requests so they cannot resurrect an uninstalled projection.
 
 Feed wire payloads remain bounded JSON in this L2 state owner; it does not import
 interpreter types. The L3 runner decodes them into engine feed values, whose
@@ -63,6 +67,7 @@ receipt. No source or app-data logging.
 ## Verify
 ```bash
 scripts/tron test gateway src/modules/apps/apps-install.integration.test.ts
+TRON_IOS_E2E_UI_RUN_TIMEOUT_SECONDS=300 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight
 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight
 ```
 Also retain the existing installed-app reopen, refused-save and confirmed Manage

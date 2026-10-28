@@ -40,6 +40,10 @@ it does not publish, execute source, network or create a second index.
   not a second catalog. First root access, catalog reads and a full-store offer
   attempt reclaim unreachable offer source/configuration under the store mutex;
   installed apps and live offers remain. Unprovable metadata is left unchanged.
+- `apps.pending` derives valid uninstalled offers from the same store, verifying
+  the producing canonical session/artifact and source bytes; no second index.
+  `apps.review` returns the exact granted source for both Apps and chat review.
+  Neither read installs; only the existing explicit install mutation does.
 - No background feed polling or change broadcast.
 
 ## Invariants

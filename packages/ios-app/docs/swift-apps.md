@@ -61,6 +61,12 @@ swiping away cancels review, not an already accepted command. The leading info
 action opens App Details: app id/current installation, artifact, hash, byte size
 and a View Source row opening the shared source reader. Nested sheets inherit
 the opening sheet's theme.
+
+The Apps sheet also lists pending offers, independently of the chat-only flag.
+A pending row re-acquires its exact session/artifact through `apps.review`, admits
+the returned complete source/hash and opens the same Install App review. The source
+is labelled `App.swift` (the canonical offered snapshot), not an inferred original
+filename. Listing/opening never installs; only the explicit review action does.
 The canonical session/artifact grant binds the exact offered bytes and config;
 another display of identical source does not inherit permission to install it.
 Install/update uses one Apps-owned command across dismissal/reconnect, never an
@@ -235,13 +241,25 @@ writes after awaits; accepted install work also blocks conflicting management.
 
 The Tron menu's **Apps** item (always offered beside Automations and Knowledge; not gated by the
 "Run Swift files" experiment, which only controls chat Run buttons) opens `InstalledAppsSheet`:
-the selected Gateway's `apps.list`, refreshed on open, pull and after a runner or Manage closes.
-A row opens the app through `apps.open` in the shared runner; touch and hold offers Open and
+the selected Gateway's `apps.pending` and `apps.list`, refreshed on open, pull and
+after review or runner closes; Manage updates the same catalog. Valid, uninstalled offers appear in a **Pending**
+section above installed apps, using the shared list rows and primary theme. Installed
+app ids and missing session/artifact grants do not appear as pending. Successful
+installation immediately removes all offers for that app id from Pending and adds
+the installed row; a pre-install disposable read cannot overwrite that receipt.
+With neither pending nor installed apps, the existing empty state is unchanged.
+An installed row opens the app through `apps.open` in the shared runner; touch and hold offers Open and
 Manage. Manage renames, clears data and removes the app (each confirmed, receipts-backed), and
 offers Discard Unsaved Changes when a save was refused. Rows with unsaved work carry an
 Unsaved tag. V2 declared feeds and reviewed source updates are implemented above;
 full history/provenance browsing and HTML remain separate scope. The hosted design
 fixture is not evidence that those remaining surfaces are implemented.
+
+The real-Gateway `testPendingAppReviewInstallLight/Dark` journeys leave the producing
+chat without using its inline card, open Apps with the chat experiment off, review
+access/source without installation, explicitly install and verify the row stays
+installed across a catalog reopen. Kept simulator attachments capture the pending
+sheet, review, source and installed result; no pixel goldens or OS build installation.
 
 The Gateway app-store boundary journey compiles its
 [`PersistenceBoundaryMain.swift`](../../gateway/src/modules/apps/fixtures/PersistenceBoundaryMain.swift)

@@ -7,7 +7,8 @@ sheet and the node views that turn interpreter values into SwiftUI.
 
 ## Owns
 
-`SwiftAppDisplayCard`, `SwiftAppRunnerSheet`, `SwiftAppViews`, `SwiftAppNodeViews`.
+`SwiftAppDisplayCard`, `SwiftAppRunnerSheet`, `SwiftAppViews`, `SwiftAppNodeViews`,
+`InstalledAppsSheet` and `SwiftAppInstallReviewSheet` (including its pending-offer loader).
 
 ## Contract
 
@@ -21,6 +22,9 @@ sheet and the node views that turn interpreter values into SwiftUI.
 ## Invariants
 
 - No Tron state or presentation types cross into the interpreter.
+- Apps pending rows use the shared primary-theme list standard. They open the
+  existing source/access review; listing or opening never installs. The retained
+  Apps state owner coordinates explicit installation, not the sheet task.
 
 ## Entry points
 

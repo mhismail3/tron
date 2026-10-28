@@ -6,7 +6,7 @@ struct SwiftAppDisplayReference: Codable, Sendable, Equatable {
     let artifactId: String
 }
 
-struct SwiftAppInstallOffer: Codable, Sendable {
+struct SwiftAppInstallOffer: Codable, Sendable, Identifiable {
     let reference: SwiftAppDisplayReference
     let version: Int
     let id: String
@@ -22,10 +22,11 @@ struct SwiftAppInstallReview: Codable, Sendable {
     let offer: SwiftAppInstallOffer
     let installed: InstalledSwiftAppManifest?
     let reference: SwiftAppDisplayReference
+    let source: String
 
     func admitted(source: String, reference: SwiftAppDisplayReference) throws -> Self {
         let digest = SHA256.hash(data: Data(source.utf8)).map { String(format: "%02x", $0) }.joined()
-        guard self.reference == reference, offer.reference == reference, offer.version == 1, offer.id.count == 64,
+        guard self.source == source, self.reference == reference, offer.reference == reference, offer.version == 1, offer.id.count == 64,
               offer.id.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil,
               offer.appId.range(of: #"^[a-z0-9][a-z0-9-]{0,62}$"#, options: .regularExpression) != nil,
               !offer.name.isEmpty, offer.name.utf8.count <= 80, (offer.icon?.utf8.count ?? 0) <= 80,
@@ -37,6 +38,13 @@ struct SwiftAppInstallReview: Codable, Sendable {
         }
         return self
     }
+}
+
+struct SwiftAppPendingList: Decodable, Sendable { let offers: [SwiftAppInstallOffer] }
+
+struct InstalledSwiftAppCatalog: Sendable {
+    let apps: [InstalledSwiftAppManifest]
+    let pending: [SwiftAppInstallOffer]
 }
 
 struct SwiftAppInstallCommand: Encodable, Sendable {

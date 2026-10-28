@@ -28,7 +28,11 @@ session membership, including live-only runtimes; offers without their exact
 producing artifact owner are then erased with their source/configuration. This
 reclaims deleted-session capacity without a second session catalog or timer.
 Unreadable metadata is not authority to delete it; installed apps and live offers
-are unaffected.
+are unaffected. `apps.pending` projects only uninstalled app ids with intact offered
+source and a currently authorized producing session/artifact whose bytes match.
+It excludes installed app ids (including update offers), orphaned grants and invalid
+offers without creating another index. Listing never installs; review and install
+re-acquire the exact grant. The bounded list is sorted by app id, then offer id.
 
 `swift-app-format.ts` owns the manifest/offer values and their admission.
 `readSwiftAppManifestV1` is the named existing reader. V1 has
@@ -50,7 +54,8 @@ reaching the bound refuses without overwriting them. No SQLite migration occurs.
    the session directory or internal `files/`. It creates a canonical code display
    and an offer; it does not install, change app state or grant a feed to a preview.
 2. `apps.review` acquires that display owner's session/artifact grant and verifies
-   the exact bytes against the offer. Source SHA alone is not authority: another
+   the exact bytes against the offer and returns that complete source for review
+   from Apps as well as chat. Source SHA alone is not authority: another
    session's display of identical bytes cannot review or replace its configuration.
 3. `apps.install` re-acquires the same grant and checks offer/config identity,
    source SHA and the reviewed existing revision/source/instance. A changed or
@@ -114,9 +119,10 @@ versions own wire admission. Reads remain available while draining.
 | Method | Params / result |
 | --- | --- |
 | `apps.list` | none → `{apps}`, sorted by id |
+| `apps.pending` | none → `{offers}`, valid uninstalled offers, sorted by app id/offer id |
 | `apps.get` | `appId` → `{app,source}` |
 | `apps.open` | `appId` → coherent `{app,source,state}`; v2 also `feeds` |
-| `apps.review` | `sessionId,artifactId` → `{offer,installed,reference}` |
+| `apps.review` | `sessionId,artifactId` → `{offer,installed,reference,source}` |
 | `apps.install` | `commandId,sessionId,artifactId,offerId,expectedRevision,expectedSourceSha256,expectedInstanceId,upgradeToV2` → `{app,created}` |
 | `apps.rename` | `commandId,appId,name` → `{app}` |
 | `apps.reset` | `commandId,appId,expectedRevision` → `{appId,revision}` |
@@ -148,6 +154,8 @@ exercise real RuntimeRegistry/Gateway/SQLite restoration, bounds and named v1
 behavior. `apps-install.integration.test.ts` adds canonical display grants,
 cross-session same-source refusal, reviewed updates, opt-in backups, real
 publisher reads, native engine feed/link admission and receipt restart cuts.
+Its pending-list journey additionally proves valid offers appear, installed and
+orphaned/invalid offers do not, and explicit installation removes the pending row.
 Its artifacts are under `test-results/apps-install/`.
 
 Crash cuts kill a fixture process **after releasing its RuntimeRegistry/workspace

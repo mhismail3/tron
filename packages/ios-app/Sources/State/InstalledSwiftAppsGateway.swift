@@ -41,7 +41,11 @@ extension InstalledSwiftApps {
         return InstalledSwiftApps(ports: Ports(
             review: { profileID, reference in try await read(profileID, "apps.review", reference) },
             install: { profileID, command in try await mutate(profileID, "apps.install", command.commandId, command) },
-            list: { profileID in (try await read(profileID, "apps.list", Empty(), as: InstalledSwiftAppList.self)).apps },
+            list: { profileID in
+                let apps = try await read(profileID, "apps.list", Empty(), as: InstalledSwiftAppList.self)
+                let pending = try await read(profileID, "apps.pending", Empty(), as: SwiftAppPendingList.self)
+                return InstalledSwiftAppCatalog(apps: apps.apps, pending: pending.offers)
+            },
             open: { profileID, appID in try await read(profileID, "apps.open", Id(appId: appID)) },
             commit: { profileID, commit in try await mutate(profileID, "apps.commit", commit.commandId, commit) },
             rename: { profileID, appID, name in
