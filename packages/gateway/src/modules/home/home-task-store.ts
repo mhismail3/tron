@@ -428,6 +428,25 @@ export class HomeTaskStore {
     return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
   }
 
+  /** The `target` of every task that has not settled, from one locked pass. Callers
+   * that only need to know where work is live (project lifecycle) must not page the
+   * whole history once per page of display rows. `signal` stops the pass between
+   * records and withdraws a read still queued for the mutex. */
+  async activeTargets(signal?: AbortSignal): Promise<string[]> {
+    return this.run(async () => {
+      const authority = await this.inspectAuthority();
+      if (!authority) return [];
+      const targets: string[] = [];
+      for await (const name of this.taskNames()) {
+        signal?.throwIfAborted();
+        const task = await this.readNamedTask(name);
+        validateAuthorityReferences(task, authority);
+        if (task.lifecycle !== "terminal") targets.push(task.target);
+      }
+      return targets;
+    }, signal);
+  }
+
   /** The newest tasks after `cursor`, with exact lifecycle counts for the whole
    * namespace, from one locked pass: the counts read every record anyway, so the
    * page's records come from that same read. Never a report body. */

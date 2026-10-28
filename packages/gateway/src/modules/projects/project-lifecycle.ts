@@ -27,8 +27,10 @@ export interface ProjectRow {
 export interface ProjectPage { workspace: string; projects: ProjectRow[]; nextCursor: string | null }
 const eligibilityActions = ["trust", "github", "rename", "archive", "untrust"] as const;
 
+/** Live occupancy as of one read: runtime slots are consulted live, Home work as of `occupancy()`. */
+export interface ProjectOccupancy { assertIdle(path: string, moving: boolean): void }
 export interface ProjectRuntimePort {
-  assertIdle(path: string, moving: boolean): Promise<void>;
+  occupancy(signal?: AbortSignal): Promise<ProjectOccupancy>;
   reload(path: string, trusted: boolean): Promise<void>;
   release(path: string): Promise<void>;
   abort(path: string): Promise<void>;
@@ -72,12 +74,15 @@ export class ProjectLifecycle {
     const remaining = names.filter(name => options.after === undefined || name > options.after);
     const selected = remaining.slice(0, options.limit);
     const projects: ProjectRow[] = [];
-    for (const name of selected) projects.push(await this.read(join(this.workspace, name), signal));
+    // One read of Home work serves every row: these are disposable projections, and the
+    // effects revalidate (#2072: a read of the task history per row took 40-90 s).
+    const occupancy = selected.length > 0 ? await this.runtimes.occupancy(signal) : undefined;
+    for (const name of selected) projects.push(await this.read(join(this.workspace, name), signal, occupancy));
     signal?.throwIfAborted();
     return { workspace: this.workspace, projects, nextCursor: remaining.length > selected.length ? selected.at(-1)! : null };
   }
 
-  async read(cwd: string, signal?: AbortSignal): Promise<ProjectRow> {
+  async read(cwd: string, signal?: AbortSignal, occupancy?: ProjectOccupancy): Promise<ProjectRow> {
     signal?.throwIfAborted();
     if (!isAbsolute(cwd)) throw new GatewayError("invalid_request", "Project inspection requires an absolute folder path");
     const path = resolve(cwd), name = basename(path);
@@ -94,14 +99,15 @@ export class ProjectLifecycle {
       row.trust = await this.trust().inspect(path);
       if (dirname(path) !== this.workspace) throw new GatewayError("invalid_request", "Lifecycle supports only direct Workspace project folders");
       this.name(name);
-      const inspected = await this.inspect({ operation: "untrust", name, identity }, signal);
+      const inspected = await this.inspect({ operation: "untrust", name, identity }, signal, occupancy);
+      occupancy ??= inspected.occupancy;
       signal?.throwIfAborted();
       row.trust = inspected.trust;
       row.eligibility.trust = row.eligibility.untrust = { allowed: true };
       row.eligibility.github = inspected.hasRemotes
         ? { allowed: false, code: "conflict", reason: "Project already has remotes; no GitHub repository will be created" } : { allowed: true };
       try {
-        await this.runtimes.assertIdle(path, true);
+        occupancy.assertIdle(path, true);
         row.eligibility.rename = { allowed: true };
         try { await this.archiveDirectory(); row.eligibility.archive = { allowed: true }; }
         catch (error) { row.eligibility.archive = denied(error); }
@@ -228,7 +234,7 @@ export class ProjectLifecycle {
     // Even read-only log inspection can launch a repository-configured verifier.
     return this.command("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "log.showSignature=false", ...args], path, signal);
   }
-  private async inspect(action: Action, signal?: AbortSignal) {
+  private async inspect(action: Action, signal?: AbortSignal, shared?: ProjectOccupancy) {
     signal?.throwIfAborted();
     const path = join(this.workspace, action.name);
     await this.same(path, action.identity);
@@ -246,7 +252,8 @@ export class ProjectLifecycle {
       const claim = await this.git(path, ["log", ref, "-1", "--grep=^Work-Claim-Session:", "--format=%(trailers:key=Work-Claim-Session,valueonly)"], signal);
       if (claim) throw new GatewayError("busy", "Project retains a work claim branch; its owner must release and clean it before lifecycle changes");
     }
-    await this.runtimes.assertIdle(path, action.operation === "rename" || action.operation === "archive");
+    const occupancy = shared ?? await this.runtimes.occupancy(signal);
+    occupancy.assertIdle(path, action.operation === "rename" || action.operation === "archive");
     const trust = await this.trust().inspect(path);
     if (trust.projectDir !== path) throw new GatewayError("invalid_request", "Project root changed");
     const destination = this.destination(action);
@@ -258,7 +265,7 @@ export class ProjectLifecycle {
     if (action.github && remotes) throw new GatewayError("conflict", "Project already has remotes; no GitHub repository will be created");
     const state = createHash("sha256").update(JSON.stringify({ gitIdentity, worktrees, remotes, saved: trust.savedDecision, effective: trust.effectiveDecision })).digest("hex");
     await this.same(path, action.identity);
-    return { path, destination, trust, state, hasRemotes: remotes.length > 0 };
+    return { path, destination, trust, state, hasRemotes: remotes.length > 0, occupancy };
   }
   private async plan(action: Action): Promise<ApprovalActionPreview> {
     const { path, destination, trust, state } = await this.inspect(action);
@@ -305,7 +312,7 @@ export class ProjectLifecycle {
       await mkdir(destination, { mode: 0o700 });
       reservation = await this.directory(destination);
       await this.trust().relocate(path, destination, action.operation === "rename" && trust.effectiveDecision === true, async () => {
-        await this.runtimes.assertIdle(path, true);
+        (await this.runtimes.occupancy()).assertIdle(path, true);
         await this.same(path, action.identity);
         if (await this.directory(destination) !== reservation || await realpath(destination) !== destination) throw new GatewayError("conflict", "Destination reservation changed");
         await rename(path, destination);

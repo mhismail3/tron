@@ -1051,6 +1051,11 @@ export class HomeTaskDispatcher {
     }
   }
 
+  /** Targets of tasks that are pending or active: one store pass, no display rows. */
+  activeTargets(signal?: AbortSignal): Promise<string[]> {
+    return this.store.activeTargets(signal);
+  }
+
   private async readList(input: { limit?: number; cursor?: string }, signal: AbortSignal): Promise<HomeTaskPage> {
     const page = await this.store.page(input, signal);
     const items: HomeTaskSummary[] = [];

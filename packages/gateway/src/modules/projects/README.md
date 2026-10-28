@@ -10,7 +10,8 @@ workers share the ordinary tool surface, but cannot approve their own requests.
 
 `project-lifecycle.ts` owns names, filesystem/Git effects, identity checks and
 GitHub command admission. `module.ts` owns the `projects` tool.
-`runtime-admission.ts` reads canonical runtime/task owners; it stores no worker index.
+`runtime-admission.ts` reads canonical runtime/task owners; it stores no worker index. A listing reads
+Home work once (one task-store pass for all rows), never once per folder or page of task history.
 
 ## Contract
 

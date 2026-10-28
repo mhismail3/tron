@@ -520,6 +520,17 @@ export class HomeOwner {
     }
   }
 
+  /** Where Home work is live (pending or active), for the project lifecycle's idle check. */
+  async activeTaskTargets(signal?: AbortSignal): Promise<string[]> {
+    const owner = await this.taskOwner();
+    if (this.unavailable) throw new GatewayError("conflict", "Home is unavailable", false, { reason: this.unavailable });
+    try { return await owner.activeTargets(signal); }
+    catch (error) {
+      if (error instanceof HomeTaskStoreError) throw new GatewayError("conflict", "Home task list refused", false, { reason: error.code });
+      throw error;
+    }
+  }
+
   async taskResult(taskId: string) {
     return (await this.taskOwner()).result(taskId);
   }

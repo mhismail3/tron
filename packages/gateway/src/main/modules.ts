@@ -45,7 +45,7 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     const owner = owners().sessionSearch;
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));
-  const projects = projectsModule(new ProjectLifecycle(() => owners().home.trust, projectRuntimePort(registry, cursor => home.owner().taskList({ limit: 50, ...(cursor ? { cursor } : {}) })), projectOptions));
+  const projects = projectsModule(new ProjectLifecycle(() => owners().home.trust, projectRuntimePort(registry, signal => home.owner().activeTaskTargets(signal)), projectOptions));
   const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners, () => owners().home.modelQueue);
   return { home: home.owner, projects, providers, runtimeOrder: ORDINARY_MODULE_NAMES, modules: [
     workspaceModule,
