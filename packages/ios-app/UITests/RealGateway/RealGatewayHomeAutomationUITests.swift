@@ -44,10 +44,19 @@ extension RealGatewayPairAndChatUITests {
         let action = app.textViews.firstMatch
         action.tap()
         action.typeText("Review the fixture queue. This message is not approval.")
-        let destination = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Destination'")).firstMatch
+        // Scroll the form from its left gutter, above the keyboard, rather
+        // than swiping on the keyboard or the nested prompt editor.
+        let form = app.scrollViews.containing(.button, identifier: "Destination").firstMatch
+        form.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).press(
+            forDuration: 0.05,
+            thenDragTo: form.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.05))
+        )
+        // The combined row also reports Button; its label is not the menu.
+        let destinationRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Destination'")).firstMatch
+        let destination = destinationRow.buttons["Destination"]
         revealBelowNavigationBar(app, destination)
         destination.tap()
-        app.buttons["Home"].firstMatch.tap()
+        app.buttons["automation.destination.home"].tap()
         let save = app.buttons["Save Draft"]
         XCTAssertTrue(waitForEnabled(save, timeout: 30), app.debugDescription)
         XCTAssertFalse(app.switches["Invoke a resource"].exists, app.debugDescription)

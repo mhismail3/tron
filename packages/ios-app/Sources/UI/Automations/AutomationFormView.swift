@@ -496,6 +496,7 @@ struct AutomationFormView: View {
                         TronSelectionRow(icon: "arrow.turn.down.right", title: "Destination", value: targetMode.title, accent: .tronAutomation) {
                             ForEach(AutomationTargetMode.allCases.filter { $0 != .home || selectedEndpoint?.profile.capabilities.contains("home.v1") == true }) { mode in
                                 Button(mode.title) { targetMode = mode }
+                                    .accessibilityIdentifier("automation.destination.\(mode.rawValue)")
                             }
                         }
                         .padding(14)
