@@ -311,6 +311,10 @@ targets:
     type: bundle.ui-testing
     platform: iOS
     sources:
+      # Both approval sources run through the real interpreter, byte for byte.
+      - path: ../../tools/web/apps/builds-preview
+        type: folder
+        buildPhase: resources
       - path: UITests
         createIntermediateGroups: true
         optional: true

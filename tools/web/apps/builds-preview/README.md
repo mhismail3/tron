@@ -26,3 +26,28 @@ The `TronSwiftAppUITests` bundle carries this folder and runs these exact bytes
 (`testInlineSwiftAppCardOpensRunnerAndReplays`,
 `testRecoveredBuildsPreviewFiltersSearchesAndReopens`). Review screenshots go to
 `~/.tron/workspace/files/mini-apps/swift-apps/evidence/<review-id>/`, never here.
+
+## Installation design review (#1162)
+
+`BuildsInstallDesign.swift` is a second **visual-only** proposal in this existing
+preview owner, not a new installable app. It uses two synthetic records, wrapping
+metadata and the existing interpreter host defaults. Install Build is disabled;
+there is no feed, network or filesystem access. The historical source is unchanged.
+
+`TronMobileUITests` also carries this folder so
+`TronAppsInstallDesignUITests` can run both exact sources through the real
+interpreter and capture light/dark/default/XXXL list/detail comparisons. A separate
+hosted-only Install App review composes shared settings/document components.
+Captures are diagnostic, not real-Gateway install or receipt acceptance.
+
+```sh
+TRON_IOS_TEST_BUILD_TIMEOUT_SECONDS=300 scripts/tron-ios-test build
+TRON_IOS_TEST_FOCUSED_TIMEOUT_SECONDS=300 scripts/tron-ios-test run \\
+  --only-testing TronMobileUITests/TronAppsInstallDesignUITests
+```
+
+The native result bundle retains originals. For this maintainer-requested review,
+the combined contact sheets and design/manual-test notes go to Home's explicitly
+specified `files/apps-install-flow/`, not the default mini-app evidence location.
+Visible UI must be approved before landing. The real install/update grant,
+receipt flow, declared feed and persisted-format decision remain unimplemented.

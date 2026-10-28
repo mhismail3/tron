@@ -43,8 +43,22 @@ stacks. Theme values are environment defaults, so a program's own `font`, `tint`
 ## Installed apps (#1156)
 
 Installed apps with their own Mac-side data are the Gateway's (`swift-apps.v1`, the
-`swift_app` tool; [Gateway Swift apps](../../gateway/docs/swift-apps.md)); this runner does not
-use them yet.
+`swift_app` tool; [Gateway Swift apps](../../gateway/docs/swift-apps.md)). The Tron
+menu's Apps sheet opens a coherent source/state snapshot in this runner through
+`InstalledSwiftApps`; accepted writes stay with that receipt-backed owner across
+runner dismissal. Manage supports rename, clear data and removal. Source
+installation is currently tool-only; displayed Swift files still run disposable
+previews, not installed instances.
+
+## Install design review (#1162)
+
+The hosted-only `-tron-apps-install-design-fixture` composes an Install App
+review using shared settings/document components; it does not register an
+installation or contact a Gateway. `TronAppsInstallDesignUITests` capture the
+unchanged historical Builds source beside the
+[Builds visual proposal](../../../tools/web/apps/builds-preview/README.md#installation-design-review-1162) in the actual
+interpreter (light/dark/default/XXXL). Both disable build installation. The
+proposal is not the declared feed or installed-app install/update flow.
 
 ## Flag
 
