@@ -274,7 +274,8 @@ struct HomeTaskSheet: View {
                     }
                     Button { checkinHistory = .taskHistory(task.taskId) } label: {
                         TronSettingsRow(icon: "clock.arrow.circlepath", title: "View all check-ins",
-                                        subtitle: "Every operation and resume", accent: accent)
+                                        subtitle: "Every operation and resume", accent: accent,
+                                        subtitleFont: TronTypography.settingsRowSubtext)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("home-task-view-checkins")

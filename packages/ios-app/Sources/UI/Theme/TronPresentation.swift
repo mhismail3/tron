@@ -660,11 +660,21 @@ private struct TronTextEntryDoneModifier: ViewModifier {
                     if focus.wrappedValue {
                         ToolbarItemGroup(placement: .keyboard) {
                             Spacer()
+                            // Keyboard accessories use the native borderless toolbar
+                            // control, not automatic Liquid Glass button chrome.
                             Button("Done") { onDone(); focus.wrappedValue = false }
-                                .font(TronTypography.buttonSM)
+                                .buttonStyle(.borderless)
+                                .controlSize(.regular)
+                                .font(.body)
+                                // Honor the native label's intrinsic width, rather
+                                // than compressing it into the settings proposal.
+                                .fixedSize(horizontal: true, vertical: false)
                                 .tronToolbarAction()
                                 .accessibilityIdentifier("text-entry-done")
                         }
+                        // The keyboard owns its accessory background. A shared
+                        // toolbar glass capsule paints beyond the item's AX frame.
+                        .sharedBackgroundVisibility(.hidden)
                     }
                 }
         } else {
@@ -1549,6 +1559,7 @@ struct TronSettingsGroup<Content: View>: View {
     let title: String?
     let detail: String?
     let inlineDetail: String?
+    let trailingDetail: String?
     let accent: Color
     let surfaceStyle: TronSettingsGroupSurfaceStyle
     @Environment(\.tronSettingsSectionCount) private var sectionCount
@@ -1559,6 +1570,7 @@ struct TronSettingsGroup<Content: View>: View {
         _ title: String?,
         detail: String? = nil,
         inlineDetail: String? = nil,
+        trailingDetail: String? = nil,
         accent: Color = .tronPrimary,
         surfaceStyle: TronSettingsGroupSurfaceStyle = .glass,
         @ViewBuilder content: () -> Content
@@ -1566,6 +1578,7 @@ struct TronSettingsGroup<Content: View>: View {
         self.title = title
         self.detail = detail
         self.inlineDetail = inlineDetail
+        self.trailingDetail = trailingDetail
         self.accent = accent
         self.surfaceStyle = surfaceStyle
         self.content = content()
@@ -1576,9 +1589,18 @@ struct TronSettingsGroup<Content: View>: View {
             if (sectionCount != 1 && title != nil) || detail != nil {
                 VStack(alignment: .leading, spacing: TronSpacing.xs) {
                     if let heading {
-                        heading
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityAddTraits(.isHeader)
+                        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
+                            heading.fixedSize(horizontal: false, vertical: true)
+                                .accessibilityAddTraits(.isHeader)
+                            if let trailingDetail {
+                                Spacer(minLength: TronSpacing.md)
+                                Text(trailingDetail)
+                                    .font(TronTypography.settingsRowSubtext)
+                                    .foregroundStyle(Color.tronTextSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
                     }
                     if let detail { TronSettingsCaption(detail, inset: 0) }
                 }

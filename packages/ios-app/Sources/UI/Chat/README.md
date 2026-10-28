@@ -199,10 +199,12 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   settings theme locally so the decorative icon cannot revert to primary. Pause memory stays standard.
 - Tasks default to in-progress/attention lineages; the shared toolbar filter exposes finished
   and all work. The Gateway owns grouping by explicit resume links, never by title.
-- Task check-ins use shared settings rows: summary headline, current-operation context,
-  recorded attention metadata and labelled Done/Next/Blocked fields. Relative time opens
+- Task check-ins use shared list insets and line/block spacing once per record: summary headline,
+  standard settings-size current-operation/attention metadata and labelled Done/Next/Blocked fields.
+  Relative time shares the heading row with a full 44-point target and opens
   the exact date and operation, also available to accessibility. Canonical prose stays literal;
-  missing spaces in submitted prose are never guessed by a renderer.
+  missing spaces in submitted prose are never guessed by a renderer. Memory’s individual/summary
+  separator uses quiet shared subtext, flanking rules and equal spacing to the cards on both sides.
 - View all check-ins uses the shared paged feed across every resume, retaining operation
   events even when no check-in was sent. A check-in opens its carried full record without
   another read; the feed's identity fences its filter and each continuation. An explicit

@@ -129,7 +129,7 @@ struct AvailableToolsList: View {
         TronSettingsSections(alignment: .leading, spacing: 18, lazy: true) {
             ForEach(groups) { group in
                 let enabled = group.tools.filter { active.contains($0.name) }.count
-                TronSettingsGroup(group.title, detail: "\(enabled) of \(group.tools.count) on", accent: accent,
+                TronSettingsGroup(group.title, trailingDetail: "\(enabled) of \(group.tools.count) on", accent: accent,
                                   surfaceStyle: .scrollOptimized) {
                     ForEach(Array(group.tools.enumerated()), id: \.element.id) { index, tool in
                         if index > 0 { TronSettingsDivider(accent: accent) }

@@ -40,30 +40,58 @@ struct HomeTaskCheckinView: View {
     private var accent: Color { theme?.accent ?? .tronPrimary }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let heading {
-                TronSettingsRow(icon: "text.bubble", title: heading, accent: accent)
-            }
-            TronSettingsRow(icon: nil, title: checkin.step, subtitle: metadata,
-                            subtitleLineLimit: nil, accent: accent)
-                .tronListMarkers("\(identifier)-summary")
-            Button { showingTime = true } label: {
-                TronSettingsRow(icon: "clock", title: HomeSheetTime.relative(checkin.at) ?? checkin.at, accent: accent,
-                                titleFont: TronTypography.settingsRowSubtext, titleColor: .tronTextSecondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(HomeSheetTime.relative(checkin.at) ?? checkin.at), \(absoluteTime)")
-            .accessibilityHint("Show the exact check-in time and operation")
-            .accessibilityIdentifier("\(identifier)-time")
-            .popover(isPresented: $showingTime) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(verbatim: absoluteTime).font(TronTypography.subheadline)
-                    Text(verbatim: "Operation: \(checkin.operationId)").font(TronTypography.settingsRowSubtext)
+        // This is one record, not a stack of independently padded settings rows.
+        // Keep the shared list's outer insets and inter-block rhythm exactly once.
+        VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
+            HStack(alignment: .firstTextBaseline, spacing: TronListMetrics.slotGap) {
+                if let heading {
+                    HStack(spacing: TronListMetrics.slotGap) {
+                        Image(systemName: "text.bubble").foregroundStyle(accent)
+                        Text(heading).foregroundStyle(Color.tronTextPrimary)
+                    }
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    Spacer(minLength: 0)
                 }
-                .padding(16)
-                .accessibilityIdentifier("\(identifier)-absolute-time")
-                .presentationCompactAdaptation(.popover)
+                Button { showingTime = true } label: {
+                    HStack(spacing: TronListMetrics.lineGap) {
+                        Image(systemName: "clock")
+                        Text(HomeSheetTime.relative(checkin.at) ?? checkin.at)
+                            .tronListMarker(.title)
+                    }
+                        .font(TronTypography.settingsRowSubtext)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .tronListMarkers("\(identifier)-timestamp")
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(HomeSheetTime.relative(checkin.at) ?? checkin.at), \(absoluteTime)")
+                .accessibilityHint("Show the exact check-in time and operation")
+                .accessibilityIdentifier("\(identifier)-time")
+                .popover(isPresented: $showingTime) {
+                    VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
+                        Text(verbatim: absoluteTime).font(TronTypography.subheadline)
+                        Text(verbatim: "Operation: \(checkin.operationId)").font(TronTypography.settingsRowSubtext)
+                    }
+                    .padding(16)
+                    .accessibilityIdentifier("\(identifier)-absolute-time")
+                    .presentationCompactAdaptation(.popover)
+                }
             }
+            VStack(alignment: .leading, spacing: TronListMetrics.lineGap) {
+                Text(verbatim: checkin.step)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .tronListMarker(.title)
+                if let metadata {
+                    Text(verbatim: metadata)
+                        .font(TronTypography.settingsRowSubtext)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .tronListMarker(.subtext)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .tronListMarkers("\(identifier)-summary")
             section("Done", text: checkin.done, suffix: "done")
             section("Next", text: checkin.next, suffix: "next")
             if let blocker = checkin.blocker { section("Blocked", text: blocker, suffix: "blocked") }
@@ -74,6 +102,9 @@ struct HomeTaskCheckinView: View {
                 }
             }
         }
+        .padding(.horizontal, TronListMetrics.horizontalPadding)
+        .padding(.vertical, TronListMetrics.verticalPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
     }
@@ -96,10 +127,19 @@ struct HomeTaskCheckinView: View {
         return facts.isEmpty ? nil : facts.joined(separator: " · ")
     }
     private func section(_ title: String, text: String, suffix: String) -> some View {
-        TronSettingsRow(icon: nil, title: title, subtitle: text, subtitleLineLimit: nil,
-                        accent: accent, subtitleFont: TronTypography.subheadline)
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("\(identifier)-\(suffix)")
-            .tronListMarkers("\(identifier)-\(suffix)")
+        VStack(alignment: .leading, spacing: TronListMetrics.lineGap) {
+            Text(title)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronTextPrimary)
+                .tronListMarker(.title)
+            Text(verbatim: text)
+                .font(TronTypography.subheadline)
+                .foregroundStyle(Color.tronTextPrimary)
+                .tronListMarker(.subtext)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("\(identifier)-\(suffix)")
+        .tronListMarkers("\(identifier)-\(suffix)")
     }
 }
