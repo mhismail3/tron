@@ -56,7 +56,7 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   destinations; an explicit semantic accent keeps its own surface unless one is supplied.
   Semantic status and resource identities stay independent. UIKit inputs refresh primary ink
   on update, not only creation. Home and session composer placeholders share `inputPlaceholder`,
-  primary ink at 70% opacity; typed text and controls retain full primary ink. This preserves theme
+  primary ink at 60% opacity; typed text and controls retain full primary ink. This preserves theme
   hue rather than using neutral muted text; dark Burgundy inherits the palette's low-contrast
   small-text exception and is not a WCAG AA placeholder. Normal usage labels, context-ring arcs and Changes states use primary;
   warning and failure colors remain semantic. Memory kind icons use smaller primary symbols.
