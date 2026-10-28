@@ -222,9 +222,12 @@ struct HomePagedListSheet: View {
                 TronListDivider(inset: 0)
                 Text("Newer messages are shown individually")
                     .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronPrimary)
+                    .tronListMarker(.title)
                 Text("Older messages are folded into summaries.")
                     .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
+                    .tronListMarker(.subtext)
             }
+            .tronListMarkers("home-memory-boundary")
             .padding(.horizontal, TronListMetrics.horizontalPadding).padding(.vertical, 8)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("home-memory-resolution-boundary")

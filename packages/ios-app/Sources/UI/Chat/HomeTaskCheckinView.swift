@@ -50,6 +50,7 @@ struct HomeTaskCheckinView: View {
             Button { showingTime = true } label: {
                 TronSettingsRow(icon: "clock", title: HomeSheetTime.relative(checkin.at) ?? checkin.at, accent: accent,
                                 titleFont: TronTypography.settingsRowSubtext, titleColor: .tronTextSecondary)
+                    .tronListMarkers("\(identifier)-timestamp")
             }
             .buttonStyle(.plain)
             .accessibilityLabel("\(HomeSheetTime.relative(checkin.at) ?? checkin.at), \(absoluteTime)")
