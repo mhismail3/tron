@@ -43,7 +43,7 @@ export class AutomationService {
     private readonly onRecoveryStep: AutomationRecoveryStep = () => {},
     private readonly homeTarget?: () => InputTriggerRoute | undefined,
   ) {
-    this.homeTrigger = homeTarget ? new AutomationHomeTrigger(store, id => targets.sessionFile(id)) : undefined;
+    this.homeTrigger = homeTarget ? new AutomationHomeTrigger(store, id => targets.sessionFile(id), homeTarget) : undefined;
   }
 
   async initialize(): Promise<void> {
@@ -197,6 +197,7 @@ export class AutomationService {
     provenance: AutomationProvenance,
   ): Promise<AutomationRecord> {
     this.scheduler.assertRunRetired(runId);
+    await this.homeTrigger?.reconcileStale(id, runId);
     const resolved = await this.store.resolveUnknown(id, expectedRevision, runId, outcome, provenance);
     this.scheduler.wake();
     return resolved;

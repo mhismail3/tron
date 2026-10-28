@@ -42,6 +42,9 @@ one accepted recovery through the existing work owner.
   resolvers and HTTP stubs. `network-isolation.ts` refuses any non-loopback TCP
   connection from an in-process socket and fails the current test (or file). It does
   not cover child processes or DNS.
+- **Authority journeys.** The lock harness's `knowledge` option constructs the real
+  Knowledge store/service and supplies Home the same settings/profile approval owner as
+  transport. Model tool dispatch never receives the paired client's decision RPCs.
 - **Wire inputs.** The protocol lock selects unbranded runtime provenance before
   constructing its real Gateway. A separate supervised case checks the three
   explicit identity values and full hello/`system.info` shapes against that base

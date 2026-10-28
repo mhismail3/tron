@@ -17,7 +17,11 @@ concrete refusal errors stay with the implementing module. `canonical-append.ts`
 carries live writer facts and an opaque module-issued authority, never a copy of
 chapter state or a second Stop fence. `input-admission.ts` carries delivery identities,
 bounds, the canonical context-delivery receipt type and live envelope readers;
-delivery state and budgeting remain module-owned.
+delivery state and budgeting remain module-owned. Typed trigger-source attribution separates
+producer and firing identity and grants no maintainer authority. A resumed trigger may name
+its already-written `deliveryMessage`: the native owner binds the new hidden wake input,
+then commits that original message's receipt before source acknowledgement and model input.
+The producer owns recovery and stale-route disposition; the host owns no trigger queue.
 `session-profile.ts` owns the neutral immutable runtime recipe and ordinary defaults.
 `session-lineage.ts` also owns `LineageRuntimePort<Runtime>`: single-flight runtime
 construction/publication with an opaque issuer-interpreted authority object. Its

@@ -143,6 +143,9 @@ canonical context attribution identifies the automation, while each firing keeps
 own event ID. The visible label is **Automation · name**, never a user-message row.
 The Run owner writes canonical binding and context attribution before the automation
 request gate proceeds; only a durable canonical proof retires its source outbox.
+A recovered partial input remains in that batch. For a singleton, a hidden native resume
+input starts the existing SDK lifecycle; `deliveryMessage` binds the original producer
+message before acknowledgement, never duplicating its visible message or claiming user authority.
 Automations enforce their own per-definition cooldown; task-result timing is unchanged.
 See [Automations](../../automations/README.md) for queue, cancellation and settlement.
 
