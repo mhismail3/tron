@@ -8,17 +8,12 @@ struct TrustedProjectsSettingsView: View {
     static let policyKey = "permissions.defaultProjectTrust"
     static let keys: Set<String> = [key, policyKey]
 
-    private enum Entry: String, Identifiable {
-        case projects
-        var id: String { rawValue }
-    }
-
     var body: some View {
-        TronListGroup([Entry.projects], identifier: "trusted-projects-entry") { _ in
-            TronProgressiveSheetLink(accessibilityLabel: "Trusted Projects", detents: .fixed([.large])) {
+        TronSettingsGroup("Projects") {
+            TronProgressiveSheetLink(accessibilityLabel: "Trusted Projects") {
                 ProjectLifecycleView(route: .list)
             } label: {
-                TronListRow(TronListRowContent(leading: .icon("checkmark.shield", .tronPrimary), title: "Trusted Projects"))
+                TronSettingsRow(icon: "checkmark.shield", title: "Trusted Projects")
             }
         }
     }

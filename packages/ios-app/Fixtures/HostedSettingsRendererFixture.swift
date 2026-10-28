@@ -94,18 +94,22 @@ struct HostedSettingsRendererFixture: View {
                 TronSettingsRow(icon: "slider.horizontal.3", title: "Summary thinking", subtitle: "Value and reset remain independent targets.") {
                     Button {} label: { TronInlineActionLabel("High") }.buttonStyle(.plain)
                         .accessibilityIdentifier("alignment.revert-value")
-                    Button {} label: { TronInlineActionLabel("", icon: "arrow.uturn.backward") }
-                        .buttonStyle(.plain).accessibilityLabel("Revert")
-                        .accessibilityIdentifier("alignment.revert")
                 }
+                .environment(\.tronSettingsRowAccessory, {
+                    AnyView(Button {} label: { TronInlineActionLabel("", icon: "arrow.uturn.backward", alignment: .leading) }
+                        .buttonStyle(.plain).accessibilityLabel("Revert")
+                        .accessibilityIdentifier("alignment.revert"))
+                })
                 TronSettingsDivider()
                 TronSettingsRow(icon: "number", title: "Optional override", subtitle: "Unset uses the same circular control geometry.") {
                     Button {} label: { TronInlineActionLabel("16,384 tokens") }.buttonStyle(.plain)
                         .accessibilityIdentifier("alignment.unset-value")
-                    Button {} label: { TronInlineActionLabel("", icon: "minus") }
-                        .buttonStyle(.plain).accessibilityLabel("Unset")
-                        .accessibilityIdentifier("alignment.unset")
                 }
+                .environment(\.tronSettingsRowAccessory, {
+                    AnyView(Button {} label: { TronInlineActionLabel("", icon: "minus", alignment: .leading) }
+                        .buttonStyle(.plain).accessibilityLabel("Unset")
+                        .accessibilityIdentifier("alignment.unset"))
+                })
             }
             .padding(20)
         }
@@ -235,6 +239,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     func releasePreview() { heldPreview?.resume(); heldPreview = nil }
 
     private var hello = true
+    private var projectReads = 0
     private var receiver: CheckedContinuation<Data, Error>?
     private var pending: [Data] = []
     private var closed = false
@@ -318,6 +323,21 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "session.workspace.list":
             result = .object(["root": .string("/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"),
                 "path": .string(""), "parent": .null, "revision": .string("preview"), "entries": .array([])])
+        case "projects.list":
+            projectReads += 1
+            if ProcessInfo.processInfo.arguments.contains("-projects-withhold-once"), projectReads == 1 { return }
+            if ProcessInfo.processInfo.arguments.contains("-projects-fail-once"), projectReads == 1 {
+                try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(false),
+                    "error": .object(["code": .string("busy"), "message": .string("Project listing is unavailable. Try again."), "retryable": .bool(true)])]))
+                return
+            }
+            result = .object(["workspace": .string("/fixture/projects"), "projects": .array([
+                .object(["name": .string("Example"), "path": .string("/fixture/projects/Example"),
+                    "trust": .object(["effectiveDecision": .bool(true)]),
+                    "eligibility": .object(Dictionary(uniqueKeysWithValues: ["trust", "github", "rename", "archive", "untrust"].map {
+                        ($0, JSONValue.object(["allowed": .bool(true)]))
+                    }))])
+            ]), "nextCursor": .null])
         case "trust.inspect": result = .object(["requiresDecision": .bool(false), "effectiveDecision": .bool(true)])
         case "git.inspect": result = .object(["isRepository": .bool(true), "branch": .null, "dirty": .bool(false), "branches": .array([]), "commits": .array([])])
         case "model.recent": result = .object(["models": .array([])])
@@ -537,7 +557,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private func resolution() -> JSONValue {
         if ProcessInfo.processInfo.arguments.contains("-settings-expanded-review") {
             let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model", "catalog", essential: true)]
-                + HostedSettingsReviewSchema.additionalKeys
+                + (ProcessInfo.processInfo.arguments.contains("-agent-behavior-regression")
+                    ? HostedSettingsReviewSchema.agentBehaviorKeys : HostedSettingsReviewSchema.additionalKeys)
                 + (ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review") ? HostedSettingsReviewSchema.sheetThemeKeys : [])
                 + [HostedSettingsReviewSchema.key("setup.sessionDir", "setup", "Session folder", .string("/workspace/sessions"), "/workspace/sessions", "readOnly", help: "Where chats are stored. Applies after a restart."),
                    HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
@@ -565,13 +586,17 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 .object(["id": .string("setup"), "title": .string("Setup"), "order": .number(80)])])])
         }
         if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
-            // Match the reported mix: owned automatic/summary overrides beside
-            // an inherited branch value, through the actual schema renderer.
-            let keys = HostedSettingsReviewSchema.additionalKeys.filter { $0.objectValue?["group"]?.stringValue == "context" }.map { value -> JSONValue in
-                guard var row = value.objectValue else { return value }
-                if row["key"]?.stringValue == "context.branchSummary.reserveTokens" {
-                    row["layers"] = .array([.object(["layer": .string("global"), "value": row["value"] ?? .null])])
-                }
+            // Geometry is the generic renderer's contract, not an editing route
+            // for retired compaction keys. Serve the same short/long value shapes
+            // as the primitive gallery through schema-negotiated choice controls.
+            let keys = [("inherited", "Inherited value", "16,384 tokens", false),
+                        ("short", "Short value", "—", false),
+                        ("revert", "Owned value", "High", true),
+                        ("unset", "Optional override", "16,384 tokens", true)].enumerated().map { index, item -> JSONValue in
+                var row = HostedSettingsReviewSchema.key("alignment.\(item.0)", "context", item.1,
+                    .string(item.2), item.2, "choice", order: Double(index),
+                    options: [.object(["value": .string(item.2), "label": .string(item.2)])]).objectValue!
+                row["overridden"] = .bool(item.3)
                 return .object(row)
             }
             return .object(["target": .object(["kind": .string("global")]), "layers": .array([.string("global")]),
@@ -757,8 +782,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            let capabilities = ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review")
-                ? #"["sessions.v1","gateway-update.v1","restart-supervised.v1"]"# : #"["sessions.v1"]"#
+            let capabilities = ProcessInfo.processInfo.arguments.contains("-agent-behavior-regression")
+                ? #"["sessions.v1","projects.lifecycle.v1"]"#
+                : ProcessInfo.processInfo.arguments.contains("-settings-sheet-theme-review")
+                    ? #"["sessions.v1","gateway-update.v1","restart-supervised.v1"]"# : #"["sessions.v1"]"#
             return Data("""
                 {"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":\(capabilities)}
                 """.utf8)

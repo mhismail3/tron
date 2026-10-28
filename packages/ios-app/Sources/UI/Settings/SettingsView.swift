@@ -231,12 +231,13 @@ struct GlobalAgentBehaviorView: View {
         ScrollView {
             TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
                 ForEach(["model", "workers", "context"], id: \.self) { section in
-                    SettingsRendererView(target: target, writeLayer: "global", presentation: .section(section), embedded: true)
+                    SettingsRendererView(target: target, writeLayer: "global", presentation: .section(section), embedded: true,
+                                         showsGroupHeadings: true)
                 }
                 TrustedProjectsSettingsView()
                 ForEach(["approvals", "run"], id: \.self) { section in
                     SettingsRendererView(target: target, writeLayer: "global", presentation: .section(section), embedded: true,
-                                         selection: .allExcept(TrustedProjectsSettingsView.keys))
+                                         showsGroupHeadings: true, selection: .allExcept(TrustedProjectsSettingsView.keys))
                 }
             }.padding(20)
         }
@@ -431,7 +432,7 @@ struct SessionSettingsView: View {
             } else {
                 SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
                     projectCWD: projectCWD, presentation: .section(id), embedded: true,
-                    hidesLoneHeading: false, selection: selection)
+                    showsGroupHeadings: true, selection: selection)
             }
         }
     }

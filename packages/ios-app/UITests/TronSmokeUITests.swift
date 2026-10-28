@@ -598,7 +598,7 @@ final class TronSmokeUITests: XCTestCase {
                         app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
                     }
                     app.launch()
-                    XCTAssertTrue(app.staticTexts[surface == "compaction" ? "Automatic compaction" : "Inherited value"].firstMatch.waitForExistence(timeout: 10))
+                    XCTAssertTrue(app.staticTexts["Inherited value"].firstMatch.waitForExistence(timeout: 10))
                     keepScreenshot(named: "1321-\(surface)-\(appearance)-\(textSize)")
                     if textSize == "accessibility" {
                         app.scrollViews.firstMatch.swipeUp()
@@ -628,13 +628,13 @@ final class TronSmokeUITests: XCTestCase {
                     let button: (String, String) -> XCUIElement = { id, label in
                         app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", id, label)).firstMatch
                     }
-                    let inherited = gallery ? button("alignment.inherited", "16,384 tokens") : settingEditor(row("context.branchSummary.reserveTokens"))
-                    let short = gallery ? button("alignment.short", "—") : app.buttons["settings-row-context.compaction.enabled-reset"]
+                    let inherited = gallery ? button("alignment.inherited", "16,384 tokens") : settingEditor(row("alignment.inherited"))
+                    let short = gallery ? button("alignment.short", "—") : settingEditor(row("alignment.short"))
                     let pairs = gallery
                         ? [(button("alignment.revert-value", "High"), button("alignment.revert", "Revert")),
                            (button("alignment.unset-value", "16,384 tokens"), button("alignment.unset", "Unset"))]
-                        : [(settingEditor(row("context.compaction.reserveTokens")), app.buttons["settings-row-context.compaction.reserveTokens-reset"]),
-                           (settingEditor(row("model.thinking_role_summarizer_")), app.buttons["settings-row-model.thinking_role_summarizer_-reset"])]
+                        : [(settingEditor(row("alignment.revert")), app.buttons["settings-row-alignment.revert-reset"]),
+                           (settingEditor(row("alignment.unset")), app.buttons["settings-row-alignment.unset-reset"])]
                     var measurements = [String]()
                     func measure(_ target: XCUIElement, circle: Bool = false) -> CGRect {
                         XCTAssertTrue(target.waitForExistence(timeout: 10), app.debugDescription)
@@ -648,7 +648,7 @@ final class TronSmokeUITests: XCTestCase {
                         // AX can serialize 44 as 43.999999999999986.
                         XCTAssertGreaterThanOrEqual(hit.width + 0.001, 44)
                         XCTAssertGreaterThanOrEqual(hit.height + 0.001, 44)
-                        let visible = paintedSettingsControl(target, in: app)
+                        let visible = paintedSettingsControl(target, in: app, backgroundX: inherited.frame.maxX + 6)
                         if circle {
                             XCTAssertEqual(hit.width, hit.height, accuracy: 0.5)
                             XCTAssertEqual(visible.width, 28, accuracy: 1.5, "Round glass diameter, not the hit frame")
@@ -660,13 +660,13 @@ final class TronSmokeUITests: XCTestCase {
                     let right = measure(inherited).maxX
                     // Native renderer groups use the standard 20pt sheet + 14pt row inset.
                     XCTAssertEqual(right, app.windows.firstMatch.frame.maxX - 34, accuracy: 1)
-                    XCTAssertEqual(measure(short, circle: !gallery).maxX, right, accuracy: 1)
+                    XCTAssertEqual(measure(short).maxX, right, accuracy: 1)
                     for (value, circle) in pairs {
                         let valuePaint = measure(value)
                         let circlePaint = measure(circle, circle: true)
-                        XCTAssertEqual(circlePaint.maxX, right, accuracy: 1, "Painted trailing edges must match the standalone value")
-                        XCTAssertEqual(circlePaint.minX - valuePaint.maxX, 16, accuracy: 1, "Visible spacing must not depend on glyph or value width")
-                        XCTAssertLessThanOrEqual(value.frame.maxX, circle.frame.minX + 0.5, "Independent targets must not overlap")
+                        XCTAssertEqual(valuePaint.maxX, right, accuracy: 1, "Painted value trailing edges must match the standalone value")
+                        XCTAssertEqual(valuePaint.minX - circlePaint.maxX, 16, accuracy: 1, "Visible spacing must not depend on glyph or value width")
+                        XCTAssertLessThanOrEqual(circle.frame.maxX, value.frame.minX + 0.5, "Independent targets must not overlap")
                     }
                     let name = "1321-measured-\(gallery ? "gallery" : "compaction")-\(appearance)-\(largeText ? "large" : "standard")"
                     let attachment = XCTAttachment(string: measurements.joined(separator: "\n"))
@@ -682,7 +682,7 @@ final class TronSmokeUITests: XCTestCase {
     /// No production geometry hook or inferred inset from the 44pt frame: raster
     /// sampling detects a centered 28pt circle ending 8pt before the target edge.
     @MainActor
-    private func paintedSettingsControl(_ target: XCUIElement, in app: XCUIApplication) -> CGRect {
+    private func paintedSettingsControl(_ target: XCUIElement, in app: XCUIApplication, backgroundX: CGFloat) -> CGRect {
         guard let image = XCUIScreen.main.screenshot().image.cgImage else { XCTFail("Missing pixels"); return .zero }
         let frame = target.frame
         let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
@@ -703,7 +703,9 @@ final class TronSmokeUITests: XCTestCase {
             }
             return samples
         }
-        let background = strip(CGRect(x: (frame.maxX + 6) * scale, y: frame.midY * scale, width: 1, height: 1)).first ?? []
+        // Sample beyond the entire action cluster, not just this target. A reset
+        // now precedes its value: target.maxX + 6 falls inside the neighboring pill.
+        let background = strip(CGRect(x: backgroundX * scale, y: frame.midY * scale, width: 1, height: 1)).first ?? []
         func extent(_ rect: CGRect, reversed: Bool = false) -> ClosedRange<CGFloat> {
             let samples = strip(rect)
             let ink = samples.indices.filter { index in

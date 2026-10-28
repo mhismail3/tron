@@ -106,7 +106,7 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let lines = max(1, (heading.frame.height / pill.frame.height).rounded())
         XCTAssertEqual(pill.frame.midY, heading.frame.minY + heading.frame.height / lines / 2, accuracy: 0.75,
                        "\(title): Overridden is centered on the title line: \(pill.frame) vs \(heading.frame)", file: file, line: line)
-        XCTAssertGreaterThanOrEqual(revert.frame.minX + 0.001, editor.frame.maxX, "\(title): Revert follows the value", file: file, line: line)
+        XCTAssertLessThanOrEqual(revert.frame.maxX, editor.frame.minX + 0.001, "\(title): Revert precedes the value", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.width, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)
         XCTAssertGreaterThanOrEqual(revert.frame.height, 43.5, "\(title): Revert keeps a 44-point target", file: file, line: line)
         assertRendersWhole(editor, matching: pattern, named: "1651-\(prefix)-value", file: file, line: line)
