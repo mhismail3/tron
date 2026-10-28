@@ -3,7 +3,7 @@ import { GatewayError, isUncertainOutcome, uncertainOutcome } from "../errors.js
 import { automationOperationId } from "../modules/automations/identity.js";
 import { AutomationStore, settleAutomationRun } from "./automation-store.js";
 import { automationOccurrenceId, classifyDueOccurrence } from "./schedule.js";
-import type { AutomationRecord, AutomationRun, AutomationRunState } from "./types.js";
+import { AUTOMATION_HOME_COOLDOWN_MS, type AutomationRecord, type AutomationRun, type AutomationRunState } from "./types.js";
 
 const MAXIMUM_CONCURRENT_AUTOMATIONS = 4;
 const MAXIMUM_DISPATCHES_PER_SCAN = 64;
@@ -52,6 +52,7 @@ export class AutomationAdmissionError extends Error {
 
 interface AutomationSchedulerOptions {
   hostEpoch: string;
+  onHomePending?: () => void;
   onDiagnostic?: (message: string, automationId: string, runId?: string) => void;
   onBlocked?: (record: AutomationRecord, run: AutomationRun) => Promise<void> | void;
 }
@@ -120,7 +121,7 @@ export class AutomationScheduler {
     await this.executor.reconcileStoredTerminals?.(records);
     for (const record of records) {
       const run = record.currentRun;
-      if (!run || run.state === "queued" || run.state === "waiting") continue;
+      if (!run || run.targetSnapshot.kind === "home" || run.state === "queued" || run.state === "waiting") continue;
       let result: AutomationRecoveryResult;
       try {
         result = this.executor.recover
@@ -262,7 +263,7 @@ export class AutomationScheduler {
       if (current.revision !== expectedRevision) {
         throw new GatewayError("conflict", "Automation changed. Review it before running it.", true);
       }
-      if (current.currentRun) throw new GatewayError("busy", "Automation already has an active run", true);
+      if (current.currentRun && current.target.kind !== "home") throw new GatewayError("busy", "Automation already has an active run", true);
       if (current.activation === "blocked") throw new GatewayError("conflict", "Resolve the blocked automation before running it");
       const scheduledFor = new Date(this.now()).toISOString();
       created = this.makeRun(
@@ -271,8 +272,14 @@ export class AutomationScheduler {
         automationOccurrenceId(current.id, current.revision, `manual:${randomUUID()}`),
         true,
       );
-      return { ...current, currentRun: created };
+      const next = current.currentRun ? { ...current, pendingHomeRuns: [...current.pendingHomeRuns ?? [], created] }
+        : { ...current, currentRun: created };
+      if (current.target.kind === "home" && current.homeWakeAt && Date.parse(current.homeWakeAt) + AUTOMATION_HOME_COOLDOWN_MS > this.now()) {
+        next.homeWakeAfter = new Date(Date.parse(current.homeWakeAt) + AUTOMATION_HOME_COOLDOWN_MS).toISOString();
+      }
+      return next;
     });
+    if (updated.target.kind === "home") this.options.onHomePending?.();
     this.wake();
     return clone(created ?? updated.currentRun!);
   }
@@ -286,6 +293,27 @@ export class AutomationScheduler {
 
   private async cancelOwned(automationId: string, runId: string): Promise<AutomationRun> {
     const record = this.store.get(automationId);
+    const homeRun = [record.currentRun, ...record.pendingHomeRuns ?? []].find(run => run?.runId === runId && run.targetSnapshot.kind === "home");
+    if (homeRun) {
+      let cancelled: AutomationRun | undefined;
+      await this.store.mutateState(record.id, current => {
+        const queued = [current.currentRun, ...current.pendingHomeRuns ?? []].filter((run): run is AutomationRun => run !== undefined);
+        const run = queued.find(run => run.runId === runId);
+        if (!run) throw new GatewayError("conflict", "Automation run is no longer active", true);
+        if (run.homeDelivery) throw new GatewayError("busy", "Home already owns this message delivery; inspect its run before cancelling", true);
+        cancelled = { ...run, state: "cancelled", terminalAt: new Date(this.now()).toISOString(), reason: "user-cancelled" };
+        const remaining = queued.filter(item => item.runId !== runId);
+        const next = { ...current, lastRun: cancelled, history: [...current.history, cancelled].slice(-64), pendingHomeRuns: remaining.slice(1) };
+        if (remaining[0]) next.currentRun = remaining[0]; else delete next.currentRun;
+        if (!remaining.length) {
+          delete next.homeWakeAfter;
+          if (next.trigger.kind === "once" && next.activation === "enabled") next.activation = "completed";
+        }
+        return next;
+      });
+      this.wake();
+      return clone(cancelled!);
+    }
     const run = record.currentRun;
     if (!run || run.runId !== runId) throw new GatewayError("conflict", "Automation run is no longer active", true);
     const active = this.active.get(runId);
@@ -327,8 +355,14 @@ export class AutomationScheduler {
 
   private async performScan(): Promise<void> {
     await this.materializeDueRuns();
+    for (const record of this.store.snapshot()) {
+      if (record.target.kind !== "home" || !record.currentRun) continue;
+      if (record.homeWakeAfter && Date.parse(record.homeWakeAfter) > this.now()) continue;
+      if (record.homeWakeAfter) await this.store.mutateState(record.id, current => { delete current.homeWakeAfter; return current; });
+      this.options.onHomePending?.();
+    }
     const candidates = this.store.snapshot()
-      .filter((record) => record.currentRun
+      .filter((record) => record.target.kind !== "home" && record.currentRun
         && (record.activation === "enabled" || record.currentRun.manual === true)
         && (record.currentRun.state === "queued" || record.currentRun.state === "waiting")
         && (record.currentRun.retryAt === undefined || Date.parse(record.currentRun.retryAt) <= this.now()))
@@ -348,6 +382,7 @@ export class AutomationScheduler {
       // Existing-session runs serialize on their canonical session. Workspace
       // runs already have a unique predetermined session identity.
       const sessionKey = run.executionSessionId;
+      if (!sessionKey) throw new GatewayError("conflict", "Ordinary automation has no execution session");
       if (activeSessions.has(sessionKey)) continue;
       activeSessions.add(sessionKey);
       this.dispatchReservations.set(runId, { sessionId: sessionKey, controller: new AbortController() });
@@ -379,6 +414,13 @@ export class AutomationScheduler {
         else next.nextOccurrenceAt = classified.nextOccurrenceAt;
         const due = classified.dispatchAt ?? classified.skipped[0];
         if (!due) return next;
+        if (current.target.kind === "home" && classified.dispatchAt) {
+          const fired = this.makeRun(current, classified.dispatchAt, automationOccurrenceId(current.id, current.revision, classified.dispatchAt));
+          if (current.currentRun) next.pendingHomeRuns = [...current.pendingHomeRuns ?? [], fired];
+          else next.currentRun = fired;
+          if (current.homeWakeAt && Date.parse(current.homeWakeAt) + AUTOMATION_HOME_COOLDOWN_MS > now) next.homeWakeAfter = new Date(Date.parse(current.homeWakeAt) + AUTOMATION_HOME_COOLDOWN_MS).toISOString();
+          return next;
+        }
         if (current.currentRun) {
           if (current.overlapPolicy === "queueLatest" && classified.dispatchAt) next.queuedLatestOccurrence = classified.dispatchAt;
           else {
@@ -404,6 +446,7 @@ export class AutomationScheduler {
           automationOccurrenceId(current.id, current.revision, classified.dispatchAt));
         return next;
       });
+      if (record.target.kind === "home") this.options.onHomePending?.();
     }
   }
 
@@ -418,16 +461,18 @@ export class AutomationScheduler {
       triggerSnapshot: clone(record.trigger),
       actionSnapshot: clone(record.action),
       targetSnapshot: clone(record.target),
-      executionSessionId: record.target.kind === "existingSession" ? record.target.sessionId : randomUUID(),
+      ...(record.target.kind === "home" ? {} : { executionSessionId: record.target.kind === "existingSession" ? record.target.sessionId : randomUUID() }),
+      ...(record.target.kind === "home" ? { homeName: record.name } : {}),
       state: "queued",
       createdAt: new Date(this.now()).toISOString(),
       preAdmissionAttemptCount: 0,
-      operationId: automationOperationId(runId),
+      ...(record.target.kind === "home" ? {} : { operationId: automationOperationId(runId) }),
     };
   }
 
   private async dispatch(candidate: AutomationRecord): Promise<void> {
     const run = candidate.currentRun!;
+    if (!run.executionSessionId) throw new GatewayError("conflict", "Ordinary automation has no execution session");
     const claimId = randomUUID();
     const claimedAt = new Date(this.now()).toISOString();
     const claimed = await this.store.mutateState(candidate.id, (current) => {
@@ -749,6 +794,10 @@ export class AutomationScheduler {
     const records = this.store.snapshot();
     let nearest: number | undefined;
     for (const record of records) {
+      if (record.homeWakeAfter) {
+        const due = Date.parse(record.homeWakeAfter);
+        if (nearest === undefined || due < nearest) nearest = due;
+      }
       if (record.currentRun?.retryAt) {
         const retryAt = Date.parse(record.currentRun.retryAt);
         if (nearest === undefined || retryAt < nearest) nearest = retryAt;

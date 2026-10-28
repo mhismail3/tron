@@ -476,5 +476,5 @@ export function canonicalMessageBytes(message: InputMessage): number {
   const framing = { id: identity, parentId: identity, timestamp: new Date().toISOString() };
   return Buffer.byteLength(JSON.stringify({ ...framing, type: "custom_message", ...message })) + 1
     + Buffer.byteLength(JSON.stringify({ ...framing, type: "custom", customType: CONTEXT_DELIVERY_RECEIPT_TYPE,
-      data: makeContextDeliveryReceipt(identity, "stored", { source: "gateway:home-task", owner: { id: message.details.taskId, title: "Home task inbox", source: "gateway:home-task" } }) })) + 1;
+      data: makeContextDeliveryReceipt(identity, "stored", { source: "gateway:home-task", owner: { id: message.details.taskId!, title: "Home task inbox", source: "gateway:home-task" } }) })) + 1;
 }

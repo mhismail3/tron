@@ -27,6 +27,7 @@ import type { NotificationService } from "../src/notifications/notification-serv
 import { GatewayAutomationExecutor } from "../src/automations/automation-executor.js";
 import { AutomationScheduler } from "../src/automations/automation-scheduler.js";
 import { AutomationService } from "../src/automations/automation-service.js";
+import type { AutomationHomeTrigger } from "../src/automations/automation-home-trigger.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
 import { GatewayScheduleToolOperations } from "../src/automations/automation-tool-operations.js";
 import { homeWorkspaceDirectory } from "../src/modules/home/home-owner.js";
@@ -246,7 +247,9 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   let server: GatewayServer | undefined;
   const notificationService = await options.notifications?.(tronHome);
   const runtimeLifecycle: RuntimeLifecycleRecord[] = [];
+  let homeTriggers: AutomationHomeTrigger | undefined;
   const registry = await createTestRegistry({
+    triggerSources: () => homeTriggers ? [homeTriggers] : [],
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     ...(notificationService ? { notifications: notificationService, machineId: "lock-machine" } : {}),
     ...(options.automations ? {
@@ -293,8 +296,10 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     });
     const work = registry.administrativeWorkRegistry;
     const scheduler = new AutomationScheduler(store,
-      new GatewayAutomationExecutor(registry, work, notificationService, "lock-machine"), { hostEpoch: work.runtimeEpoch });
-    automations = new AutomationService(store, scheduler, registry);
+      new GatewayAutomationExecutor(registry, work, notificationService, "lock-machine"), { hostEpoch: work.runtimeEpoch,
+        onHomePending: () => homeOwnerOf(registry).notifyTrigger() });
+    automations = new AutomationService(store, scheduler, registry, undefined, undefined, () => homeOwnerOf(registry).triggerRoute());
+    homeTriggers = automations.homeTrigger;
     scheduleTool = new GatewayScheduleToolOperations(automations, receipts);
   }
   const lifecycleRequests: LockLifecycleRequest[] = [];

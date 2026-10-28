@@ -10,9 +10,11 @@ enum AutomationWorkspacePathPolicy {
 }
 
 private enum AutomationTargetMode: String, CaseIterable, Identifiable {
-    case workspace, existingSession
+    case workspace, existingSession, home
     var id: String { rawValue }
-    var title: String { self == .existingSession ? "Existing Session" : "New Session in Workspace" }
+    var title: String {
+        switch self { case .workspace: "New Session in Workspace"; case .existingSession: "Existing Session"; case .home: "Home" }
+    }
 }
 
 enum AutomationDateField: String, Identifiable {
@@ -171,6 +173,8 @@ struct AutomationFormView: View {
     @PresentationState private var actionContent = ""
     @PresentationState private var targetMode: AutomationTargetMode = .workspace
     @PresentationState private var targetSessionID = ""
+    @PresentationState private var homeTargetStatus: HomeStatusDTO?
+    @PresentationState private var savedHomeTarget: GatewayAutomationTarget?
     /// The name of a target the dashboard projection cannot hold. An archived
     /// session is excluded from that projection by contract, so the owning
     /// Gateway's archived projection supplies its name instead of showing an
@@ -370,7 +374,16 @@ struct AutomationFormView: View {
                 targetMode = .workspace
             }
         }
-        .onChange(of: targetMode) { _, _ in
+        .task(id: PresentationActivityTaskID(
+            source: "home:\(selectedProfileID):\(selectedEndpoint?.profile.connectionID ?? -1):\(targetMode):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard targetMode == .home, presentationActivity.allowsPresentationPublication, scenePhase == .active else { return }
+            await loadHomeTarget()
+        }
+        .onChange(of: targetMode) { _, next in
+            if next == .home { includesResource = false }
+            else { savedHomeTarget = nil }
             intervalAmount = min(max(intervalAmount, minimumIntervalAmount), maximumIntervalAmount)
         }
         .onChange(of: model.profileRevision) { _, _ in
@@ -440,7 +453,7 @@ struct AutomationFormView: View {
         section(
             "Action",
             detail: actionKind == .sessionPrompt
-                ? (targetMode == .workspace ? "Send text to a new session in the selected workspace." : "Send text to the selected session.")
+                ? (targetMode == .home ? "Send an attributed message to Home, not a maintainer instruction." : targetMode == .workspace ? "Send text to a new session in the selected workspace." : "Send text to the selected session.")
                 : "Queue a notification associated with the selected session."
         ) {
             VStack(spacing: 0) {
@@ -452,7 +465,7 @@ struct AutomationFormView: View {
                 .padding(14)
                 TronSettingsDivider(accent: .tronAutomation)
                 actionEditor
-                if actionKind == .sessionPrompt {
+                if actionKind == .sessionPrompt && targetMode != .home {
                     TronSettingsDivider(accent: .tronAutomation)
                     TronToggleRow(
                         icon: "sparkles",
@@ -476,19 +489,22 @@ struct AutomationFormView: View {
                 actionKind == .notification ? "Associated Session" : "Target",
                 detail: actionKind == .notification
                     ? "Notifications are associated with an existing persisted session."
-                    : "Choose an existing session or create a new ordinary session for every run."
+                    : "Choose Home, an existing session, or a new ordinary session for every run."
             ) {
                 VStack(spacing: 0) {
                     if actionKind == .sessionPrompt {
-                        TronSegmentedControl(
-                            options: AutomationTargetMode.allCases.map { ($0.title, $0) },
-                            selection: $targetMode,
-                            accent: .tronAutomation
-                        )
+                        TronSelectionRow(icon: "arrow.turn.down.right", title: "Destination", value: targetMode.title, accent: .tronAutomation) {
+                            ForEach(AutomationTargetMode.allCases.filter { $0 != .home || selectedEndpoint?.profile.capabilities.contains("home.v1") == true }) { mode in
+                                Button(mode.title) { targetMode = mode }
+                            }
+                        }
                         .padding(14)
                         TronSettingsDivider(accent: .tronAutomation)
                     }
-                    if targetMode == .existingSession || actionKind == .notification {
+                    if targetMode == .home && actionKind == .sessionPrompt {
+                        TronValueRow(icon: "house", title: "Home", value: homeTargetStatus?.phase.rawValue.capitalized ?? "Checking availability", accent: .tronAutomation)
+                        TronSettingsCaption("Every firing stays separate. Busy, paused, disabled or cooling messages wait and batch into one wake. Cooldown: 60 seconds per automation. Messages cannot approve settings, grants, trust or profile changes.")
+                    } else if targetMode == .existingSession || actionKind == .notification {
                         existingSessionTarget
                     } else {
                         workspaceTarget
@@ -840,6 +856,31 @@ struct AutomationFormView: View {
         switch targetMode {
         case .existingSession: return .existingSession(sessionID: targetSessionID)
         case .workspace: return .workspace(cwd: workspacePath, sessionPolicy: .newPerRun)
+        case .home: return savedHomeTarget ?? .home(homeID: homeTargetStatus?.homeId ?? "", routeGeneration: homeTargetStatus?.routeGeneration ?? 0)
+        }
+    }
+
+    private func loadHomeTarget() async {
+        let profileID = selectedProfileID
+        let connectionID = selectedEndpoint?.profile.connectionID
+        let generation = presentationReadGeneration
+        let foreground = model.foregroundReconciliationGeneration
+        homeTargetStatus = nil
+        guard let client, selectedEndpoint?.profile.capabilities.contains("home.v1") == true else { return }
+        do {
+            let value: JSONValue = try await client.request("home.status")
+            let status = try HomeStatusDTO.decode(value)
+            guard !Task.isCancelled, generation == presentationReadGeneration,
+                  foreground == model.foregroundReconciliationGeneration,
+                  selectedProfileID == profileID, selectedEndpoint?.profile.connectionID == connectionID,
+                  targetMode == .home, presentationActivity.allowsPresentationPublication, scenePhase == .active else { return }
+            homeTargetStatus = status
+        } catch {
+            guard !Task.isCancelled, generation == presentationReadGeneration,
+                  foreground == model.foregroundReconciliationGeneration,
+                  selectedProfileID == profileID, selectedEndpoint?.profile.connectionID == connectionID,
+                  targetMode == .home, presentationActivity.allowsPresentationPublication, scenePhase == .active else { return }
+            errorMessage = (error as? GatewayFailure)?.message ?? "Unable to read Home availability."
         }
     }
 
@@ -1109,13 +1150,16 @@ struct AutomationFormView: View {
         let scheduleIsValid = scheduleKind != .calendar
             || (!weekdays.isEmpty && TimeZone(identifier: timezone) != nil)
         let targetIsValid = switch target {
+        case let .home(homeID, generation):
+            AutomationAdmissionPolicy.admits(target) && homeTargetStatus?.homeId == homeID && homeTargetStatus?.routeGeneration == generation
+                && !includesResource && actionKind == .sessionPrompt
         case let .existingSession(sessionID): AutomationAdmissionPolicy.validSessionID(sessionID)
         case let .workspace(cwd, _):
             AutomationAdmissionPolicy.validWorkspacePath(cwd)
                 && workspaceTrustInspection != nil
                 && !NewSessionTrustPolicy.requiresDecision(workspaceTrustInspection)
         }
-        let intervalIsValid = targetMode == .existingSession
+        let intervalIsValid = targetMode != .workspace
             || AutomationAdmissionPolicy.admitsNewSessionInterval(trigger)
         return initialized && (!isEditing || loadedRevision != nil)
             && !trimmedName.isEmpty
@@ -1153,7 +1197,7 @@ struct AutomationFormView: View {
     }
 
     private var resourceInvocation: ComposerResourceInvocation? {
-        guard actionKind == .sessionPrompt, includesResource else { return nil }
+        guard actionKind == .sessionPrompt, targetMode != .home, includesResource else { return nil }
         return ComposerResourceInvocation(
             source: resourceSource,
             name: resourceName,
@@ -1211,6 +1255,11 @@ struct AutomationFormView: View {
             name = record.name
             description = record.description ?? ""
             switch record.target {
+            case .home:
+                targetMode = .home
+                savedHomeTarget = record.target
+                targetSessionID = ""
+                workspacePath = ""
             case let .existingSession(sessionID):
                 targetMode = .existingSession
                 targetSessionID = sessionID

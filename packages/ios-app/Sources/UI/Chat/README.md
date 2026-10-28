@@ -103,7 +103,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 - **Thinking and context.** Thinking shows at most four measured lines, opening the full trace on
   tap. Compaction, branch, configuration and extension status share one notification-pill language;
   command pills never show arguments. `custom_message` is right-aligned context; worker results
-  read **Worker · task title**; subagent messages use the seafoam **Subagent** chip.
+  read **Worker · task title**; receipt-attributed Home automation messages read
+  **Automation · name**, opening the full untrusted request and its details; subagent
+  messages use the seafoam **Subagent** chip.
 - **Provider errors.** The projection kernel joins all adjacent assistant-error occurrences,
   including mixed types. Every visible non-error row (user Continue, model change, assistant
   content or tool activity) splits a run; empty error text parts do not. The first presentation

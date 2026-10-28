@@ -28,6 +28,8 @@ export interface InvocationProjection {
 }
 
 /** The Home task result custom message a Home wake is bound to. */
+import { INPUT_TRIGGER_MESSAGE } from "../host/input-admission.js";
+
 export const HOME_TASK_RESULT_MESSAGE = "tron.home-task-result.v1";
 /** Canonical, non-context receipt family for Gateway invocation causality. */
 export const INVOCATION_RECEIPT_TYPE = "tron.chat-invocation.v1";
@@ -221,7 +223,7 @@ export function invocationReceipts(entries: readonly SessionEntry[], sessionId?:
       const target = entriesById.get(receipt.canonicalEntryId);
       // A Home wake binds the result message that triggered it, never a user message.
       const valid = receipt.source === "homeWake"
-        ? target?.type === "custom_message" && (target.customType === HOME_TASK_RESULT_MESSAGE || target.customType === SETTINGS_OUTCOME_MESSAGE)
+        ? target?.type === "custom_message" && (target.customType === HOME_TASK_RESULT_MESSAGE || target.customType === SETTINGS_OUTCOME_MESSAGE || target.customType === INPUT_TRIGGER_MESSAGE)
         : target?.type === "message" && target.message.role === "user";
       if (!valid) throw new Error("invocation receipt target is not the canonical message its source binds");
       if (receipt.parentEntryId !== undefined && entry.parentId !== receipt.parentEntryId) {

@@ -65,6 +65,7 @@ import { AutomationStore } from "./automations/automation-store.js";
 import { AutomationScheduler } from "./automations/automation-scheduler.js";
 import { logAutomationDiagnostic } from "./automations/automation-diagnostic.js";
 import { AutomationService } from "./automations/automation-service.js";
+import type { AutomationHomeTrigger } from "./automations/automation-home-trigger.js";
 import { GatewayAutomationExecutor } from "./automations/automation-executor.js";
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import type { ScheduleToolOperations } from "./automations/tron-schedule-extension.js";
@@ -258,7 +259,9 @@ const modelQueue = new ModelQueueOwner({
       { event: record.event, source: "models", code: record.role, ...(record.sessionId ? { sessionId: record.sessionId } : {}) });
   },
 });
+let automationHomeTrigger: AutomationHomeTrigger | undefined;
 const homeComposition: HomeComposition = {
+  triggerSources: () => automationHomeTrigger ? [automationHomeTrigger] : [],
   modelQueue, modelRuntime,
   settings: () => settingsChanges === undefined ? undefined : { model: settingsModel, changes: settingsChanges },
   knowledge: () => knowledge,
@@ -572,6 +575,7 @@ const automationExecutor = new GatewayAutomationExecutor(
 );
 const automationScheduler = new AutomationScheduler(automationStore, automationExecutor, {
   hostEpoch: workRegistry.runtimeEpoch,
+  onHomePending: () => home().notifyTrigger(),
   onDiagnostic: (message, automationId, runId) => logAutomationDiagnostic(logger, message, automationId, runId),
   onBlocked: async (record, run) => {
     // Workspace targets have no stable session route until a run is created;
@@ -597,7 +601,8 @@ automations = new AutomationService(automationStore, automationScheduler, sessio
   logger.log("info", `Automation recovery ${step} took ${Math.round(durationMs)} ms${detail ? ` (${detail})` : ""}`, {
     event: "automation.recovery-step", source: "automations", step, durationMs,
   });
-});
+}, () => home().triggerRoute());
+automationHomeTrigger = automations.homeTrigger;
 automationToolOperations = new GatewayScheduleToolOperations(automations, receipts);
 
 let stopping = false;

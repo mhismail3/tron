@@ -191,7 +191,15 @@ struct InboundContextMessagePresentation: Equatable {
     let detailsTitle: String
 
     init(origin: ChatOrigin?, customType: String?, details: JSONValue?) {
-        if customType == "tron.home-task-result.v1" {
+        if customType == "tron.home-trigger.v1", origin?.kind == .extension,
+           let trigger = details?.objectValue?["trigger"]?.objectValue,
+           trigger["kind"]?.stringValue == "automation" {
+            title = trigger["title"]?.stringValue.map { "Automation · \($0)" } ?? "Automation"
+            status = "Message"
+            tone = InboundProducerPresentationPolicy.tone(for: origin?.kind)
+            icon = "clock.arrow.circlepath"
+            detailsTitle = "Automation message"
+        } else if customType == "tron.home-task-result.v1" {
             let object = details?.objectValue
             let taskTitle = object?["taskTitle"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
             title = taskTitle.flatMap { $0.isEmpty ? nil : "Worker · \($0)" } ?? "Worker"

@@ -32,8 +32,12 @@ editors), `KnowledgeFormSheet`, `KnowledgeMutation`,
   at 1,024 definitions; prompt or notification content comes only from authenticated,
   surface-scoped `automation.get`. iOS builds no schedule engine and infers no execution state; the
   editor uses the Gateway's schedule preview.
-- **Targets.** A strict union: an existing session, or a workspace with `newPerRun` (prompts only;
-  each run's session is an ordinary user session). Create/edit supports session prompts with
+- **Targets.** A strict union: Home (`homeId` and `routeGeneration`, plain messages only),
+  an existing session, or a workspace with `newPerRun` (prompts only; each run's session is
+  an ordinary user session). Home availability reads are disposable and fenced to the
+  presentation, selected Gateway connection and foreground generation; editing retains
+  the saved route instead of silently rebinding it. Home messages wait through busy,
+  paused, disabled, blocked or cooling states; the 60-second cooldown is per automation. Create/edit supports session prompts with
   optional skill/prompt invocations, and notifications to an existing session. New-session interval
   schedules are limited to one run per 24 hours by Gateway policy. Shell, webhook,
   extension-command, attachment, deployment and Gateway lifecycle actions have no UI or wire path.
@@ -42,7 +46,9 @@ editors), `KnowledgeFormSheet`, `KnowledgeMutation`,
   uncertain-outcome resolution require confirmation and keep revision fences.
 - **Prompt provenance.** A canonical Automation prompt renders in the Automation-accent container
   only with the complete Gateway-authored invocation tuple (`automation:<run UUID>`); partial
-  provenance fails closed to the ordinary prompt.
+  provenance fails closed to the ordinary prompt. Receipt-attributed Home trigger messages
+  reuse the inbound context chip as **Automation · name**, opening the full request and
+  technical details. They never render as maintainer prompts or approval outcomes.
 - **Knowledge sheet.** A bounded, Gateway-authoritative projection with the `Color.tronKnowledge`
   accent, in the Automations sheet's pattern. It lists Sources (thumbnail, title, domain · type),
   Syntheses or Legacy history, filtered by visibility and Personal/Research scope from the toolbar

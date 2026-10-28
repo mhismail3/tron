@@ -1,5 +1,75 @@
 #!/usr/bin/env bash
 # Sourced by ios-gateway-e2e-test; uses its resolved gateway_dir.
+
+# Prepare Home through its real owners, not raw Home/session store writes. The
+# journey tests the editor and inbound chip; first-designation routing and the
+# background-queue editor have their own journeys. This uses only the isolated
+# fixture's local credential, never the live Mac wrapper or phone credentials.
+prepare_home_automation_fixture() {
+  "$NODE_BIN" --input-type=module - "$gateway_dir" "$TRON_E2E_TRON_HOME" "$TRON_E2E_AGENT_DIR" "$TRON_E2E_PORT" <<'JS'
+import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+const [gatewayDir, tronHome, agentDir, port] = process.argv.slice(2);
+const load = path => import(pathToFileURL(join(gatewayDir, path)).href);
+const { default: WebSocket } = await load('node_modules/ws/index.js');
+const { readLocalCredential } = await load('dist/client/local-credential.js');
+const { PROTOCOL_VERSION } = await load('dist/version.js');
+const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, {
+  headers: { authorization: `Bearer ${await readLocalCredential(tronHome)}` }, maxPayload: 2 * 1024 * 1024,
+});
+const frames = [];
+let failure;
+socket.on('message', raw => {
+  try { const frame = JSON.parse(raw.toString()); if (frame.type === 'hello' || frame.type === 'response') frames.push(frame); }
+  catch (error) { failure = error; }
+});
+socket.on('error', error => { failure = error; });
+const deadline = Date.now() + 60_000;
+async function until(read) {
+  while (Date.now() < deadline) {
+    if (failure) throw failure;
+    const value = read();
+    if (value) return value;
+    await delay(25);
+  }
+  throw new Error('Home automation fixture setup did not settle');
+}
+async function request(method, params) {
+  const id = randomUUID();
+  socket.send(JSON.stringify({ type: 'request', id, method, params }));
+  const response = await until(() => frames.find(frame => frame.type === 'response' && frame.id === id));
+  frames.splice(frames.indexOf(response), 1);
+  if (!response.ok) throw new Error(`${method}: ${response.error?.code}: ${response.error?.message}`);
+  return response.result;
+}
+try {
+  await until(() => socket.readyState === WebSocket.OPEN);
+  socket.send(JSON.stringify({ type: 'hello', protocolVersion: PROTOCOL_VERSION }));
+  await until(() => frames.some(frame => frame.type === 'hello'));
+  const settings = JSON.parse(await readFile(join(agentDir, 'settings.json'), 'utf8'));
+  const { sessionId } = await request('home.designate', { commandId: randomUUID(), model: { provider: settings.defaultProvider, id: settings.defaultModel } });
+  await request('settings.change', { commandId: randomUUID(), target: { kind: 'home' }, changes: [
+    { key: 'model.queue[role=background]', layer: 'session', op: 'set', value: [`${settings.defaultProvider}/${settings.defaultModel}`] },
+  ] });
+  await request('home.prompt', { commandId: randomUUID(), text: 'HOME-AUTOMATION-JOURNEY: initialize Home' });
+  while (true) {
+    const { session, syncToken } = await request('session.open', { sessionId });
+    await request('session.sync', { sessionId, syncToken });
+    if (session.phase === 'idle' && JSON.stringify(session.transcript).includes('Home automation fixture ready.')) break;
+    if (Date.now() >= deadline) throw new Error('Home automation fixture reply did not settle');
+    await delay(25);
+  }
+  console.log('Prepared isolated Home automation fixture through Gateway RPC.');
+} finally {
+  if (socket.readyState === WebSocket.OPEN) socket.close(); else socket.terminate();
+  await until(() => socket.readyState === WebSocket.CLOSED).catch(() => socket.terminate());
+}
+JS
+}
+
 write_fixture_extension() {
   local agent_dir="$1" pi_ai_url
   pi_ai_url="file://$gateway_dir/node_modules/@earendil-works/pi-ai/dist/index.js"
@@ -134,6 +204,10 @@ const scripted = (context, options, state, model) => {
     if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Installed persistence proof app.");
     return fauxAssistantMessage([fauxToolCall("swift_app", { action: "install", appId: "persistence-proof", name: "Persistence proof", source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-proof" })], { stopReason: "toolUse" });
   }
+  if (latestUserText(context).includes("Review the fixture queue. This message is not approval.")) {
+    return fauxAssistantMessage("Home automation message received without approval authority.");
+  }
+  if (latestUserText(context).includes("HOME-AUTOMATION-JOURNEY:")) return fauxAssistantMessage("Home automation fixture ready.");
   if (latestUserText(context).includes(APPROVAL_MARKER)) return approvalTurn(context);
   if (latestUserText(context).includes(CODEMODE_MARKER)) return codemodeTurn(context) ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "Unexpected codemode journey turn" });
   if (latestUserText(context).includes("historical sheet replay") && context.messages.at(-1)?.role === "toolResult"

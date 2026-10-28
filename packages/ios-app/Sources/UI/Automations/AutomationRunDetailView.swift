@@ -38,14 +38,14 @@ struct AutomationRunDetailView: View {
                     section("Timing", icon: "clock") { info("Scheduled", AutomationDateFormatting.date(run.scheduledFor)); info("Created", AutomationDateFormatting.date(run.createdAt)); info("Claimed", AutomationDateFormatting.date(run.claimedAt)); info("Started", AutomationDateFormatting.date(run.startedAt)); info("Finished", AutomationDateFormatting.date(run.terminalAt)); info("Attempts", "\(run.preAdmissionAttemptCount)") }
                     section("Execution Session", icon: "bubble.left.and.bubble.right") {
                         info("Target", run.targetSnapshot.displayName)
-                        info("Session ID", run.executionSessionId)
-                        if !run.targetSnapshot.isWorkspace || run.startedAt != nil {
-                            Button("Open Session") { onOpenSession?(run.executionSessionId) }
+                        info("Session ID", run.executionSessionId ?? "Awaiting Home delivery")
+                        if let sessionID = run.executionSessionId, !run.targetSnapshot.isWorkspace || run.startedAt != nil {
+                            Button("Open Session") { onOpenSession?(sessionID) }
                                 .buttonStyle(TronActionButtonStyle(role: .primary))
                                 .disabled(onOpenSession == nil)
                                 .padding(14)
                         } else {
-                            Text(run.state == .outcomeUnknown
+                            Text(run.targetSnapshot.isHome ? "The Home chapter is chosen when this message is admitted." : run.state == .outcomeUnknown
                                  ? "Tron cannot prove that the new session became available."
                                  : "The execution session will be available when this run starts.")
                                 .font(TronTypography.secondaryDescription)

@@ -295,6 +295,8 @@ export class AutomationStore {
 
   async replace(id: string, expectedRevision: number, input: AutomationUpdateInput): Promise<AutomationRecord> {
     return this.definitionMutation(id, expectedRevision, (current) => {
+      if ((current.pendingHomeRuns?.length || current.currentRun?.targetSnapshot.kind === "home")
+        && JSON.stringify(current.target) !== JSON.stringify(input.target)) throw new GatewayError("conflict", "Deliver or cancel pending Home messages before changing target");
       const next = clone(current);
       next.name = input.name;
       if (input.description === undefined) delete next.description;
@@ -326,12 +328,19 @@ export class AutomationStore {
           throw new GatewayError("conflict", "Resolve the uncertain run before enabling this automation");
         }
         next.consecutiveFailureCount = 0;
-        const occurrence = firstAutomationOccurrence(current.trigger, Date.now());
-        if (occurrence === undefined) delete next.nextOccurrenceAt;
-        else next.nextOccurrenceAt = occurrence;
+        const retainedAutomatic = current.target.kind === "home"
+          && [current.currentRun, ...current.pendingHomeRuns ?? []].some(run => run && !run.manual
+            && JSON.stringify(run.triggerSnapshot) === JSON.stringify(current.trigger));
+        // A retained automatic firing already advanced this schedule. Enabling
+        // releases that outbox; it must not create the same occurrence again.
+        if (!retainedAutomatic) {
+          const occurrence = firstAutomationOccurrence(current.trigger, Date.now());
+          if (occurrence === undefined) delete next.nextOccurrenceAt;
+          else next.nextOccurrenceAt = occurrence;
+        }
       } else {
-        delete next.nextOccurrenceAt;
-        if (next.currentRun && (next.currentRun.state === "queued" || next.currentRun.state === "waiting")) {
+        if (next.target.kind !== "home") delete next.nextOccurrenceAt;
+        if (next.target.kind !== "home" && next.currentRun && (next.currentRun.state === "queued" || next.currentRun.state === "waiting")) {
           const terminal: AutomationRun = {
             ...next.currentRun,
             state: "cancelled",
@@ -387,7 +396,7 @@ export class AutomationStore {
       this.assertInitialized();
       const current = this.requireCurrent(id);
       this.assertRevision(current, expectedRevision);
-      if (current.currentRun) throw new GatewayError("conflict", "Cancel the active automation run before deleting it", true);
+      if (current.currentRun || current.pendingHomeRuns?.length) throw new GatewayError("conflict", "Cancel the active automation run before deleting it", true);
       await durableRemove(this.path(id));
       this.records.delete(id);
       this.bytes.delete(id);

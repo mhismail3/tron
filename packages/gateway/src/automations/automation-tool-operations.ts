@@ -57,6 +57,10 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
   ) {}
 
   private belongsToSession(automation: AutomationRecord, sessionId: string): boolean {
+    if (automation.target.kind === "home") {
+      try { const route = this.service.homeRoute(); if (route.sessionId === sessionId && route.homeId === automation.target.homeId && route.routeGeneration === automation.target.routeGeneration) return true; }
+      catch { /* An unavailable Home does not widen this session's inventory. */ }
+    }
     return (automation.target.kind === "existingSession" && automation.target.sessionId === sessionId)
       || (automation.provenance.kind === "assistant" && automation.provenance.sessionId === sessionId);
   }
@@ -92,12 +96,14 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
 
   private async mutate(sessionId: string, toolCallId: string, request: ScheduleToolRequest): Promise<JsonValue> {
     if (request.action === "create") {
+      const route = request.target === "home" ? this.service.homeRoute() : undefined;
       const created = await this.service.create({
         name: requireField(request.name, "name"),
         activation: request.activate === true ? "enabled" : "draft",
-        target: request.target === "newSessionInWorkspace"
-          ? { kind: "workspace", cwd: await this.service.workspaceForSession(sessionId), sessionPolicy: "newPerRun" }
-          : { kind: "existingSession", sessionId },
+        target: route ? { kind: "home", homeId: route.homeId, routeGeneration: route.routeGeneration }
+          : request.target === "newSessionInWorkspace"
+            ? { kind: "workspace", cwd: await this.service.workspaceForSession(sessionId), sessionPolicy: "newPerRun" }
+            : { kind: "existingSession", sessionId },
         trigger: createTrigger(request, this.now()),
         misfirePolicy: "latest",
         overlapPolicy: "skip",

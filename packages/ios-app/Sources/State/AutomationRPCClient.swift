@@ -46,7 +46,8 @@ final class AutomationRPCClient {
     func runs(id: String) async throws -> GatewayAutomationRuns {
         struct Params: Encodable { let automationId: String }
         let value: GatewayAutomationRuns = try await request("automation.run.list", Params(automationId: id))
-        guard value.runs.count <= 65, value.runs.allSatisfy(AutomationAdmissionPolicy.admits) else {
+        // The 512 KiB canonical record bounds the Home outbox as well as its 64 terminal entries.
+        guard value.runs.count <= 1_024, value.runs.allSatisfy(AutomationAdmissionPolicy.admits) else {
             throw GatewayFailure(code: "invalid_response", message: "The Automation run history is invalid.", retryable: false, details: nil)
         }
         return value
