@@ -78,7 +78,7 @@ extension Color {
     static let assistantMessageText = Color(lightHex: "#111827", darkHex: "#E8E9EA")
     @MainActor static var inputText: Color { .tronPrimary }
     /// The typed-text ink, dimmed: a placeholder reads as the theme's own quiet draft, not grey.
-    @MainActor static var inputPlaceholder: Color { Color.tronPrimary.opacity(0.7) }
+    @MainActor static var inputPlaceholder: Color { Color.tronPrimary.opacity(0.6) }
     @MainActor static var userBubble: Color { .tronPrimary }
     static let assistantBubble = Color(lightHex: "#EEF2F6", darkHex: "#252A32")
     static let systemBubble = Color(lightHex: "#E6EBF1", darkHex: "#323842")
