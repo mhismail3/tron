@@ -94,18 +94,22 @@ struct HostedSettingsRendererFixture: View {
                 TronSettingsRow(icon: "slider.horizontal.3", title: "Summary thinking", subtitle: "Value and reset remain independent targets.") {
                     Button {} label: { TronInlineActionLabel("High") }.buttonStyle(.plain)
                         .accessibilityIdentifier("alignment.revert-value")
-                    Button {} label: { TronInlineActionLabel("", icon: "arrow.uturn.backward") }
-                        .buttonStyle(.plain).accessibilityLabel("Revert")
-                        .accessibilityIdentifier("alignment.revert")
                 }
+                .environment(\.tronSettingsRowAccessory, {
+                    AnyView(Button {} label: { TronInlineActionLabel("", icon: "arrow.uturn.backward", alignment: .leading) }
+                        .buttonStyle(.plain).accessibilityLabel("Revert")
+                        .accessibilityIdentifier("alignment.revert"))
+                })
                 TronSettingsDivider()
                 TronSettingsRow(icon: "number", title: "Optional override", subtitle: "Unset uses the same circular control geometry.") {
                     Button {} label: { TronInlineActionLabel("16,384 tokens") }.buttonStyle(.plain)
                         .accessibilityIdentifier("alignment.unset-value")
-                    Button {} label: { TronInlineActionLabel("", icon: "minus") }
-                        .buttonStyle(.plain).accessibilityLabel("Unset")
-                        .accessibilityIdentifier("alignment.unset")
                 }
+                .environment(\.tronSettingsRowAccessory, {
+                    AnyView(Button {} label: { TronInlineActionLabel("", icon: "minus", alignment: .leading) }
+                        .buttonStyle(.plain).accessibilityLabel("Unset")
+                        .accessibilityIdentifier("alignment.unset"))
+                })
             }
             .padding(20)
         }
@@ -582,13 +586,17 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 .object(["id": .string("setup"), "title": .string("Setup"), "order": .number(80)])])])
         }
         if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
-            // Match the reported mix: owned automatic/summary overrides beside
-            // an inherited branch value, through the actual schema renderer.
-            let keys = HostedSettingsReviewSchema.additionalKeys.filter { $0.objectValue?["group"]?.stringValue == "context" }.map { value -> JSONValue in
-                guard var row = value.objectValue else { return value }
-                if row["key"]?.stringValue == "context.branchSummary.reserveTokens" {
-                    row["layers"] = .array([.object(["layer": .string("global"), "value": row["value"] ?? .null])])
-                }
+            // Geometry is the generic renderer's contract, not an editing route
+            // for retired compaction keys. Serve the same short/long value shapes
+            // as the primitive gallery through schema-negotiated choice controls.
+            let keys = [("inherited", "Inherited value", "16,384 tokens", false),
+                        ("short", "Short value", "—", false),
+                        ("revert", "Owned value", "High", true),
+                        ("unset", "Optional override", "16,384 tokens", true)].enumerated().map { index, item -> JSONValue in
+                var row = HostedSettingsReviewSchema.key("alignment.\(item.0)", "context", item.1,
+                    .string(item.2), item.2, "choice", order: Double(index),
+                    options: [.object(["value": .string(item.2), "label": .string(item.2)])]).objectValue!
+                row["overridden"] = .bool(item.3)
                 return .object(row)
             }
             return .object(["target": .object(["kind": .string("global")]), "layers": .array([.string("global")]),

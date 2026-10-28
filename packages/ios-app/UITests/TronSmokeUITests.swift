@@ -598,7 +598,7 @@ final class TronSmokeUITests: XCTestCase {
                         app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
                     }
                     app.launch()
-                    XCTAssertTrue(app.staticTexts[surface == "compaction" ? "Automatic compaction" : "Inherited value"].firstMatch.waitForExistence(timeout: 10))
+                    XCTAssertTrue(app.staticTexts["Inherited value"].firstMatch.waitForExistence(timeout: 10))
                     keepScreenshot(named: "1321-\(surface)-\(appearance)-\(textSize)")
                     if textSize == "accessibility" {
                         app.scrollViews.firstMatch.swipeUp()
@@ -628,13 +628,13 @@ final class TronSmokeUITests: XCTestCase {
                     let button: (String, String) -> XCUIElement = { id, label in
                         app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", id, label)).firstMatch
                     }
-                    let inherited = gallery ? button("alignment.inherited", "16,384 tokens") : settingEditor(row("context.branchSummary.reserveTokens"))
-                    let short = gallery ? button("alignment.short", "—") : app.buttons["settings-row-context.compaction.enabled-reset"]
+                    let inherited = gallery ? button("alignment.inherited", "16,384 tokens") : settingEditor(row("alignment.inherited"))
+                    let short = gallery ? button("alignment.short", "—") : settingEditor(row("alignment.short"))
                     let pairs = gallery
                         ? [(button("alignment.revert-value", "High"), button("alignment.revert", "Revert")),
                            (button("alignment.unset-value", "16,384 tokens"), button("alignment.unset", "Unset"))]
-                        : [(settingEditor(row("context.compaction.reserveTokens")), app.buttons["settings-row-context.compaction.reserveTokens-reset"]),
-                           (settingEditor(row("model.thinking_role_summarizer_")), app.buttons["settings-row-model.thinking_role_summarizer_-reset"])]
+                        : [(settingEditor(row("alignment.revert")), app.buttons["settings-row-alignment.revert-reset"]),
+                           (settingEditor(row("alignment.unset")), app.buttons["settings-row-alignment.unset-reset"])]
                     var measurements = [String]()
                     func measure(_ target: XCUIElement, circle: Bool = false) -> CGRect {
                         XCTAssertTrue(target.waitForExistence(timeout: 10), app.debugDescription)
@@ -660,13 +660,13 @@ final class TronSmokeUITests: XCTestCase {
                     let right = measure(inherited).maxX
                     // Native renderer groups use the standard 20pt sheet + 14pt row inset.
                     XCTAssertEqual(right, app.windows.firstMatch.frame.maxX - 34, accuracy: 1)
-                    XCTAssertEqual(measure(short, circle: !gallery).maxX, right, accuracy: 1)
+                    XCTAssertEqual(measure(short).maxX, right, accuracy: 1)
                     for (value, circle) in pairs {
                         let valuePaint = measure(value)
                         let circlePaint = measure(circle, circle: true)
-                        XCTAssertEqual(circlePaint.maxX, right, accuracy: 1, "Painted trailing edges must match the standalone value")
-                        XCTAssertEqual(circlePaint.minX - valuePaint.maxX, 16, accuracy: 1, "Visible spacing must not depend on glyph or value width")
-                        XCTAssertLessThanOrEqual(value.frame.maxX, circle.frame.minX + 0.5, "Independent targets must not overlap")
+                        XCTAssertEqual(valuePaint.maxX, right, accuracy: 1, "Painted value trailing edges must match the standalone value")
+                        XCTAssertEqual(valuePaint.minX - circlePaint.maxX, 16, accuracy: 1, "Visible spacing must not depend on glyph or value width")
+                        XCTAssertLessThanOrEqual(circle.frame.maxX, value.frame.minX + 0.5, "Independent targets must not overlap")
                     }
                     let name = "1321-measured-\(gallery ? "gallery" : "compaction")-\(appearance)-\(largeText ? "large" : "standard")"
                     let attachment = XCTAttachment(string: measurements.joined(separator: "\n"))
