@@ -33,7 +33,7 @@ import UIKit
             expand(app, title: "Home Settings")
             let row = models.frame
             check(app, ink: CGRect(x: row.minX, y: row.midY - 12, width: 30, height: 24),
-                  background: CGRect(x: row.maxX - 20, y: row.midY - 2, width: 4, height: 4),
+                  background: CGRect(x: row.midX - 2, y: row.minY + 4, width: 4, height: 4),
                   mode: mode, name: "Inherited Home Settings")
         }
     }
