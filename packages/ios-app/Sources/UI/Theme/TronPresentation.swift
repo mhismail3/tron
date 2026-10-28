@@ -1678,13 +1678,17 @@ struct TronSettingsRow<Trailing: View>: View {
         self.trailing = trailing()
     }
 
+    /// From XXXL the title owns the full text width and its value, pill and
+    /// control sit below it, rather than leaving the title a sliver beside them.
+    private var stacksAtLargeText: Bool { dynamicTypeSize >= .xxxLarge }
+
     var body: some View {
         // A compact action already owns its 44-point hit area. Pad the labels,
         // not that target, so these rows size like ordinary Session rows.
         let labelsOwnInsets = controlSize == .small && !dynamicTypeSize.isAccessibilitySize
         TronSettingsRowLayout(
             spacing: TronSpacing.md,
-            stackedSpacing: dynamicTypeSize.isAccessibilitySize ? TronSpacing.md : nil,
+            stackedSpacing: stacksAtLargeText ? TronSpacing.md : nil,
             stackedLeadingInset: icon == nil ? 0 : TronSettingsLayoutPolicy.iconSize + TronSpacing.xl
         ) {
             rowLabels
@@ -1751,13 +1755,21 @@ struct TronSettingsRow<Trailing: View>: View {
                     // The state word never shortens; a long title wraps beside it.
                     // The pill centers on one title line (a hidden line of the
                     // title's font), so its baseline is the title's, not its own.
-                    HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
-                        Text(title).font(titleFont).foregroundStyle(titleColor)
-                            .fixedSize(horizontal: false, vertical: true)
-                        TronTitleLineCenteredLayout {
-                            Text(verbatim: "X").font(titleFont).hidden()
-                            TronStatusPill(text: status, accent: settingsTheme?.accent ?? accent)
-                                .fixedSize()
+                    let titleText = Text(title).font(titleFont).foregroundStyle(titleColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if stacksAtLargeText {
+                        VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                            titleText
+                            TronStatusPill(text: status, accent: settingsTheme?.accent ?? accent).fixedSize()
+                        }
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
+                            titleText
+                            TronTitleLineCenteredLayout {
+                                Text(verbatim: "X").font(titleFont).hidden()
+                                TronStatusPill(text: status, accent: settingsTheme?.accent ?? accent)
+                                    .fixedSize()
+                            }
                         }
                     }
                 } else {

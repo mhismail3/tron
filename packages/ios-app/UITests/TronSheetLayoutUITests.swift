@@ -66,8 +66,8 @@ import XCTest
         let title = row.staticTexts["Worker models"].firstMatch
         let pill = row.staticTexts["Overridden"].firstMatch
         XCTAssertTrue(title.exists && pill.exists, row.debugDescription)
-        let window = app.windows.firstMatch.frame
-        XCTAssertGreaterThanOrEqual(title.frame.width, window.width * 0.4, "The title is not squeezed beside its pill: \(title.frame)")
+        // One title line is about a pill tall; a title squeezed into fragments wraps to several.
+        XCTAssertLessThan(title.frame.height, pill.frame.height * 1.6, "The title is not broken into fragments: \(title.frame) vs \(pill.frame)")
         XCTAssertGreaterThanOrEqual(pill.frame.minY, title.frame.maxY - 1, "The pill stacks below the title: \(pill.frame) vs \(title.frame)")
     }
 
