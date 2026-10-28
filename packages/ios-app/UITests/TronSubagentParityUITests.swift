@@ -245,17 +245,52 @@ final class TronSubagentParityUITests: XCTestCase {
             try verifyPills(app, scheme: scheme)
             org.tap()
             XCTAssertTrue(app.staticTexts["Running subagents"].waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertTrue(app.staticTexts["Worker"].exists, app.debugDescription)
+            // The shared row is one accessibility element: its title is the label and
+            // the lifecycle, details, current action and output are its value.
+            let worker = app.buttons.matching(NSPredicate(format: "label == %@", "Worker")).firstMatch
+            XCTAssertTrue(worker.exists, app.debugDescription)
+            let workerValue = worker.value as? String ?? ""
             XCTAssertFalse(app.staticTexts["PRIVATE PROVIDER STATUS"].exists)
             XCTAssertFalse(app.staticTexts["PRIVATE PROVIDER FRAME"].exists)
             XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "PI_SUBAGENT_ASYNC_JSON")).firstMatch.exists)
-            XCTAssertTrue(app.staticTexts["PARITY_CHILD_COMPLETE"].exists, app.debugDescription)
-            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "parity.txt")).firstMatch.exists, app.debugDescription)
-            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "2 tools")).firstMatch.exists, app.debugDescription)
+            XCTAssertTrue(workerValue.contains("PARITY_CHILD_COMPLETE"), workerValue)
+            XCTAssertTrue(workerValue.contains("parity.txt"), workerValue)
+            XCTAssertTrue(workerValue.contains("2 tools"), workerValue)
             try capture("sheet-\(scheme)")
             app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Worker")).firstMatch.tap()
             XCTAssertTrue(app.staticTexts["Child transcript reached through the native row."].waitForExistence(timeout: 10), app.debugDescription)
             try capture("child-transcript-\(scheme)")
+        }
+    }
+
+    /// Activity lists running and finished subagents as shared list rows; captures show both in each appearance.
+    @MainActor
+    func testActivityRowsCaptures() throws {
+        continueAfterFailure = false
+        for scheme in ["light", "dark"] {
+            for state in ["running", "recent"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-subagent-parity-fixture", "-\(scheme)", "-subagentRecentFinishedRetentionMinutes.v1", "5"]
+                    + (state == "recent" ? ["-activity-preview-recent"] : [])
+                app.launch()
+                defer { app.terminate() }
+                let org = app.buttons["Subagents"]
+                XCTAssertTrue(org.waitForExistence(timeout: 10), app.debugDescription)
+                if state == "running" { try capture("2090-composer-\(scheme)") }
+                org.tap()
+                XCTAssertTrue(app.staticTexts[state == "running" ? "Running subagents" : "Completed subagents"].waitForExistence(timeout: 5), app.debugDescription)
+                // Rows are the shared list-entry row: one button per subagent whose value leads with its
+                // lifecycle, and none of the retired bespoke card headings.
+                let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "subagent-row-"))
+                XCTAssertEqual(rows.count, 1, app.debugDescription)
+                XCTAssertTrue((rows.firstMatch.value as? String)?.hasPrefix(state == "running" ? "Live," : "Completed,") == true,
+                              "\(rows.firstMatch.value ?? "")")
+                XCTAssertFalse(app.staticTexts["DETAILS"].exists, "The bespoke DETAILS heading is retired")
+                XCTAssertFalse(app.staticTexts["LIVE OUTPUT"].exists, "The bespoke LIVE OUTPUT heading is retired")
+                try capture("2090-activity-\(state)-medium-\(scheme)")
+                app.swipeUp()
+                try capture("2090-activity-\(state)-large-\(scheme)")
+            }
         }
     }
 
