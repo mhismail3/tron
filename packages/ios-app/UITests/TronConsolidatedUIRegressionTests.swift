@@ -110,9 +110,9 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         let opus = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Opus 5.5'")).firstMatch
         XCTAssertTrue(opus.waitForExistence(timeout: 5)); opus.tap()
         XCTAssertTrue(card.staticTexts["Claude Opus 5.5"].waitForExistence(timeout: 5), "Home selection must persist through the existing Home-scoped settings RPC")
-        tap(app, "home-manage-settings"); tap(app, "settings-section-model-open")
-        XCTAssertFalse(element(app, "settings-section-model-detail").descendants(matching: .any)["settings-row-model.ref_role_chat_"].exists)
-        XCTAssertTrue(element(app, "settings-row-model.queue_role_worker_").waitForExistence(timeout: 5), "Worker/delegation choices remain in Home Models")
+        tap(app, "home-manage-settings")
+        XCTAssertFalse(element(app, "home-settings-content").descendants(matching: .any)["settings-row-model.ref_role_chat_"].exists)
+        XCTAssertTrue(element(app, "settings-row-model.queue_role_worker_").waitForExistence(timeout: 5), "Worker/delegation choices are directly on Home Settings")
         keep("home-model-write-and-remaining-workers")
     }
 

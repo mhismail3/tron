@@ -8,7 +8,13 @@ import UIKit
     func testHomeSettingsOrder() {
         for mode in ["light", "dark"] {
             let app = launch("home", mode: mode)
-            ordered(app, ["Models", "Tools", "More Settings"])
+            let headings = ["Workers & delegation", "Tools", "Connection"].map { app.staticTexts[$0].firstMatch }
+            for heading in headings { XCTAssertTrue(heading.waitForExistence(timeout: 8), app.debugDescription) }
+            XCTAssertLessThan(headings[0].frame.minY, headings[1].frame.minY)
+            XCTAssertLessThan(headings[1].frame.minY, headings[2].frame.minY)
+            XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
+            XCTAssertFalse(app.buttons["settings-section-tools-open"].exists)
+            XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists)
             app.terminate()
         }
     }

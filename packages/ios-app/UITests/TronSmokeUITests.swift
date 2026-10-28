@@ -557,7 +557,7 @@ final class TronSmokeUITests: XCTestCase {
                     openManageHome(app)
                     tapManageRow(app, "home-manage-settings")
                     expandSettingsSheet(app, title: "Home Settings")
-                    XCTAssertTrue(app.buttons["Models"].firstMatch.waitForExistence(timeout: 5))
+                    XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.queue_role_worker_"].waitForExistence(timeout: 5))
                 case "session":
                     XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
                     app.buttons["Stop session"].tap()
@@ -973,8 +973,6 @@ final class TronSmokeUITests: XCTestCase {
             tapManageRow(home, "home-manage-settings")
             expandSettingsSheet(home, title: "Home Settings")
             keepScreenshot(named: "1325-expanded-home-settings-\(mode)")
-            tapScrolling(home.buttons["settings-section-model-open"], in: home)
-            expandSettingsSheet(home, title: "Models")
             keepScreenshot(named: "1325-expanded-home-models-\(mode)")
             let scopes = home.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Revoke")).firstMatch
             reveal(scopes, in: home)
@@ -1012,7 +1010,7 @@ final class TronSmokeUITests: XCTestCase {
                     openManageHome(app)
                     tapManageRow(app, "home-manage-settings")
                     expandSettingsSheet(app, title: "Home Settings")
-                    XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 5))
+                    XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.queue_role_worker_"].waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-home-\(appearance)")
                     captureSettingsTools(app, scope: scope, appearance: appearance)
                     captureModels(app, scope: scope, appearance: appearance)
@@ -1105,6 +1103,7 @@ final class TronSmokeUITests: XCTestCase {
                 expandSettingsSheet(app, title: title)
                 let anchor = scope == "project"
                     ? app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
+                    : scope == "home" ? app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
                     : app.buttons["settings-section-model-open"]
                 XCTAssertTrue(anchor.waitForExistence(timeout: 5), app.debugDescription)
                 keepScreenshot(named: "1634-\(scope)-\(appearance)-xxxl")
@@ -1135,11 +1134,12 @@ final class TronSmokeUITests: XCTestCase {
             closeTopSheet(app)
             return
         }
-        // Session and Home open Tools from Global's Tools & Extensions row (#1651).
-        let section = app.buttons["settings-section-tools-open"]
-        reveal(section, in: app)
-        section.tap()
-        expandSettingsSheet(app, title: "Tools")
+        if scope != "home" {
+            let section = app.buttons["settings-section-tools-open"]
+            reveal(section, in: app)
+            section.tap()
+            expandSettingsSheet(app, title: "Tools")
+        }
         let row = app.descendants(matching: .any)["settings-row-tools.active"]
         let editor = settingEditor(row)
         reveal(editor, in: app)
@@ -1157,11 +1157,19 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(tool.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "1325-\(scope)-\(appearance)-populated-tools")
         closeTopSheet(app)
-        closeTopSheet(app)
+        if scope != "home" { closeTopSheet(app) }
     }
 
     @MainActor
     private func captureModels(_ app: XCUIApplication, scope: String, appearance: String) {
+        if scope == "home" {
+            let worker = app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
+            for _ in 0..<12 where !worker.isHittable { app.swipeDown() }
+            XCTAssertTrue(worker.isHittable, app.debugDescription)
+            XCTAssertFalse(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].exists)
+            keepScreenshot(named: "1325-\(scope)-\(appearance)-canonical-models")
+            return
+        }
         let models = app.buttons["settings-section-model-open"]
         reveal(models, in: app)
         XCTAssertTrue(models.isHittable, app.debugDescription)
@@ -2050,7 +2058,7 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     private func openHomeModelsSettings(_ app: XCUIApplication) {
         tapManageRow(app, "home-manage-settings")
-        tapScrolling(app.buttons["settings-section-model-open"], in: app)
+        expandSettingsSheet(app, title: "Home Settings")
     }
 
     private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
@@ -2743,16 +2751,13 @@ final class TronSmokeUITests: XCTestCase {
             openManageHome(app)
             tapManageRow(app, "home-manage-settings")
             expandSettingsSheet(app, title: "Home Settings")
-            let models = app.buttons["settings-section-model-open"]
-            let section = app.buttons["settings-section-tools-open"]
+            let models = app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
+            let section = app.descendants(matching: .any)["settings-row-tools.active"]
             XCTAssertTrue(models.waitForExistence(timeout: 5))
             XCTAssertTrue(section.exists)
-            XCTAssertLessThan(models.frame.minY, section.frame.minY, "Models precedes Tools in Home Settings")
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Claude Opus 5.5 · ")).firstMatch.exists,
-                          "The Models row names Home's current model")
+            XCTAssertLessThan(models.frame.minY, section.frame.minY, "Worker choices precede Tools in Home Settings")
+            XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "The first-level Models drill-in is removed")
             keepScreenshot(named: "1332-home-settings-\(appearance)")
-            section.tap()
-            expandSettingsSheet(app, title: "Tools")
             let tools = app.descendants(matching: .any)["settings-row-tools.active"]
             XCTAssertTrue(tools.waitForExistence(timeout: 5))
             tapScrolling(settingEditor(tools), in: app)
@@ -2777,12 +2782,8 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
         tapManageRow(app, "home-manage-settings")
         expandSettingsSheet(app, title: "Home Settings")
-        // Home Settings uses Global's Tools & Extensions row (#1651).
-        let section = app.buttons["settings-section-tools-open"]
-        XCTAssertTrue(section.waitForExistence(timeout: 5), app.debugDescription)
-        section.tap()
-        expandSettingsSheet(app, title: "Tools")
         let row = app.descendants(matching: .any)["settings-row-tools.active"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
         let count = app.staticTexts["fixture.home-control-count"]
         func openTools() {
             tapScrolling(settingEditor(row), in: app)

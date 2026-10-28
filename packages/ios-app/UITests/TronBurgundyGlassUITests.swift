@@ -28,7 +28,7 @@ import UIKit
             XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].firstMatch.waitForExistence(timeout: 10))
             expand(app, title: "Manage Home")
             app.buttons["home-manage-settings"].tap()
-            let models = app.buttons["settings-section-model-open"]
+            let models = app.descendants(matching: .any)["settings-row-model.queue_role_worker_"].firstMatch
             XCTAssertTrue(models.waitForExistence(timeout: 10))
             expand(app, title: "Home Settings")
             let row = models.frame

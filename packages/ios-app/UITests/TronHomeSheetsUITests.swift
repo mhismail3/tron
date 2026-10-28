@@ -176,17 +176,14 @@ final class TronHomeSheetsUITests: XCTestCase {
         defer { app.terminate() }
         let settings = element(app, "home-manage-settings")
         for _ in 0..<8 where !settings.isHittable { app.swipeUp() }
-        open(app, settings, ready: "home-settings-content", name: "default-metadata-settings")
-        expandSheet(app, title: "Home Settings")
-        let metadata = element(app, "settings-section-model-open-subtext")
-        let settingsTitle = element(app, "settings-section-model-open-title")
+        let metadata = settings.staticTexts["Assistant profile and worker launch choices"]
+        let settingsTitle = settings.staticTexts["Home Settings"]
         XCTAssertTrue(metadata.exists && settingsTitle.exists)
         let metadataHeight = metadata.frame.height
         XCTAssertGreaterThan(metadataHeight, 0)
         XCTAssertLessThan(metadataHeight, settingsTitle.frame.height,
                           "Default shared-row callers keep their smaller metadata style")
         shot("1771-default-metadata-\(name)")
-        closeTop(app)
         let tasks = element(app, "home-manage-tasks")
         for _ in 0..<8 where !tasks.isHittable { app.swipeDown() }
         open(app, tasks, ready: "home-task-terminal", name: "reading-subtext-tasks")
@@ -397,10 +394,17 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, row, ready: "home-settings-content", name: "home-settings")
         expandSheet(app, title: "Home Settings")
         let content = element(app, "home-settings-content")
-        let models = app.buttons["settings-section-model-open"]
-        XCTAssertTrue(models.waitForExistence(timeout: 8), app.debugDescription)
+        let workers = element(app, "settings-row-model.queue_role_worker_")
+        let tools = element(app, "settings-row-tools.active")
+        XCTAssertTrue(workers.waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertTrue(tools.exists, content.debugDescription)
+        XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
+        XCTAssertFalse(app.buttons["settings-section-tools-open"].exists)
+        XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists)
+        XCTAssertLessThan(workers.frame.minY, tools.frame.minY)
+        XCTAssertEqual(workers.frame.minX, tools.frame.minX, accuracy: 1)
+        XCTAssertEqual(workers.frame.width, tools.frame.width, accuracy: 1)
         shot("1478-home-settings-\(name)")
-        groupCards(app, content)
         shot("1478-home-settings-\(name)-bottom")
     }
 

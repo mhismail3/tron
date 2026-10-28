@@ -9,7 +9,7 @@ import XCTest
         XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Workers are edited on Home Settings")
         XCTAssertFalse(app.buttons["settings-section-tools-open"].exists, "The Tools setting is on Home Settings")
         XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists, "Connection and approvals are on Home Settings")
-        for prefix in ["settings-row-model.queue_role_worker_", "settings-row-model.queue_role_subagent_", "settings-row-model.queue_role_background_", "settings-row-tools.active"] {
+        for prefix in ["settings-row-model.queue_role_worker_", "settings-row-model.queue_role_subagent_", "settings-row-model.queue_role_background_", "settings-row-tools.active", "settings-row-run.transport", "settings-row-run.retry.maxRetries"] {
             let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT identifier ENDSWITH '-reset'", prefix)).firstMatch
             XCTAssertTrue(row.exists, "Inline setting \(prefix)\n\(app.debugDescription)")
         }

@@ -28,11 +28,9 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         for _ in 0..<8 where !row.isHittable { app.swipeUp() }
         row.tap()
         expandSheet(app, title: "Home Settings")
-        let models = app.buttons["settings-section-model-open"]
-        XCTAssertTrue(models.waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Home's first-level Models route is removed")
+        XCTAssertTrue(element(app, "settings-row-model.queue_role_worker_").waitForExistence(timeout: 8), app.debugDescription)
         shot("1651-home-settings-\(dark ? "dark" : "light")")
-        models.tap()
-        expandSheet(app, title: "Models")
         // The direct model/thinking card belongs to Manage Home, not its delegation sheet.
         // Direct selection/receipts remain covered by the model and shared-thinking UI journeys.
         shot("1651-home-models-\(dark ? "dark" : "light")")
@@ -60,7 +58,7 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let content = element(app, "session-settings-content")
         let sections = element(app, "session-project-settings")
         // The caption stays separate from repository/settings groups of drill-in rows.
-        XCTAssertTrue(sections.staticTexts["Settings"].exists, sections.debugDescription)
+        XCTAssertFalse(sections.staticTexts["Settings"].exists, "The session card is untitled")
         XCTAssertTrue(sections.buttons["settings-section-tools-open"].exists, sections.debugDescription)
         XCTAssertFalse(element(app, "settings-row-tools.active").exists, "Tools opens from its row")
         // The ignored repository field is the Project section's to list, once.
